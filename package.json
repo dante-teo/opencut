@@ -21,6 +21,7 @@
     "format:check": "prettier --check .",
     "test": "pnpm build:packages && pnpm --filter @opencut/cli build && vitest run",
     "test:desktop": "pnpm build && playwright test",
+    "test:preview": "pnpm build && playwright test --config playwright.preview.config.ts",
     "fixtures:generate": "tsx scripts/fixtures.ts generate",
     "fixtures:validate": "tsx scripts/fixtures.ts validate",
     "test:fixtures": "node --import tsx --test tests/fixtures/validation.native.spec.ts",

@@ -204,7 +204,7 @@ concat, aresample, amix and alimiter filters, including scale's `reset_sar` opti
 (FFmpeg 8+; validated here with FFmpeg 9).
 Install them manually through your preferred package manager. OpenCut does not
 install, download or bundle media executables. Help/version, ordinary unit tests,
-and the desktop placeholder do not need them.
+and basic desktop playback do not need them. Desktop frame stepping needs ffprobe for average FPS.
 
 Node's built-in `execFile` is sufficient for this small subprocess boundary;
 no wrapper dependency or native binding is required. Arguments are passed

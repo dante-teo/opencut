@@ -1,38 +1,23 @@
-import { createRequire } from 'node:module';
-import { resolve } from 'node:path';
-import { _electron as electron, expect, test } from '@playwright/test';
-
-const requireDesktop = createRequire(
-  new URL('../../apps/desktop/package.json', import.meta.url),
-);
-const executablePath = requireDesktop('electron') as string;
+import { expect, test } from '@playwright/test';
+import { launchDesktop } from './helpers.js';
 
 test('built desktop displays React through the sandboxed bridge', async () => {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) env[key] = value;
-  }
-  delete env.ELECTRON_RUN_AS_NODE;
-  delete env.ELECTRON_RENDERER_URL;
-  const application = await electron.launch({
-    executablePath,
-    args: [resolve('apps/desktop')],
-    env,
-  });
+  const { application, page } = await launchDesktop();
   try {
-    const page = await application.firstWindow();
     // Let nativeTheme drive Chromium instead of Playwright default light emulation.
     await page.emulateMedia({ colorScheme: null });
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await expect(
-      page.getByRole('heading', { name: 'A place for your next cut.' }),
+      page.getByRole('heading', { name: 'Video preview' }),
     ).toBeVisible();
     await expect(page.getByRole('status')).toHaveText(
       'OpenCut is running · v0.1.0',
     );
     expect(await page.evaluate(() => Object.keys(window.opencut))).toEqual([
       'getApplicationInfo',
+      'openPreview',
+      'getPreviewMetrics',
     ]);
     expect(
       await page.evaluate(() =>

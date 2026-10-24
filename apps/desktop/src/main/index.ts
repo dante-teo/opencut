@@ -2,20 +2,36 @@ import {
   app,
   BrowserWindow,
   ipcMain,
+  dialog,
   nativeTheme,
   net,
   protocol,
   session,
 } from 'electron';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { stat } from 'node:fs/promises';
+import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getApplicationInfo } from '@opencut/core';
-import { APP_INFO_CHANNEL } from '../bridge.js';
+import { probeMedia } from '@opencut/media';
+import {
+  APP_INFO_CHANNEL,
+  OPEN_PREVIEW_CHANNEL,
+  PREVIEW_METRICS_CHANNEL,
+  type PreviewSource,
+} from '../bridge.js';
+import type { IpcMainInvokeEvent } from 'electron';
+import { servePreviewFile } from './preview-file.js';
 
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'opencut',
-    privileges: { standard: true, secure: true, supportFetchAPI: true },
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+    },
   },
 ]);
 
@@ -27,6 +43,88 @@ if (devURL && new URL(devURL).origin !== 'http://127.0.0.1:5173') {
 }
 const rendererURL = new URL(devURL ?? 'opencut://app/index.html').href;
 let mainWindow: BrowserWindow | null = null;
+let previewFile: { url: string; path: string } | null = null;
+let openingPreview = false;
+
+function assertSender(event: IpcMainInvokeEvent): void {
+  if (
+    event.sender !== mainWindow?.webContents ||
+    event.senderFrame !== event.sender.mainFrame ||
+    event.senderFrame.url !== rendererURL
+  ) {
+    throw new Error('Untrusted IPC sender.');
+  }
+}
+
+async function openPreview(
+  event: IpcMainInvokeEvent,
+): Promise<PreviewSource | null> {
+  assertSender(event);
+  const window = mainWindow;
+  if (!window || openingPreview) return null;
+  openingPreview = true;
+  try {
+    const selection = await dialog.showOpenDialog(window, {
+      title: 'Open video preview',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Video', extensions: ['mp4', 'mov', 'm4v', 'webm', 'mkv'] },
+      ],
+    });
+    const path = selection.filePaths[0];
+    if (selection.canceled || !path) return null;
+    if (!(await stat(path)).isFile())
+      throw new Error('Select a local video file.');
+    let frameRate: number | null = null;
+    let videoEndSeconds: number | null = null;
+    let width: number | null = null;
+    let height: number | null = null;
+    let warning: string | null = null;
+    try {
+      const metadata = await probeMedia(path);
+      if (
+        !metadata.video ||
+        metadata.durationSeconds === null ||
+        metadata.durationSeconds <= 0
+      ) {
+        warning = 'No timed video detected. Browser decoding may fail.';
+      } else {
+        frameRate = metadata.video.frameRate;
+        const video = metadata.video;
+        if (
+          video.durationSeconds !== null &&
+          video.startTimeSeconds !== null &&
+          metadata.startTimeSeconds !== null
+        ) {
+          videoEndSeconds =
+            video.startTimeSeconds -
+            metadata.startTimeSeconds +
+            video.durationSeconds;
+        }
+        width = metadata.video.width;
+        height = metadata.video.height;
+      }
+    } catch {
+      warning =
+        'Metadata unavailable (ffprobe is optional). Playback can still work; frame stepping is disabled.';
+    }
+    // Revalidate after the native dialog/probe, including a window closing/reopening.
+    assertSender(event);
+    const url = `opencut://media/${randomUUID()}`;
+    previewFile = { url, path };
+    return {
+      url,
+      name: basename(path),
+      frameRate,
+      videoEndSeconds,
+      width,
+      height,
+      warning,
+    };
+  } finally {
+    openingPreview = false;
+  }
+}
 
 function getWindowBackgroundColor(): string {
   return nativeTheme.shouldUseDarkColors ? '#101416' : '#f6f8f7';
@@ -57,7 +155,10 @@ async function createWindow(): Promise<void> {
   });
   mainWindow = window;
   window.on('closed', () => {
-    if (mainWindow === window) mainWindow = null;
+    if (mainWindow === window) {
+      mainWindow = null;
+      previewFile = null;
+    }
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event) => event.preventDefault());
@@ -84,6 +185,11 @@ app
     protocol.handle('opencut', async (request) => {
       try {
         const url = new URL(request.url);
+        if (url.host === 'media') {
+          if (request.method !== 'GET' || request.url !== previewFile?.url)
+            return new Response(null, { status: 403 });
+          return await servePreviewFile(previewFile.path, request);
+        }
         if (url.host !== 'app' || request.method !== 'GET')
           return new Response(null, { status: 403 });
         const file = resolve(
@@ -99,14 +205,25 @@ app
       }
     });
     ipcMain.handle(APP_INFO_CHANNEL, (event) => {
-      if (
-        event.sender !== mainWindow?.webContents ||
-        event.senderFrame !== event.sender.mainFrame ||
-        event.senderFrame.url !== rendererURL
-      ) {
-        throw new Error('Untrusted IPC sender.');
-      }
+      assertSender(event);
       return getApplicationInfo();
+    });
+    ipcMain.handle(OPEN_PREVIEW_CHANNEL, openPreview);
+    ipcMain.handle(PREVIEW_METRICS_CHANNEL, (event) => {
+      assertSender(event);
+      const metrics = app.getAppMetrics();
+      return {
+        cpuPercent: metrics.reduce(
+          (sum, metric) => sum + metric.cpu.percentCPUUsage,
+          0,
+        ),
+        workingSetMiB:
+          metrics.reduce(
+            (sum, metric) => sum + metric.memory.workingSetSize,
+            0,
+          ) / 1024,
+        processCount: metrics.length,
+      };
     });
     await createWindow();
   })

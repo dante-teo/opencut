@@ -2,15 +2,15 @@
 
 ## Workspace boundaries
 
-| Package            | Owns                                                             | Actual dependencies         |
-| ------------------ | ---------------------------------------------------------------- | --------------------------- |
-| `@opencut/desktop` | Electron lifecycle, restricted IPC, React shell                  | core, Electron, React       |
-| `@opencut/cli`     | Argument parsing, stdout/stderr and exit codes                   | core, media, Node built-ins |
-| `@opencut/core`    | Headless application identity; future editing behavior           | none                        |
-| `@opencut/media`   | Probing, frame extraction and composition through external tools | Node built-ins              |
-| `@opencut/shared`  | Reserved location for utilities/types used by multiple packages  | none                        |
+| Package            | Owns                                                             | Actual dependencies                        |
+| ------------------ | ---------------------------------------------------------------- | ------------------------------------------ |
+| `@opencut/desktop` | Electron lifecycle, restricted IPC, React source preview         | core, media, Electron, React, range-parser |
+| `@opencut/cli`     | Argument parsing, stdout/stderr and exit codes                   | core, media, Node built-ins                |
+| `@opencut/core`    | Headless application identity; future editing behavior           | none                                       |
+| `@opencut/media`   | Probing, frame extraction and composition through external tools | Node built-ins                             |
+| `@opencut/shared`  | Reserved location for utilities/types used by multiple packages  | none                                       |
 
-Actual runtime dependency direction is `desktop → core ← cli → media`. The rationale is
+Actual runtime dependency direction is `desktop → core ← cli`, with both desktop main and CLI depending on media. The rationale is
 recorded in [ADR 0001](adr/0001-shared-headless-core.md). Core never
 imports Electron, React, CLI or desktop code. Media is headless and shared
 remains reserved: add APIs and dependencies only when a real task needs them.
@@ -31,7 +31,7 @@ workspace manifests; release/version automation is deferred.
 The future editing model describes intent and validates operations. A media
 engine performs probing, decoding, playback and encoding. T02 uses external
 ffprobe for metadata and FFmpeg for single-frame PNG extraction in media; the
-editing model and playback remain unimplemented. T03 adds `composeMedia(options)`
+editing model remains unimplemented; T04 adds isolated HTML video playback in desktop. T03 adds `composeMedia(options)`
 in media as a technical spike, called directly by the CLI alongside inspection
 and extraction. Future engine hosting and core
 coordination remain open decisions. This scoped FFmpeg use does not select the
@@ -77,34 +77,78 @@ through Electron nativeTheme and CSS prefers-color-scheme. On macOS the native
 title bar is hidden; the full header (including its padding and text) is draggable,
 while the standard window controls and normal resizable window behavior remain.
 
+## Desktop source preview
+
+The source-preview controller lives only in desktop renderer code. One HTML video
+element owns A/V playback; `currentTime` is the playback clock and
+`requestVideoFrameCallback` supplies the last observed compositor frame PTS through
+its `metadata.mediaTime` argument.
+The UI displays both and derives a nominal zero-based frame index from average
+FPS. There is no editing domain state or Electron dependency in core, media or CLI.
+
+A pointer drag stages a target while leaving the range input enabled, then seeks
+to the committed target on release, including releases outside the input. Playback
+pauses when the gesture starts. Other controls and source replacement stay locked
+through the gesture and seek. Cancellation, window blur or unmount removes gesture
+listeners and releases its lock. Keyboard changes seek immediately. The final seek
+uses the latest observed frame rather than the frame snapshot at pointer-down.
+
+Imports and discrete player actions are mutually exclusive in both directions. A
+pending native selection/probe disables the old player's controls, while a seek, drag or
+validation disables Open video. This prevents replacement from unmounting a running
+validation and leaving its busy state behind. A canceled selection preserves the
+source. Normal playback permits file selection; successful replacement pauses the
+old video. Failed seeks and benchmark startup release their callbacks/listeners and
+seek timers before another operation can begin.
+
+Real Electron regressions cover native dragging, release outside the slider,
+keyboard seeking and pending-import/validation exclusion, including a successful
+validation after replacement. These test observable interaction boundaries rather
+than relying only on programmatically assigning slider values. See
+[ADR 0003](adr/0003-html-video-preview.md) for the preview recommendation,
+measurement definitions and accuracy limits.
+
 ## Desktop trust boundary
 
 Electron main owns native privileges. React runs with `contextIsolation: true`,
 `nodeIntegration: false`, `sandbox: true`, web security enabled and webviews
-disabled. A bundled **CommonJS preload** exposes one typed capability:
-`window.opencut.getApplicationInfo()`. ESM is used elsewhere. CommonJS here keeps
+disabled. A bundled **CommonJS preload** exposes three typed capabilities:
+`getApplicationInfo()`, `openPreview()` and `getPreviewMetrics()` on `window.opencut`. ESM is used elsewhere. CommonJS here keeps
 Electron's renderer sandbox enabled; sandboxed preloads cannot use native ESM.
 No raw IPC, arbitrary channel, filesystem or shell API reaches React.
 
-Main validates the sending WebContents, main frame and exact URL for the one IPC
+Main validates the sending WebContents, main frame and exact URL for every IPC
 handler. Navigation, new windows, webviews and permission requests are denied.
 Production assets use the secure `opencut://app` custom protocol with a path
-containment check. The production CSP allows only local scripts/styles and no
-network connections. Development listens only at `127.0.0.1:5173`; its CSP permits
+containment check. The production CSP allows only local scripts/styles, no
+network connections, and media from the capability-backed `opencut://media` host. Development listens only at `127.0.0.1:5173`; its CSP permits
 the Vite websocket and inline styles for CSS reloads. JSX is compiled by Vite;
-no extra React refresh framework is needed for the placeholder.
+no extra React refresh framework is needed.
 
 These choices follow [Electron's security guidance](https://www.electronjs.org/docs/latest/tutorial/security)
 and [sandboxed preload constraints](https://www.electronjs.org/docs/latest/tutorial/sandbox).
-They secure this local shell; future file import/export and IPC need their own
-validated capabilities and tests.
+Main owns the native picker and issues one random, session-only media URL.
+Only that exact URL can stream the selected file. Replacement/window close revokes
+future requests to the old URL; streams already accepted may finish. Canceled
+selection preserves the current source. The renderer cannot submit arbitrary paths.
+Range responses use the maintained `range-parser` library and Node file streams;
+partial reads return 206, unsupported/unsatisfiable ranges return 416. Files are
+never buffered in full or written. `net.fetch(file:)` did not honor Range in the
+T04 integration check, so it remains used only for bundled assets. Frame-rate
+metadata reuses `probeMedia` in main; missing ffprobe degrades to clock-only
+playback/seeking. Main returns aggregate Electron process CPU and working-set
+samples without exposing process or filesystem APIs. Tests cover token revocation,
+byte ranges, missing ffprobe, and IPC rejection from a second window.
+
+Future project import/export and IPC need their own validated capabilities.
 
 ## Tooling and build
 
 Node 24 and pinned pnpm 11, TypeScript 6, ESM, pnpm recursive dependency ordering,
 electron-vite/Vite for Electron and React, tsc for headless packages/CLI, Vitest
-for headless tests, Playwright for the separate real Electron smoke test, the Node
-test runner for optional native fixture regressions, ESLint and Prettier. TypeScript stays on the compiler major supported by typescript-eslint;
+for headless tests, Playwright for Electron integration and opt-in preview
+performance tests, the Node test runner for optional native fixture regressions,
+ESLint and Prettier. TypeScript stays on the compiler major supported by typescript-eslint;
 newer tool majors are not required for T02. The lockfile fixes transitive versions.
 Only Electron and esbuild dependency build scripts are explicitly allowed.
 There is no root postinstall, fixture generation hook, native media dependency,
@@ -117,7 +161,7 @@ assets under each package/app's `dist/`; distribution packaging is deferred.
 
 ## Fixture validation boundary
 
-Ordinary tests run without FFmpeg, ffprobe or an Electron window. `pnpm test:media`
+`pnpm test` runs without FFmpeg, ffprobe or an Electron window. `pnpm test:media`
 is an opt-in native CLI suite using the existing generated fixtures. It creates
 derived timing/stream inputs, PNGs and composition outputs in owned subdirectories under
 `tests/fixtures/generated/` and removes those subdirectories on success or failure.
@@ -140,7 +184,7 @@ Fixture validation is independent of the application media APIs.
 - Define a versioned scripting contract when editing behavior exists; current
   media JSON is documented in [CLI.md](CLI.md). Stdout is reserved for results,
   stderr for errors.
-- Define media access, IPC authorization and rendering/playback ownership.
+- Extend the picker capability boundary for future project media access; define rendering/playback ownership beyond a single source.
 - Choose distribution tooling and signing, then validate other operating systems.
 
-These are decisions to investigate, not APIs promised or implemented by T03.
+These are decisions to investigate, not APIs promised or implemented by T04.

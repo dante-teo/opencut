@@ -1,9 +1,10 @@
 # OpenCut
 
 A lightweight desktop video editor for creators, with a GUI and a scriptable
-headless core. **T03 adds multi-clip composition with mixed audio and MP4 export.** The desktop
-shows a React placeholder; the independent CLI supports help, version and media commands.
-Project files, timeline editing and playback are not implemented yet.
+headless core. **T04 adds an isolated Electron video preview with play/pause, seeking,
+nominal frame stepping and reproducible performance measurements.** The independent
+CLI supports inspection, frame extraction and the T03 composition spike.
+Project files and timeline editing remain unimplemented.
 
 ## Quick start (macOS)
 
@@ -26,6 +27,32 @@ The desktop follows the system light/dark appearance, including changes while
 running. On macOS it uses a normal resizable window with native window buttons
 and a hidden title bar. Drag the header, including the space above the logo,
 to move the window.
+
+Use **Open video** in the desktop to choose a local file. Play/Pause, the Seek
+slider and Previous/Next frame operate on that source without modifying it.
+The timestamp distinguishes the playback clock from the last compositor frame PTS;
+frame numbers are zero based and nominal. Frame stepping requires optional `ffprobe`
+on PATH to obtain average FPS. Playback and timestamp seeking work without it.
+Dragging the seek slider stages a target and seeks when released; keyboard changes
+seek immediately. Importing a replacement disables the current player's controls,
+and importing and performance validation run exclusively. Unsupported codecs show
+a decode error. There is no timeline or editing model.
+
+**Run performance validation** runs a positioning seek, three warm-up seeks,
+30 fixed target seeks, then up to eight seconds of playback. Keep the window visible.
+The UI shows median/p95 seek latency, dropped frames and expandable measurement JSON.
+For the reproducible fixture/1080p suite, run `pnpm test:preview` after generating
+fixtures. It uses FFmpeg/ffprobe already on PATH, creates and cleans only an owned
+`tests/fixtures/generated/t04-*` directory, and writes environment, raw samples,
+source hashes, metadata and screenshots under ignored `test-results/preview-performance/`.
+It tests the production build and native picker IPC (stubbing only the dialog result).
+The shell/security checks run without fixtures or media tools. Fixture-backed
+playback, dragging and import/validation regressions need the generated fixture
+set and `ffprobe` on PATH for nominal frame assertions; they skip when the base
+video fixture is absent. A separate case deliberately removes ffprobe from the
+app's PATH to verify basic playback and timestamp seeking without it.
+See [the preview architecture decision](adr/0003-html-video-preview.md) for the
+measurement definitions, findings, recommendation and accuracy limits.
 
 To use the CLI independently:
 
@@ -50,27 +77,32 @@ and standard filters. Existing output files are refused. See
 
 ## Commands
 
-| Command                                  | Purpose                                                                              |
-| ---------------------------------------- | ------------------------------------------------------------------------------------ |
-| `pnpm install`                           | Install and link workspace dependencies                                              |
-| `pnpm dev` / `pnpm dev:desktop`          | Build internal packages, run the desktop dev server, open Electron                   |
-| `pnpm dev:cli --help`                    | Run the TypeScript CLI without launching Electron                                    |
-| `pnpm cli --help` / `pnpm cli --version` | Run the built CLI (build first)                                                      |
-| `pnpm build`                             | Build libraries, CLI and Electron main/preload/React assets in dependency order      |
-| `pnpm typecheck`                         | Build library declarations and strictly check all source, scripts and tests          |
-| `pnpm lint`                              | Run ESLint                                                                           |
-| `pnpm format` / `pnpm format:check`      | Apply / check Prettier formatting                                                    |
-| `pnpm test`                              | Build prerequisites and run headless unit + CLI/fixture-contract tests               |
-| `pnpm test:desktop`                      | Build and check the desktop shell, sandbox, appearance switching and macOS reopening |
-| `pnpm test:fixtures`                     | Run the optional native intact/truncated-media regression (FFmpeg + ffprobe)         |
-| `pnpm test:media`                        | Build and test real media CLI against existing generated fixtures (FFmpeg + ffprobe) |
-| `pnpm fixtures:generate`                 | Generate and validate five small synthetic media files (optional FFmpeg + ffprobe)   |
-| `pnpm fixtures:validate`                 | Decode generated media and check metadata/readable video frame counts (ffprobe)      |
+| Command                                  | Purpose                                                                                 |
+| ---------------------------------------- | --------------------------------------------------------------------------------------- |
+| `pnpm install`                           | Install and link workspace dependencies                                                 |
+| `pnpm dev` / `pnpm dev:desktop`          | Build internal packages, run the desktop dev server, open Electron                      |
+| `pnpm dev:cli --help`                    | Run the TypeScript CLI without launching Electron                                       |
+| `pnpm cli --help` / `pnpm cli --version` | Run the built CLI (build first)                                                         |
+| `pnpm build`                             | Build libraries, CLI and Electron main/preload/React assets in dependency order         |
+| `pnpm typecheck`                         | Build library declarations and strictly check all source, scripts and tests             |
+| `pnpm lint`                              | Run ESLint                                                                              |
+| `pnpm format` / `pnpm format:check`      | Apply / check Prettier formatting                                                       |
+| `pnpm test`                              | Build prerequisites and run headless unit + CLI/fixture-contract tests                  |
+| `pnpm test:desktop`                      | Build and check shell security, appearance, reopening and available fixture playback    |
+| `pnpm test:preview`                      | Build and measure real Electron playback/seek performance (FFmpeg + ffprobe + fixtures) |
+| `pnpm test:fixtures`                     | Run the optional native intact/truncated-media regression (FFmpeg + ffprobe)            |
+| `pnpm test:media`                        | Build and test real media CLI against existing generated fixtures (FFmpeg + ffprobe)    |
+| `pnpm fixtures:generate`                 | Generate and validate five small synthetic media files (optional FFmpeg + ffprobe)      |
+| `pnpm fixtures:validate`                 | Decode generated media and check metadata/readable video frame counts (ffprobe)         |
 
 `build` emits development-ready production assets, not a signed `.app`, DMG,
 or installer. `test:desktop` needs a graphical desktop session but no downloaded
 Playwright browser; it also checks the typed core bridge and saves screenshots
-under the ignored `test-results/` directory.
+under the ignored `test-results/` directory. The interaction regressions use
+native pointer movement and release outside the slider, immediate keyboard seeks,
+and a gated import followed by validation of the replacement source. Performance
+measurements are separate in `pnpm test:preview`; desktop correctness checks do
+not impose hardware-dependent latency thresholds.
 
 `pnpm test` runs the headless suite with Vitest and needs no native media tools.
 `pnpm test:fixtures` runs the separate Node native regression with FFmpeg and
@@ -97,7 +129,7 @@ skills/video-editor/   Product Agent Skill and its current CLI reference
 tests/
   fixtures/            Expected metadata and fixture documentation
   integration/         Headless CLI/fixture-contract tests and opt-in native media tests
-  desktop/             Optional real Electron smoke test
+  desktop/             Electron integration and opt-in playback performance tests
 scripts/               Optional fixture tooling (TypeScript)
 docs/                  Product, architecture and architectural decisions (adr/)
 ```

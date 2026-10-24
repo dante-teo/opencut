@@ -2,6 +2,7 @@ import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { ApplicationInfo } from '@opencut/core';
 import './style.css';
+import { Preview } from './video-preview.js';
 
 function App() {
   const [info, setInfo] = useState<ApplicationInfo | null>(null);
@@ -20,29 +21,15 @@ function App() {
         </span>
         <span>OpenCut</span>
       </header>
-      <section>
-        <p className="eyebrow">DESKTOP + COMMAND LINE</p>
-        <h1>A place for your next cut.</h1>
-        <p className="intro">One editing core. Two ways to create.</p>
-        <p className="status" role="status">
-          <span className="dot" aria-hidden="true" />
-          {error
-            ? 'Unable to connect to the application'
-            : info
-              ? `${info.name} is running · v${info.version}`
-              : 'Starting OpenCut…'}
-        </p>
-        <div className="note">
-          <span className="badge">T01</span>
-          <div>
-            <h2>Foundation ready</h2>
-            <p>
-              The application shell is ready. Video editing is not implemented
-              yet.
-            </p>
-          </div>
-        </div>
-      </section>
+      <Preview />
+      <p className="status" role="status">
+        <span className="dot" aria-hidden="true" />
+        {error
+          ? 'Unable to connect to the application'
+          : info
+            ? `${info.name} is running · v${info.version}`
+            : 'Starting OpenCut…'}
+      </p>
       <footer>OpenCut / Development preview</footer>
     </main>
   );

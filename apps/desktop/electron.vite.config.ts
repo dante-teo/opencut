@@ -26,6 +26,7 @@ export default defineConfig(({ command }) => ({
               ? "style-src 'self' 'unsafe-inline'"
               : "style-src 'self'",
             "img-src 'self' data:",
+            'media-src opencut://media',
             development
               ? "connect-src 'self' ws://127.0.0.1:5173"
               : "connect-src 'none'",

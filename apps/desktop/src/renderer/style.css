@@ -7,10 +7,8 @@
   --status: #334d3e;
   --accent: #25764d;
   --accent-border: #25764d60;
-  --note-border: #233a251c;
   --note-background: #ffffff88;
   --badge-background: #25764d12;
-  --detail: #5a6c61;
   --footer: #64786b;
   --gutter: 52px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -28,10 +26,8 @@
     --status: #c4d0cc;
     --accent: #a9f0ca;
     --accent-border: #8ee5bd77;
-    --note-border: #ffffff14;
     --note-background: #ffffff03;
     --badge-background: #a9f0ca12;
-    --detail: #91a09b;
     --footer: #6c7c78;
   }
 }
@@ -108,7 +104,7 @@ h1 {
   display: flex;
   align-items: center;
   gap: 9px;
-  margin: 36px 0;
+  margin: 12px 0 20px;
   font-size: 13px;
   color: var(--status);
 }
@@ -118,33 +114,10 @@ h1 {
   background: var(--accent);
   border-radius: 50%;
 }
-.note {
-  display: flex;
-  align-items: flex-start;
-  gap: 18px;
-  padding: 24px;
-  border: 1px solid var(--note-border);
-  border-radius: 12px;
-  background: var(--note-background);
-}
-.badge {
-  color: var(--accent);
-  background: var(--badge-background);
-  border-radius: 4px;
-  padding: 5px 7px;
-  font-size: 11px;
-  letter-spacing: 1px;
-}
 h2 {
   margin: 0 0 8px;
   font-size: 14px;
   font-weight: 550;
-}
-.note p {
-  margin: 0;
-  color: var(--detail);
-  font-size: 13px;
-  line-height: 1.6;
 }
 footer {
   color: var(--footer);
@@ -155,7 +128,89 @@ footer {
   :root {
     --gutter: 28px;
   }
-  .note {
-    padding: 18px;
-  }
+}
+
+.preview {
+  width: min(880px, 100%);
+  padding: 28px 0;
+}
+.preview h1 {
+  font-size: 36px;
+  margin: 12px 0;
+}
+.preview .intro {
+  font-size: 16px;
+}
+button {
+  font: inherit;
+  padding: 10px 16px;
+  border-radius: 7px;
+  border: 1px solid var(--accent-border);
+  color: var(--text);
+  background: var(--note-background);
+  cursor: pointer;
+}
+button:hover:enabled {
+  background: var(--badge-background);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+button:focus-visible,
+input:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.player {
+  margin-top: 24px;
+}
+.player video {
+  display: block;
+  width: 100%;
+  max-height: 42vh;
+  background: #000;
+  border-radius: 8px;
+}
+.media-detail {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.transport {
+  display: flex;
+  gap: 10px;
+  margin: 16px 0;
+  flex-wrap: wrap;
+}
+.seek-label {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 13px;
+}
+.seek-label input {
+  flex: 1;
+  accent-color: var(--accent);
+}
+output {
+  display: block;
+  font:
+    12px/1.7 ui-monospace,
+    monospace;
+  margin-top: 10px;
+}
+.measurements {
+  margin: 16px 0;
+  font-size: 13px;
+}
+pre {
+  overflow: auto;
+  max-height: 280px;
+  padding: 16px;
+  background: var(--note-background);
+}
+[role='alert'] {
+  color: light-dark(#a22424, #ffaaaa);
 }

@@ -7,8 +7,18 @@ description: Use the OpenCut CLI to inspect media, extract PNG frames, or concat
 
 This is the official product skill for external coding agents using OpenCut.
 It will grow with the CLI to cover project inspection, modification, validation
-and rendering. T03 includes a composition/export prototype; project and timeline
-editing remain unavailable.
+and rendering. T03 includes a composition/export prototype. T04 adds an
+interactive Electron source preview (launch with `pnpm dev`) with playback,
+seeking, nominal frame stepping and a performance-validation button. This preview
+has no CLI command or project integration; project and timeline editing remain
+unavailable. Frame numbers use average FPS from optional ffprobe and are not a
+frame-accurate editing guarantee. The optional `pnpm test:preview` command measures
+fixture/1080p playback in the built Electron app; see
+[the preview architecture decision](../../docs/adr/0003-html-video-preview.md).
+In the desktop, pointer drags seek on release and keyboard seeks are immediate.
+Import, seeking and performance validation are serialized; keep the window visible
+while measuring. See [desktop usage](../../docs/README.md) for optional-tool
+prerequisites and the separate correctness/performance test commands.
 
 From an installed and built OpenCut checkout, run `pnpm cli --help` to discover
 supported capabilities and `pnpm cli --version` to check the application version.

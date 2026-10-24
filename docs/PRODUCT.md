@@ -3,7 +3,7 @@
 OpenCut will be a lightweight, local desktop video editor for YouTubers,
 TikTok and Instagram creators, vloggers, and streamers. A clear conventional
 interface should make everyday editing accessible without code: media library,
-preview, timeline and editing controls are intended future capabilities.
+timeline and editing controls are intended future capabilities. A source preview prototype is available.
 
 ## Two equally important workflows
 
@@ -20,21 +20,25 @@ The editing model (projects, intent, commands, validation) and the media engine
 (probing, decoding, playback and encoding) are separate concerns. Detailed editing
 contracts and the playback/render backend require later technical validation.
 
-## Current scope: T03
+## Current scope: T04
 
-Implemented: pnpm workspace, Electron/React placeholder, standalone help/version
+Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
 strict TypeScript, linting, formatting, tests, synthetic fixture tooling, and
 documentation. T02 adds structured media inspection with ffprobe and single-frame
 PNG extraction with FFmpeg, through standalone CLI commands supporting JSON.
 T03 adds a headless FFmpeg composition spike: sequential video clips, background
 music mixed with original audio, normalization of media properties, and verified
-H.264/AAC MP4 export through the CLI. The desktop placeholder is not an editing UI.
+H.264/AAC MP4 export through the CLI. T04 adds a desktop-only source preview prototype: local file selection,
+play/pause, timestamp seeks, nominal forward/backward frame stepping, presented
+frame PTS and reproducible seek/playback/resource measurements. HTML video is the
+recommended initial source-preview architecture; frame stepping is best effort,
+not a frame-accurate editing contract. See [ADR 0003](adr/0003-html-video-preview.md).
 
 ## Excluded
 
-T03 does not implement a timeline, final rendering architecture, preview player,
-project editing commands, project serialization or GUI media integration. No FFmpeg or
+T04 does not implement a timeline, final rendering architecture,
+project editing commands, project serialization or project media integration. No FFmpeg or
 MLT runtime is bundled; media commands require manually installed external tools.
 Fixture generation remains an optional development utility.
 
@@ -45,4 +49,4 @@ User media must never be silently changed or overwritten.
 
 macOS is the initial required platform. Package boundaries should stay portable;
 Windows/Linux support requires explicit validation later. No distribution,
-installer, updater, signing or notarization work is included in T03. T04 is not implemented.
+installer, updater, signing or notarization work is included in T04. T05 is not implemented.
