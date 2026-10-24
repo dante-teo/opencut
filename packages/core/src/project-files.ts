@@ -4,11 +4,12 @@ import { access, readFile, stat, writeFile } from 'node:fs/promises';
 import { posix, win32 } from 'node:path';
 import {
   deserializeProject,
+  ProjectFormatError,
   mediaReferenceSchema,
   serializeProject,
   validateProject,
 } from './project.js';
-import type { MediaReference, Project } from './project.js';
+import type { MediaReference, Project, ProjectIssue } from './project.js';
 
 function pathStyle(value: string): typeof posix {
   return /^[A-Za-z]:[/\\]/.test(value) || /^(?:\/\/|\\\\)/.test(value)
@@ -170,6 +171,42 @@ export async function readProjectFile(
     throw new ProjectFileError('READ_FAILED', path, { cause });
   }
   return deserializeProject(json);
+}
+
+export interface ProjectFileValidation {
+  path: string;
+  valid: boolean;
+  structureValid: boolean;
+  issues: readonly ProjectIssue[];
+  media: MediaAvailability[];
+}
+
+/** Read-only validation of project data and every referenced media file. */
+export async function validateProjectFile(
+  projectFilePath: string,
+): Promise<ProjectFileValidation> {
+  const path = nativePath(projectFilePath);
+  let project: Project;
+  try {
+    project = await readProjectFile(path);
+  } catch (error) {
+    if (!(error instanceof ProjectFormatError)) throw error;
+    return {
+      path,
+      valid: false,
+      structureValid: false,
+      issues: error.issues,
+      media: [],
+    };
+  }
+  const media = await checkProjectMedia(project, path);
+  return {
+    path,
+    valid: media.every((asset) => asset.status === 'available'),
+    structureValid: true,
+    issues: [],
+    media,
+  };
 }
 
 /** Exclusive creation only. Updating/overwriting existing project files is deferred. */

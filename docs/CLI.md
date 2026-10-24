@@ -1,4 +1,4 @@
-# CLI reference (T03)
+# CLI reference (T06)
 
 Build from the checkout root with `pnpm build`. The `opencut` executable is
 workspace-local. Use the direct Node form for machine-readable stdout; pnpm
@@ -11,6 +11,9 @@ without building or launching the desktop app.
 ```sh
 node apps/cli/dist/index.js --help
 node apps/cli/dist/index.js --version
+node apps/cli/dist/index.js project create /path/to/new.opencut.json --name "My project" --width 1920 --height 1080 --fps 30000/1001 --json
+node apps/cli/dist/index.js project info /path/to/new.opencut.json --json
+node apps/cli/dist/index.js project validate /path/to/new.opencut.json --json
 node apps/cli/dist/index.js probe tests/fixtures/generated/video-medium.mp4 --json
 node apps/cli/dist/index.js extract-frame tests/fixtures/generated/video-medium.mp4 --timestamp 0.5 --output tests/fixtures/generated/frame.png --json
 node apps/cli/dist/index.js compose tests/fixtures/generated/video-short.mp4 tests/fixtures/generated/video-medium.mp4 --music tests/fixtures/generated/audio-tone.wav --output tests/fixtures/generated/composition.mp4 --width 640 --height 360 --json
@@ -25,6 +28,11 @@ already exist, and the output file must not exist.
 
 - No arguments, `--help`, or `-h`: print usage. Help takes precedence over version.
 - `--version` or `-v`: print the application version.
+- `project create <project-file> --name <name> [--width <px>] [--height <px>] [--fps <n|n/d>] [--json]`:
+  create an empty version 1 project without overwriting.
+- `project info <project-file> [--json]`: display validated metadata, settings and collection counts.
+- `project validate <project-file> [--json]`: validate project structure, internal references and media availability.
+- `project --help` and `project create|info|validate --help`: show project usage.
 - `probe <file> [--json]`: inspect a readable local file with ffprobe.
 - `extract-frame <file> --timestamp <seconds> --output <file.png> [--json]`:
   extract one video frame with ffprobe and FFmpeg. Seconds must be a finite,
@@ -37,15 +45,86 @@ before `--`, followed by the filename, or use an absolute path. For an output
 name starting with `-`, use `--output=-frame.png` or an absolute path. Quote paths
 containing spaces in the calling shell.
 
-All media commands print a readable summary by default. `--json` prints one JSON
+All commands print readable output by default. `--json` prints one JSON
 object followed by a newline, without progress or diagnostics on stdout.
 Errors always go to stderr as text, including with `--json`.
 
-Exit codes: **0** success, **2** invalid command/arguments, **1** media, filesystem,
-prerequisite or execution failure. Unknown commands/options and extra positional
-arguments fail. `--timestamp` applies only to extraction; `--output` applies to
-extraction and composition. Composition options are rejected by other commands. `--json`
-applies only to media commands.
+Exit codes: **0** success, **2** invalid command/arguments, **1** failed project
+validation, invalid project data, media, filesystem, prerequisite or execution failure.
+Unknown commands/options, extra positional arguments and options that do not apply
+to the command fail. Repeated options use the last value, matching Node's parser
+and existing media commands. `--name` applies only to project creation;
+`--width`, `--height` and `--fps` apply to project creation and composition with
+the distinct bounds below. `--timestamp` applies only to extraction; `--output`
+applies to extraction and composition. Help with `--json` returns `{ "help": "..." }`;
+version with `--json` returns `{ "name": "OpenCut", "version": "0.1.0" }`.
+The application version is separate from the project file's `schemaVersion`;
+use the latter to identify the supported project format.
+
+## Projects
+
+Project commands run independently of Electron and need no FFmpeg/ffprobe.
+`<project-file>` is always an explicit file location, with no implicit project discovery
+or directory creation. Relative paths resolve from the process working directory;
+results report absolute paths. Quote paths with spaces. Any filename extension is
+accepted; `.opencut.json` is suggested. Use `--` before a positional path beginning
+with `-`. Paths must be nonblank and contain no control characters.
+
+Creation requires a nonblank `--name`. Defaults are 1920×1080 at 30/1 fps, matching
+the T05 core model. Width and height must be positive safe integers (up to
+9007199254740991), with no even-dimension or encoder-specific restriction.
+`--fps` accepts a positive safe integer or a rational with positive safe integer
+components, such as `24` or `30000/1001`. Decimal rates such as `29.97` are rejected;
+use an exact ratio. Ratios are preserved as supplied. These project settings are
+data-model values, not a promise that a future renderer supports every value.
+The core generates a stable UUID and UTC creation/update timestamps. Assets,
+tracks and clips start empty. Inputs are validated before opening the destination.
+The parent must exist; existing files, directories and symlinks, including dangling
+symlinks, are refused. No force/overwrite mode exists. A disk write failure can
+leave a partially written newly created file; project updates remain deferred.
+
+Creation and info JSON have the same shape:
+
+```json
+{
+  "path": "/path/to/demo.opencut.json",
+  "schemaVersion": 1,
+  "metadata": {
+    "id": "example-project",
+    "name": "Demo",
+    "createdAt": "2026-10-25T00:00:00.000Z",
+    "updatedAt": "2026-10-25T00:00:00.000Z"
+  },
+  "settings": {
+    "width": 1920,
+    "height": 1080,
+    "frameRate": { "numerator": 30, "denominator": 1 }
+  },
+  "statistics": { "assets": 0, "tracks": 0, "clips": 0 }
+}
+```
+
+Info validates project data before returning metadata and counts. Offline media
+does not prevent info from succeeding; info performs no media availability checks.
+Neither info nor validate modifies project data, timestamps, references or media.
+
+Validation JSON contains `path`, `valid`, `structureValid`, `issues` and `media`.
+`structureValid` includes schema, supported version, unique IDs, asset/track
+references, compatible media types, timestamps and source ranges. Each issue has
+a JSON-pointer `path`, `code` and actionable `message`. Invalid JSON or structure
+returns `structureValid: false` and an empty `media` array. Once data is valid,
+every asset is checked for regular-file readability, with paths anchored to the
+project file's directory. Each media entry has `assetId`, resolved `path`, `status`
+and `message`. Statuses are `available`, `missing`, `unreadable`, `not_file` and
+`unsupported_path`. Validation checks no codecs, decoding, timing or stream content.
+
+`valid` is true only when structure and every availability check pass. Missing
+media leaves the project data usable (`structureValid: true`), but validation
+returns exit 1 so automation can detect unresolved references. Invalid projects
+still produce a report on stdout, including with `--json`, plus diagnostics on
+stderr. Check the exit status and report. Missing/unreadable project files and
+other execution failures produce only stderr diagnostics with no stdout report.
+See [PROJECT_FORMAT.md](PROJECT_FORMAT.md) for the shared core API and file contract.
 
 ## Probe JSON
 
@@ -203,7 +282,7 @@ Composition needs FFmpeg with `libx264`, AAC, and the standard scale, pad, fps,
 concat, aresample, amix and alimiter filters, including scale's `reset_sar` option
 (FFmpeg 8+; validated here with FFmpeg 9).
 Install them manually through your preferred package manager. OpenCut does not
-install, download or bundle media executables. Help/version, ordinary unit tests,
+install, download or bundle media executables. Project commands, help/version, ordinary unit tests,
 and basic desktop playback do not need them. Desktop frame stepping needs ffprobe for average FPS.
 
 Node's built-in `execFile` is sufficient for this small subprocess boundary;
@@ -219,6 +298,15 @@ The subprocess and JSON behavior follows the official
 and [ffprobe documentation](https://ffmpeg.org/ffprobe.html).
 
 ## Verification
+
+`pnpm test` includes standalone project CLI integration tests for creation and
+readback, integer/rational frame rates, populated-project statistics, malformed
+JSON, unsupported versions, broken internal references and offline media. These
+tests run with an empty `PATH` to check independence from media tools. They cover
+invalid arguments, repeated-option overrides, literal paths, existing destinations,
+symlinks and missing parent directories, and verify that inspection and validation
+preserve project and source-file contents. Temporary project JSON and text
+sentinels are created in owned OS temporary directories and cleaned up after tests.
 
 `pnpm test` covers metadata normalization, absent streams, command validation,
 missing tools, execution failures and output protection without requiring media
@@ -241,5 +329,6 @@ loop boundary. Decoded tone pulses and video flashes check sync, and source hash
 ensure that the base fixtures remain unchanged. Unit tests also cover failed render cleanup,
 metadata verification and destination races without requiring media tools.
 
-Timeline editing, project files, a final rendering architecture, playback and GUI media
-integration are not implemented.
+Timeline editing, media importing into projects, project rendering and desktop
+project integration are not implemented. The existing composition prototype
+continues to take media paths directly, independently of projects.

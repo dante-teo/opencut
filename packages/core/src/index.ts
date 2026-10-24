@@ -3,6 +3,7 @@ export {
   ProjectFormatError,
   createProject,
   deserializeProject,
+  getProjectInfo,
   serializeProject,
   validateProject,
 } from './project.js';

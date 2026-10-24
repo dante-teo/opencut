@@ -20,7 +20,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 (probing, decoding, playback and encoding) are separate concerns. Detailed editing
 contracts and the playback/render backend require later technical validation.
 
-## Current scope: T05
+## Current scope: T06
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -42,10 +42,16 @@ deterministic JSON serialization, file save/load and separate missing-media
 checks are available as core APIs. Relative paths keep project bundles portable.
 See [PROJECT_FORMAT.md](PROJECT_FORMAT.md) for the version 1 contract.
 
+T06 adds standalone `project create`, `project info` and `project validate`
+commands over the T05 APIs, with configurable resolution/rational frame rate,
+JSON reports, scoped help, predictable exit codes and exclusive project creation.
+Validation reports project-data issues and local media availability separately.
+Project commands require no Electron or media tools. See [CLI.md](CLI.md#projects).
+
 ## Excluded
 
-T05 does not implement timeline editing, undo/redo, final rendering architecture,
-project editing commands, CLI project commands or desktop project media integration. No FFmpeg or
+T06 does not implement timeline editing, undo/redo, final rendering architecture,
+media importing, project editing commands or desktop project media integration. No FFmpeg or
 MLT runtime is bundled; media commands require manually installed external tools.
 Fixture generation remains an optional development utility.
 
@@ -56,4 +62,4 @@ User media must never be silently changed or overwritten.
 
 macOS is the initial required platform. Package boundaries should stay portable;
 Windows/Linux support requires explicit validation later. No distribution,
-installer, updater, signing or notarization work is included in T05. T06 is not implemented.
+installer, updater, signing or notarization work is included in T06. T07 is not implemented.

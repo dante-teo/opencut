@@ -255,6 +255,21 @@ export interface CreateProjectOptions {
   settings?: ProjectSettings;
 }
 
+/** Validated metadata and collection counts; does not check media availability. */
+export function getProjectInfo(project: Project) {
+  const validated = requireProject(project);
+  return {
+    schemaVersion: validated.schemaVersion,
+    metadata: validated.metadata,
+    settings: validated.settings,
+    statistics: {
+      assets: validated.assets.length,
+      tracks: validated.tracks.length,
+      clips: validated.clips.length,
+    },
+  };
+}
+
 export function createProject(options: CreateProjectOptions): Project {
   const now = options.createdAt ?? new Date().toISOString();
   return requireProject({

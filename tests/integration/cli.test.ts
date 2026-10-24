@@ -42,6 +42,34 @@ describe('standalone built CLI', () => {
     expect(result.stderr).toBe('');
   });
 
+  it('prints clean JSON for help and version', () => {
+    expect(JSON.parse(run('--version', '--json').stdout)).toEqual(
+      getApplicationInfo(),
+    );
+    expect(JSON.parse(run('--help', '--json').stdout).help).toContain(
+      'Usage: opencut',
+    );
+  });
+
+  it.each(['create', 'info', 'validate'])(
+    'provides scoped help for project %s',
+    (command) => {
+      const result = run('project', command, '--help');
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(result.stdout).toContain(
+        `Usage: opencut project ${command} <project-file>`,
+      );
+    },
+  );
+
+  it('preserves repeated boolean options', () => {
+    const result = run('-v', '--version');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe(`${getApplicationInfo().version}\n`);
+    expect(result.stderr).toBe('');
+  });
+
   it.each([['--unknown'], ['render'], ['--version=no'], ['--no-version']])(
     'rejects unsupported arguments %j',
     (...args) => {

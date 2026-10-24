@@ -1,4 +1,4 @@
-# OpenCut CLI at T03
+# OpenCut CLI at T06
 
 Run commands at the root of an installed checkout. Build with `pnpm build` if
 `apps/cli/dist/index.js` does not exist.
@@ -14,6 +14,9 @@ node apps/cli/dist/index.js --help
 node apps/cli/dist/index.js probe /path/to/video.mp4 --json
 node apps/cli/dist/index.js extract-frame /path/to/video.mp4 --timestamp 0.5 --output /path/to/new-frame.png --json
 node apps/cli/dist/index.js compose /path/to/clip1.mp4 /path/to/clip2.mp4 --music /path/to/music.wav --output /path/to/new-composition.mp4 --json
+node apps/cli/dist/index.js project create /path/to/new.opencut.json --name "My project" --fps 30000/1001 --json
+node apps/cli/dist/index.js project info /path/to/new.opencut.json --json
+node apps/cli/dist/index.js project validate /path/to/new.opencut.json --json
 ```
 
 `opencut` is the workspace-local executable, not a globally installed command.
@@ -22,8 +25,55 @@ version. Help takes precedence when both options are present.
 
 Direct invocation writes results to stdout and errors to stderr. pnpm scripts
 may add their own lifecycle logs, so use the Node/bin form for exact output.
-Exit codes: 0 success, 2 invalid arguments, 1 media/filesystem/prerequisite or
-execution failure. Unknown options/commands and extra arguments fail.
+Exit codes: 0 success, 2 invalid arguments, 1 project validation/data,
+media/filesystem/prerequisite or execution failure. Unknown options/commands,
+extra arguments and inapplicable options fail. Repeated options use the last value.
+Errors remain text on stderr with `--json`. Help and version also accept `--json`, returning
+`{ "help": "..." }` and `{ "name": "OpenCut", "version": "0.1.0" }` respectively.
+The application version and project `schemaVersion` identify different contracts;
+use `schemaVersion` when checking project-format compatibility.
+
+## Projects
+
+Project commands run without Electron, FFmpeg or ffprobe. Each takes an explicit
+project-file path, relative to the working directory or absolute; result paths are
+absolute. No directory discovery, automatic parent creation or extension requirement
+exists. Prefer `.opencut.json` and quote paths containing spaces. Use `--` before
+a positional filename beginning with `-`.
+
+`project create <project-file> --name <name> [--width <px>] [--height <px>] [--fps <n|n/d>] [--json]`
+creates an empty version 1 project with a UUID and UTC timestamps. Name must be
+nonblank. Dimensions default to 1920×1080 and must be positive safe integers.
+Frame rate defaults to 30/1; integer or rational components must be positive safe
+integers (maximum 9007199254740991). Decimal `29.97` is rejected; use `30000/1001`.
+These are model settings without encoder-specific restrictions. Ratios are preserved.
+Creation validates inputs before opening the destination and refuses existing files,
+directories and symlinks, including dangling ones. There is no overwrite flag.
+The parent must exist. A write failure may leave a partial newly created file.
+
+`project info <project-file> [--json]` validates data and returns metadata,
+settings and asset/track/clip counts. Offline media does not prevent info.
+Creation and info JSON contain `path`, `schemaVersion`, `metadata` (`id`, `name`,
+`createdAt`, `updatedAt`), `settings` (`width`, `height`, rational `frameRate`) and
+`statistics` (`assets`, `tracks`, `clips`).
+
+`project validate <project-file> [--json]` checks schema/version, unique IDs,
+internal references, media compatibility, timestamps and source ranges. Once data
+passes, it checks every referenced file for readability, resolving relative media
+paths from the project file's directory. It does not decode or probe media.
+The report contains `path`, `valid`, `structureValid`, `issues` and `media`.
+Issues have JSON-pointer `path`, `code`, `message`; media entries have `assetId`,
+resolved `path`, `status`, `message`. Statuses are `available`, `missing`, `unreadable`,
+`not_file` and `unsupported_path`. Data errors yield `structureValid: false` with
+issues and no media checks. Offline projects yield `structureValid: true` but
+`valid: false`. Exit 0 requires valid data and all media available; otherwise exit 1.
+
+Validation failures still return the requested report on stdout with diagnostics
+on stderr. File-read or execution failures return no stdout report. Check exit
+status before using results. Info and validate never modify projects or media.
+Run `project --help` or `project create|info|validate --help` for scoped usage.
+
+## Media inspection and frame extraction
 
 `probe <file> [--json]` inspects a local readable file. JSON contains `path`,
 `formatName`, `startTimeSeconds`, `durationSeconds`, `hasAudio`, selected `video`/`audio` stream objects

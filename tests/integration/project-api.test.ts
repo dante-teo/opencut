@@ -4,6 +4,7 @@ import {
   createProject,
   deserializeProject,
   frameTime,
+  getProjectInfo,
   serializeProject,
   validateProject,
 } from '@opencut/core';
@@ -11,6 +12,18 @@ import { resolveMediaReference } from '@opencut/core/node';
 
 it('exposes the built headless project API and optional Node adapter', () => {
   const project = createProject({ name: 'Built package' });
+  expect(getProjectInfo(project)).toEqual({
+    schemaVersion: 1,
+    metadata: project.metadata,
+    settings: project.settings,
+    statistics: { assets: 0, tracks: 0, clips: 0 },
+  });
+  const info = getProjectInfo(project);
+  info.metadata.name = 'Independent copy';
+  expect(project.metadata.name).toBe('Built package');
+  expect(() =>
+    getProjectInfo({ ...project, settings: { ...project.settings, width: 0 } }),
+  ).toThrow('/settings/width');
   expect(deserializeProject(serializeProject(project))).toEqual(project);
   expect(frameTime(30, { numerator: 30000, denominator: 1001 })).toEqual({
     numerator: 1001,

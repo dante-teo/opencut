@@ -3,8 +3,9 @@
 OpenCut projects are UTF-8 JSON objects with `schemaVersion: 1`. The suggested
 filename is `name.opencut.json`; the API does not require an extension. This is
 the shared headless data model, independent of Electron, React and FFmpeg.
-T05 provides creation, validation and persistence APIs. Editing commands,
-undo/redo, rendering, CLI commands and desktop project integration are deferred.
+T05 provides creation, validation and persistence APIs. T06 exposes creation,
+information and validation through the [CLI](CLI.md#projects). Editing commands,
+undo/redo, project rendering and desktop project integration are deferred.
 
 ## Example
 
@@ -170,6 +171,7 @@ Import pure APIs and TypeScript types from `@opencut/core`:
 import {
   createProject,
   deserializeProject,
+  getProjectInfo,
   serializeProject,
   validateProject,
 } from '@opencut/core';
@@ -178,6 +180,8 @@ const project = createProject({ name: 'Untitled' });
 const json = serializeProject(project);
 const loaded = deserializeProject(json);
 const result = validateProject(loaded);
+const info = getProjectInfo(loaded);
+// info.statistics: { assets: 0, tracks: 0, clips: 0 }
 ```
 
 Creation defaults to 1920×1080 at 30/1 fps, an empty timeline, a random project
@@ -186,7 +190,11 @@ when reproducible creation is required. Creation and successful validation
 produce independent data objects. Validation returns
 `{ success: true, project }` or `{ success: false, error }`.
 
-Creation, serialization and deserialization validate and throw `ProjectFormatError`
+`getProjectInfo(project)` validates and returns independent `schemaVersion`,
+`metadata`, `settings` and `statistics` data. Statistics count assets, tracks
+and clips; no media probing or availability checking occurs.
+
+Creation, inspection, serialization and deserialization validate and throw `ProjectFormatError`
 on invalid input. Its `code` is `INVALID_JSON`, `INVALID_PROJECT` or
 `UNSUPPORTED_VERSION`. `issues` contains `path`, `code` and actionable `message`
 fields. Paths are JSON pointers, e.g. `/clips/0/assetId`; an empty path denotes
@@ -206,6 +214,7 @@ Optional filesystem operations are in `@opencut/core/node`:
 import {
   checkProjectMedia,
   readProjectFile,
+  validateProjectFile,
   writeProjectFile,
 } from '@opencut/core/node';
 
@@ -215,6 +224,8 @@ const media = await checkProjectMedia(
   reopened,
   '/absolute/path/demo.opencut.json',
 );
+const report = await validateProjectFile('/absolute/path/demo.opencut.json');
+// report.valid requires valid project data and every media reference available.
 ```
 
 File I/O requires an absolute path for the current host. `writeProjectFile`
@@ -236,9 +247,19 @@ codecs, decodability, recorded duration or stream presence. Missing media does n
 invalidate the project or delete clips. These operations do not write media,
 relink references, install tools or invoke FFmpeg.
 
+`validateProjectFile(absolutePath)` combines loading, data validation and media
+availability into a read-only report: `path`, `valid`, `structureValid`, `issues`
+and `media`. Malformed JSON, unsupported versions and structural/semantic errors
+return `structureValid: false` with format issues and no media checks. Otherwise
+`structureValid` is true and `valid` requires every media entry to be available.
+Offline projects remain valid data and loadable even when this combined report
+has `valid: false`. I/O errors still throw `ProjectFileError`; invalid path
+arguments still throw `TypeError`. The CLI maps failed validation to exit 1.
+
 ## Version evolution
 
 The top-level safe-integer version is checked before reading a version's structure.
+This schema version is independent of the application version from `opencut --version`.
 Version 1 is the sole supported version. Other safe-integer versions are rejected
 with a clear supported-version message; missing, unsafe or malformed versions
 are invalid structures. Future format changes must explicitly decide whether to

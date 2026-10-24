@@ -71,7 +71,7 @@ gaps with silence, including gaps below FFmpeg's default 100ms compensation
 threshold. These rules keep short clips visible and later music in position;
 the [CLI contract](CLI.md#composition-prototype) describes their observable behavior.
 
-## Project model and persistence (T05)
+## Project model, persistence and CLI management (T05–T06)
 
 Core's main entry point exports the version 1 project types, creation, validation,
 deterministic JSON serialization and exact rational time helpers. The maintained
@@ -87,8 +87,13 @@ creation, portable path helpers and separate read-only media availability checks
 The main core entry point imports no filesystem modules. Relative references are
 anchored to the project file directory; missing files do not prevent loading.
 Unsupported schema versions are rejected before structural parsing; future
-migrations can be added there without introducing a framework now. Neither the
-CLI nor desktop consumes this model yet. No editing operations, undo/redo or
+migrations can be added there without introducing a framework now. T06 exposes
+project create/info/validate in the standalone CLI; the desktop does not consume
+the model yet. Core owns validated metadata/counts and combined file validation;
+the CLI owns argument parsing, cwd-relative project paths, stdout/stderr and exit
+codes. Node's existing `util.parseArgs` and Zod cover this scope without a command
+framework dependency. File validation distinguishes data validity from media
+availability and never modifies files. No editing operations, undo/redo or
 project rendering are implemented. See [the project format contract](PROJECT_FORMAT.md)
 for schema fields, invariants, portability, APIs and errors.
 The rationale for rational time, strict versioning and separate file access is

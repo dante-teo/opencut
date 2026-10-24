@@ -1,6 +1,6 @@
 ---
 name: video-editor
-description: Use the OpenCut CLI to inspect media, extract PNG frames, or concatenate video clips with background music into an H.264/AAC MP4. Project and timeline editing are not available.
+description: Use the OpenCut CLI to create, inspect and validate video projects, inspect media, extract PNG frames, or compose video clips with background music. Timeline editing and project rendering are not available.
 ---
 
 # OpenCut CLI
@@ -23,9 +23,10 @@ prerequisites and the separate correctness/performance test commands.
 T05 adds a versioned project data model, exact rational time, JSON save/load,
 validation and media availability checks as headless core APIs. See
 [the project format](../../docs/PROJECT_FORMAT.md) when using those APIs directly.
-The CLI and desktop do not yet expose projects; there are no project editing,
-undo/redo or project rendering operations. Existing media commands and preview
-remain separate from project data.
+T06 exposes `project create`, `project info` and `project validate` in the CLI.
+There are no media-importing, timeline-editing, undo/redo or project-rendering
+operations. The desktop preview and existing media commands remain separate
+from project data.
 
 From an installed and built OpenCut checkout, run `pnpm cli --help` to discover
 supported capabilities and `pnpm cli --version` to check the application version.
@@ -35,13 +36,28 @@ For a CLI-only build, run `pnpm build:packages` and then
 For result fields, direct executable forms, safety rules and exit codes, read
 [the current CLI reference](references/cli.md) when needed.
 
-Implemented media commands (use the direct Node form for clean JSON stdout):
+Implemented commands (use the direct Node form for clean JSON stdout):
 
 ```sh
+node apps/cli/dist/index.js project create /path/to/new.opencut.json --name "My project" --fps 30000/1001 --json
+node apps/cli/dist/index.js project info /path/to/new.opencut.json --json
+node apps/cli/dist/index.js project validate /path/to/new.opencut.json --json
 node apps/cli/dist/index.js probe /path/to/video.mp4 --json
 node apps/cli/dist/index.js extract-frame /path/to/video.mp4 --timestamp 0.5 --output /path/to/new-frame.png --json
 node apps/cli/dist/index.js compose /path/to/clip1.mp4 /path/to/clip2.mp4 --music /path/to/music.wav --output /path/to/new-composition.mp4 --json
 ```
+
+Project commands need no media tools or Electron. Choose an explicit project-file
+path; relative paths use the working directory. Creation requires `--name` and a
+new destination in an existing directory. Existing files and symlinks are refused.
+Defaults are 1920×1080 at 30/1 fps; use `--width`, `--height` and integer or rational
+`--fps` to configure settings. Use `30000/1001`, rather than decimal `29.97`.
+Info returns metadata, settings and asset/track/clip counts even with offline media.
+Validation checks project data, internal references and regular-file readability;
+it does not decode media. It returns a JSON report for invalid data and unavailable
+media with exit 1; `structureValid` distinguishes valid offline data from data
+errors. File-read failures produce no report. Read
+[the project command reference](references/cli.md#projects) for fields and exit codes.
 
 Probing needs `ffprobe` on PATH; extraction/composition also need `ffmpeg`. Never silently
 install these tools. Inspect metadata before selecting a timestamp. Use finite,
@@ -69,6 +85,6 @@ and decode or play the output before claiming delivery. Composition is an FFmpeg
 spike, with a 10-minute encoder limit; it requires FFmpeg 8+ with libx264/AAC and
 standard filters. It is not the final rendering architecture.
 
-Do not invent project, import, edit, validate, render or MCP commands. Explain
+Do not invent additional project, import, edit, render or MCP commands. Explain
 the current limitation when a workflow needs them. Probing reads metadata;
 it does not validate full-file decodability.

@@ -5,8 +5,9 @@ headless core. **T04 adds an isolated Electron video preview with play/pause, se
 nominal frame stepping and reproducible performance measurements.** The independent
 CLI supports inspection, frame extraction and the T03 composition spike.
 T05 adds a headless [project model and JSON file format](PROJECT_FORMAT.md) with
-core APIs for validation, save/load and media availability checks. Timeline editing
-and project integration in the desktop/CLI remain deferred.
+core APIs for validation, save/load and media availability checks. T06 exposes
+project creation, information and validation in the CLI. Timeline editing and
+desktop project integration remain deferred.
 
 ## Quick start (macOS)
 
@@ -64,6 +65,9 @@ pnpm cli --help
 pnpm cli --version
 # Direct executable entry point, without pnpm log output:
 node apps/cli/dist/index.js --help
+node apps/cli/dist/index.js project create /path/to/new.opencut.json --name "My project" --fps 30000/1001 --json
+node apps/cli/dist/index.js project info /path/to/new.opencut.json --json
+node apps/cli/dist/index.js project validate /path/to/new.opencut.json --json
 node apps/cli/dist/index.js probe /path/to/video.mp4 --json
 node apps/cli/dist/index.js extract-frame /path/to/video.mp4 --timestamp 0.5 --output /path/to/new-frame.png --json
 node apps/cli/dist/index.js compose /path/to/clip1.mp4 /path/to/clip2.mp4 --music /path/to/music.wav --output /path/to/new-composition.mp4 --json
@@ -72,6 +76,7 @@ node apps/cli/dist/index.js compose /path/to/clip1.mp4 /path/to/clip2.mp4 --musi
 To build only the headless packages and CLI, use `pnpm build:packages` followed
 by `pnpm --filter @opencut/cli build` instead of the full workspace build.
 
+Project commands need no media tools and never overwrite existing project files.
 Media commands require manually installed `ffprobe` on PATH; extraction also
 requires `ffmpeg` with PNG support. Composition needs FFmpeg 8+ with libx264/AAC
 and standard filters. Existing output files are refused. See

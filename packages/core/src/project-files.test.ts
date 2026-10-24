@@ -15,6 +15,7 @@ import {
   readProjectFile,
   resolveMediaReference,
   writeProjectFile,
+  validateProjectFile,
 } from './project-files.js';
 
 vi.mock('node:fs/promises', async (original) => {
@@ -130,6 +131,48 @@ describe('media reference paths', () => {
 });
 
 describe('project file and media checks', () => {
+  it('returns format issues as a validation report while retaining I/O errors', async () => {
+    const directory = await temporary();
+    const path = join(directory, 'invalid.json');
+    await expect(validateProjectFile(path)).rejects.toMatchObject({
+      code: 'READ_FAILED',
+    });
+    await fs.writeFile(path, '{broken');
+    expect(await validateProjectFile(path)).toEqual({
+      path,
+      valid: false,
+      structureValid: false,
+      issues: [expect.objectContaining({ code: 'invalid_json' })],
+      media: [],
+    });
+  });
+
+  it('reports valid structure and unavailable media separately', async () => {
+    const directory = await temporary();
+    const path = join(directory, 'project.json');
+    const project = createProject({ name: 'Availability' });
+    await writeProjectFile(project, path);
+    expect(await validateProjectFile(path)).toEqual({
+      path,
+      valid: true,
+      structureValid: true,
+      issues: [],
+      media: [],
+    });
+    project.assets.push({
+      id: 'missing',
+      name: 'Missing',
+      mediaTypes: ['audio'],
+      file: { type: 'relative', path: 'missing.txt' },
+    });
+    await fs.writeFile(path, serializeProject(project));
+    expect(await validateProjectFile(path)).toMatchObject({
+      valid: false,
+      structureValid: true,
+      issues: [],
+      media: [{ status: 'missing' }],
+    });
+  });
   it('saves/loads a populated project and survives moving its whole folder', async () => {
     const directory = await temporary();
     const original = join(directory, 'original');
