@@ -6,6 +6,12 @@ import { MediaError, probeMedia } from '@opencut/media';
 import type { MediaMetadata } from '@opencut/media';
 import { createProject, serializeProject, validateProject } from './project.js';
 import {
+  getEditHistory,
+  projectSnapshot,
+  redoEdit,
+  undoEdit,
+} from './editing.js';
+import {
   getMediaAsset,
   importMediaAsset,
   listMediaAssets,
@@ -87,6 +93,57 @@ afterEach(async () => {
 });
 
 describe('headless asset management', () => {
+  it('shares import/remove history, previews without saving, and restores metadata without probing', async () => {
+    const original = await readProjectFile(path);
+    const bytes = await fs.readFile(path, 'utf8');
+    const modified = (await fs.stat(path)).mtimeMs;
+    await importMediaAsset(path, source, { dryRun: true, expectedRevision: 0 });
+    expect(await fs.readFile(path, 'utf8')).toBe(bytes);
+    expect((await fs.stat(path)).mtimeMs).toBe(modified);
+    const imported = await importMediaAsset(path, source, {
+      expectedRevision: 0,
+    });
+    const first = await readProjectFile(path);
+    expect(getEditHistory(first)).toMatchObject({
+      revision: 1,
+      undo: [{ label: 'media import' }],
+      redo: [],
+    });
+    const saved = await fs.readFile(path, 'utf8');
+    await importMediaAsset(path, source, { expectedRevision: 1 });
+    expect(await fs.readFile(path, 'utf8')).toBe(saved);
+    const calls = vi.mocked(probeMedia).mock.calls.length;
+    await updateProjectFile(
+      path,
+      async (project) => ({ project: undoEdit(project), result: undefined }),
+      { history: 'restore' },
+    );
+    expect(projectSnapshot(await readProjectFile(path))).toEqual(original);
+    await updateProjectFile(
+      path,
+      async (project) => ({ project: redoEdit(project), result: undefined }),
+      { history: 'restore' },
+    );
+    expect(projectSnapshot(await readProjectFile(path))).toEqual(
+      projectSnapshot(first),
+    );
+    await removeMediaAsset(path, imported.asset.id, { expectedRevision: 3 });
+    expect(getEditHistory(await readProjectFile(path))).toMatchObject({
+      revision: 4,
+      undo: [{ label: 'media import' }, { label: 'media remove' }],
+    });
+    await updateProjectFile(
+      path,
+      async (project) => ({ project: undoEdit(project), result: undefined }),
+      { history: 'restore' },
+    );
+    expect((await readProjectFile(path)).assets).toEqual([imported.asset]);
+    expect(vi.mocked(probeMedia)).toHaveBeenCalledTimes(calls);
+    expect(await fs.readFile(source, 'utf8')).toBe(
+      'source sentinel; probe is mocked',
+    );
+  });
+
   it.each([false, true])(
     'resolves symlinked project directories consistently (shadow source: %s)',
     async (shadowSource) => {

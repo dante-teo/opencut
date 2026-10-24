@@ -20,7 +20,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 (probing, decoding, playback and encoding) are separate concerns. Detailed editing
 contracts and the playback/render backend require later technical validation.
 
-## Current scope: T08
+## Current scope: T09
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -64,9 +64,15 @@ overlaps are allowed. Splits preserve source mapping and total duration; no edit
 implicitly shifts neighbors. Stable IDs and guarded atomic persistence support
 scripts and external agents. See [timeline editing](CLI.md#timeline-editing).
 
+T09 adds atomic timeline batches, exact undo/redo, persistent history, dry-run
+validation and revision checks through `edit apply|undo|redo|history`. Existing
+individual timeline/media edits share the same snapshot history. Failed batches
+leave no partial content or history; changed edits after undo discard redo.
+See [transactions, undo and redo](CLI.md#transactions-undo-and-redo).
+
 ## Excluded
 
-T08 does not implement undo/redo, transactions, final rendering architecture,
+T09 does not implement final rendering architecture,
 or desktop project media integration. No FFmpeg or
 MLT runtime is bundled; media commands require manually installed external tools.
 Fixture generation remains an optional development utility.
@@ -78,4 +84,4 @@ User media must never be silently changed or overwritten.
 
 macOS is the initial required platform. Package boundaries should stay portable;
 Windows/Linux support requires explicit validation later. No distribution,
-installer, updater, signing or notarization work is included in T08. T09 is not implemented.
+installer, updater, signing or notarization work is included in T09. T10 is not implemented.

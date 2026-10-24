@@ -26,7 +26,8 @@ directly. Desktop main imports it and answers the renderer's narrow read-only IP
 request. React holds only view state for that response; it owns no editing state.
 Future GUI actions, CLI commands and scripts must execute the same core editing
 operations. T05 adds a versioned project model and persistence; T08 implements
-pure timeline operations shared by CLI and future GUI callers. A command bus remains deferred.
+pure timeline operations shared by CLI and future GUI callers. T09 adds pure
+transaction dispatch and persistent snapshot history over those operations.
 The application version is currently returned by core and kept aligned with the
 workspace manifests; release/version automation is deferred.
 
@@ -72,7 +73,7 @@ gaps with silence, including gaps below FFmpeg's default 100ms compensation
 threshold. These rules keep short clips visible and later music in position;
 the [CLI contract](CLI.md#composition-prototype) describes their observable behavior.
 
-## Project model, persistence and CLI management (T05–T08)
+## Project model, persistence and CLI management (T05–T09)
 
 Core's main entry point exports the version 1 project types, creation, validation,
 deterministic JSON serialization and exact rational time helpers. The maintained
@@ -125,13 +126,29 @@ track compatibility, globally unique IDs, safe derived times and no same-track
 overlap are enforced by project validation on edits, load and save. Half-open
 intervals may touch, and separate tracks may overlap. Trims fix timeline start;
 splits preserve source mapping and total duration while retaining the left ID.
-There are no implicit ripple edits or populated-track cascades. Undo/redo and
-project rendering remain deferred. See [the project format contract](PROJECT_FORMAT.md)
+There are no implicit ripple edits or populated-track cascades. Project rendering
+remains deferred. T09 adds a pure transaction dispatcher over these operations.
+A transaction validates each evolving state, then records full before/after content
+snapshots as one history entry when the final content changes. If operations cancel
+out, generated `updatedAt` changes alone do not create a commit: revision, both
+stacks, timestamps and project bytes stay unchanged. Exact timestamp comparisons
+remain in history-integrity checks and undo/redo restoration. Undo/redo restore snapshots and advance a monotonic
+revision, avoiding command replay, inverse-operation bugs and reused revisions.
+The optional version 1 `editing` field stores revision and both history stacks in
+the same JSON as current content, so a single atomic replacement publishes all of
+them. Legacy projects start at revision 0. Individual timeline and asset mutations
+record through the same writer; new changed edits clear redo. Explicit expected
+revisions reject stale callers, while the lock serializes cooperating writers and
+existing identity/content checks detect outside modifications during execution.
+Dry-run plans the same update and history but skips publication. Existing Zod and
+Node APIs suffice; snapshots remain unpruned and trade file size for simplicity. See [the project format contract](PROJECT_FORMAT.md)
 for schema fields, invariants, portability, APIs and errors.
 The rationale for rational time, strict versioning and separate file access is
 recorded in [ADR 0004](adr/0004-versioned-project-model.md).
 [ADR 0005](adr/0005-explicit-timeline-editing.md) records why T08 uses explicit
 non-ripple edits, rejects same-track overlap and permits offline source ranges.
+[ADR 0006](adr/0006-snapshot-transactions-and-history.md) records the T09 snapshot,
+revision, atomicity and no-op decisions.
 
 ## Desktop shell
 
@@ -244,7 +261,7 @@ Fixture validation is independent of the application media APIs.
 ## Open decisions for subsequent tasks
 
 - Validate FFmpeg/MLT capabilities, licensing, distribution and process isolation.
-- Define undo semantics and project rendering on top of the shared model and T08 edits.
+- Define project rendering on top of the shared model and transactional edits.
 - Evolve the scripting contract for later editing capabilities; current
   project, media and timeline JSON is documented in [CLI.md](CLI.md). Stdout is reserved for results,
   stderr for errors.

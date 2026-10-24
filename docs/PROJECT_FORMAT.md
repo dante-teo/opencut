@@ -1,4 +1,4 @@
-# Project format (T08)
+# Project format (T09)
 
 OpenCut projects are UTF-8 JSON objects with `schemaVersion: 1`. The suggested
 filename is `name.opencut.json`; the API does not require an extension. This is
@@ -6,8 +6,8 @@ the shared headless data model, independent of Electron, React and FFmpeg.
 T05 provides creation, validation and persistence APIs. T06 exposes creation,
 information and validation through the [CLI](CLI.md#projects). T07 adds media
 import/list/info/remove APIs and CLI commands. T08 adds shared timeline editing
-operations and CLI commands. Undo/redo, project rendering and desktop project
-integration are deferred.
+operations and CLI commands. T09 adds atomic transactions and persistent undo/redo.
+Project rendering and desktop project integration are deferred.
 
 ## Example
 
@@ -411,8 +411,86 @@ For persistence, call these operations inside the existing Node
 `updateProjectFile(path, async (project) => ({ project, result }))` callback,
 returning the edited project and the desired result. It validates before atomic
 publication and preserves typed timeline/format errors. The CLI implements this
-adapter without adding a command bus or transaction layer. See
+adapter; T09 records its edits through the shared transaction history. See
 [the CLI editing contract](CLI.md#timeline-editing) for flags and JSON fields.
+
+## Transactions and history API
+
+T09 extends prerelease schema version 1 with optional top-level `editing`:
+`{ revision, undo, redo }`. Its absence means revision 0 and empty stacks, so legacy
+files load and serialize unchanged until their first changed edit. Revision is a
+nonnegative safe integer, increasing once per changed apply, undo or redo; overflow
+fails. Undo restores content, while revision records the new commit and never
+returns to a historical value. Older strict binaries reject the optional field;
+use a T09-capable reader for edited projects.
+
+Both stacks contain strict `{ id, label, committedAt, before, after }` entries.
+IDs use the normal stable-ID syntax, labels are nonblank and `committedAt` is a
+millisecond UTC timestamp. Each snapshot contains exactly the version 1 project
+content fields (`schemaVersion`, `metadata`, `settings`, `assets`, `tracks`,
+`clips`), with no nested history/revision. Snapshots receive the same structural
+and semantic validation as current content, including project identity checks.
+The next undo/redo is at the end of its stack. History operations check snapshot
+continuity and the current content against the cursor; inconsistent/manual edits
+are refused. Snapshots preserve ordering, metadata and unreduced rational forms.
+Full snapshots trade disk space for reliable exact restoration without inverse
+commands or event replay; no automatic pruning or event-sourcing system exists.
+
+The filesystem-free main core exports:
+
+- `parseEditTransaction(unknown)`: strict batch validation and typed `EditTransaction`.
+- `executeTransaction(project, transaction)`: returns `{ project, results }` and
+  commits all T08 operations once, validating the evolving state after each.
+  Requires `expectedRevision`; optional `label` defaults to `edit apply`.
+- `commitEdit(before, after, label?)`: record a single validated content change.
+- `undoEdit(project, expectedRevision?)` / `redoEdit(project, expectedRevision?)`:
+  return restored projects with updated stacks and increasing revision.
+- `projectRevision(project)`, `checkProjectRevision(project, expectedRevision?)`,
+  `projectSnapshot(project)` and `getEditHistory(project)`: revision checks,
+  independent content snapshots and compact history summaries.
+
+These APIs copy validated inputs and leave callers' projects untouched on failure.
+Primitive T08 functions remain pure transformations; use `executeTransaction` or
+`commitEdit` when committing in memory. The Node adapter records a callback's
+changed content automatically, including callbacks mutating their input in place.
+A callback returning a stale project revision is rejected even without an explicit
+expected-revision option.
+No-op edits retain stacks and revision. Changed edits clear redo.
+
+No-op detection compares the final content with the original while ignoring only
+`metadata.updatedAt`, which intermediate operations refresh automatically. All
+other fields, collection ordering and rational representations must match. A batch
+that adds then removes a temporary track, or moves/trims a clip and restores its
+original values, therefore retains the original timestamps and both history
+stacks. The Node adapter preserves the original file bytes and mtime. Every
+operation and the expected revision are still validated. History-chain validation
+and undo/redo snapshots continue to compare and preserve exact timestamps.
+
+`updateProjectFile(path, callback, options?)` accepts optional `expectedRevision`,
+`dryRun`, `label` and `history`. The default `history: 'record'` adds one snapshot
+transaction. For callbacks returning the result of `executeTransaction`, `undoEdit`
+or `redoEdit`, pass `history: 'restore'` to persist their already managed history
+without creating a second entry. Changed managed results must advance the current
+revision by exactly one and have consistent history. Pass the revision from the caller's earlier read
+as `expectedRevision` to reject stale work before invoking the callback. Batch
+execution also checks its own required expected revision. Dry-run plans and
+validates the same update but discards it before publication; the callback result
+can describe the projected revision/history. Callbacks must not perform external
+side effects. A temporary writer lock is acquired and cleaned even for dry-run.
+The adapter publishes content, revision and history in one synced atomic rename.
+
+`importMediaAsset` and `removeMediaAsset` also accept a final options object with
+`expectedRevision` and `dryRun`, and record `media import` / `media remove` entries.
+Import dry-run probes but never modifies the source; duplicates add no history.
+The CLI documents the full operation JSON shape in
+[transactions, undo and redo](CLI.md#transactions-undo-and-redo).
+
+`EditError.code` distinguishes `INVALID_TRANSACTION`, `REVISION_CONFLICT`,
+`REVISION_EXHAUSTED`, `NOTHING_TO_UNDO`, `NOTHING_TO_REDO` and `HISTORY_CONFLICT`.
+Batch operation failures identify their one-based index/type in the message.
+Format errors remain `ProjectFormatError`; filesystem errors retain
+`ProjectFileError`. Detected outside changes during publication use
+`REVISION_CONFLICT`. None of these APIs reads or changes original media content.
 
 ## Version evolution
 

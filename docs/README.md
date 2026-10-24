@@ -9,6 +9,7 @@ core APIs for validation, save/load and media availability checks. T06 exposes
 project creation, information and validation in the CLI. T07 adds media asset
 import, listing, inspection and safe removal. T08 adds shared headless timeline
 editing through the CLI: track management and clip add/move/trim/split/remove.
+T09 adds [atomic batches, persistent undo/redo, dry-run and revision checks](CLI.md#transactions-undo-and-redo).
 Desktop project integration remains deferred.
 
 ## Quick start (macOS)

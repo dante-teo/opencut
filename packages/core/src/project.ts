@@ -92,7 +92,7 @@ const settingsSchema = z.strictObject({
   height: z.int().positive(),
   frameRate: frameRateSchema,
 });
-const projectSchema = z.strictObject({
+const snapshotSchema = z.strictObject({
   schemaVersion: z.literal(PROJECT_SCHEMA_VERSION),
   metadata: z.strictObject({
     id,
@@ -105,6 +105,25 @@ const projectSchema = z.strictObject({
   tracks: z.array(trackSchema),
   clips: z.array(clipSchema),
 });
+
+const historyEntrySchema = z.strictObject({
+  id,
+  label: name,
+  committedAt: z.iso.datetime({ precision: 3 }),
+  before: snapshotSchema,
+  after: snapshotSchema,
+});
+const projectSchema = snapshotSchema.extend({
+  editing: z
+    .strictObject({
+      revision: z.int().nonnegative(),
+      undo: z.array(historyEntrySchema),
+      redo: z.array(historyEntrySchema),
+    })
+    .optional(),
+});
+export type ProjectSnapshot = z.infer<typeof snapshotSchema>;
+export type HistoryEntry = z.infer<typeof historyEntrySchema>;
 
 export type MediaReference = z.infer<typeof mediaReferenceSchema>;
 export type MediaAsset = z.infer<typeof assetSchema>;
@@ -292,6 +311,24 @@ export function validateProject(value: unknown): ProjectValidationResult {
     };
   }
   const issues = collectSemanticIssues(parsed.data);
+  for (const stack of ['undo', 'redo'] as const) {
+    parsed.data.editing?.[stack].forEach((entry, index) => {
+      for (const side of ['before', 'after'] as const) {
+        const snapshot = entry[side];
+        for (const issue of collectSemanticIssues(snapshot))
+          issues.push({
+            ...issue,
+            path: `/editing/${stack}/${index}/${side}${issue.path}`,
+          });
+        if (snapshot.metadata.id !== parsed.data.metadata.id)
+          issues.push({
+            path: `/editing/${stack}/${index}/${side}/metadata/id`,
+            code: 'history_project',
+            message: 'History must belong to this project.',
+          });
+      }
+    });
+  }
   return issues.length
     ? {
         success: false,

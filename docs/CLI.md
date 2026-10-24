@@ -1,4 +1,4 @@
-# CLI reference (T08)
+# CLI reference (T09)
 
 Build from the checkout root with `pnpm build`. The `opencut` executable is
 workspace-local. Use the direct Node form for machine-readable stdout; pnpm
@@ -47,6 +47,10 @@ already exist, and the output file must not exist.
 - `clip split <project-file> <clip-id> --at <frame> [--json]`: split strictly inside a clip.
 - `clip remove <project-file> <clip-id> [--json]`: remove only that clip.
 - `timeline|track|clip --help`: show editing usage and time semantics.
+- `edit apply <project-file> <batch.json> [--dry-run] [--expected-revision <n>] [--json]`: commit an atomic batch.
+- `edit undo|redo <project-file> [--dry-run] [--expected-revision <n>] [--json]`: restore a transaction.
+- `edit history <project-file> [--json]`: inspect the current revision and persistent history.
+- `edit --help`: show transaction usage and batch format.
 - `probe <file> [--json]`: inspect a readable local file with ffprobe.
 - `extract-frame <file> --timestamp <seconds> --output <file.png> [--json]`:
   extract one video frame with ffprobe and FFmpeg. Seconds must be a finite,
@@ -268,7 +272,8 @@ files with same-track overlaps are now invalid; resolve their positions/ranges i
 JSON before using edit commands. There is no silent migration. Derived durations
 and ends must fit safe rational JSON components; arithmetic overflow fails without
 rounding. No ripple, implicit track creation, speed changes, linked AV operations,
-undo/redo, multi-command transactions, project rendering or GUI integration exists.
+project rendering or GUI integration exists. T09 adds transactions and undo/redo
+as described below.
 
 `timeline list` returns `{ path, frameRate, duration, tracks }`. All times are
 `{ numerator, denominator }` in exact seconds; `duration` is the maximum clip
@@ -303,6 +308,136 @@ and exit 2 for malformed or inapplicable arguments. Check exit status before
 parsing stdout. Diagnostics identify IDs or JSON-pointer fields, source bounds
 and colliding clips. Core errors expose machine-readable codes and validation
 issues; see [the API contract](PROJECT_FORMAT.md#timeline-editing-api).
+
+## Transactions, undo and redo
+
+`edit apply PROJECT BATCH.json [--dry-run] [--expected-revision N] [--json]`
+applies a nonempty array of timeline operations as **one transaction**. The
+project path is explicit, followed by the batch file path; both resolve from cwd.
+Read `edit history PROJECT --json` first and use its `revision` as the batch's
+required `expectedRevision`. Legacy projects without history have revision 0.
+For example, with an existing imported asset `asset-camera` and revision 0:
+
+```json
+{
+  "expectedRevision": 0,
+  "label": "Place and split camera",
+  "operations": [
+    {
+      "type": "track.add",
+      "id": "video-main",
+      "name": "Video",
+      "mediaType": "video"
+    },
+    {
+      "type": "clip.add",
+      "id": "camera",
+      "assetId": "asset-camera",
+      "trackId": "video-main",
+      "at": 0,
+      "in": 0,
+      "out": 60
+    },
+    {
+      "type": "clip.split",
+      "id": "camera",
+      "at": 30,
+      "rightId": "camera-right"
+    }
+  ]
+}
+```
+
+```sh
+node apps/cli/dist/index.js edit history /path/to/project.opencut.json --json
+node apps/cli/dist/index.js edit apply /path/to/project.opencut.json /path/to/batch.json --dry-run --json
+node apps/cli/dist/index.js edit apply /path/to/project.opencut.json /path/to/batch.json --json
+node apps/cli/dist/index.js edit undo /path/to/project.opencut.json --expected-revision 1 --json
+node apps/cli/dist/index.js edit redo /path/to/project.opencut.json --expected-revision 2 --json
+```
+
+Batch objects allow only `expectedRevision`, optional nonblank `label`, and
+`operations`. Operation objects are strict; unknown fields/types fail. All IDs
+follow the project ID rules. Time fields are nonnegative safe integer **project
+frame indices**, including source points; the same exact rational conversion and
+T08 validation apply. No media probing, source changes or rendering occurs.
+
+| Operation `type` | Required fields besides `type`           | Optional fields             |
+| ---------------- | ---------------------------------------- | --------------------------- |
+| `track.add`      | `name`, `mediaType` (`video` or `audio`) | `id`                        |
+| `track.remove`   | `id`                                     | —                           |
+| `clip.add`       | `assetId`, `trackId`, `at`, `in`, `out`  | `id`                        |
+| `clip.move`      | `id`, at least one of `trackId` / `at`   | remaining destination field |
+| `clip.trim`      | `id`, at least one of `in` / `out`       | remaining source field      |
+| `clip.split`     | `id`, `at`                               | `rightId`                   |
+| `clip.remove`    | `id`                                     | —                           |
+
+Omitted new IDs become UUIDs. Supply explicit IDs when later operations in the
+same batch must reference a newly added track/clip or the right side of a split.
+Each operation sees the preceding result. Every intermediate state must be valid:
+a temporary overlap or removing a populated track fails even if a later operation
+would repair it. Any failure discards the entire batch without changing saved
+content, revision, undo or redo. Diagnostics include the failing operation's
+one-based index and type. An empty batch is invalid.
+
+`edit undo PROJECT` restores the previous transaction's exact content, including
+metadata timestamps, IDs, rational representations and collection ordering.
+`edit redo PROJECT` restores that transaction's after-state without replaying
+commands or regenerating IDs. Each apply/undo/redo that changes state increments
+the revision once, even when undo returns to earlier content. New changed edits
+clear redo; equivalent no-op moves/trims and batches whose edits cancel out leave
+history, revision and file timestamps unchanged. Generated `updatedAt` changes alone
+do not count as a content change. Undo/redo with no available entry fails with exit 1.
+
+Existing `track`, `clip`, `media import` and `media remove` mutations each record
+one transaction through the same writer. Duplicate imports and no-op edits add
+nothing. Asset undo/redo restores references and stored metadata only; it never
+modifies source files or re-probes. Batch operations cover the T08 timeline
+operations; media imports/removals remain individual commands.
+
+All mutations above accept `--expected-revision N` and `--dry-run`. The revision
+must be a nonnegative safe integer. A stale revision fails with exit 1 before any
+commit. For apply, a supplied CLI revision must match the required batch revision
+(otherwise exit 2). Without the flag, individual commands and undo/redo operate on
+the current revision under the writer lock. Use the flag when acting on a prior
+read. A failed or stale edit retains the redo branch.
+
+Dry-run executes the same validation, operations and history planning, returning a
+preview without saving content or history. It preserves project bytes and mtime,
+and cleans its temporary writer lock. Media import dry-run still requires ffprobe.
+Generated preview IDs and timestamps are provisional and can differ on real apply.
+Existing individual command JSON shapes remain unchanged during dry-run; their
+fields describe the proposed result rather than a committed edit.
+
+`edit history` returns `{ path, revision, undo, redo }` without writing.
+Each entry is `{ id, label, committedAt }`; both arrays are stacks, with the next
+undo/redo at the **last** position. Undo is oldest first; redo is reverse execution
+order. Snapshot contents remain in the project file rather than history stdout.
+Apply/undo/redo JSON returns `{ path, dryRun, baseRevision, changed, revision,
+undo, redo }`, plus `results` for apply. Each result contains its operation `type`
+and the existing T08 result fields without `path`. With dry-run, `revision` and
+history describe the **projected** state and `baseRevision` is the saved revision.
+`changed` is false for an equivalent transaction; it adds no history. Adding then
+removing a temporary track, or moving/trimming a clip back to its original values,
+is a no-op when all other stored content matches. The batch still validates every
+operation and the expected revision, and returns the intermediate operation
+`results`. Those results do not imply a saved change; check `changed` and read back
+the final timeline/history. This also applies to dry-run output.
+
+Snapshots and current content share one atomic JSON replacement: no sidecar
+history can commit independently. History survives reopening and moving the
+project bundle. It is retained without automatic pruning and increases file size
+by two project-content snapshots per changed transaction. Do not hand-edit content
+behind existing history: snapshot mismatch or a broken chain fails with a history
+conflict instead of overwriting newer content on undo. Restore a valid backup.
+
+The existing lock, symlink/hard-link refusal, outside-change detection and atomic
+save guarantees apply. Cooperating writers serialize by rejection while busy;
+retry after reloading. Detected outside replacements during an operation fail.
+Arbitrary noncooperating writes in the final check/rename window and power-loss
+durability remain outside the filesystem guarantee. Errors are text on stderr,
+including with `--json`; exit 0 means success, 1 means data/runtime/file/conflict
+failure, and 2 means invalid CLI arguments. Failed commands emit no success JSON.
 
 ## Composition prototype
 
@@ -555,6 +690,11 @@ preserve original bytes. Native tests use imported video/audio/image fixtures,
 read back timeline JSON and project data, validate source bounds, and compare
 source hashes. Native outputs stay in an owned `t08-*` directory under
 `tests/fixtures/generated/`, cleaned on success or failure.
+
+T09 unit/CLI tests cover multi-operation commits, intermediate validation and rollback,
+exact undo/redo across reloads, branch invalidation, individual-command history,
+dry-run bytes/mtime preservation, stale revisions, simultaneous writers, outside
+replacement and failed atomic publication. Sources remain unchanged.
 
 Project rendering and desktop project integration are not implemented. The existing composition prototype
 continues to take media paths directly, independently of projects.

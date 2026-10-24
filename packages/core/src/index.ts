@@ -51,3 +51,18 @@ export type {
   MoveClipOptions,
   TrimClipOptions,
 } from './timeline.js';
+
+export {
+  EditError,
+  parseEditTransaction,
+  projectSnapshot,
+  projectRevision,
+  checkProjectRevision,
+  commitEdit,
+  executeTransaction,
+  undoEdit,
+  redoEdit,
+  getEditHistory,
+} from './editing.js';
+export type { EditOperation, EditTransaction } from './editing.js';
+export type { ProjectSnapshot, HistoryEntry } from './project.js';

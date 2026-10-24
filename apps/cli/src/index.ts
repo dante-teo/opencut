@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
-import { runTimelineCommand, timelineHelp, UsageError } from './timeline.js';
+import { editHelp, runEditCommand } from './edit.js';
+import {
+  editOptions,
+  runTimelineCommand,
+  timelineHelp,
+  UsageError,
+} from './timeline.js';
 import { resolve } from 'node:path';
 import {
   createProject,
@@ -22,7 +28,7 @@ import type { MediaMetadata } from '@opencut/media';
 
 const help = `Usage: opencut [command] [options]
 
-OpenCut — project, media asset and timeline editing, headless media tools (T08).
+OpenCut — project, media asset and timeline editing, transactions and headless media tools (T09).
 Project rendering is not implemented yet.
 
 Commands:
@@ -38,6 +44,8 @@ Commands:
   track add|remove <project-file>       Manage video/audio tracks (track --help)
   clip add|move|trim|split|remove <project-file>
                                        Edit clips (clip --help; time arguments are frames)
+  edit apply <project-file> <batch.json> Apply an atomic transaction
+  edit undo|redo|history <project-file>  Restore or inspect persistent editing history
   probe <file>                         Inspect local media metadata
   extract-frame <file> --timestamp <s> --output <file.png>
                                        Extract one PNG frame, without overwriting
@@ -48,6 +56,8 @@ Options:
   -h, --help     Show this help
   -v, --version  Show the application version
   --json        Print requested output as JSON
+  --dry-run     Validate editing/media mutations without saving
+  --expected-revision <n> Reject a stale editing/media mutation
   --name        Nonblank project or track name (project create / track add)
   --timestamp   Frame timestamp in nonnegative decimal seconds
   --output      New PNG/MP4 output path (parent directory must exist)
@@ -91,7 +101,7 @@ No decoding or file modification occurs. File-read failures have no report.
 };
 
 const mediaHelp = {
-  import: `Usage: opencut media import <project-file> <file> [--json] [--help]
+  import: `Usage: opencut media import <project-file> <file> [--dry-run] [--expected-revision <n>] [--json] [--help]
 
 Import one video, audio or image file by reference without copying or modifying it.
 Source arguments resolve from the working directory; stored references prefer project-relative paths.
@@ -108,10 +118,11 @@ Offline sources are reported in the result; they do not prevent inspection.
 Inspect stored metadata, source availability and referencing clip IDs by stable asset ID.
 No probing or writes; offline sources remain inspectable.
 `,
-  remove: `Usage: opencut media remove <project-file> <asset-id> [--json] [--help]
+  remove: `Usage: opencut media remove <project-file> <asset-id> [--dry-run] [--expected-revision <n>] [--json] [--help]
 
 Atomically remove an unreferenced asset entry. Referenced assets are refused.
 Original media files are never deleted. No media tools are required.
+Import/remove create undo/redo history; dry-run validates without saving.
 `,
 };
 
@@ -196,6 +207,8 @@ async function runCli(args: string[]): Promise<void> {
       help: { type: 'boolean', short: 'h' },
       version: { type: 'boolean', short: 'v' },
       json: { type: 'boolean' },
+      'dry-run': { type: 'boolean' },
+      'expected-revision': { type: 'string' },
       name: { type: 'string' },
       type: { type: 'string' },
       track: { type: 'string' },
@@ -228,18 +241,25 @@ async function runCli(args: string[]): Promise<void> {
       ? (file as keyof typeof mediaHelp)
       : undefined;
   if (values.help || args.length === 0) {
-    const usage = timelineCommand
-      ? timelineHelp
-      : command === 'project'
-        ? projectCommand
-          ? projectHelp[projectCommand]
-          : `Usage: opencut project <create|info|validate> <project-file> [options]\n\n${Object.values(projectHelp).join('\n')}`
-        : command === 'media'
-          ? mediaCommand
-            ? mediaHelp[mediaCommand]
-            : `Usage: opencut media <import|list|info|remove> <project-file> [file|asset-id] [--json]\n\n${Object.values(mediaHelp).join('\n')}`
-          : help;
+    const usage =
+      command === 'edit'
+        ? editHelp
+        : timelineCommand
+          ? timelineHelp
+          : command === 'project'
+            ? projectCommand
+              ? projectHelp[projectCommand]
+              : `Usage: opencut project <create|info|validate> <project-file> [options]\n\n${Object.values(projectHelp).join('\n')}`
+            : command === 'media'
+              ? mediaCommand
+                ? mediaHelp[mediaCommand]
+                : `Usage: opencut media <import|list|info|remove> <project-file> [file|asset-id] [--json]\n\n${Object.values(mediaHelp).join('\n')}`
+              : help;
     output({ help: usage }, usage, values.json);
+    return;
+  }
+  if (command === 'edit') {
+    await runEditCommand(positionals, values);
     return;
   }
   if (timelineCommand) {
@@ -252,6 +272,14 @@ async function runCli(args: string[]): Promise<void> {
         `--${option} applies only to timeline editing commands.`,
       );
   }
+  if (
+    command !== 'media' &&
+    (values['dry-run'] !== undefined ||
+      values['expected-revision'] !== undefined)
+  )
+    throw new UsageError(
+      '--dry-run and --expected-revision apply only to editing or media mutations.',
+    );
   if (command === 'media') {
     const argument = positionals[3];
     if (
@@ -263,8 +291,14 @@ async function runCli(args: string[]): Promise<void> {
       throw new UsageError(
         'Expected media import <project-file> <file>, media list <project-file>, or media info|remove <project-file> <asset-id>.',
       );
+    const allowed = [
+      'json',
+      ...(['import', 'remove'].includes(mediaCommand)
+        ? ['dry-run', 'expected-revision']
+        : []),
+    ];
     for (const option of Object.keys(values)) {
-      if (option !== 'json')
+      if (!allowed.includes(option))
         throw new UsageError(
           `--${option} does not apply to media ${mediaCommand}.`,
         );
@@ -286,18 +320,30 @@ async function runCli(args: string[]): Promise<void> {
         values.json,
       );
     } else if (mediaCommand === 'import') {
-      const result = await importMediaAsset(path, argument!);
+      const result = await importMediaAsset(
+        path,
+        argument!,
+        editOptions(values),
+      );
       output(
         result,
-        `${result.imported ? 'Imported' : 'Already imported'}: ${result.asset.id}\n${formatAsset(result)}`,
+        `${values['dry-run'] ? 'Validated import' : result.imported ? 'Imported' : 'Already imported'}: ${result.asset.id}\n${formatAsset(result)}`,
         values.json,
       );
     } else if (mediaCommand === 'info') {
       const result = await getMediaAsset(path, argument!);
       output(result, formatAsset(result), values.json);
     } else {
-      const result = await removeMediaAsset(path, argument!);
-      output(result, `Removed asset: ${result.removedAssetId}\n`, values.json);
+      const result = await removeMediaAsset(
+        path,
+        argument!,
+        editOptions(values),
+      );
+      output(
+        result,
+        `${values['dry-run'] ? 'Validated removal of' : 'Removed'} asset: ${result.removedAssetId}\n`,
+        values.json,
+      );
     }
     return;
   }

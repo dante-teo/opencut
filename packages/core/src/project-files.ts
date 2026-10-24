@@ -24,6 +24,13 @@ import type { MediaReference, Project, ProjectIssue } from './project.js';
 import { MediaError } from '@opencut/media';
 import { AssetError } from './assets.js';
 import { TimelineError } from './timeline.js';
+import {
+  checkProjectRevision,
+  commitEdit,
+  EditError,
+  getEditHistory,
+  projectRevision,
+} from './editing.js';
 
 function pathStyle(value: string): typeof posix {
   return /^[A-Za-z]:[/\\]/.test(value) || /^(?:\/\/|\\\\)/.test(value)
@@ -257,6 +264,14 @@ export async function writeProjectFile(
   }
 }
 
+export interface ProjectUpdateOptions {
+  expectedRevision?: number;
+  dryRun?: boolean;
+  label?: string;
+  /** For callbacks using executeTransaction, undoEdit or redoEdit, which manage history themselves. */
+  history?: 'record' | 'restore';
+}
+
 /** Serialize cooperating writers and publish a complete, synced JSON file by rename. */
 export async function updateProjectFile<T>(
   projectFilePath: string,
@@ -264,6 +279,7 @@ export async function updateProjectFile<T>(
     project: Project,
     path: string,
   ) => Promise<{ project: Project; result: T }>,
+  options: ProjectUpdateOptions = {},
 ): Promise<T> {
   const requested = nativePath(projectFilePath);
   let path = requested;
@@ -287,10 +303,25 @@ export async function updateProjectFile<T>(
       );
     const original = await readFile(path, 'utf8');
     const project = deserializeProject(original);
+    checkProjectRevision(project, options.expectedRevision);
     const snapshot = serializeProject(project);
     const changed = await update(project, path);
-    const json = serializeProject(changed.project);
-    if (json === snapshot) return changed.result;
+    const baseline = deserializeProject(snapshot);
+    const updated =
+      options.history === 'restore'
+        ? changed.project
+        : commitEdit(baseline, changed.project, options.label);
+    const json = serializeProject(updated);
+    if (options.history === 'restore' && json !== snapshot) {
+      checkProjectRevision(updated, projectRevision(baseline) + 1);
+      if (updated.metadata.id !== baseline.metadata.id)
+        throw new EditError(
+          'INVALID_TRANSACTION',
+          'An edit cannot change project identity.',
+        );
+      getEditHistory(updated);
+    }
+    if (options.dryRun || json === snapshot) return changed.result;
     temporary = await mkdtemp(join(dirname(path), '.opencut-update-'));
     const pending = join(temporary, 'project.json');
     const file = await open(pending, 'wx', before.mode & 0o777);
@@ -309,7 +340,8 @@ export async function updateProjectFile<T>(
       current.mtimeMs !== before.mtimeMs ||
       (await readFile(path, 'utf8')) !== original
     )
-      throw new Error(
+      throw new EditError(
+        'REVISION_CONFLICT',
         'Project changed during the operation; reload and retry.',
       );
     await rename(pending, path);
@@ -319,6 +351,7 @@ export async function updateProjectFile<T>(
       cause instanceof ProjectFormatError ||
       cause instanceof AssetError ||
       cause instanceof TimelineError ||
+      cause instanceof EditError ||
       cause instanceof MediaError
     )
       throw cause;

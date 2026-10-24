@@ -16,6 +16,27 @@ export class UsageError extends Error {}
 
 type Options = Record<string, string | boolean | undefined>;
 
+/** Shared mutation flags; omitted revision means operate on the locked current revision. */
+export function editOptions(values: Options): {
+  dryRun?: boolean;
+  expectedRevision?: number;
+} {
+  const value = values['expected-revision'];
+  if (
+    value !== undefined &&
+    (typeof value !== 'string' ||
+      !/^\d+$/.test(value) ||
+      !Number.isSafeInteger(Number(value)))
+  )
+    throw new UsageError(
+      '--expected-revision requires a nonnegative safe integer.',
+    );
+  return {
+    ...(values['dry-run'] === true ? { dryRun: true } : {}),
+    ...(value !== undefined ? { expectedRevision: Number(value) } : {}),
+  };
+}
+
 const hasControlCharacters = (value: string) =>
   Array.from(value).some((character) => character.charCodeAt(0) < 32);
 
@@ -36,6 +57,7 @@ Same-track overlaps fail; touching ends and cross-track overlaps are allowed.
 Remove clips explicitly before removing a populated track. Split keeps the left ID and creates a right ID.
 Known source durations are enforced. Unknown durations/images require explicit ranges with no inferred bound.
 Offline editing needs no media tools; stored metadata is not refreshed or decoded.
+Mutations create undo/redo history; --dry-run previews; --expected-revision <n> guards stale edits.
 Mutations use guarded atomic updates; project-file symlinks/hard links are refused.
 Errors remain text on stderr with --json. Exit codes: 0 success, 1 invalid edit/data/file, 2 invalid arguments.
 `;
@@ -67,8 +89,13 @@ export async function runTimelineCommand(
     throw new UsageError(
       'Expected a timeline list, track add/remove or clip add/move/trim/split/remove command. Run opencut timeline --help for usage.',
     );
+  const allowedOptions = [
+    'json',
+    ...allowed,
+    ...(command === 'timeline list' ? [] : ['dry-run', 'expected-revision']),
+  ];
   for (const option of Object.keys(values)) {
-    if (option !== 'json' && !allowed.includes(option))
+    if (!allowedOptions.includes(option))
       throw new UsageError(`--${option} does not apply to ${command}.`);
   }
   if (positionals.some((value) => !value.trim() || hasControlCharacters(value)))
@@ -121,6 +148,7 @@ export async function runTimelineCommand(
       );
     frames[key] = number;
   }
+  const options = editOptions(values);
   const path = resolve(projectFile!);
   if (command === 'timeline list') {
     const result = { path, ...listTimeline(await readProjectFile(path)) };
@@ -195,10 +223,11 @@ export async function runTimelineCommand(
       const { project: updated, ...fields } = changed;
       return { project: updated, result: { path: canonicalPath, ...fields } };
     },
+    { ...options, label: command },
   );
   process.stdout.write(
     values.json
       ? JSON.stringify(result, null, 2) + '\n'
-      : `Saved ${command}: ${JSON.stringify(result)}\n`,
+      : `${options.dryRun ? 'Validated' : 'Saved'} ${command}: ${JSON.stringify(result)}\n`,
   );
 }

@@ -95,3 +95,7 @@ T08 follow-up: [ADR 0005](0005-explicit-timeline-editing.md) adds shared editing
 operations without changing stored fields. It tightens prerelease version 1
 validation to reject same-track overlap and unsafe derived times. The CLI uses
 project-frame indices; the core retains exact rational inputs and offline editing.
+
+T09 follow-up: [ADR 0006](0006-snapshot-transactions-and-history.md) extends
+prerelease version 1 with optional editing revision and snapshot-history stacks.
+Legacy files remain readable; older strict binaries cannot read the new field.

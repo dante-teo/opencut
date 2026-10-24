@@ -1,4 +1,4 @@
-# OpenCut CLI at T08
+# OpenCut CLI at T09
 
 Run commands at the root of an installed checkout. Build with `pnpm build` if
 `apps/cli/dist/index.js` does not exist.
@@ -137,14 +137,15 @@ no writer is running. Power-loss durability and arbitrary outside writers are
 not covered by the atomicity guarantee.
 
 Only import needs ffprobe; list/info/remove need no media tools. All support
-scoped `--help`, readable output and `--json`, with no other options. Errors use
+scoped `--help`, readable output and `--json`. Import/remove also accept
+`--dry-run` and `--expected-revision N`. Errors use
 the existing text stderr contract even with JSON: exit 2 for invalid arguments,
 exit 1 for runtime/data failures, and no JSON success result on failed commands.
 Check the exit status, then read back list/info after a successful update.
 
 ## Timeline editing
 
-Read [the full T08 editing contract](../../../docs/CLI.md#timeline-editing) before
+Read [the full timeline editing contract](../../../docs/CLI.md#timeline-editing) before
 editing: it specifies every command, exact time semantics, JSON fields and errors.
 Use `timeline list PROJECT --json` to discover track and clip IDs. Add tracks with
 `track add PROJECT --type video|audio --name NAME --json`; remove empty ones with
@@ -170,7 +171,7 @@ and total duration, keeps the left ID and creates a right UUID.
 Same-track video/audio overlaps fail; touching boundaries and cross-track overlaps
 are allowed. Known asset durations are enforced; unknown-duration/image ranges
 must be explicit and have no inferred finite source bound. No ripple edits,
-source refresh/decoding, undo/redo or multi-command transactions occur.
+source refresh/decoding occurs. T09 transactions and undo/redo are described below.
 Populated track removal fails until all its clips are moved or removed.
 Offline edits require no media tools. Mutations use the existing guarded atomic
 save path, while no-op moves/trims and inspection preserve bytes/timestamps.
@@ -182,6 +183,72 @@ List JSON is `{ path, frameRate, duration, tracks }`; each track has model field
 and time-ordered `clips` with derived rational `duration` and `timelineEnd`.
 Other mutation JSON is `{ path, track }`, `{ path, clip }`,
 `{ path, removedTrackId }`, or `{ path, removedClipId }`, as appropriate.
+
+## Transactions, undo and redo
+
+Read [the complete transaction contract](../../../docs/CLI.md#transactions-undo-and-redo)
+for the strict batch fields, operation table, result fields and filesystem limits.
+
+- `edit history PROJECT --json` returns `{ path, revision, undo, redo }`.
+  Legacy projects start at revision 0. Each summary entry is
+  `{ id, label, committedAt }`; the next undo/redo is the last stack entry.
+- `edit apply PROJECT BATCH.json [--dry-run] [--expected-revision N] --json`
+  applies one transaction. Both paths are explicit and cwd-relative or absolute.
+- `edit undo PROJECT [--dry-run] [--expected-revision N] --json` and
+  `edit redo PROJECT [--dry-run] [--expected-revision N] --json` restore snapshots.
+
+A batch is `{ "expectedRevision": N, "label": "Optional description",
+"operations": [...] }`. Use the revision read from history. A supplied CLI
+revision must equal the batch revision. Operations are strict `track.add/remove`
+and `clip.add/move/trim/split/remove` objects; unknown fields fail. Times are safe
+nonnegative integer project-frame indices. For example, on revision 0:
+
+```json
+{
+  "expectedRevision": 0,
+  "operations": [
+    { "type": "track.add", "id": "v1", "name": "Video", "mediaType": "video" },
+    {
+      "type": "clip.add",
+      "id": "c1",
+      "assetId": "EXISTING_ASSET_ID",
+      "trackId": "v1",
+      "at": 0,
+      "in": 0,
+      "out": 30
+    }
+  ]
+}
+```
+
+Explicit IDs let later operations refer to new tracks/clips; split uses optional
+`rightId`. Each operation validates against the preceding result, including
+intermediate overlap/reference/source-bound checks. Failure leaves project bytes,
+revision and both stacks unchanged. Empty batches fail. Media imports/removals
+remain individual commands, each entering this same history; duplicates and no-op
+edits add nothing. Undo/redo restore exact content/IDs/timestamps without probing
+or changing media. Revisions increase on every changed apply/undo/redo. Changed
+edits clear redo; no-ops, including batches whose edits cancel out, and failed edits
+retain it. Cancelling batches also preserve revision and timestamps. Empty undo/redo fails.
+
+Use `--expected-revision N` on individual track/clip/media mutations or undo/redo
+when acting on prior inspection. Stale revisions fail; reload and reassess before
+retrying. Without the flag, these commands use the locked current state. Apply
+always requires the batch revision. All these mutations accept `--dry-run`.
+Dry-run previews without modifying project bytes/mtime or history; its temporary
+writer lock is cleaned. Import dry-run still needs ffprobe. Generated preview IDs
+and timestamps are provisional. Individual commands retain their original JSON
+shapes and show proposed results during dry-run.
+
+Apply/undo/redo returns `{ path, dryRun, baseRevision, changed, revision, undo,
+redo }`, with `results` on apply (operation `type` plus existing result fields).
+For dry-run, revision/history describe the projected state, not the saved state.
+History lives inside the atomic project JSON and survives reloads. It retains two
+full content snapshots per changed edit without automatic pruning. Do not hand-edit
+content behind history; mismatches are refused instead of restoring over it.
+Check exit status before parsing stdout: 0 success, 1 data/runtime/file/conflict,
+2 invalid CLI arguments. Errors remain text on stderr and produce no success JSON.
+After real apply/undo/redo, read back history and timeline/media state.
 
 ## Media inspection and frame extraction
 

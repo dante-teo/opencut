@@ -1,6 +1,6 @@
 ---
 name: video-editor
-description: Use the OpenCut CLI to create, inspect and validate video projects, manage media assets and timeline tracks/clips, inspect media, extract PNG frames, or compose video clips with background music. Project rendering is not available.
+description: Use the OpenCut CLI to create, inspect and validate video projects, manage media assets and timeline tracks/clips, apply atomic batches, undo/redo edits, inspect media, extract PNG frames, or compose video clips with background music. Project rendering is not available.
 ---
 
 # OpenCut CLI
@@ -28,7 +28,8 @@ T06 exposes `project create`, `project info` and `project validate` in the CLI.
 T07 adds `media import`, `media list`, `media info` and `media remove` with stable
 asset IDs, persisted metadata, source availability and atomic project updates.
 T08 adds timeline inspection, video/audio track management and clip add/move/trim/split/remove
-through shared headless operations. Undo/redo and project rendering remain deferred.
+through shared headless operations. T09 adds atomic batches, persistent undo/redo,
+dry-run and revision checks. Project rendering remains deferred.
 The desktop preview and path-based media commands remain separate
 from project data.
 
@@ -100,6 +101,22 @@ Read back `timeline list` after each successful mutation. Inspect exit status
 before parsing JSON; errors remain text on stderr. Timeline updates reuse the
 atomic-save and lock rules above. Pre-T08 overlapping documents fail validation;
 correct them explicitly before editing.
+
+For transactions, read [the batch/history reference](references/cli.md#transactions-undo-and-redo).
+Run `edit history PROJECT --json` to obtain the current revision. Use
+`edit apply PROJECT BATCH.json --dry-run --json`, then apply with the same required
+batch `expectedRevision` after reviewing the preview. Use explicit new IDs when
+later operations refer to them in the same batch. All intermediate states must be
+valid; any failure discards the whole batch. Batch times are project-frame indices.
+`edit undo PROJECT [--expected-revision N] --json` and `edit redo PROJECT
+[--expected-revision N] --json` restore exact content with increasing revisions.
+Individual track, clip and media mutations share persistent history and accept
+`--dry-run` / `--expected-revision`. Changed edits after undo clear redo. No-ops,
+including batches whose edits cancel out, preserve revision, timestamps and both
+history stacks. A batch can return operation results with `changed: false`; those
+results do not imply a saved change. On conflict, reload history/content and
+reconsider the edit before retrying. A dry-run is a preview, not a saved edit; IDs/timestamps can differ on
+real apply. Read back history and timeline/media state after successful mutations.
 
 Probing needs `ffprobe` on PATH; extraction/composition also need `ffmpeg`. Never silently
 install these tools. Inspect metadata before selecting a timestamp. Use finite,

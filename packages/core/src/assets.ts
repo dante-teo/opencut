@@ -11,7 +11,10 @@ import {
   resolveMediaReference,
   updateProjectFile,
 } from './project-files.js';
-import type { MediaAvailability } from './project-files.js';
+import type {
+  MediaAvailability,
+  ProjectUpdateOptions,
+} from './project-files.js';
 
 export class AssetError extends Error {
   override name = 'AssetError';
@@ -95,6 +98,7 @@ export async function getMediaAsset(
 export async function importMediaAsset(
   projectFilePath: string,
   mediaFilePath: string,
+  options: Pick<ProjectUpdateOptions, 'dryRun' | 'expectedRevision'> = {},
 ): Promise<AssetImportResult> {
   const requested = resolve(mediaFilePath);
   return updateProjectFile<AssetImportResult>(
@@ -216,6 +220,7 @@ export async function importMediaAsset(
         },
       };
     },
+    { ...options, label: 'media import' },
   );
 }
 
@@ -223,22 +228,27 @@ export async function importMediaAsset(
 export async function removeMediaAsset(
   projectFilePath: string,
   id: string,
+  options: Pick<ProjectUpdateOptions, 'dryRun' | 'expectedRevision'> = {},
 ): Promise<{ path: string; removedAssetId: string }> {
-  return updateProjectFile(projectFilePath, async (project, path) => {
-    requireAsset(project, id);
-    const clips = project.clips.filter((clip) => clip.assetId === id);
-    if (clips.length)
-      throw new AssetError(
-        'ASSET_REFERENCED',
-        `Cannot remove asset '${id}'; referenced by timeline clips: ${clips.map((clip) => clip.id).join(', ')}. Remove those references before removing the asset.`,
-      );
-    project.assets = project.assets.filter((asset) => asset.id !== id);
-    project.metadata.updatedAt = new Date(
-      Math.max(Date.now(), Date.parse(project.metadata.updatedAt)),
-    ).toISOString();
-    return {
-      project,
-      result: { path, removedAssetId: id },
-    };
-  });
+  return updateProjectFile(
+    projectFilePath,
+    async (project, path) => {
+      requireAsset(project, id);
+      const clips = project.clips.filter((clip) => clip.assetId === id);
+      if (clips.length)
+        throw new AssetError(
+          'ASSET_REFERENCED',
+          `Cannot remove asset '${id}'; referenced by timeline clips: ${clips.map((clip) => clip.id).join(', ')}. Remove those references before removing the asset.`,
+        );
+      project.assets = project.assets.filter((asset) => asset.id !== id);
+      project.metadata.updatedAt = new Date(
+        Math.max(Date.now(), Date.parse(project.metadata.updatedAt)),
+      ).toISOString();
+      return {
+        project,
+        result: { path, removedAssetId: id },
+      };
+    },
+    { ...options, label: 'media remove' },
+  );
 }
