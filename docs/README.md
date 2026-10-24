@@ -1,8 +1,8 @@
 # OpenCut
 
 A lightweight desktop video editor for creators, with a GUI and a scriptable
-headless core. **T01 implements development infrastructure only.** The desktop
-shows a React placeholder; the independent CLI supports help and version.
+headless core. **T02 adds media probing and PNG frame extraction.** The desktop
+shows a React placeholder; the independent CLI supports help, version and media commands.
 Editing, project files, playback, and rendering are not implemented yet.
 
 ## Quick start (macOS)
@@ -35,7 +35,16 @@ pnpm cli --help
 pnpm cli --version
 # Direct executable entry point, without pnpm log output:
 node apps/cli/dist/index.js --help
+node apps/cli/dist/index.js probe /path/to/video.mp4 --json
+node apps/cli/dist/index.js extract-frame /path/to/video.mp4 --timestamp 0.5 --output /path/to/new-frame.png --json
 ```
+
+To build only the headless packages and CLI, use `pnpm build:packages` followed
+by `pnpm --filter @opencut/cli build` instead of the full workspace build.
+
+Media commands require manually installed `ffprobe` on PATH; extraction also
+requires `ffmpeg` with PNG support. Existing output files are refused. See
+[CLI.md](CLI.md) for fields, timestamp behavior, limits and exit codes.
 
 ## Commands
 
@@ -52,6 +61,7 @@ node apps/cli/dist/index.js --help
 | `pnpm test`                              | Build prerequisites and run headless unit + CLI/fixture-contract tests               |
 | `pnpm test:desktop`                      | Build and check the desktop shell, sandbox, appearance switching and macOS reopening |
 | `pnpm test:fixtures`                     | Run the optional native intact/truncated-media regression (FFmpeg + ffprobe)         |
+| `pnpm test:media`                        | Build and test real media CLI against existing generated fixtures (FFmpeg + ffprobe) |
 | `pnpm fixtures:generate`                 | Generate and validate five small synthetic media files (optional FFmpeg + ffprobe)   |
 | `pnpm fixtures:validate`                 | Decode generated media and check metadata/readable video frame counts (ffprobe)      |
 
@@ -63,6 +73,9 @@ under the ignored `test-results/` directory.
 `pnpm test` runs the headless suite with Vitest and needs no native media tools.
 `pnpm test:fixtures` runs the separate Node native regression with FFmpeg and
 ffprobe, generating temporary media rather than depending on existing fixtures.
+`pnpm test:media` requires all five existing generated fixtures and exercises the
+built CLI, including delayed video with zero and nonzero input starts. It creates
+and cleans only its own derived inputs and outputs under the generated directory.
 `pnpm fixtures:validate` only needs ffprobe: it counts decoded video frames and
 rejects decoder errors, even when a damaged file retains valid header metadata.
 See the [fixture contract](../tests/fixtures/README.md) for prerequisites and safe
@@ -76,12 +89,12 @@ apps/
   cli/                 Standalone Node CLI
 packages/
   core/                Headless application identity; future editing operations
-  media/               Reserved backend boundary, no implementation
+  media/               Headless ffprobe inspection and FFmpeg PNG extraction
   shared/              Reserved home for genuinely shared utilities/types
 skills/video-editor/   Product Agent Skill and its current CLI reference
 tests/
   fixtures/            Expected metadata and fixture documentation
-  integration/         Headless CLI and fixture-contract tests
+  integration/         Headless CLI/fixture-contract tests and opt-in native media tests
   desktop/             Optional real Electron smoke test
 scripts/               Optional fixture tooling (TypeScript)
 docs/                  Product, architecture and architectural decisions (adr/)

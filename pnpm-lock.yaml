@@ -47,6 +47,9 @@ importers:
       '@opencut/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@opencut/media':
+        specifier: workspace:*
+        version: link:../../packages/media
 
   apps/desktop:
     dependencies:

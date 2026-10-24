@@ -34,3 +34,8 @@ Using FFmpeg for development fixtures does not select an application backend.
 At T01, the shared integration is application identity only. No editing model,
 commands or media engine are implemented. See [the architecture overview](../ARCHITECTURE.md)
 for current package boundaries.
+
+T02 follow-up: [ADR 0002](0002-external-ffmpeg-media-tools.md) replaces the empty
+media placeholder with external ffprobe inspection and FFmpeg frame extraction.
+Shared core ownership of editing behavior and the desktop trust boundary remain
+in effect.

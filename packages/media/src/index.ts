@@ -1,2 +1,5 @@
-// Reserved package boundary. Backend selection awaits FFmpeg/MLT validation.
-export {};
+export { probeMedia } from './probe.js';
+export { extractFrame } from './frame.js';
+export { MediaError } from './process.js';
+export type { MediaMetadata, MediaStream } from './probe.js';
+export type { FrameResult } from './frame.js';

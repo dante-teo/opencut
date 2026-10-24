@@ -16,7 +16,8 @@ flashes white for approximately the first 0.1 seconds of each second. Video
 audio pulses use the same time rule, supporting later frame and A/V sync tests.
 Audio volume changes occur at audio-frame boundaries; the marker is approximate,
 not a sample-accurate synchronization reference. Inputs begin at timestamp zero.
-These fixtures supply content for future editing/render tests, not those features.
+These fixtures cover current media inspection/extraction and provide inputs for
+future editing/render tests. They do not implement editing or rendering features.
 
 ## Generate and validate
 
@@ -45,6 +46,14 @@ It creates synthetic media in an OS temporary directory, verifies an intact vide
 and rejects a truncated copy whose header still claims all frames exist. It cleans
 up its temporary files without touching generated fixtures. Ordinary `pnpm test`
 does not run this test or require native media tools.
+
+Run `pnpm test:media` for optional T02 CLI probing and PNG extraction tests using
+these existing fixtures. It requires all five generated files and FFmpeg/ffprobe,
+checks metadata and timestamp-selected pixels, and removes only its own output
+subdirectory under `generated/`. That subdirectory also holds derived MP4 inputs
+whose video starts 5 seconds after audio, with zero and nonzero container starts,
+to check input-relative timestamp handling. It is cleaned on success or failure.
+The suite never regenerates or changes the five base fixtures.
 
 The generator exclusively creates `generated/` and uses FFmpeg's no-overwrite
 mode. It refuses an existing directory or symlink. On failure, it removes only

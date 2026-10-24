@@ -17,21 +17,24 @@ core without launching Electron. Neither interface gets a separate editing model
 A maintained official Agent Skill will teach agents the actual CLI as it grows.
 
 The editing model (projects, intent, commands, validation) and the media engine
-(probing, decoding, playback and encoding) are separate concerns. Their detailed
-contracts and the media backend require later technical validation.
+(probing, decoding, playback and encoding) are separate concerns. Detailed editing
+contracts and the playback/render backend require later technical validation.
 
-## Current scope: T01
+## Current scope: T02
 
 Implemented: pnpm workspace, Electron/React placeholder, standalone help/version
-CLI, importable core identity, reserved media/shared packages, strict TypeScript,
-linting, formatting, tests, synthetic fixture tooling, and initial documentation.
+CLI, importable core identity, headless media package, reserved shared package,
+strict TypeScript, linting, formatting, tests, synthetic fixture tooling, and
+documentation. T02 adds structured media inspection with ffprobe and single-frame
+PNG extraction with FFmpeg, through standalone CLI commands supporting JSON.
 No editing operation exists yet. The desktop placeholder is not an editing UI.
 
 ## Excluded
 
-T01 does not implement a timeline, renderer, media decoder, preview player,
-editing commands, project serialization or a media backend. No FFmpeg or MLT
-runtime is bundled; fixture generation is an optional development utility.
+T02 does not implement a timeline, rendering pipeline, preview player,
+editing commands, project serialization or GUI media integration. No FFmpeg or
+MLT runtime is bundled; media commands require manually installed external tools.
+Fixture generation remains an optional development utility.
 
 The product is not an AI-native editor. An embedded assistant, LLM APIs and an
 MCP server are outside the product direction. Cloud infrastructure, databases,
@@ -40,4 +43,4 @@ User media must never be silently changed or overwritten.
 
 macOS is the initial required platform. Package boundaries should stay portable;
 Windows/Linux support requires explicit validation later. No distribution,
-installer, updater, signing or notarization work is included in T01.
+installer, updater, signing or notarization work is included in T02.
