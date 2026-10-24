@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/project-files.d.ts",
+      "import": "./dist/project-files.js"
     }
   },
   "files": [
@@ -15,5 +19,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "zod": "4.6.7"
   }
 }

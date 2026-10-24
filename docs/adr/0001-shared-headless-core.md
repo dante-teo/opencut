@@ -39,3 +39,8 @@ T02 follow-up: [ADR 0002](0002-external-ffmpeg-media-tools.md) replaces the empt
 media placeholder with external ffprobe inspection and FFmpeg frame extraction.
 Shared core ownership of editing behavior and the desktop trust boundary remain
 in effect.
+
+T05 follow-up: [ADR 0004](0004-versioned-project-model.md) establishes the project
+format, rational time model and persistence boundary in core. Editing commands,
+undo/redo and desktop/CLI project integration remain deferred. The original
+shared-core ownership and renderer trust boundary continue to apply.

@@ -4,7 +4,9 @@ A lightweight desktop video editor for creators, with a GUI and a scriptable
 headless core. **T04 adds an isolated Electron video preview with play/pause, seeking,
 nominal frame stepping and reproducible performance measurements.** The independent
 CLI supports inspection, frame extraction and the T03 composition spike.
-Project files and timeline editing remain unimplemented.
+T05 adds a headless [project model and JSON file format](PROJECT_FORMAT.md) with
+core APIs for validation, save/load and media availability checks. Timeline editing
+and project integration in the desktop/CLI remain deferred.
 
 ## Quick start (macOS)
 
@@ -36,7 +38,7 @@ on PATH to obtain average FPS. Playback and timestamp seeking work without it.
 Dragging the seek slider stages a target and seeks when released; keyboard changes
 seek immediately. Importing a replacement disables the current player's controls,
 and importing and performance validation run exclusively. Unsupported codecs show
-a decode error. There is no timeline or editing model.
+a decode error. The desktop has no timeline or project integration.
 
 **Run performance validation** runs a positioning seek, three warm-up seeks,
 30 fixed target seeks, then up to eight seconds of playback. Keep the window visible.
@@ -122,7 +124,7 @@ apps/
   desktop/             Electron main + sandboxed preload + React renderer
   cli/                 Standalone Node CLI
 packages/
-  core/                Headless application identity; future editing operations
+  core/                Headless identity, project model, validation and persistence
   media/               Headless probing, frame extraction and composition spike
   shared/              Reserved home for genuinely shared utilities/types
 skills/video-editor/   Product Agent Skill and its current CLI reference
@@ -135,6 +137,8 @@ docs/                  Product, architecture and architectural decisions (adr/)
 ```
 
 Read [PRODUCT.md](PRODUCT.md), [ARCHITECTURE.md](ARCHITECTURE.md),
+[PROJECT_FORMAT.md](PROJECT_FORMAT.md),
 [AGENTS.md](../AGENTS.md), and the [fixture contract](../tests/fixtures/README.md).
-The official [Agent Skill](../skills/video-editor/SKILL.md) describes only working
-CLI capabilities. It is distinct from repository coding instructions.
+The official [Agent Skill](../skills/video-editor/SKILL.md) documents working CLI
+capabilities and links to the core API contract. It is distinct from repository
+coding instructions.

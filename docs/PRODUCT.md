@@ -20,7 +20,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 (probing, decoding, playback and encoding) are separate concerns. Detailed editing
 contracts and the playback/render backend require later technical validation.
 
-## Current scope: T04
+## Current scope: T05
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -35,10 +35,17 @@ frame PTS and reproducible seek/playback/resource measurements. HTML video is th
 recommended initial source-preview architecture; frame stepping is best effort,
 not a frame-accurate editing contract. See [ADR 0003](adr/0003-html-video-preview.md).
 
+T05 adds a headless versioned project data model with metadata/settings, media
+assets, video/audio tracks, source ranges and timeline positions linked by stable
+IDs. Rational time supports exact frame boundaries. Creation, strict validation,
+deterministic JSON serialization, file save/load and separate missing-media
+checks are available as core APIs. Relative paths keep project bundles portable.
+See [PROJECT_FORMAT.md](PROJECT_FORMAT.md) for the version 1 contract.
+
 ## Excluded
 
-T04 does not implement a timeline, final rendering architecture,
-project editing commands, project serialization or project media integration. No FFmpeg or
+T05 does not implement timeline editing, undo/redo, final rendering architecture,
+project editing commands, CLI project commands or desktop project media integration. No FFmpeg or
 MLT runtime is bundled; media commands require manually installed external tools.
 Fixture generation remains an optional development utility.
 
@@ -49,4 +56,4 @@ User media must never be silently changed or overwritten.
 
 macOS is the initial required platform. Package boundaries should stay portable;
 Windows/Linux support requires explicit validation later. No distribution,
-installer, updater, signing or notarization work is included in T04. T05 is not implemented.
+installer, updater, signing or notarization work is included in T05. T06 is not implemented.

@@ -2,13 +2,13 @@
 
 ## Workspace boundaries
 
-| Package            | Owns                                                             | Actual dependencies                        |
-| ------------------ | ---------------------------------------------------------------- | ------------------------------------------ |
-| `@opencut/desktop` | Electron lifecycle, restricted IPC, React source preview         | core, media, Electron, React, range-parser |
-| `@opencut/cli`     | Argument parsing, stdout/stderr and exit codes                   | core, media, Node built-ins                |
-| `@opencut/core`    | Headless application identity; future editing behavior           | none                                       |
-| `@opencut/media`   | Probing, frame extraction and composition through external tools | Node built-ins                             |
-| `@opencut/shared`  | Reserved location for utilities/types used by multiple packages  | none                                       |
+| Package            | Owns                                                             | Actual dependencies                             |
+| ------------------ | ---------------------------------------------------------------- | ----------------------------------------------- |
+| `@opencut/desktop` | Electron lifecycle, restricted IPC, React source preview         | core, media, Electron, React, range-parser      |
+| `@opencut/cli`     | Argument parsing, stdout/stderr and exit codes                   | core, media, Node built-ins                     |
+| `@opencut/core`    | Headless identity, versioned project model and persistence       | Zod; Node built-ins in optional `/node` adapter |
+| `@opencut/media`   | Probing, frame extraction and composition through external tools | Node built-ins                                  |
+| `@opencut/shared`  | Reserved location for utilities/types used by multiple packages  | none                                            |
 
 Actual runtime dependency direction is `desktop → core ← cli`, with both desktop main and CLI depending on media. The rationale is
 recorded in [ADR 0001](adr/0001-shared-headless-core.md). Core never
@@ -24,18 +24,19 @@ JavaScript and declarations rather than TypeScript path aliases.
 directly. Desktop main imports it and answers the renderer's narrow read-only IPC
 request. React holds only view state for that response; it owns no editing state.
 Future GUI actions, CLI commands and scripts must execute the same core editing
-operations. T02 defines no project model, command bus or serialization format.
+operations. T05 adds a versioned project model and persistence; editing commands
+and a command bus remain deferred.
 The application version is currently returned by core and kept aligned with the
 workspace manifests; release/version automation is deferred.
 
-The future editing model describes intent and validates operations. A media
-engine performs probing, decoding, playback and encoding. T02 uses external
-ffprobe for metadata and FFmpeg for single-frame PNG extraction in media; the
-editing model remains unimplemented; T04 adds isolated HTML video playback in desktop. T03 adds `composeMedia(options)`
-in media as a technical spike, called directly by the CLI alongside inspection
-and extraction. Future engine hosting and core
-coordination remain open decisions. This scoped FFmpeg use does not select the
-eventual playback/render backend.
+Core owns project intent and data validation. A media engine performs probing,
+decoding, playback and encoding. T02 uses external ffprobe for metadata and FFmpeg
+for single-frame PNG extraction in media. T03 adds `composeMedia(options)` in
+media as a technical spike, called directly by the CLI alongside inspection and
+extraction. T04 adds isolated HTML video playback in desktop. The T05 model stores
+intent without executing edits or connecting to these media/preview prototypes.
+Future engine hosting and core coordination remain open decisions. This scoped
+FFmpeg use does not select the eventual playback/render backend.
 The scoped tool choice and subprocess boundary are recorded in
 [ADR 0002](adr/0002-external-ffmpeg-media-tools.md).
 
@@ -70,6 +71,29 @@ gaps with silence, including gaps below FFmpeg's default 100ms compensation
 threshold. These rules keep short clips visible and later music in position;
 the [CLI contract](CLI.md#composition-prototype) describes their observable behavior.
 
+## Project model and persistence (T05)
+
+Core's main entry point exports the version 1 project types, creation, validation,
+deterministic JSON serialization and exact rational time helpers. The maintained
+Zod schema supplies both structural validation and inferred TypeScript types.
+Semantic validation checks globally unique stable IDs, asset/track references,
+media compatibility, timestamps and source bounds without inspecting media.
+Rational seconds preserve frame and sample boundaries at mixed rates; bigint
+intermediate arithmetic avoids rounding during frame conversion and comparison.
+Clips store source in/out points and timeline starts; duration is derived at 1×.
+
+The optional `@opencut/core/node` entry point owns project file reads/exclusive
+creation, portable path helpers and separate read-only media availability checks.
+The main core entry point imports no filesystem modules. Relative references are
+anchored to the project file directory; missing files do not prevent loading.
+Unsupported schema versions are rejected before structural parsing; future
+migrations can be added there without introducing a framework now. Neither the
+CLI nor desktop consumes this model yet. No editing operations, undo/redo or
+project rendering are implemented. See [the project format contract](PROJECT_FORMAT.md)
+for schema fields, invariants, portability, APIs and errors.
+The rationale for rational time, strict versioning and separate file access is
+recorded in [ADR 0004](adr/0004-versioned-project-model.md).
+
 ## Desktop shell
 
 The desktop follows the system light/dark appearance, including live changes,
@@ -84,7 +108,8 @@ element owns A/V playback; `currentTime` is the playback clock and
 `requestVideoFrameCallback` supplies the last observed compositor frame PTS through
 its `metadata.mediaTime` argument.
 The UI displays both and derives a nominal zero-based frame index from average
-FPS. There is no editing domain state or Electron dependency in core, media or CLI.
+FPS. The preview does not use the T05 project model. Core has no Electron
+dependency; media and CLI remain headless.
 
 A pointer drag stages a target while leaving the range input enabled, then seeks
 to the committed target on release, including releases outside the input. Playback
@@ -180,11 +205,12 @@ Fixture validation is independent of the application media APIs.
 ## Open decisions for subsequent tasks
 
 - Validate FFmpeg/MLT capabilities, licensing, distribution and process isolation.
-- Define time representation, project/command model, persistence and undo semantics.
+- Define editing commands, safe project updates, undo semantics and project rendering
+  on top of the T05 data model.
 - Define a versioned scripting contract when editing behavior exists; current
   media JSON is documented in [CLI.md](CLI.md). Stdout is reserved for results,
   stderr for errors.
 - Extend the picker capability boundary for future project media access; define rendering/playback ownership beyond a single source.
 - Choose distribution tooling and signing, then validate other operating systems.
 
-These are decisions to investigate, not APIs promised or implemented by T04.
+These are decisions to investigate, not APIs promised or implemented by T05.

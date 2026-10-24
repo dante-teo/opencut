@@ -20,6 +20,13 @@ Import, seeking and performance validation are serialized; keep the window visib
 while measuring. See [desktop usage](../../docs/README.md) for optional-tool
 prerequisites and the separate correctness/performance test commands.
 
+T05 adds a versioned project data model, exact rational time, JSON save/load,
+validation and media availability checks as headless core APIs. See
+[the project format](../../docs/PROJECT_FORMAT.md) when using those APIs directly.
+The CLI and desktop do not yet expose projects; there are no project editing,
+undo/redo or project rendering operations. Existing media commands and preview
+remain separate from project data.
+
 From an installed and built OpenCut checkout, run `pnpm cli --help` to discover
 supported capabilities and `pnpm cli --version` to check the application version.
 If the CLI has not been built, run `pnpm build` from the checkout root first.

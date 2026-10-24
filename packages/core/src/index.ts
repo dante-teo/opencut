@@ -1,4 +1,27 @@
-/** Application identity only; no editing model exists in T01. */
+export {
+  PROJECT_SCHEMA_VERSION,
+  ProjectFormatError,
+  createProject,
+  deserializeProject,
+  serializeProject,
+  validateProject,
+} from './project.js';
+export type {
+  CreateProjectOptions,
+  MediaAsset,
+  MediaReference,
+  Project,
+  ProjectIssue,
+  ProjectMetadata,
+  ProjectSettings,
+  ProjectValidationResult,
+  TimelineClip,
+  Track,
+} from './project.js';
+export { compareTimes, frameTime } from './time.js';
+export type { FrameRate, RationalTime } from './time.js';
+
+/** Shared application identity, introduced in T01. */
 export interface ApplicationInfo {
   readonly name: string;
   readonly version: string;
