@@ -1,0 +1,27 @@
+# Repository instructions
+
+- Use pnpm (never npm/npx); keep `pnpm-lock.yaml` synchronized with manifests.
+- Use TypeScript, strict checking and ESM, except the sandbox-compatible CJS preload.
+- Follow existing conventions, work on one task at a time and avoid unrelated changes.
+- Check reliable maintained libraries before implementing a common capability;
+  prefer an appropriate library unless its cost outweighs its benefit.
+- Keep the core headless. GUI and CLI must share future editing operations.
+  Core must not depend on Electron, React or the CLI. CLI must not depend on Electron.
+- Keep renderer privileges behind narrow typed preload methods. Preserve sandbox,
+  isolation, CSP, sender checks and navigation restrictions.
+- Add meaningful tests for new behavior. Run `pnpm typecheck`, `pnpm lint`,
+  `pnpm format:check`, `pnpm test` and `pnpm build` as appropriate. Run
+  `pnpm test:desktop` for changes to Electron/preload/renderer integration.
+- Media tools are optional development prerequisites; never silently install them.
+- Never silently modify or overwrite user media. Generated fixtures belong only
+  in `tests/fixtures/generated/`, are ignored by Git and must never contain user files.
+- Keep project documentation in `docs/`; use `docs/adr/` for lasting architectural
+  decisions when needed. `AGENTS.md` stays at the root as coding-agent instructions.
+- Do not create development guides, validation reports or disposable task reports.
+  Report validation results in chat.
+- Keep documentation and the product Agent Skill synchronized with actual behavior.
+  Do not invent CLI commands or prematurely implement later tasks.
+- Summarize changes, validation results and anything not verified.
+
+`skills/video-editor/SKILL.md` is the user-facing product skill, not a replacement
+for these repository development instructions.

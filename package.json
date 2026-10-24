@@ -1,0 +1,41 @@
+{
+  "name": "opencut",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.20.0",
+  "engines": {
+    "node": ">=24.12.0 <25",
+    "pnpm": ">=11.20.0 <12"
+  },
+  "scripts": {
+    "dev": "pnpm build:packages && pnpm --filter @opencut/desktop dev",
+    "dev:desktop": "pnpm dev",
+    "dev:cli": "pnpm build:packages && pnpm --filter @opencut/cli dev",
+    "cli": "pnpm --filter @opencut/cli start",
+    "build:packages": "pnpm -r --filter './packages/*' build",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm build:packages && pnpm -r typecheck && tsc -p tsconfig.tools.json",
+    "lint": "eslint . --max-warnings 0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "pnpm build:packages && pnpm --filter @opencut/cli build && vitest run",
+    "test:desktop": "pnpm build && playwright test",
+    "fixtures:generate": "tsx scripts/fixtures.ts generate",
+    "fixtures:validate": "tsx scripts/fixtures.ts validate",
+    "test:fixtures": "node --import tsx --test tests/fixtures/validation.native.spec.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@opencut/core": "workspace:*",
+    "@playwright/test": "1.64.1",
+    "@types/node": "24.19.2",
+    "eslint": "9.39.5",
+    "eslint-config-prettier": "10.1.8",
+    "prettier": "3.9.10",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.0",
+    "vitest": "4.1.12"
+  }
+}
