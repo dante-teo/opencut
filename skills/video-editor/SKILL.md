@@ -1,6 +1,6 @@
 ---
 name: video-editor
-description: Use the OpenCut CLI to create, inspect and validate video projects, import and manage video/audio/image assets, inspect media, extract PNG frames, or compose video clips with background music. Timeline editing and project rendering are not available.
+description: Use the OpenCut CLI to create, inspect and validate video projects, manage media assets and timeline tracks/clips, inspect media, extract PNG frames, or compose video clips with background music. Project rendering is not available.
 ---
 
 # OpenCut CLI
@@ -10,9 +10,10 @@ It will grow with the CLI to cover project inspection, modification, validation
 and rendering. T03 includes a composition/export prototype. T04 adds an
 interactive Electron source preview (launch with `pnpm dev`) with playback,
 seeking, nominal frame stepping and a performance-validation button. This preview
-has no CLI command or project integration; desktop project integration and timeline editing remain
-unavailable. Frame numbers use average FPS from optional ffprobe and are not a
-frame-accurate editing guarantee. The optional `pnpm test:preview` command measures
+has no CLI command or project integration; desktop project integration remains
+unavailable. Preview frame numbers use average FPS from optional ffprobe and are
+not a frame-accurate editing guarantee. Headless timeline editing uses exact
+project-rate frame boundaries through the CLI. The optional `pnpm test:preview` command measures
 fixture/1080p playback in the built Electron app; see
 [the preview architecture decision](../../docs/adr/0003-html-video-preview.md).
 In the desktop, pointer drags seek on release and keyboard seeks are immediate.
@@ -26,7 +27,8 @@ validation and media availability checks as headless core APIs. See
 T06 exposes `project create`, `project info` and `project validate` in the CLI.
 T07 adds `media import`, `media list`, `media info` and `media remove` with stable
 asset IDs, persisted metadata, source availability and atomic project updates.
-There are no timeline-editing, undo/redo or project-rendering operations.
+T08 adds timeline inspection, video/audio track management and clip add/move/trim/split/remove
+through shared headless operations. Undo/redo and project rendering remain deferred.
 The desktop preview and path-based media commands remain separate
 from project data.
 
@@ -82,6 +84,22 @@ successful mutations. Project updates refuse project-file symlinks/hard links, u
 rename and serialize cooperating writers with a `.lock`; retry when busy.
 Remove a stale lock only after checking that no writer is active. See
 [the asset reference](references/cli.md#project-media-assets) for results and limits.
+
+For timeline edits, read [the editing reference](references/cli.md#timeline-editing)
+for syntax, JSON results and exact semantics. Use returned stable IDs and read
+`timeline list PROJECT --json` before choosing tracks or positions. CLI `--at`,
+`--in` and `--out` are nonnegative integer **project-frame indices**, including
+source points, not source-file frame numbers or seconds. Out is exclusive;
+splits use absolute timeline positions. Trim fixes timeline start; move fixes
+source points. Same-track overlaps fail; touching ends and cross-track overlap
+are allowed. No implicit ripple or repositioning occurs. Track removal requires
+an empty track. Unknown-duration assets/images require explicit ranges without
+an inferred finite bound; known durations are enforced. Offline editing needs
+no media tools and does not refresh metadata or verify decodability.
+Read back `timeline list` after each successful mutation. Inspect exit status
+before parsing JSON; errors remain text on stderr. Timeline updates reuse the
+atomic-save and lock rules above. Pre-T08 overlapping documents fail validation;
+correct them explicitly before editing.
 
 Probing needs `ffprobe` on PATH; extraction/composition also need `ffmpeg`. Never silently
 install these tools. Inspect metadata before selecting a timestamp. Use finite,

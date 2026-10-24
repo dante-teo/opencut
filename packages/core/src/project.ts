@@ -1,5 +1,12 @@
 import { z } from 'zod';
-import { compareTimes, frameRateSchema, timeSchema } from './time.js';
+import {
+  addTimes,
+  compareTimes,
+  frameRateSchema,
+  subtractTimes,
+  timeSchema,
+} from './time.js';
+import type { RationalTime } from './time.js';
 
 export const PROJECT_SCHEMA_VERSION = 1;
 
@@ -174,6 +181,10 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
   }
   const assets = new Map(project.assets.map((asset) => [asset.id, asset]));
   const tracks = new Map(project.tracks.map((track) => [track.id, track]));
+  const intervals = new Map<
+    string,
+    { index: number; clip: TimelineClip; end: RationalTime }[]
+  >();
   project.clips.forEach((clip, index) => {
     const location = `/clips/${index}`;
     const asset = assets.get(clip.assetId);
@@ -208,7 +219,41 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
         'source_bounds',
         `sourceOut exceeds the known duration of asset '${asset.id}'.`,
       );
+    if (compareTimes(clip.sourceOut, clip.sourceIn) > 0) {
+      try {
+        const end = addTimes(
+          clip.timelineStart,
+          subtractTimes(clip.sourceOut, clip.sourceIn),
+        );
+        const entries = intervals.get(clip.trackId) ?? [];
+        entries.push({ index, clip, end });
+        intervals.set(clip.trackId, entries);
+      } catch (error) {
+        if (!(error instanceof RangeError)) throw error;
+        add(
+          `${location}/timelineStart`,
+          'time_overflow',
+          'Clip duration and timeline end must be representable as safe rational time components. Reduce the range or position.',
+        );
+      }
+    }
   });
+  for (const entries of intervals.values()) {
+    entries.sort((a, b) =>
+      compareTimes(a.clip.timelineStart, b.clip.timelineStart),
+    );
+    let previous: (typeof entries)[number] | undefined;
+    for (const entry of entries) {
+      if (previous && compareTimes(entry.clip.timelineStart, previous.end) < 0)
+        add(
+          `/clips/${entry.index}/timelineStart`,
+          'clip_overlap',
+          `Clip '${entry.clip.id}' overlaps clip '${previous.clip.id}' on track '${entry.clip.trackId}'. Move or trim it, or choose another compatible track; touching exclusive boundaries are allowed.`,
+        );
+      if (!previous || compareTimes(entry.end, previous.end) > 0)
+        previous = entry;
+    }
+  }
   return issues;
 }
 

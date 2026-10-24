@@ -2,13 +2,13 @@
 
 ## Workspace boundaries
 
-| Package            | Owns                                                               | Actual dependencies                                       |
-| ------------------ | ------------------------------------------------------------------ | --------------------------------------------------------- |
-| `@opencut/desktop` | Electron lifecycle, restricted IPC, React source preview           | core, media, Electron, React, range-parser                |
-| `@opencut/cli`     | Argument parsing, stdout/stderr and exit codes                     | core, media, Node built-ins                               |
-| `@opencut/core`    | Headless identity, project model, persistence and asset management | Zod; media and Node built-ins in optional `/node` adapter |
-| `@opencut/media`   | Probing, frame extraction and composition through external tools   | Node built-ins                                            |
-| `@opencut/shared`  | Reserved location for utilities/types used by multiple packages    | none                                                      |
+| Package            | Owns                                                                     | Actual dependencies                                       |
+| ------------------ | ------------------------------------------------------------------------ | --------------------------------------------------------- |
+| `@opencut/desktop` | Electron lifecycle, restricted IPC, React source preview                 | core, media, Electron, React, range-parser                |
+| `@opencut/cli`     | Argument parsing, stdout/stderr and exit codes                           | core, media, Node built-ins                               |
+| `@opencut/core`    | Headless identity, project model, persistence, assets and timeline edits | Zod; media and Node built-ins in optional `/node` adapter |
+| `@opencut/media`   | Probing, frame extraction and composition through external tools         | Node built-ins                                            |
+| `@opencut/shared`  | Reserved location for utilities/types used by multiple packages          | none                                                      |
 
 Actual runtime dependency direction is `desktop → core ← cli`, with desktop main,
 CLI and the core Node adapter depending on media. The rationale is
@@ -25,8 +25,8 @@ JavaScript and declarations rather than TypeScript path aliases.
 directly. Desktop main imports it and answers the renderer's narrow read-only IPC
 request. React holds only view state for that response; it owns no editing state.
 Future GUI actions, CLI commands and scripts must execute the same core editing
-operations. T05 adds a versioned project model and persistence; timeline editing commands
-and a command bus remain deferred.
+operations. T05 adds a versioned project model and persistence; T08 implements
+pure timeline operations shared by CLI and future GUI callers. A command bus remains deferred.
 The application version is currently returned by core and kept aligned with the
 workspace manifests; release/version automation is deferred.
 
@@ -72,7 +72,7 @@ gaps with silence, including gaps below FFmpeg's default 100ms compensation
 threshold. These rules keep short clips visible and later music in position;
 the [CLI contract](CLI.md#composition-prototype) describes their observable behavior.
 
-## Project model, persistence and CLI management (T05–T07)
+## Project model, persistence and CLI management (T05–T08)
 
 Core's main entry point exports the version 1 project types, creation, validation,
 deterministic JSON serialization and exact rational time helpers. The maintained
@@ -113,11 +113,25 @@ leave stale locks/temporary directories. Atomicity does not promise power-loss
 durability or locking of arbitrary external tools. Existing Zod, Node file APIs
 and the media package cover validation, guarded replacement and probing;
 an atomic-write wrapper would still require these identity and writer checks,
-so no additional runtime library is added. No timeline editing, undo/redo or
-project rendering are implemented. See [the project format contract](PROJECT_FORMAT.md)
+so no additional runtime library is added. T08 also uses existing Zod and bigint
+arithmetic rather than a general timeline engine: the operations are small,
+pure model transformations with explicit 1x timing and no renderer dependencies.
+`addTrack`, `removeTrack`, `addClip`, `moveClip`, `trimClip`, `splitClip` and
+`removeClip` validate/copy input and return new projects and stable entity IDs.
+`listTimeline` derives duration/end and groups time-sorted clips by track.
+The CLI converts project-frame indices to exact rational seconds and invokes the
+same operations inside the guarded Node update adapter. Known source durations,
+track compatibility, globally unique IDs, safe derived times and no same-track
+overlap are enforced by project validation on edits, load and save. Half-open
+intervals may touch, and separate tracks may overlap. Trims fix timeline start;
+splits preserve source mapping and total duration while retaining the left ID.
+There are no implicit ripple edits or populated-track cascades. Undo/redo and
+project rendering remain deferred. See [the project format contract](PROJECT_FORMAT.md)
 for schema fields, invariants, portability, APIs and errors.
 The rationale for rational time, strict versioning and separate file access is
 recorded in [ADR 0004](adr/0004-versioned-project-model.md).
+[ADR 0005](adr/0005-explicit-timeline-editing.md) records why T08 uses explicit
+non-ripple edits, rejects same-track overlap and permits offline source ranges.
 
 ## Desktop shell
 
@@ -230,10 +244,9 @@ Fixture validation is independent of the application media APIs.
 ## Open decisions for subsequent tasks
 
 - Validate FFmpeg/MLT capabilities, licensing, distribution and process isolation.
-- Define timeline editing commands, undo semantics and project rendering
-  on top of the T05 data model.
-- Define a versioned scripting contract when editing behavior exists; current
-  media JSON is documented in [CLI.md](CLI.md). Stdout is reserved for results,
+- Define undo semantics and project rendering on top of the shared model and T08 edits.
+- Evolve the scripting contract for later editing capabilities; current
+  project, media and timeline JSON is documented in [CLI.md](CLI.md). Stdout is reserved for results,
   stderr for errors.
 - Extend the picker capability boundary for future project media access; define rendering/playback ownership beyond a single source.
 - Choose distribution tooling and signing, then validate other operating systems.

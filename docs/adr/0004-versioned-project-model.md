@@ -90,3 +90,8 @@ undo/redo, project rendering or desktop/CLI project integration. Schema migratio
 can be added at the version boundary when an actual incompatible version exists;
 no migration framework is introduced now. Windows/UNC path handling is tested
 lexically; Windows/Linux runtime support remains a separate validation task.
+
+T08 follow-up: [ADR 0005](0005-explicit-timeline-editing.md) adds shared editing
+operations without changing stored fields. It tightens prerelease version 1
+validation to reject same-track overlap and unsafe derived times. The CLI uses
+project-frame indices; the core retains exact rational inputs and offline editing.

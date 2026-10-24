@@ -7,8 +7,9 @@ CLI supports inspection, frame extraction and the T03 composition spike.
 T05 adds a headless [project model and JSON file format](PROJECT_FORMAT.md) with
 core APIs for validation, save/load and media availability checks. T06 exposes
 project creation, information and validation in the CLI. T07 adds media asset
-import, listing, inspection and safe removal. Timeline editing and
-desktop project integration remain deferred.
+import, listing, inspection and safe removal. T08 adds shared headless timeline
+editing through the CLI: track management and clip add/move/trim/split/remove.
+Desktop project integration remains deferred.
 
 ## Quick start (macOS)
 
@@ -87,7 +88,9 @@ with one hard link. See [asset paths and results](CLI.md#project-media-assets).
 To build only the headless packages and CLI, use `pnpm build:packages` followed
 by `pnpm --filter @opencut/cli build` instead of the full workspace build.
 
-Project create/info/validate and media list/info/remove need no media tools.
+Project create/info/validate, media list/info/remove and timeline edits need no media tools.
+See [timeline editing](CLI.md#timeline-editing) for commands, exact project-frame
+indices, overlap rules and JSON results.
 Project creation refuses existing files; media import/remove atomically update
 existing projects. Imports reference original files and preserve source contents;
 removal affects only unreferenced asset entries. Import/probe require manually
@@ -144,7 +147,7 @@ apps/
   desktop/             Electron main + sandboxed preload + React renderer
   cli/                 Standalone Node CLI
 packages/
-  core/                Headless project model, validation, persistence and asset management
+  core/                Headless project model, validation, persistence, assets and timeline editing
   media/               Headless probing, frame extraction and composition spike
   shared/              Reserved home for genuinely shared utilities/types
 skills/video-editor/   Product Agent Skill and its current CLI reference

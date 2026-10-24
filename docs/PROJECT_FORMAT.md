@@ -1,12 +1,13 @@
-# Project format (T07)
+# Project format (T08)
 
 OpenCut projects are UTF-8 JSON objects with `schemaVersion: 1`. The suggested
 filename is `name.opencut.json`; the API does not require an extension. This is
 the shared headless data model, independent of Electron, React and FFmpeg.
 T05 provides creation, validation and persistence APIs. T06 exposes creation,
 information and validation through the [CLI](CLI.md#projects). T07 adds media
-import/list/info/remove APIs and CLI commands. Timeline editing commands,
-undo/redo, project rendering and desktop project integration are deferred.
+import/list/info/remove APIs and CLI commands. T08 adds shared timeline editing
+operations and CLI commands. Undo/redo, project rendering and desktop project
+integration are deferred.
 
 ## Example
 
@@ -110,7 +111,8 @@ required when the object exists; unknown/inapplicable values are `null`, except
 the required kind and boolean audio presence. Dimensions are positive safe integers;
 duration is finite/nonnegative and FPS is finite/positive when known. Images
 use the existing `video` media type for visual content, with metadata kind `image`
-and null duration/FPS. No image track type or editing policy is introduced.
+and null duration/FPS. Images use explicit clip source ranges as model durations
+on video tracks, without an inferred finite source bound.
 Import also stores positive known duration as rational seconds rounded to
 microseconds for the existing source-bound validator. Probe metadata is a snapshot;
 availability checks do not refresh it or detect changed content at the same path.
@@ -143,8 +145,12 @@ subframe offsets. Validation does not round or snap to the project frame grid.
 Use `frameTime(frame, project.settings.frameRate)` for project frame boundaries,
 or a known source rate for source frame boundaries. Resolving actual VFR frame
 timestamps and enforcing future editing/snap policies belong to later work.
-Clip overlaps and gaps may be represented; T05 defines no compositing or mixing
-behavior. Collection order is preserved; no render ordering is implemented.
+T08 rejects overlap on the same track for video and audio. Half-open intervals
+may touch exactly; gaps and cross-track overlap are allowed. This rule applies
+to validation, loading, serialization and every editing operation. Clip duration
+and timeline end must also be representable by safe rational components;
+arithmetic never rounds or silently overflows. Collection order is preserved;
+no rendering or cross-track compositing/mixing behavior is defined.
 
 ## Media references and portability
 
@@ -331,6 +337,83 @@ core entry point stays free of filesystem and media-tool imports.
 See [the asset CLI contract](CLI.md#project-media-assets) for results, canonical
 source references, duplicate identity, offline behavior and atomic-save limits.
 
+## Timeline editing API
+
+The main `@opencut/core` entry point exports filesystem-free operations:
+
+```ts
+import {
+  addTrack,
+  addClip,
+  moveClip,
+  trimClip,
+  splitClip,
+  removeClip,
+  removeTrack,
+  listTimeline,
+  frameTime,
+} from '@opencut/core';
+
+const video = addTrack(project, { name: 'Video 1', type: 'video' });
+const at = (frame: number) => frameTime(frame, project.settings.frameRate);
+const added = addClip(video.project, {
+  assetId: project.assets[0]!.id,
+  trackId: video.track.id,
+  timelineStart: at(30),
+  sourceIn: at(15),
+  sourceOut: at(75),
+});
+const moved = moveClip(added.project, added.clip.id, { timelineStart: at(60) });
+const trimmed = trimClip(moved.project, added.clip.id, { sourceIn: at(30) });
+const split = splitClip(trimmed.project, added.clip.id, at(90));
+const timeline = listTimeline(split.project);
+const leftRemoved = removeClip(split.project, split.left.id);
+const allRemoved = removeClip(leftRemoved.project, split.right.id);
+const trackRemoved = removeTrack(allRemoved.project, video.track.id);
+```
+
+Operations validate and copy the input before editing, return a validated new
+`project`, and never mutate caller data on success or failure. Add functions
+return the created `track` or `clip`; move/trim return `clip`; split returns
+`left` and `right`; removal returns `removedTrackId` or `removedClipId`.
+Optional `id` on add options and optional fourth `rightId` on `splitClip` support
+explicit identities for core callers; all IDs must remain globally unique.
+Otherwise a collision-checked UUID is generated. Core inputs use exact rational
+seconds; CLI integer frame arguments are converted with `frameTime` at the
+project frame rate. No core grid snapping is imposed.
+
+Moves preserve source points. Trims keep timeline start fixed and require at
+least one source point. Splits require an absolute timeline position strictly
+inside the clip; left keeps its ID and right gets a new ID, preserving the same
+asset, track, contiguous source mapping, total duration and timeline coverage.
+Removing a populated track fails until its clips are moved/removed explicitly.
+No operation changes neighboring clip positions or removes source files/assets.
+Known duration bounds are enforced; explicit ranges for unknown-duration assets
+are allowed without inferring physical source bounds. Offline editing is valid.
+
+`listTimeline` returns `frameRate`, maximum clip-end `duration` (zero if empty),
+and ordered `tracks` with time-sorted `clips`. Each listed clip includes derived
+`duration` and `timelineEnd`; neither is persisted. `clipDuration(clip)` and
+`clipTimelineEnd(clip)` expose these calculations for callers. `addTimes(a,b)`
+and `subtractTimes(a,b)` return reduced rational times using bigint intermediate
+arithmetic; malformed inputs, negative results and unsafe components fail.
+
+Successful edits update `updatedAt` without moving it backwards. Exact no-op
+moves/trims preserve the original metadata and rational representations.
+`TimelineError.code` distinguishes `TRACK_NOT_FOUND`, `CLIP_NOT_FOUND`,
+`TRACK_NOT_EMPTY`, `INVALID_EDIT` and `SPLIT_BOUNDS`. Validation errors remain
+`ProjectFormatError` with JSON-pointer `issues`, including `duplicate_id`,
+`invalid_reference`, `incompatible_media`, `invalid_range`, `source_bounds`,
+`clip_overlap` and `time_overflow`. Direct arithmetic rejects unsafe results
+with `RangeError`; malformed direct time arguments fail schema validation.
+
+For persistence, call these operations inside the existing Node
+`updateProjectFile(path, async (project) => ({ project, result }))` callback,
+returning the edited project and the desired result. It validates before atomic
+publication and preserves typed timeline/format errors. The CLI implements this
+adapter without adding a command bus or transaction layer. See
+[the CLI editing contract](CLI.md#timeline-editing) for flags and JSON fields.
+
 ## Version evolution
 
 The top-level safe-integer version is checked before reading a version's structure.
@@ -338,6 +421,10 @@ This schema version is independent of the application version from `opencut --ve
 Version 1 is the sole supported version. T07 deliberately extends this prerelease
 version with optional asset metadata: existing T05/T06 files still load unchanged,
 but older strict readers cannot read assets containing the new metadata field.
+T08 tightens prerelease version 1 semantic validation to forbid same-track overlaps
+and unsafe derived times without changing stored fields. Pre-T08 documents that
+violate those rules are rejected with actionable issues; they require explicit
+position/range correction, with no automatic migration or ripple adjustment.
 Other safe-integer versions are rejected
 with a clear supported-version message; missing, unsafe or malformed versions
 are invalid structures. Future format changes must explicitly decide whether to

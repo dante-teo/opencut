@@ -51,3 +51,7 @@ adapter coordinates probing through the headless media package; the main model
 API remains independent of media tools. Timeline editing and desktop project
 integration remain deferred. See [the current core architecture](../ARCHITECTURE.md)
 and [the project format decision](0004-versioned-project-model.md).
+
+T08 follow-up: [ADR 0005](0005-explicit-timeline-editing.md) defines the first
+shared timeline editing operations and their CLI adapter. Core remains independent
+of Electron and media-tool access; GUI timeline integration remains deferred.

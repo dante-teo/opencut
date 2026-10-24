@@ -30,8 +30,14 @@ export function compareTimes(a: RationalTime, b: RationalTime): -1 | 0 | 1 {
 export function frameTime(frame: number, rate: FrameRate): RationalTime {
   natural.parse(frame);
   frameRateSchema.parse(rate);
-  let numerator = BigInt(frame) * BigInt(rate.denominator);
-  let denominator = BigInt(rate.numerator);
+  return rationalTime(
+    BigInt(frame) * BigInt(rate.denominator),
+    BigInt(rate.numerator),
+  );
+}
+
+function rationalTime(numerator: bigint, denominator: bigint): RationalTime {
+  if (numerator < 0n) throw new RangeError('Time must not be negative.');
   let a = numerator;
   let b = denominator;
   while (b !== 0n) [a, b] = [b, a % b];
@@ -41,9 +47,28 @@ export function frameTime(frame: number, rate: FrameRate): RationalTime {
     numerator > BigInt(Number.MAX_SAFE_INTEGER) ||
     denominator > BigInt(Number.MAX_SAFE_INTEGER)
   ) {
-    throw new RangeError(
-      'Frame time cannot be represented by safe JSON integers.',
-    );
+    throw new RangeError('Time cannot be represented by safe JSON integers.');
   }
   return { numerator: Number(numerator), denominator: Number(denominator) };
+}
+
+/** Exact, reduced arithmetic; reject negative or unrepresentable results without rounding. */
+export function addTimes(a: RationalTime, b: RationalTime): RationalTime {
+  timeSchema.parse(a);
+  timeSchema.parse(b);
+  return rationalTime(
+    BigInt(a.numerator) * BigInt(b.denominator) +
+      BigInt(b.numerator) * BigInt(a.denominator),
+    BigInt(a.denominator) * BigInt(b.denominator),
+  );
+}
+
+export function subtractTimes(a: RationalTime, b: RationalTime): RationalTime {
+  timeSchema.parse(a);
+  timeSchema.parse(b);
+  return rationalTime(
+    BigInt(a.numerator) * BigInt(b.denominator) -
+      BigInt(b.numerator) * BigInt(a.denominator),
+    BigInt(a.denominator) * BigInt(b.denominator),
+  );
 }

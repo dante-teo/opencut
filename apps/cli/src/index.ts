@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
+import { runTimelineCommand, timelineHelp, UsageError } from './timeline.js';
 import { resolve } from 'node:path';
 import {
   createProject,
@@ -21,8 +22,8 @@ import type { MediaMetadata } from '@opencut/media';
 
 const help = `Usage: opencut [command] [options]
 
-OpenCut — project and media asset management, headless media tools (T07).
-Timeline editing and project rendering are not implemented yet.
+OpenCut — project, media asset and timeline editing, headless media tools (T08).
+Project rendering is not implemented yet.
 
 Commands:
   project create <project-file> --name <name> [--width <px>] [--height <px>] [--fps <n|n/d>]
@@ -33,6 +34,10 @@ Commands:
   media list <project-file>             List assets, metadata and source availability
   media info <project-file> <asset-id>   Inspect an asset by stable ID
   media remove <project-file> <asset-id> Remove an unreferenced asset, keeping its file
+  timeline list <project-file>          Inspect tracks, clips and exact timing
+  track add|remove <project-file>       Manage video/audio tracks (track --help)
+  clip add|move|trim|split|remove <project-file>
+                                       Edit clips (clip --help; time arguments are frames)
   probe <file>                         Inspect local media metadata
   extract-frame <file> --timestamp <s> --output <file.png>
                                        Extract one PNG frame, without overwriting
@@ -43,7 +48,7 @@ Options:
   -h, --help     Show this help
   -v, --version  Show the application version
   --json        Print requested output as JSON
-  --name        Nonblank project name (project create only)
+  --name        Nonblank project or track name (project create / track add)
   --timestamp   Frame timestamp in nonnegative decimal seconds
   --output      New PNG/MP4 output path (parent directory must exist)
   --music       Background audio path (compose only; looped to fit)
@@ -55,13 +60,11 @@ Options:
 
 Project create defaults: 1920x1080, 30/1 fps; positive safe integer dimensions
 and frame-rate components. Relative project paths resolve from the working directory.
-Project commands and media list/info/remove need no media tools. Import/probe need ffprobe;
+Project commands, timeline edits and media list/info/remove need no media tools. Import/probe need ffprobe;
 extraction/composition also need ffmpeg.
 Compose supports 2–16 clips, up to 600 seconds; exports H.264/AAC MP4.
 Exit codes: 0 success, 1 validation/runtime/file/media failure, 2 invalid arguments.
 `;
-
-class UsageError extends Error {}
 
 const projectHelp = {
   create: `Usage: opencut project create <project-file> --name <name> [options]
@@ -194,6 +197,11 @@ async function runCli(args: string[]): Promise<void> {
       version: { type: 'boolean', short: 'v' },
       json: { type: 'boolean' },
       name: { type: 'string' },
+      type: { type: 'string' },
+      track: { type: 'string' },
+      at: { type: 'string' },
+      in: { type: 'string' },
+      out: { type: 'string' },
       timestamp: { type: 'string' },
       output: { type: 'string' },
       music: { type: 'string' },
@@ -208,6 +216,7 @@ async function runCli(args: string[]): Promise<void> {
     allowNegative: false,
   });
   const [command, file, projectFile] = positionals;
+  const timelineCommand = ['timeline', 'track', 'clip'].includes(command ?? '');
   const projectCommand =
     command === 'project' &&
     file !== undefined &&
@@ -219,8 +228,9 @@ async function runCli(args: string[]): Promise<void> {
       ? (file as keyof typeof mediaHelp)
       : undefined;
   if (values.help || args.length === 0) {
-    const usage =
-      command === 'project'
+    const usage = timelineCommand
+      ? timelineHelp
+      : command === 'project'
         ? projectCommand
           ? projectHelp[projectCommand]
           : `Usage: opencut project <create|info|validate> <project-file> [options]\n\n${Object.values(projectHelp).join('\n')}`
@@ -231,6 +241,16 @@ async function runCli(args: string[]): Promise<void> {
           : help;
     output({ help: usage }, usage, values.json);
     return;
+  }
+  if (timelineCommand) {
+    await runTimelineCommand(positionals, values);
+    return;
+  }
+  for (const option of ['type', 'track', 'at', 'in', 'out'] as const) {
+    if (values[option] !== undefined)
+      throw new UsageError(
+        `--${option} applies only to timeline editing commands.`,
+      );
   }
   if (command === 'media') {
     const argument = positionals[3];

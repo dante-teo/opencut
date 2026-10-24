@@ -1,4 +1,4 @@
-# OpenCut CLI at T07
+# OpenCut CLI at T08
 
 Run commands at the root of an installed checkout. Build with `pnpm build` if
 `apps/cli/dist/index.js` does not exist.
@@ -142,6 +142,47 @@ the existing text stderr contract even with JSON: exit 2 for invalid arguments,
 exit 1 for runtime/data failures, and no JSON success result on failed commands.
 Check the exit status, then read back list/info after a successful update.
 
+## Timeline editing
+
+Read [the full T08 editing contract](../../../docs/CLI.md#timeline-editing) before
+editing: it specifies every command, exact time semantics, JSON fields and errors.
+Use `timeline list PROJECT --json` to discover track and clip IDs. Add tracks with
+`track add PROJECT --type video|audio --name NAME --json`; remove empty ones with
+`track remove PROJECT TRACK_ID --json`.
+
+Place an imported asset with
+`clip add PROJECT ASSET_ID --track TRACK_ID --at FRAME --in FRAME --out FRAME --json`.
+All three times are required and use nonnegative safe integer **project-rate frame
+indices**, including source points. They are not source-file frame indices or
+seconds. Stored and returned times are exact rational seconds. Out is exclusive.
+Use the stored rational asset duration to choose an in-bounds source out point:
+frame 60 at 30000/1001 fps is 2.002 seconds and exceeds a two-second asset. See the
+[exact source-bound example](../../../docs/CLI.md#timeline-editing).
+
+`clip move PROJECT CLIP_ID [--track TRACK_ID] [--at FRAME] --json` preserves source
+mapping. `clip trim PROJECT CLIP_ID [--in FRAME] [--out FRAME] --json` fixes timeline
+start and changes duration at 1x. Each requires at least one change option.
+`clip split PROJECT CLIP_ID --at FRAME --json` uses an absolute timeline position
+strictly inside the clip, returns `{ path, left, right }`, preserves source mapping
+and total duration, keeps the left ID and creates a right UUID.
+`clip remove PROJECT CLIP_ID --json` leaves a gap.
+
+Same-track video/audio overlaps fail; touching boundaries and cross-track overlaps
+are allowed. Known asset durations are enforced; unknown-duration/image ranges
+must be explicit and have no inferred finite source bound. No ripple edits,
+source refresh/decoding, undo/redo or multi-command transactions occur.
+Populated track removal fails until all its clips are moved or removed.
+Offline edits require no media tools. Mutations use the existing guarded atomic
+save path, while no-op moves/trims and inspection preserve bytes/timestamps.
+Check exit status before parsing stdout; failed commands keep text stderr and no
+JSON success result. Read back `timeline list` after mutations. Pre-T08 documents
+with same-track overlaps fail validation and need explicit JSON correction.
+
+List JSON is `{ path, frameRate, duration, tracks }`; each track has model fields
+and time-ordered `clips` with derived rational `duration` and `timelineEnd`.
+Other mutation JSON is `{ path, track }`, `{ path, clip }`,
+`{ path, removedTrackId }`, or `{ path, removedClipId }`, as appropriate.
+
 ## Media inspection and frame extraction
 
 `probe <file> [--json]` inspects a local readable file. JSON contains `path`,
@@ -219,4 +260,4 @@ For filenames starting with `-`, place options before `--` and the filename,
 or use an absolute path. For an output name starting with `-`, use
 `--output=-frame.png` or an absolute path. Quote paths in the calling shell.
 The complete [CLI/API contract](../../../docs/CLI.md) describes all fields and
-limits. Timeline editing, project rendering and GUI project commands do not exist.
+limits. Project rendering and GUI project commands do not exist.

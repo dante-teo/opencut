@@ -19,7 +19,7 @@ export type {
   TimelineClip,
   Track,
 } from './project.js';
-export { compareTimes, frameTime } from './time.js';
+export { addTimes, compareTimes, frameTime, subtractTimes } from './time.js';
 export type { FrameRate, RationalTime } from './time.js';
 
 /** Shared application identity, introduced in T01. */
@@ -31,3 +31,23 @@ export interface ApplicationInfo {
 export function getApplicationInfo(): ApplicationInfo {
   return { name: 'OpenCut', version: '0.1.0' };
 }
+
+export {
+  TimelineError,
+  addTrack,
+  removeTrack,
+  addClip,
+  moveClip,
+  trimClip,
+  splitClip,
+  removeClip,
+  listTimeline,
+  clipDuration,
+  clipTimelineEnd,
+} from './timeline.js';
+export type {
+  AddTrackOptions,
+  AddClipOptions,
+  MoveClipOptions,
+  TrimClipOptions,
+} from './timeline.js';

@@ -1,4 +1,4 @@
-# CLI reference (T07)
+# CLI reference (T08)
 
 Build from the checkout root with `pnpm build`. The `opencut` executable is
 workspace-local. Use the direct Node form for machine-readable stdout; pnpm
@@ -38,6 +38,15 @@ already exist, and the output file must not exist.
 - `media info <project-file> <asset-id> [--json]`: inspect a stable asset ID.
 - `media remove <project-file> <asset-id> [--json]`: remove an unreferenced asset entry.
 - `media --help` and `media import|list|info|remove --help`: show asset usage.
+- `timeline list <project-file> [--json]`: inspect tracks, clips and exact timing.
+- `track add <project-file> --type <video|audio> --name <name> [--json]`: append a track.
+- `track remove <project-file> <track-id> [--json]`: remove an empty track.
+- `clip add <project-file> <asset-id> --track <track-id> --at <frame> --in <frame> --out <frame> [--json]`: place an asset range.
+- `clip move <project-file> <clip-id> [--track <track-id>] [--at <frame>] [--json]`: move without changing source points.
+- `clip trim <project-file> <clip-id> [--in <frame>] [--out <frame>] [--json]`: change source points with a fixed timeline start.
+- `clip split <project-file> <clip-id> --at <frame> [--json]`: split strictly inside a clip.
+- `clip remove <project-file> <clip-id> [--json]`: remove only that clip.
+- `timeline|track|clip --help`: show editing usage and time semantics.
 - `probe <file> [--json]`: inspect a readable local file with ffprobe.
 - `extract-frame <file> --timestamp <seconds> --output <file.png> [--json]`:
   extract one video frame with ffprobe and FFmpeg. Seconds must be a finite,
@@ -58,7 +67,7 @@ Exit codes: **0** success, **2** invalid command/arguments, **1** failed project
 validation, invalid project data, media, filesystem, prerequisite or execution failure.
 Unknown commands/options, extra positional arguments and options that do not apply
 to the command fail. Repeated options use the last value, matching Node's parser
-and existing media commands. `--name` applies only to project creation;
+and existing media commands. `--name` applies to project creation and track creation;
 `--width`, `--height` and `--fps` apply to project creation and composition with
 the distinct bounds below. `--timestamp` applies only to extraction; `--output`
 applies to extraction and composition. Help with `--json` returns `{ "help": "..." }`;
@@ -183,6 +192,117 @@ refused; no overwrite option is provided. PNG bytes are decoded and checked for
 the PNG signature before exclusive output creation, so subprocess failures leave
 no output file. Disk write failures can leave an incomplete newly created output;
 review it before removing it. Parent directories are not created automatically.
+
+## Timeline editing
+
+T08 uses the shared, filesystem-free core operations. The CLI is a parsing and
+persistence adapter. Every command takes an explicit project path, resolved from
+cwd, and supports `--json` and `--help`. No Electron, FFmpeg, ffprobe, decoding or
+source-file availability is needed for editing. Asset metadata is a stored snapshot.
+Use `media import` first to obtain `asset.id`; track/clip creation returns stable
+UUIDs. Subsequent operations take those IDs, never array indices.
+
+All CLI time arguments (`--at`, `--in`, `--out`) are **nonnegative safe integer
+frame indices at the project's frame rate**, including source in/out points.
+They are not source-file frame numbers or decimal seconds. At 30000/1001 fps,
+frame 30 is exactly 1001/1000 seconds. Integer seconds, sample positions or source
+frame indices must be converted deliberately when using these CLI flags. The core
+API also accepts arbitrary exact rational seconds, preserving existing subframe
+and sample offsets. Neither interface rounds, snaps or inspects actual VFR frames.
+Out points and timeline ends are exclusive. One-frame clips are valid.
+
+Choose source points against the stored rational `asset.duration`, rather than
+rounding decimal metadata to a nearby frame. For a two-second asset at
+30000/1001 fps, frame 60 is 2.002 seconds and fails the source bound; the largest
+allowed integer out point is frame 59. In general, use the floor of duration
+multiplied by the project frame rate, computed from their exact rational
+components. A source end between project frames remains representable directly
+through the rational core API. The workflow below assumes the asset permits at
+least source frame 90.
+
+```sh
+node apps/cli/dist/index.js media import /work/demo.opencut.json /media/camera.mp4 --json
+node apps/cli/dist/index.js track add /work/demo.opencut.json --type video --name "Video 1" --json
+node apps/cli/dist/index.js track add /work/demo.opencut.json --type audio --name "Audio 1" --json
+# Substitute the returned ASSET_ID, TRACK_ID and CLIP_ID:
+node apps/cli/dist/index.js clip add /work/demo.opencut.json ASSET_ID --track TRACK_ID --at 30 --in 15 --out 75 --json
+node apps/cli/dist/index.js timeline list /work/demo.opencut.json --json
+node apps/cli/dist/index.js clip move /work/demo.opencut.json CLIP_ID --at 60 --json
+node apps/cli/dist/index.js clip trim /work/demo.opencut.json CLIP_ID --in 30 --out 90 --json
+node apps/cli/dist/index.js clip split /work/demo.opencut.json CLIP_ID --at 90 --json
+node apps/cli/dist/index.js clip remove /work/demo.opencut.json CLIP_ID --json
+# Remove the other clip returned by split before removing its populated track:
+node apps/cli/dist/index.js clip remove /work/demo.opencut.json RIGHT_CLIP_ID --json
+node apps/cli/dist/index.js track remove /work/demo.opencut.json TRACK_ID --json
+```
+
+- `track add` requires a nonblank name and type `video` or `audio`, and appends the track.
+  Removing a populated track fails with its clip IDs; explicitly move or remove them first.
+- `clip add` requires an existing asset and compatible track plus all three time
+  options. Video tracks accept video/image assets; audio tracks require audio.
+  An AV asset may be placed independently on either type. No linked clip is created.
+- `clip move` requires `--track`, `--at` or both. Omitted values stay unchanged.
+  Source points, duration, asset ID and clip ID are preserved.
+- `clip trim` requires `--in`, `--out` or both. Omitted points stay unchanged.
+  **Timeline start stays fixed**; changing the source range changes duration at 1x.
+  Extending a range is allowed within the asset bound and available track space.
+- `clip split --at` uses an **absolute timeline position**, strictly between the
+  clip's timeline start and end. Left keeps the original ID; right gets a new UUID.
+  The exact source split is `sourceIn + (at - timelineStart)`. Both pieces reference
+  the same asset and track; their source ranges are contiguous, and total duration
+  and timeline coverage are unchanged. The right entry is inserted after the left.
+- `clip remove` leaves a gap and preserves all assets, tracks and other clips.
+
+Clips play at 1x. Source ranges must be nonnegative, nonempty and end no later
+than the asset's recorded rational duration when known. **Unknown-duration assets,
+including images, require explicit ranges and have no inferred finite source bound.**
+Editing does not establish that unknown or stale ranges are decodable; validate
+media separately. Images use their selected range as a duration at the model level.
+
+**Same-track overlaps are forbidden for video and audio.** Touching exclusive
+boundaries, gaps, and overlap across different tracks are allowed. Add, move and
+trim reject collisions instead of shifting clips or choosing another position.
+Splits create exactly adjacent pieces. Loading, saving and project validation
+apply the same overlap rule, including unsorted hand-edited documents. Pre-T08
+files with same-track overlaps are now invalid; resolve their positions/ranges in
+JSON before using edit commands. There is no silent migration. Derived durations
+and ends must fit safe rational JSON components; arithmetic overflow fails without
+rounding. No ripple, implicit track creation, speed changes, linked AV operations,
+undo/redo, multi-command transactions, project rendering or GUI integration exists.
+
+`timeline list` returns `{ path, frameRate, duration, tracks }`. All times are
+`{ numerator, denominator }` in exact seconds; `duration` is the maximum clip
+end, or zero for an empty timeline. Tracks retain insertion order and contain
+`id`, `name`, `type`, and `clips` ordered by timeline start. Each listed clip
+contains the stored `id`, `assetId`, `trackId`, `timelineStart`, `sourceIn`,
+`sourceOut`, plus derived `duration` and `timelineEnd`. Derived fields are not saved.
+
+Mutation JSON results are:
+
+| Command              | Result                     |
+| -------------------- | -------------------------- |
+| `track add`          | `{ path, track }`          |
+| `track remove`       | `{ path, removedTrackId }` |
+| `clip add/move/trim` | `{ path, clip }`           |
+| `clip split`         | `{ path, left, right }`    |
+| `clip remove`        | `{ path, removedClipId }`  |
+
+`track` and `clip` use the stored model fields; mutations do not include derived
+timing. Mutation paths are canonical absolute paths; list retains the requested
+absolute path. Successful changes update `metadata.updatedAt` without going
+backwards; exact no-op moves/trims preserve bytes and timestamps. Read back
+`timeline list` after mutations. Inspection never writes. Mutations reuse the
+[asset atomic-save guarantees](#project-media-assets): writer lock, validation
+before publishing, synced temporary JSON and same-directory rename, refusal of
+project-file symlinks/hard links, and outside-change detection. Invalid edits
+leave original project bytes intact and clean owned locks/temporaries.
+
+Errors preserve the existing CLI contract: text diagnostics on stderr even with
+`--json`, no success JSON on failed commands, exit 1 for invalid edits/data/I/O,
+and exit 2 for malformed or inapplicable arguments. Check exit status before
+parsing stdout. Diagnostics identify IDs or JSON-pointer fields, source bounds
+and colliding clips. Core errors expose machine-readable codes and validation
+issues; see [the API contract](PROJECT_FORMAT.md#timeline-editing-api).
 
 ## Composition prototype
 
@@ -428,6 +548,13 @@ reload, inspect assets after sources disappear, and verify source hashes before
 and after import/removal. Native outputs stay in an owned `t07-*` directory under
 `tests/fixtures/generated/`, cleaned on success or failure.
 
-Timeline editing, project rendering and desktop
-project integration are not implemented. The existing composition prototype
+T08 unit/CLI tests cover track/clip operations, exact fractional-rate and sample
+timing, split source mapping and total duration, exclusive boundaries, same-track
+overlap rejection, offline edits, stable IDs, no-op writes and invalid edits that
+preserve original bytes. Native tests use imported video/audio/image fixtures,
+read back timeline JSON and project data, validate source bounds, and compare
+source hashes. Native outputs stay in an owned `t08-*` directory under
+`tests/fixtures/generated/`, cleaned on success or failure.
+
+Project rendering and desktop project integration are not implemented. The existing composition prototype
 continues to take media paths directly, independently of projects.

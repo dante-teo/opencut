@@ -20,7 +20,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 (probing, decoding, playback and encoding) are separate concerns. Detailed editing
 contracts and the playback/render backend require later technical validation.
 
-## Current scope: T07
+## Current scope: T08
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -56,9 +56,17 @@ referencing clips; removal refuses referenced assets and never deletes source
 files. Project mutations use atomic replacement and a writer lock. Only import
 needs ffprobe. See [the asset command contract](CLI.md#project-media-assets).
 
+T08 adds shared headless timeline operations through `timeline list`, video/audio
+`track add/remove`, and `clip add/move/trim/split/remove`. CLI frame indices convert
+to exact rational seconds at the project rate. Source bounds and compatibility
+are validated, same-track overlaps fail, and touching exclusive ends or cross-track
+overlaps are allowed. Splits preserve source mapping and total duration; no edit
+implicitly shifts neighbors. Stable IDs and guarded atomic persistence support
+scripts and external agents. See [timeline editing](CLI.md#timeline-editing).
+
 ## Excluded
 
-T07 does not implement timeline editing, undo/redo, final rendering architecture,
+T08 does not implement undo/redo, transactions, final rendering architecture,
 or desktop project media integration. No FFmpeg or
 MLT runtime is bundled; media commands require manually installed external tools.
 Fixture generation remains an optional development utility.
@@ -70,4 +78,4 @@ User media must never be silently changed or overwritten.
 
 macOS is the initial required platform. Package boundaries should stay portable;
 Windows/Linux support requires explicit validation later. No distribution,
-installer, updater, signing or notarization work is included in T07. T08 is not implemented.
+installer, updater, signing or notarization work is included in T08. T09 is not implemented.

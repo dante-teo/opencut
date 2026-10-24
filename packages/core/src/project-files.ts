@@ -23,6 +23,7 @@ import {
 import type { MediaReference, Project, ProjectIssue } from './project.js';
 import { MediaError } from '@opencut/media';
 import { AssetError } from './assets.js';
+import { TimelineError } from './timeline.js';
 
 function pathStyle(value: string): typeof posix {
   return /^[A-Za-z]:[/\\]/.test(value) || /^(?:\/\/|\\\\)/.test(value)
@@ -317,6 +318,7 @@ export async function updateProjectFile<T>(
     if (
       cause instanceof ProjectFormatError ||
       cause instanceof AssetError ||
+      cause instanceof TimelineError ||
       cause instanceof MediaError
     )
       throw cause;
