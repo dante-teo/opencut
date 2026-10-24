@@ -20,19 +20,21 @@ The editing model (projects, intent, commands, validation) and the media engine
 (probing, decoding, playback and encoding) are separate concerns. Detailed editing
 contracts and the playback/render backend require later technical validation.
 
-## Current scope: T02
+## Current scope: T03
 
 Implemented: pnpm workspace, Electron/React placeholder, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
 strict TypeScript, linting, formatting, tests, synthetic fixture tooling, and
 documentation. T02 adds structured media inspection with ffprobe and single-frame
 PNG extraction with FFmpeg, through standalone CLI commands supporting JSON.
-No editing operation exists yet. The desktop placeholder is not an editing UI.
+T03 adds a headless FFmpeg composition spike: sequential video clips, background
+music mixed with original audio, normalization of media properties, and verified
+H.264/AAC MP4 export through the CLI. The desktop placeholder is not an editing UI.
 
 ## Excluded
 
-T02 does not implement a timeline, rendering pipeline, preview player,
-editing commands, project serialization or GUI media integration. No FFmpeg or
+T03 does not implement a timeline, final rendering architecture, preview player,
+project editing commands, project serialization or GUI media integration. No FFmpeg or
 MLT runtime is bundled; media commands require manually installed external tools.
 Fixture generation remains an optional development utility.
 
@@ -43,4 +45,4 @@ User media must never be silently changed or overwritten.
 
 macOS is the initial required platform. Package boundaries should stay portable;
 Windows/Linux support requires explicit validation later. No distribution,
-installer, updater, signing or notarization work is included in T02.
+installer, updater, signing or notarization work is included in T03. T04 is not implemented.

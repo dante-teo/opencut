@@ -1,31 +1,64 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
 import { getApplicationInfo } from '@opencut/core';
-import { extractFrame, probeMedia } from '@opencut/media';
+import { composeMedia, extractFrame, probeMedia } from '@opencut/media';
 import type { MediaMetadata } from '@opencut/media';
 
 const help = `Usage: opencut [command] [options]
 
-OpenCut — media inspection and frame extraction (T02).
-Editing commands are not implemented yet.
+OpenCut — media inspection, frame extraction and composition prototype (T03).
+Project and timeline editing are not implemented yet.
 
 Commands:
   probe <file>                         Inspect local media metadata
   extract-frame <file> --timestamp <s> --output <file.png>
                                        Extract one PNG frame, without overwriting
+  compose <clip1> <clip2> [more clips] --music <audio> --output <new.mp4>
+                                       Concatenate video and mix background music
 
 Options:
   -h, --help     Show this help
   -v, --version  Show the application version
   --json        Print media command results as JSON
   --timestamp   Frame timestamp in nonnegative decimal seconds
-  --output      New PNG output path (parent directory must exist)
+  --output      New PNG/MP4 output path (parent directory must exist)
+  --music       Background audio path (compose only; looped to fit)
+  --width       Even output width, 2–3840 (compose default: 1280)
+  --height      Even output height, 2–2160 (compose default: 720)
+  --fps         Integer output frame rate, 1–60 (compose default: 30)
+  --clip-volume Original audio gain, 0–1 (compose default: 1; 0 mutes)
+  --music-volume Music gain, 0–1 (compose default: 0.25)
 
-Media commands require ffprobe on PATH; extraction also requires ffmpeg.
+Media commands require ffprobe on PATH; extraction/composition also need ffmpeg.
+Compose supports 2–16 clips, up to 600 seconds; exports H.264/AAC MP4.
 Exit codes: 0 success, 1 runtime/media failure, 2 invalid arguments.
 `;
 
 class UsageError extends Error {}
+
+function numericArgument(
+  name: string,
+  value: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+  integer = false,
+): number {
+  if (value === undefined) return fallback;
+  const number = Number(value);
+  if (
+    !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(value) ||
+    !Number.isFinite(number) ||
+    number < minimum ||
+    number > maximum ||
+    (integer && !Number.isInteger(number))
+  ) {
+    throw new UsageError(
+      `--${name} requires ${integer ? 'an integer' : 'a decimal number'} between ${minimum} and ${maximum}.`,
+    );
+  }
+  return number;
+}
 
 function formatProbe(media: MediaMetadata): string {
   const { video, audio } = media;
@@ -49,6 +82,12 @@ async function runCli(args: string[]): Promise<void> {
       json: { type: 'boolean' },
       timestamp: { type: 'string' },
       output: { type: 'string' },
+      music: { type: 'string' },
+      width: { type: 'string' },
+      height: { type: 'string' },
+      fps: { type: 'string' },
+      'clip-volume': { type: 'string' },
+      'music-volume': { type: 'string' },
     },
     strict: true,
     allowPositionals: true,
@@ -58,18 +97,75 @@ async function runCli(args: string[]): Promise<void> {
     process.stdout.write(help);
     return;
   }
+  const hasCompositionOptions = [
+    values.music,
+    values.width,
+    values.height,
+    values.fps,
+    values['clip-volume'],
+    values['music-volume'],
+  ].some((value) => value !== undefined);
   if (
     values.version &&
     positionals.length === 0 &&
     !values.json &&
     values.timestamp === undefined &&
-    values.output === undefined
+    values.output === undefined &&
+    !hasCompositionOptions
   ) {
     process.stdout.write(`${getApplicationInfo().version}\n`);
     return;
   }
 
   const [command, file] = positionals;
+  if (command === 'compose' && !values.version) {
+    const clips = positionals.slice(1);
+    if (
+      clips.length < 2 ||
+      clips.length > 16 ||
+      !values.music ||
+      !values.output ||
+      values.timestamp !== undefined
+    ) {
+      throw new UsageError(
+        'compose requires 2–16 video clips, --music <audio> and --output <new.mp4>; --timestamp is not supported.',
+      );
+    }
+    if (!values.output.toLowerCase().endsWith('.mp4'))
+      throw new UsageError('--output must have a .mp4 extension.');
+    const width = numericArgument('width', values.width, 1280, 2, 3840, true);
+    const height = numericArgument('height', values.height, 720, 2, 2160, true);
+    if (width % 2 || height % 2)
+      throw new UsageError('--width and --height must be even.');
+    const result = await composeMedia({
+      clips,
+      music: values.music,
+      output: values.output,
+      width,
+      height,
+      fps: numericArgument('fps', values.fps, 30, 1, 60, true),
+      clipVolume: numericArgument(
+        'clip-volume',
+        values['clip-volume'],
+        1,
+        0,
+        1,
+      ),
+      musicVolume: numericArgument(
+        'music-volume',
+        values['music-volume'],
+        0.25,
+        0,
+        1,
+      ),
+    });
+    process.stdout.write(
+      values.json
+        ? `${JSON.stringify(result, null, 2)}\n`
+        : `Saved ${result.durationSeconds}s composition (${result.width}x${result.height}, ${result.fps} fps, H.264/AAC) to ${result.path}\n`,
+    );
+    return;
+  }
   if (
     values.version ||
     positionals.length !== 2 ||
@@ -77,9 +173,13 @@ async function runCli(args: string[]): Promise<void> {
     !['probe', 'extract-frame'].includes(command ?? '')
   ) {
     throw new UsageError(
-      'Expected probe <file> or extract-frame <file> --timestamp <seconds> --output <file.png>.',
+      'Expected probe <file>, extract-frame <file> --timestamp <seconds> --output <file.png>, or compose <clip1> <clip2> --music <audio> --output <new.mp4>.',
     );
   }
+  if (hasCompositionOptions)
+    throw new UsageError(
+      '--music, --width, --height, --fps, --clip-volume and --music-volume apply only to compose.',
+    );
   if (command === 'probe') {
     if (values.timestamp !== undefined || values.output !== undefined) {
       throw new UsageError(

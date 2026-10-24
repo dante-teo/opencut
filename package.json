@@ -24,7 +24,7 @@
     "fixtures:generate": "tsx scripts/fixtures.ts generate",
     "fixtures:validate": "tsx scripts/fixtures.ts validate",
     "test:fixtures": "node --import tsx --test tests/fixtures/validation.native.spec.ts",
-    "test:media": "pnpm build:packages && pnpm --filter @opencut/cli build && node --import tsx --test tests/integration/media.native.spec.ts"
+    "test:media": "pnpm build:packages && pnpm --filter @opencut/cli build && node --import tsx --test tests/integration/*.native.spec.ts"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

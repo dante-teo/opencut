@@ -2,13 +2,13 @@
 
 ## Workspace boundaries
 
-| Package            | Owns                                                            | Actual dependencies         |
-| ------------------ | --------------------------------------------------------------- | --------------------------- |
-| `@opencut/desktop` | Electron lifecycle, restricted IPC, React shell                 | core, Electron, React       |
-| `@opencut/cli`     | Argument parsing, stdout/stderr and exit codes                  | core, media, Node built-ins |
-| `@opencut/core`    | Headless application identity; future editing behavior          | none                        |
-| `@opencut/media`   | Probing and PNG frame extraction through external tools         | Node built-ins              |
-| `@opencut/shared`  | Reserved location for utilities/types used by multiple packages | none                        |
+| Package            | Owns                                                             | Actual dependencies         |
+| ------------------ | ---------------------------------------------------------------- | --------------------------- |
+| `@opencut/desktop` | Electron lifecycle, restricted IPC, React shell                  | core, Electron, React       |
+| `@opencut/cli`     | Argument parsing, stdout/stderr and exit codes                   | core, media, Node built-ins |
+| `@opencut/core`    | Headless application identity; future editing behavior           | none                        |
+| `@opencut/media`   | Probing, frame extraction and composition through external tools | Node built-ins              |
+| `@opencut/shared`  | Reserved location for utilities/types used by multiple packages  | none                        |
 
 Actual runtime dependency direction is `desktop → core ← cli → media`. The rationale is
 recorded in [ADR 0001](adr/0001-shared-headless-core.md). Core never
@@ -31,15 +31,17 @@ workspace manifests; release/version automation is deferred.
 The future editing model describes intent and validates operations. A media
 engine performs probing, decoding, playback and encoding. T02 uses external
 ffprobe for metadata and FFmpeg for single-frame PNG extraction in media; the
-editing model, playback and rendering pipelines remain unimplemented. CLI calls
-media directly for inspection/extraction. Future engine hosting and core
+editing model and playback remain unimplemented. T03 adds `composeMedia(options)`
+in media as a technical spike, called directly by the CLI alongside inspection
+and extraction. Future engine hosting and core
 coordination remain open decisions. This scoped FFmpeg use does not select the
 eventual playback/render backend.
 The scoped tool choice and subprocess boundary are recorded in
 [ADR 0002](adr/0002-external-ffmpeg-media-tools.md).
 
 Media uses asynchronous Node `execFile` with literal arguments, closed stdin,
-bounded buffers and a 60-second subprocess timeout. It validates local input
+bounded buffers and timeouts. Probe/extraction subprocesses have a 60-second limit;
+the composition encoder has a 10-minute limit. It validates local input
 files and normalizes ffprobe JSON; unavailable metadata becomes `null`. Container
 and stream start timestamps are retained so extraction bounds use the selected
 video's end relative to input start. All streams are retained while default
@@ -48,6 +50,25 @@ attached cover art is excluded from frame extraction. PNG output is decoded to a
 bounded buffer before exclusive file creation, refusing existing paths and
 symlinks. No source media is written. External tools are optional, manually
 installed prerequisites. See [the CLI/API contract](CLI.md) for precise behavior.
+
+The composition spike normalizes each video's aspect ratio, dimensions, frame
+rate and timestamps, pairs it with trimmed/padded stereo audio, concatenates
+segments and mixes looped background music. It uses FFmpeg's maintained filters
+and encoders through the existing subprocess utility; no wrapper library or MLT
+integration is needed for these operations. This does not choose the final
+editing/rendering architecture. Renders go to a temporary sibling directory,
+are probed for expected metadata, and are published through an exclusive atomic
+hard link. Temporary files are cleaned on handled failures. There is no project
+or timeline representation and no desktop integration in T03.
+
+Two timing invariants are covered by native regressions. Every accepted clip must
+contribute at least one output frame: `fps` uses `eof_action=pass` so very short
+clips survive conversion before padding and trimming to the planned frame count.
+Background music must preserve timestamp gaps before trimming and resetting PTS
+from sample count. Its resampler uses `async=1:min_hard_comp=0:first_pts=0` to fill
+gaps with silence, including gaps below FFmpeg's default 100ms compensation
+threshold. These rules keep short clips visible and later music in position;
+the [CLI contract](CLI.md#composition-prototype) describes their observable behavior.
 
 ## Desktop shell
 
@@ -98,8 +119,8 @@ assets under each package/app's `dist/`; distribution packaging is deferred.
 
 Ordinary tests run without FFmpeg, ffprobe or an Electron window. `pnpm test:media`
 is an opt-in native CLI suite using the existing generated fixtures. It creates
-derived delayed-video inputs and PNG outputs in its own subdirectory under
-`tests/fixtures/generated/` and removes that subdirectory on success or failure.
+derived timing/stream inputs, PNGs and composition outputs in owned subdirectories under
+`tests/fixtures/generated/` and removes those subdirectories on success or failure.
 The native fixture regression is a separate opt-in
 suite that creates synthetic media in an OS temporary directory and cleans it up.
 It does not use or change the working fixture set.
@@ -122,4 +143,4 @@ Fixture validation is independent of the application media APIs.
 - Define media access, IPC authorization and rendering/playback ownership.
 - Choose distribution tooling and signing, then validate other operating systems.
 
-These are decisions to investigate, not APIs promised or implemented by T02.
+These are decisions to investigate, not APIs promised or implemented by T03.

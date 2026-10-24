@@ -1,9 +1,9 @@
 # OpenCut
 
 A lightweight desktop video editor for creators, with a GUI and a scriptable
-headless core. **T02 adds media probing and PNG frame extraction.** The desktop
+headless core. **T03 adds multi-clip composition with mixed audio and MP4 export.** The desktop
 shows a React placeholder; the independent CLI supports help, version and media commands.
-Editing, project files, playback, and rendering are not implemented yet.
+Project files, timeline editing and playback are not implemented yet.
 
 ## Quick start (macOS)
 
@@ -37,13 +37,15 @@ pnpm cli --version
 node apps/cli/dist/index.js --help
 node apps/cli/dist/index.js probe /path/to/video.mp4 --json
 node apps/cli/dist/index.js extract-frame /path/to/video.mp4 --timestamp 0.5 --output /path/to/new-frame.png --json
+node apps/cli/dist/index.js compose /path/to/clip1.mp4 /path/to/clip2.mp4 --music /path/to/music.wav --output /path/to/new-composition.mp4 --json
 ```
 
 To build only the headless packages and CLI, use `pnpm build:packages` followed
 by `pnpm --filter @opencut/cli build` instead of the full workspace build.
 
 Media commands require manually installed `ffprobe` on PATH; extraction also
-requires `ffmpeg` with PNG support. Existing output files are refused. See
+requires `ffmpeg` with PNG support. Composition needs FFmpeg 8+ with libx264/AAC
+and standard filters. Existing output files are refused. See
 [CLI.md](CLI.md) for fields, timestamp behavior, limits and exit codes.
 
 ## Commands
@@ -74,7 +76,7 @@ under the ignored `test-results/` directory.
 `pnpm test:fixtures` runs the separate Node native regression with FFmpeg and
 ffprobe, generating temporary media rather than depending on existing fixtures.
 `pnpm test:media` requires all five existing generated fixtures and exercises the
-built CLI, including delayed video with zero and nonzero input starts. It creates
+built CLI, including composition, decoded A/V sync and delayed streams. It creates
 and cleans only its own derived inputs and outputs under the generated directory.
 `pnpm fixtures:validate` only needs ffprobe: it counts decoded video frames and
 rejects decoder errors, even when a damaged file retains valid header metadata.
@@ -89,7 +91,7 @@ apps/
   cli/                 Standalone Node CLI
 packages/
   core/                Headless application identity; future editing operations
-  media/               Headless ffprobe inspection and FFmpeg PNG extraction
+  media/               Headless probing, frame extraction and composition spike
   shared/              Reserved home for genuinely shared utilities/types
 skills/video-editor/   Product Agent Skill and its current CLI reference
 tests/

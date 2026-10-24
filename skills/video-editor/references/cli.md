@@ -1,4 +1,4 @@
-# OpenCut CLI at T02
+# OpenCut CLI at T03
 
 Run commands at the root of an installed checkout. Build with `pnpm build` if
 `apps/cli/dist/index.js` does not exist.
@@ -13,6 +13,7 @@ node apps/cli/dist/index.js --help
 ./apps/cli/dist/index.js --version
 node apps/cli/dist/index.js probe /path/to/video.mp4 --json
 node apps/cli/dist/index.js extract-frame /path/to/video.mp4 --timestamp 0.5 --output /path/to/new-frame.png --json
+node apps/cli/dist/index.js compose /path/to/clip1.mp4 /path/to/clip2.mp4 --music /path/to/music.wav --output /path/to/new-composition.mp4 --json
 ```
 
 `opencut` is the workspace-local executable, not a globally installed command.
@@ -46,14 +47,57 @@ The source is never modified. Use a new
 `.png` path in an existing directory; existing files and symlinks are refused.
 `timestampSeconds` preserves the requested value before FFmpeg precision rounding.
 
+## Composition
+
+`compose <clip1> <clip2> [more clips] --music <audio> --output <new.mp4> [--json]`
+concatenates 2–16 video clips in argument order. Each needs a timed video stream
+and known positive duration; still images and audio-only clips fail. Default
+video/audio streams are selected as for probe; only one audio stream per clip
+is used. Original audio and background music are mixed by default.
+
+Options: `--width` (1280, even integer 2–3840), `--height` (720, even integer
+2–2160), `--fps` (30, integer 1–60), `--clip-volume` (1, decimal 0–1),
+`--music-volume` (0.25, decimal 0–1). Zero gain mutes that source.
+Unknown or inapplicable options fail. `--timestamp` does not apply to composition.
+
+Output uses H.264/yuv420p, AAC 192 kb/s, 48 kHz stereo and MP4 faststart. Video is
+scaled without cropping, letterboxed and converted to the requested constant
+frame rate with square pixels. Segments begin at their video's first frame;
+each video duration is rounded to the nearest output frame, minimum one frame.
+At 1 fps, this minimum is one second per clip, even for very short inputs.
+The sum is capped at 600 seconds. Original audio keeps its offset relative to
+the video, with silence for gaps/missing audio and trimming at segment boundaries.
+Unknown stream starts assume alignment. Music starts at zero and loops/trims to
+fit; timestamp gaps, including gaps below 100ms, are filled with silence so later
+music keeps its position.
+Gains stay stable through silent clips; a latency-compensated limiter avoids
+clipping. Loop boundaries may be audible; there is no crossfade or ducking.
+
+JSON contains `path`, ordered `clipPaths`, `musicPath` (all absolute), planned
+`durationSeconds`, `width`, `height`, `fps`, `clipVolume`, `musicVolume` and
+measured `metadata` using the probe schema. Before publishing, codecs, dimensions,
+FPS, audio configuration, container/stream durations and A/V duration agreement
+are checked, along with container/stream starts within 0.05s of zero. The
+encoder has a 10-minute wall-clock limit and 4 MiB stdout/stderr limits.
+FFmpeg 8+ with libx264, AAC and standard filters is required (tested with 9).
+
+Use a new `.mp4` in an existing writable directory supporting hard links. A
+verified temporary render is published atomically without overwriting existing
+files or symlinks. Temporary files are cleaned on handled failures; forced process
+termination may leave `.opencut-compose-*` beside the destination. Source media
+is not modified. This is an SDR composition spike; HDR/color management,
+misleading source timing, project files and timeline editing are outside scope.
+
+## Prerequisites and paths
+
 `probe` requires external `ffprobe` on PATH; extraction also requires `ffmpeg`
-with PNG support. Install prerequisites manually. Each subprocess has a 60-second
+with PNG support. Install prerequisites manually. Probe/extraction subprocesses have a 60-second
 limit and bounded output (4 MiB for probe; 64 MiB for extraction). Runtime failures
-produce no JSON on stdout; errors remain text on stderr. Both commands provide
+produce no JSON on stdout; errors remain text on stderr. All media commands provide
 human-readable output when `--json` is omitted.
 
 For filenames starting with `-`, place options before `--` and the filename,
 or use an absolute path. For an output name starting with `-`, use
 `--output=-frame.png` or an absolute path. Quote paths in the calling shell.
 The complete [CLI/API contract](../../../docs/CLI.md) describes all fields and
-limits. Project editing, playback, rendering and GUI media commands do not exist.
+limits. Project editing, playback and GUI media commands do not exist.

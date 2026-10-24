@@ -1,4 +1,4 @@
-# CLI reference (T02)
+# CLI reference (T03)
 
 Build from the checkout root with `pnpm build`. The `opencut` executable is
 workspace-local. Use the direct Node form for machine-readable stdout; pnpm
@@ -13,9 +13,10 @@ node apps/cli/dist/index.js --help
 node apps/cli/dist/index.js --version
 node apps/cli/dist/index.js probe tests/fixtures/generated/video-medium.mp4 --json
 node apps/cli/dist/index.js extract-frame tests/fixtures/generated/video-medium.mp4 --timestamp 0.5 --output tests/fixtures/generated/frame.png --json
+node apps/cli/dist/index.js compose tests/fixtures/generated/video-short.mp4 tests/fixtures/generated/video-medium.mp4 --music tests/fixtures/generated/audio-tone.wav --output tests/fixtures/generated/composition.mp4 --width 640 --height 360 --json
 ```
 
-The last two examples require the synthetic fixtures. Generate them explicitly
+The media examples require the synthetic fixtures. Generate them explicitly
 with `pnpm fixtures:generate` if absent; see the
 [fixture contract](../tests/fixtures/README.md). The output parent directory must
 already exist, and the output file must not exist.
@@ -28,19 +29,22 @@ already exist, and the output file must not exist.
 - `extract-frame <file> --timestamp <seconds> --output <file.png> [--json]`:
   extract one video frame with ffprobe and FFmpeg. Seconds must be a finite,
   nonnegative decimal number, such as `0`, `0.5`, or `12.25`.
+- `compose <clip1> <clip2> [more clips] --music <audio> --output <new.mp4> [--json]`:
+  concatenate video clips in argument order and mix their original audio with music.
 
 Options can precede the input. For filenames beginning with `-`, put all options
 before `--`, followed by the filename, or use an absolute path. For an output
 name starting with `-`, use `--output=-frame.png` or an absolute path. Quote paths
 containing spaces in the calling shell.
 
-Both media commands print a readable summary by default. `--json` prints one JSON
+All media commands print a readable summary by default. `--json` prints one JSON
 object followed by a newline, without progress or diagnostics on stdout.
 Errors always go to stderr as text, including with `--json`.
 
 Exit codes: **0** success, **2** invalid command/arguments, **1** media, filesystem,
 prerequisite or execution failure. Unknown commands/options and extra positional
-arguments fail. `--timestamp` and `--output` apply only to extraction. `--json`
+arguments fail. `--timestamp` applies only to extraction; `--output` applies to
+extraction and composition. Composition options are rejected by other commands. `--json`
 applies only to media commands.
 
 ## Probe JSON
@@ -95,21 +99,119 @@ the PNG signature before exclusive output creation, so subprocess failures leave
 no output file. Disk write failures can leave an incomplete newly created output;
 review it before removing it. Parent directories are not created automatically.
 
+## Composition prototype
+
+`compose` is a T03 technical spike in the headless media package, using one
+FFmpeg filter graph. It does not define a project format or timeline API.
+
+| Option           | Default  | Accepted values                                  |
+| ---------------- | -------- | ------------------------------------------------ |
+| `--music`        | required | Readable local file with an audio stream         |
+| `--output`       | required | New `.mp4` in an existing writable directory     |
+| `--width`        | 1280     | Even integer, 2–3840                             |
+| `--height`       | 720      | Even integer, 2–2160                             |
+| `--fps`          | 30       | Integer, 1–60                                    |
+| `--clip-volume`  | 1        | Decimal linear gain, 0–1; 0 mutes original audio |
+| `--music-volume` | 0.25     | Decimal linear gain, 0–1; 0 mutes music          |
+
+Provide 2–16 clips with a timed video stream and a known positive duration.
+Still images, audio-only clips and unknown-duration inputs are rejected. Default
+video/audio streams are selected using the same rules as `probe`; only that audio
+stream is mixed, even if a clip contains several. Subtitles/data are not exported.
+
+Each selected video's first frame begins its segment. Prefer its stream duration;
+if absent, subtract its start offset relative to the input from the reported media
+duration. For that calculation, a missing input start is zero and a missing video
+start uses the input start. Unknown or nonpositive durations are rejected.
+
+Each segment is rounded to the nearest output frame, with a minimum of one frame.
+At 1 fps, even a clip lasting only 1/60 second contributes one second to the export.
+The export lasts the sum of these frame-aligned durations, at most 600 seconds.
+Frames can be duplicated or dropped during frame-rate conversion; the last frame
+is held if rounding extends a clip. Input display aspect ratio is
+preserved with square pixels and centered black letterboxing, without cropping.
+Output is constant-frame-rate H.264 (`libx264`, CRF 20, veryfast), yuv420p, with
+AAC 192 kb/s, 48 kHz stereo audio and MP4 faststart.
+
+Original audio is resampled/downmixed to stereo, positioned relative to its
+video's start timestamp, padded with silence or trimmed to that segment. Leading
+audio before the video is dropped; delayed audio retains its gap. Missing start
+timestamps assume aligned starts. Clips without audio supply silence. Background
+audio starts at zero, loops when shorter and is trimmed when longer than the
+composition. Gaps in background audio timestamps are filled with silence before
+trimming, preserving the position of later music. Gains remain stable through
+silent clips; a latency-compensated limiter prevents clipping. There is no
+ducking, loudness normalization or crossfade; music loop boundaries can be audible.
+This spike is intended for ordinary SDR media;
+HDR/color management and damaged or misleading input timing are not validated.
+
+Composition JSON contains absolute `path`, ordered absolute `clipPaths`, absolute
+`musicPath`, frame-aligned planned `durationSeconds`, `width`, `height`, `fps`,
+`clipVolume`, `musicVolume`, and measured `metadata` in the Probe JSON schema.
+The metadata path points to the final destination. Before publishing, the command
+checks codecs, dimensions, frame rate, audio configuration, container and stream
+durations (each within max(0.1s, one frame) of planned duration), A/V duration
+agreement (within 0.1s), and container/stream starts (within 0.05s of zero).
+Native tests additionally decode the full export and check frame
+counts, source images, mixed tone frequencies and synchronization markers.
+
+FFmpeg renders into an owned temporary directory beside the destination.
+After verification, an atomic exclusive hard link publishes the MP4; existing
+files, directories, hard-link aliases and symlinks (including dangling ones) are
+refused. Temporary renders are cleaned on success and handled failures, leaving
+no partial final output. The destination filesystem must support hard links;
+there is no overwrite option. A forced termination of the parent process can
+leave an `.opencut-compose-*` temporary directory. Inputs are read only.
+
+## Headless media API
+
+Workspace consumers declare `"@opencut/media": "workspace:*"` as a dependency
+and build the headless packages before importing it. The package exports
+`probeMedia(file)`,
+`extractFrame(file, timestampSeconds, output)`, `composeMedia(options)`,
+their TypeScript option/result types, and `MediaError`.
+
+```ts
+import { composeMedia } from '@opencut/media';
+
+const result = await composeMedia({
+  clips: ['/path/to/clip1.mp4', '/path/to/clip2.mp4'],
+  music: '/path/to/music.wav',
+  output: '/path/to/new-composition.mp4',
+  width: 640,
+  height: 360,
+  fps: 30,
+  clipVolume: 1,
+  musicVolume: 0.25,
+});
+
+console.log(result.path, result.durationSeconds, result.metadata);
+```
+
+Only `clips`, `music` and `output` are required. Optional fields use the same
+defaults and bounds as the CLI options above; CLI `--clip-volume` and
+`--music-volume` correspond to API `clipVolume` and `musicVolume`. The returned
+`CompositionResult` has the same fields as composition JSON. Tool prerequisites,
+timing rules, output protection and filesystem requirements also apply to API
+calls. The CLI owns argument parsing, stdout/stderr and exit codes; the media
+package runs independently of Electron and React.
+
 ## External tools and limits
 
 Put `ffprobe` on PATH to probe; extraction also needs `ffmpeg` with PNG support.
+Composition needs FFmpeg with `libx264`, AAC, and the standard scale, pad, fps,
+concat, aresample, amix and alimiter filters, including scale's `reset_sar` option
+(FFmpeg 8+; validated here with FFmpeg 9).
 Install them manually through your preferred package manager. OpenCut does not
 install, download or bundle media executables. Help/version, ordinary unit tests,
 and the desktop placeholder do not need them.
 
-The headless `@opencut/media` package exports `probeMedia(file)` and
-`extractFrame(file, timestampSeconds, output)`, their result types, and
-`MediaError`. CLI adapts these APIs and owns argument parsing and output.
 Node's built-in `execFile` is sufficient for this small subprocess boundary;
 no wrapper dependency or native binding is required. Arguments are passed
 without a shell, inputs are resolved to absolute local files, and child stdin
-is closed. Each subprocess has a 60-second limit; ffprobe JSON/stderr is bounded
-to 4 MiB and PNG/stderr to 64 MiB. Exceeding a bound is an execution error.
+is closed. Probe/extraction subprocesses have a 60-second limit; the composition
+encoder has a 10-minute wall-clock limit. ffprobe/encoder stdout and stderr are
+bounded to 4 MiB each and PNG/stderr to 64 MiB each. Exceeding a bound is an execution error.
 Error-level tool diagnostics fail the command even if the tool exits zero.
 
 The subprocess and JSON behavior follows the official
@@ -130,5 +232,14 @@ inputs and PNG outputs only in its own subdirectory under
 `tests/fixtures/generated/`. That subdirectory is cleaned on success or failure;
 the five base fixtures are read without modification.
 
-Timeline editing, project files, rendering pipelines, playback and GUI media
+The same command runs T03 integration tests against silent, mono and stereo
+clips at different sizes/rates, fractional-rate video with early/delayed 44.1 kHz
+audio and nonzero starts, background looping, gain controls and destination safety.
+It also checks one-frame 60/120 fps clips converted to 1/30 fps, and PCM music with
+80ms/one-second timestamp gaps, including audible content after each gap and a
+loop boundary. Decoded tone pulses and video flashes check sync, and source hashes
+ensure that the base fixtures remain unchanged. Unit tests also cover failed render cleanup,
+metadata verification and destination races without requiring media tools.
+
+Timeline editing, project files, a final rendering architecture, playback and GUI media
 integration are not implemented.

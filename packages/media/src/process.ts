@@ -24,6 +24,7 @@ export function runMediaTool(
   tool: 'ffprobe' | 'ffmpeg',
   args: string[],
   maxBuffer = 4 * 1024 * 1024,
+  timeoutMs = 60_000,
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const child = execFile(
@@ -32,7 +33,7 @@ export function runMediaTool(
       {
         encoding: 'buffer',
         shell: false,
-        timeout: 60_000,
+        timeout: timeoutMs,
         killSignal: 'SIGKILL',
         maxBuffer,
         windowsHide: true,
