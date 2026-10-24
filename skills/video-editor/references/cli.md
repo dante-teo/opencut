@@ -1,4 +1,4 @@
-# OpenCut CLI at T06
+# OpenCut CLI at T07
 
 Run commands at the root of an installed checkout. Build with `pnpm build` if
 `apps/cli/dist/index.js` does not exist.
@@ -17,6 +17,10 @@ node apps/cli/dist/index.js compose /path/to/clip1.mp4 /path/to/clip2.mp4 --musi
 node apps/cli/dist/index.js project create /path/to/new.opencut.json --name "My project" --fps 30000/1001 --json
 node apps/cli/dist/index.js project info /path/to/new.opencut.json --json
 node apps/cli/dist/index.js project validate /path/to/new.opencut.json --json
+node apps/cli/dist/index.js media import /path/to/new.opencut.json /path/to/video.mp4 --json
+node apps/cli/dist/index.js media list /path/to/new.opencut.json --json
+node apps/cli/dist/index.js media info /path/to/new.opencut.json ASSET_ID --json
+node apps/cli/dist/index.js media remove /path/to/new.opencut.json ASSET_ID --json
 ```
 
 `opencut` is the workspace-local executable, not a globally installed command.
@@ -72,6 +76,71 @@ Validation failures still return the requested report on stdout with diagnostics
 on stderr. File-read or execution failures return no stdout report. Check exit
 status before using results. Info and validate never modify projects or media.
 Run `project --help` or `project create|info|validate --help` for scoped usage.
+
+## Project media assets
+
+`media import <project-file> <file> [--json]` imports one video, audio or image by
+reference and probes it with external ffprobe. No copying or source mutation
+occurs. Both CLI paths resolve from cwd. Source symlinks resolve to their real
+targets; stored forward-slash references prefer project-relative paths (including
+`..`). Project directory symlinks resolve to their physical parent consistently
+for import, list/info and project media validation. References
+fall back to absolute paths for different roots or unrepresentable
+relative paths. Invalid formats, missing/unreadable files and unsupported streams
+fail without changing project data.
+
+For `/links/project -> /work/project`, a stored `../media/video.mp4` resolves
+to `/work/media/video.mp4` through either directory path. Import/remove report
+the canonical project `path`; list/info/validate retain the requested absolute
+project `path`. Resolved media paths are reported separately. Use `asset.id` as
+the asset identity across these results. A directory symlink is allowed; mutation
+guards still reject a symlink at the project filename.
+
+Import JSON: `{ path, imported, asset, source, referencedBy }`. `path` is the
+absolute project path. Asset fields are `id`, `name`, `file`, `mediaTypes`, optional
+rational `duration`, and optional `metadata`. Metadata is persisted with `kind`
+(`video`, `audio`, `image`), `formatName`, `durationSeconds`, `width`, `height`,
+`videoCodec`, `audioCodec`, average `frameRate`, `frameRateRatio` and `hasAudio`.
+Unknown/inapplicable values are null; still images have null duration and FPS
+and use visual (`video`) media types. Known positive duration is also stored as
+rational seconds rounded to microseconds. Old assets may lack metadata entirely.
+Metadata is a snapshot; availability checks do not refresh it.
+
+Reimporting a normalized path, symlink or hard link to the same file returns its
+existing stable ID and `imported: false`; it does not probe or rewrite the project.
+Distinct copies with equal contents are separate assets. No hash deduplication,
+metadata refresh, copy-import or relink option exists.
+
+`media list <project-file> [--json]` returns `{ path, assets }`, with each entry
+containing `{ asset, source, referencedBy }`.
+`media info <project-file> <asset-id> [--json]` returns
+`{ path, asset, source, referencedBy }`.
+`source` has `assetId`, resolved `path`, `status`, `message`; statuses match project
+validation (`available`, `missing`, `unreadable`, `not_file`, `unsupported_path`).
+`referencedBy` lists clip IDs. Both commands are read only and use stored metadata
+without ffprobe. Offline sources do not prevent inspection (exit 0); run project
+validate when unavailable media must fail the workflow. Unknown IDs fail with exit 1.
+
+`media remove <project-file> <asset-id> [--json]` removes only an unreferenced
+project entry and returns `{ path, removedAssetId }`. Offline assets can be removed.
+Any referencing clip blocks removal and is named in the diagnostic. Original
+files are never deleted; there is no force flag.
+
+Imports/removals validate data, update `updatedAt`, sync temporary JSON and replace
+the existing project atomically by same-directory rename. Updates require a
+writable directory and a regular project file with one hard link; project
+symlinks/hard links are refused. A per-project `.lock` rejects competing writers;
+detected outside changes also fail. Handled failures preserve the prior JSON
+and clean owned temporary files/locks. Forced termination may leave
+`.opencut-update-*` and `<project-file>.lock`; remove stale artifacts only when
+no writer is running. Power-loss durability and arbitrary outside writers are
+not covered by the atomicity guarantee.
+
+Only import needs ffprobe; list/info/remove need no media tools. All support
+scoped `--help`, readable output and `--json`, with no other options. Errors use
+the existing text stderr contract even with JSON: exit 2 for invalid arguments,
+exit 1 for runtime/data failures, and no JSON success result on failed commands.
+Check the exit status, then read back list/info after a successful update.
 
 ## Media inspection and frame extraction
 
@@ -150,4 +219,4 @@ For filenames starting with `-`, place options before `--` and the filename,
 or use an absolute path. For an output name starting with `-`, use
 `--output=-frame.png` or an absolute path. Quote paths in the calling shell.
 The complete [CLI/API contract](../../../docs/CLI.md) describes all fields and
-limits. Project editing, playback and GUI media commands do not exist.
+limits. Timeline editing, project rendering and GUI project commands do not exist.

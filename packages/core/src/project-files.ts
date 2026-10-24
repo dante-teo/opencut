@@ -1,7 +1,18 @@
 /** Optional Node adapter. The main core entry point remains free of filesystem imports. */
 import { constants } from 'node:fs';
-import { access, readFile, stat, writeFile } from 'node:fs/promises';
-import { posix, win32 } from 'node:path';
+import {
+  access,
+  lstat,
+  mkdtemp,
+  open,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
+import { basename, dirname, join, posix, win32 } from 'node:path';
 import {
   deserializeProject,
   ProjectFormatError,
@@ -10,6 +21,8 @@ import {
   validateProject,
 } from './project.js';
 import type { MediaReference, Project, ProjectIssue } from './project.js';
+import { MediaError } from '@opencut/media';
+import { AssetError } from './assets.js';
 
 function pathStyle(value: string): typeof posix {
   return /^[A-Za-z]:[/\\]/.test(value) || /^(?:\/\/|\\\\)/.test(value)
@@ -47,6 +60,24 @@ function nativePath(value: string): string {
     );
   }
   return path;
+}
+
+/** Resolve directory aliases while retaining the project filename for update safety checks. */
+export async function canonicalProjectFilePath(value: string): Promise<string> {
+  const path = absolutePath(value);
+  if (!isNativePath(path)) return path;
+  try {
+    return join(await realpath(dirname(path)), basename(path));
+  } catch (error) {
+    // Availability checks also accept locations whose project directory is absent.
+    if (
+      error instanceof Error &&
+      'code' in error &&
+      (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+    )
+      return path;
+    throw error;
+  }
 }
 
 /** Prefer paths relative to the project file's directory, including sibling folders. */
@@ -93,7 +124,7 @@ export interface MediaAvailability {
   message: string;
 }
 
-async function inspectMediaFile(
+export async function inspectMediaFile(
   path: string,
 ): Promise<Pick<MediaAvailability, 'status' | 'message'>> {
   if (!isNativePath(path)) {
@@ -132,7 +163,7 @@ export async function checkProjectMedia(
 ): Promise<MediaAvailability[]> {
   const validated = validateProject(project);
   if (!validated.success) throw validated.error;
-  const location = absolutePath(projectFilePath);
+  const location = await canonicalProjectFilePath(projectFilePath);
   const results: MediaAvailability[] = [];
   for (const asset of validated.project.assets) {
     const path = resolveMediaReference(asset.file, location);
@@ -148,14 +179,16 @@ export async function checkProjectMedia(
 export class ProjectFileError extends Error {
   override name = 'ProjectFileError';
   constructor(
-    public readonly code: 'READ_FAILED' | 'WRITE_FAILED',
+    public readonly code: 'READ_FAILED' | 'WRITE_FAILED' | 'UPDATE_FAILED',
     public readonly path: string,
     options: ErrorOptions,
   ) {
     const message =
       code === 'READ_FAILED'
         ? `Cannot read project file '${path}'.`
-        : `Cannot create project file '${path}'; use a new file in an existing writable directory (existing files and symlinks are refused).`;
+        : code === 'WRITE_FAILED'
+          ? `Cannot create project file '${path}'; use a new file in an existing writable directory (existing files and symlinks are refused).`
+          : `Cannot update project file '${path}': ${options.cause instanceof Error ? options.cause.message : String(options.cause)}`;
     super(message, options);
   }
 }
@@ -209,7 +242,7 @@ export async function validateProjectFile(
   };
 }
 
-/** Exclusive creation only. Updating/overwriting existing project files is deferred. */
+/** Exclusive creation only. Use updateProjectFile for guarded atomic updates. */
 export async function writeProjectFile(
   project: Project,
   projectFilePath: string,
@@ -222,3 +255,89 @@ export async function writeProjectFile(
     throw new ProjectFileError('WRITE_FAILED', path, { cause });
   }
 }
+
+/** Serialize cooperating writers and publish a complete, synced JSON file by rename. */
+export async function updateProjectFile<T>(
+  projectFilePath: string,
+  update: (
+    project: Project,
+    path: string,
+  ) => Promise<{ project: Project; result: T }>,
+): Promise<T> {
+  const requested = nativePath(projectFilePath);
+  let path = requested;
+  let lock: Awaited<ReturnType<typeof open>> | undefined;
+  let temporary: string | undefined;
+  try {
+    // Canonicalize the parent so directory aliases use the same writer lock.
+    path = await canonicalProjectFilePath(requested);
+    try {
+      lock = await open(`${path}.lock`, 'wx', 0o600);
+    } catch (cause) {
+      throw new Error(
+        'Project is locked or its directory is not writable. Retry after other writers finish; remove a stale .lock only when no writer is running.',
+        { cause },
+      );
+    }
+    const before = await lstat(path);
+    if (!before.isFile() || before.nlink !== 1)
+      throw new Error(
+        'Updates require a regular project file with one hard link; project symlinks and hard links are refused.',
+      );
+    const original = await readFile(path, 'utf8');
+    const project = deserializeProject(original);
+    const snapshot = serializeProject(project);
+    const changed = await update(project, path);
+    const json = serializeProject(changed.project);
+    if (json === snapshot) return changed.result;
+    temporary = await mkdtemp(join(dirname(path), '.opencut-update-'));
+    const pending = join(temporary, 'project.json');
+    const file = await open(pending, 'wx', before.mode & 0o777);
+    try {
+      await file.chmod(before.mode & 0o777);
+      await file.writeFile(json, 'utf8');
+      await file.sync();
+    } finally {
+      await file.close();
+    }
+    const current = await lstat(path);
+    if (
+      current.dev !== before.dev ||
+      current.ino !== before.ino ||
+      current.nlink !== 1 ||
+      current.mtimeMs !== before.mtimeMs ||
+      (await readFile(path, 'utf8')) !== original
+    )
+      throw new Error(
+        'Project changed during the operation; reload and retry.',
+      );
+    await rename(pending, path);
+    return changed.result;
+  } catch (cause) {
+    if (
+      cause instanceof ProjectFormatError ||
+      cause instanceof AssetError ||
+      cause instanceof MediaError
+    )
+      throw cause;
+    throw new ProjectFileError('UPDATE_FAILED', path, { cause });
+  } finally {
+    try {
+      if (temporary) await rm(temporary, { recursive: true, force: true });
+    } finally {
+      if (lock) {
+        await lock.close();
+        await rm(`${path}.lock`, { force: true });
+      }
+    }
+  }
+}
+
+export {
+  AssetError,
+  importMediaAsset,
+  listMediaAssets,
+  getMediaAsset,
+  removeMediaAsset,
+} from './assets.js';
+export type { AssetInfo, AssetImportResult } from './assets.js';

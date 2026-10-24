@@ -6,7 +6,8 @@ nominal frame stepping and reproducible performance measurements.** The independ
 CLI supports inspection, frame extraction and the T03 composition spike.
 T05 adds a headless [project model and JSON file format](PROJECT_FORMAT.md) with
 core APIs for validation, save/load and media availability checks. T06 exposes
-project creation, information and validation in the CLI. Timeline editing and
+project creation, information and validation in the CLI. T07 adds media asset
+import, listing, inspection and safe removal. Timeline editing and
 desktop project integration remain deferred.
 
 ## Quick start (macOS)
@@ -68,16 +69,29 @@ node apps/cli/dist/index.js --help
 node apps/cli/dist/index.js project create /path/to/new.opencut.json --name "My project" --fps 30000/1001 --json
 node apps/cli/dist/index.js project info /path/to/new.opencut.json --json
 node apps/cli/dist/index.js project validate /path/to/new.opencut.json --json
+node apps/cli/dist/index.js media import /path/to/new.opencut.json /path/to/video.mp4 --json
+node apps/cli/dist/index.js media list /path/to/new.opencut.json --json
+node apps/cli/dist/index.js media info /path/to/new.opencut.json ASSET_ID --json
+node apps/cli/dist/index.js media remove /path/to/new.opencut.json ASSET_ID --json
 node apps/cli/dist/index.js probe /path/to/video.mp4 --json
 node apps/cli/dist/index.js extract-frame /path/to/video.mp4 --timestamp 0.5 --output /path/to/new-frame.png --json
 node apps/cli/dist/index.js compose /path/to/clip1.mp4 /path/to/clip2.mp4 --music /path/to/music.wav --output /path/to/new-composition.mp4 --json
 ```
 
+Replace `ASSET_ID` with the stable `asset.id` returned by import or shown in
+`media list`. Import returns `imported: false` and the existing ID for a duplicate.
+Directory symlinks are supported: media references resolve from the physical
+project directory. Updates require the project file itself to be a regular file
+with one hard link. See [asset paths and results](CLI.md#project-media-assets).
+
 To build only the headless packages and CLI, use `pnpm build:packages` followed
 by `pnpm --filter @opencut/cli build` instead of the full workspace build.
 
-Project commands need no media tools and never overwrite existing project files.
-Media commands require manually installed `ffprobe` on PATH; extraction also
+Project create/info/validate and media list/info/remove need no media tools.
+Project creation refuses existing files; media import/remove atomically update
+existing projects. Imports reference original files and preserve source contents;
+removal affects only unreferenced asset entries. Import/probe require manually
+installed `ffprobe` on PATH; extraction also
 requires `ffmpeg` with PNG support. Composition needs FFmpeg 8+ with libx264/AAC
 and standard filters. Existing output files are refused. See
 [CLI.md](CLI.md) for fields, timestamp behavior, limits and exit codes.
@@ -115,7 +129,8 @@ not impose hardware-dependent latency thresholds.
 `pnpm test:fixtures` runs the separate Node native regression with FFmpeg and
 ffprobe, generating temporary media rather than depending on existing fixtures.
 `pnpm test:media` requires all five existing generated fixtures and exercises the
-built CLI, including composition, decoded A/V sync and delayed streams. It creates
+built CLI, including video/audio/image asset import, composition, decoded A/V
+sync and delayed streams. It creates
 and cleans only its own derived inputs and outputs under the generated directory.
 `pnpm fixtures:validate` only needs ffprobe: it counts decoded video frames and
 rejects decoder errors, even when a damaged file retains valid header metadata.
@@ -129,7 +144,7 @@ apps/
   desktop/             Electron main + sandboxed preload + React renderer
   cli/                 Standalone Node CLI
 packages/
-  core/                Headless identity, project model, validation and persistence
+  core/                Headless project model, validation, persistence and asset management
   media/               Headless probing, frame extraction and composition spike
   shared/              Reserved home for genuinely shared utilities/types
 skills/video-editor/   Product Agent Skill and its current CLI reference

@@ -1,6 +1,6 @@
 ---
 name: video-editor
-description: Use the OpenCut CLI to create, inspect and validate video projects, inspect media, extract PNG frames, or compose video clips with background music. Timeline editing and project rendering are not available.
+description: Use the OpenCut CLI to create, inspect and validate video projects, import and manage video/audio/image assets, inspect media, extract PNG frames, or compose video clips with background music. Timeline editing and project rendering are not available.
 ---
 
 # OpenCut CLI
@@ -10,7 +10,7 @@ It will grow with the CLI to cover project inspection, modification, validation
 and rendering. T03 includes a composition/export prototype. T04 adds an
 interactive Electron source preview (launch with `pnpm dev`) with playback,
 seeking, nominal frame stepping and a performance-validation button. This preview
-has no CLI command or project integration; project and timeline editing remain
+has no CLI command or project integration; desktop project integration and timeline editing remain
 unavailable. Frame numbers use average FPS from optional ffprobe and are not a
 frame-accurate editing guarantee. The optional `pnpm test:preview` command measures
 fixture/1080p playback in the built Electron app; see
@@ -24,8 +24,10 @@ T05 adds a versioned project data model, exact rational time, JSON save/load,
 validation and media availability checks as headless core APIs. See
 [the project format](../../docs/PROJECT_FORMAT.md) when using those APIs directly.
 T06 exposes `project create`, `project info` and `project validate` in the CLI.
-There are no media-importing, timeline-editing, undo/redo or project-rendering
-operations. The desktop preview and existing media commands remain separate
+T07 adds `media import`, `media list`, `media info` and `media remove` with stable
+asset IDs, persisted metadata, source availability and atomic project updates.
+There are no timeline-editing, undo/redo or project-rendering operations.
+The desktop preview and path-based media commands remain separate
 from project data.
 
 From an installed and built OpenCut checkout, run `pnpm cli --help` to discover
@@ -42,6 +44,10 @@ Implemented commands (use the direct Node form for clean JSON stdout):
 node apps/cli/dist/index.js project create /path/to/new.opencut.json --name "My project" --fps 30000/1001 --json
 node apps/cli/dist/index.js project info /path/to/new.opencut.json --json
 node apps/cli/dist/index.js project validate /path/to/new.opencut.json --json
+node apps/cli/dist/index.js media import /path/to/new.opencut.json /path/to/video.mp4 --json
+node apps/cli/dist/index.js media list /path/to/new.opencut.json --json
+node apps/cli/dist/index.js media info /path/to/new.opencut.json ASSET_ID --json
+node apps/cli/dist/index.js media remove /path/to/new.opencut.json ASSET_ID --json
 node apps/cli/dist/index.js probe /path/to/video.mp4 --json
 node apps/cli/dist/index.js extract-frame /path/to/video.mp4 --timestamp 0.5 --output /path/to/new-frame.png --json
 node apps/cli/dist/index.js compose /path/to/clip1.mp4 /path/to/clip2.mp4 --music /path/to/music.wav --output /path/to/new-composition.mp4 --json
@@ -58,6 +64,24 @@ it does not decode media. It returns a JSON report for invalid data and unavaila
 media with exit 1; `structureValid` distinguishes valid offline data from data
 errors. File-read failures produce no report. Read
 [the project command reference](references/cli.md#projects) for fields and exit codes.
+
+Import one video/audio/image at a time with an explicit project path. Both CLI
+paths resolve from the working directory; persisted references resolve from the
+physical project directory. Directory symlinks work consistently for import,
+list/info and validation. Import reads the original in place and uses ffprobe; never
+copy or modify user media as an implicit import step. A normalized path, symlink
+or hard link to the same file returns its existing asset ID with `imported: false`;
+do not assume equal contents at different file locations are duplicates.
+Use the returned stable `asset.id` for info/remove. Persisted metadata includes
+kind, duration, dimensions, codecs, frame rate and audio presence; unknown values
+are null. Image duration/FPS are null. List/info check availability and still
+succeed for offline sources; use project validate to require readable sources.
+Removal deletes only the project entry and refuses any asset referenced by clips.
+No force-delete, relink or refresh command exists. Read back list/info after
+successful mutations. Project updates refuse project-file symlinks/hard links, use an atomic
+rename and serialize cooperating writers with a `.lock`; retry when busy.
+Remove a stale lock only after checking that no writer is active. See
+[the asset reference](references/cli.md#project-media-assets) for results and limits.
 
 Probing needs `ffprobe` on PATH; extraction/composition also need `ffmpeg`. Never silently
 install these tools. Inspect metadata before selecting a timestamp. Use finite,
@@ -85,6 +109,6 @@ and decode or play the output before claiming delivery. Composition is an FFmpeg
 spike, with a 10-minute encoder limit; it requires FFmpeg 8+ with libx264/AAC and
 standard filters. It is not the final rendering architecture.
 
-Do not invent additional project, import, edit, render or MCP commands. Explain
+Do not invent additional project, media, edit, render or MCP commands. Explain
 the current limitation when a workflow needs them. Probing reads metadata;
 it does not validate full-file decodability.

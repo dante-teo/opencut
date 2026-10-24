@@ -7,16 +7,21 @@ import {
   getProjectInfo,
 } from '@opencut/core';
 import {
+  getMediaAsset,
+  importMediaAsset,
+  listMediaAssets,
   readProjectFile,
+  removeMediaAsset,
   validateProjectFile,
   writeProjectFile,
 } from '@opencut/core/node';
+import type { AssetInfo } from '@opencut/core/node';
 import { composeMedia, extractFrame, probeMedia } from '@opencut/media';
 import type { MediaMetadata } from '@opencut/media';
 
 const help = `Usage: opencut [command] [options]
 
-OpenCut — project management and headless media tools (T06).
+OpenCut — project and media asset management, headless media tools (T07).
 Timeline editing and project rendering are not implemented yet.
 
 Commands:
@@ -24,6 +29,10 @@ Commands:
                                        Create a new project without overwriting
   project info <project-file>           Show metadata, settings and statistics
   project validate <project-file>       Check project data and media references
+  media import <project-file> <file>    Import a source reference and probe metadata
+  media list <project-file>             List assets, metadata and source availability
+  media info <project-file> <asset-id>   Inspect an asset by stable ID
+  media remove <project-file> <asset-id> Remove an unreferenced asset, keeping its file
   probe <file>                         Inspect local media metadata
   extract-frame <file> --timestamp <s> --output <file.png>
                                        Extract one PNG frame, without overwriting
@@ -46,7 +55,7 @@ Options:
 
 Project create defaults: 1920x1080, 30/1 fps; positive safe integer dimensions
 and frame-rate components. Relative project paths resolve from the working directory.
-Project commands need no media tools. Media commands require ffprobe on PATH;
+Project commands and media list/info/remove need no media tools. Import/probe need ffprobe;
 extraction/composition also need ffmpeg.
 Compose supports 2–16 clips, up to 600 seconds; exports H.264/AAC MP4.
 Exit codes: 0 success, 1 validation/runtime/file/media failure, 2 invalid arguments.
@@ -77,6 +86,50 @@ Print a report even for invalid project data; exit 1 when data or media checks f
 No decoding or file modification occurs. File-read failures have no report.
 `,
 };
+
+const mediaHelp = {
+  import: `Usage: opencut media import <project-file> <file> [--json] [--help]
+
+Import one video, audio or image file by reference without copying or modifying it.
+Source arguments resolve from the working directory; stored references prefer project-relative paths.
+Requires ffprobe. Duplicate paths, symlinks and hard links return the existing stable ID.
+Project updates are atomic; project symlinks and hard links are refused.
+`,
+  list: `Usage: opencut media list <project-file> [--json] [--help]
+
+List stored asset metadata, source availability and referencing clip IDs. No probing or writes.
+Offline sources are reported in the result; they do not prevent inspection.
+`,
+  info: `Usage: opencut media info <project-file> <asset-id> [--json] [--help]
+
+Inspect stored metadata, source availability and referencing clip IDs by stable asset ID.
+No probing or writes; offline sources remain inspectable.
+`,
+  remove: `Usage: opencut media remove <project-file> <asset-id> [--json] [--help]
+
+Atomically remove an unreferenced asset entry. Referenced assets are refused.
+Original media files are never deleted. No media tools are required.
+`,
+};
+
+function formatAsset(info: AssetInfo): string {
+  const { asset, source, referencedBy } = info;
+  const metadata = asset.metadata;
+  return [
+    `Asset: ${asset.id} (${asset.name})`,
+    `Source: ${source.path} [${source.status}]`,
+    source.message,
+    `Media: ${metadata?.kind ?? asset.mediaTypes.join(', ')}`,
+    `Format: ${metadata?.formatName ?? 'unknown'}`,
+    `Duration: ${metadata?.durationSeconds ?? 'unknown'} s`,
+    `Dimensions: ${metadata?.width ?? '?'}x${metadata?.height ?? '?'}`,
+    `Codecs: video ${metadata?.videoCodec ?? 'none/unknown'}, audio ${metadata?.audioCodec ?? 'none/unknown'}`,
+    `Frame rate: ${metadata?.frameRateRatio ?? metadata?.frameRate ?? 'unknown'}`,
+    `Audio present: ${metadata?.hasAudio ?? asset.mediaTypes.includes('audio')}`,
+    `Referenced by: ${referencedBy.join(', ') || 'none'}`,
+    '',
+  ].join('\n');
+}
 
 function output(
   value: unknown,
@@ -161,14 +214,71 @@ async function runCli(args: string[]): Promise<void> {
     Object.hasOwn(projectHelp, file)
       ? (file as keyof typeof projectHelp)
       : undefined;
+  const mediaCommand =
+    command === 'media' && file !== undefined && Object.hasOwn(mediaHelp, file)
+      ? (file as keyof typeof mediaHelp)
+      : undefined;
   if (values.help || args.length === 0) {
     const usage =
       command === 'project'
         ? projectCommand
           ? projectHelp[projectCommand]
           : `Usage: opencut project <create|info|validate> <project-file> [options]\n\n${Object.values(projectHelp).join('\n')}`
-        : help;
+        : command === 'media'
+          ? mediaCommand
+            ? mediaHelp[mediaCommand]
+            : `Usage: opencut media <import|list|info|remove> <project-file> [file|asset-id] [--json]\n\n${Object.values(mediaHelp).join('\n')}`
+          : help;
     output({ help: usage }, usage, values.json);
+    return;
+  }
+  if (command === 'media') {
+    const argument = positionals[3];
+    if (
+      !mediaCommand ||
+      positionals.length !== (mediaCommand === 'list' ? 3 : 4) ||
+      !projectFile?.trim() ||
+      (mediaCommand !== 'list' && !argument?.trim())
+    )
+      throw new UsageError(
+        'Expected media import <project-file> <file>, media list <project-file>, or media info|remove <project-file> <asset-id>.',
+      );
+    for (const option of Object.keys(values)) {
+      if (option !== 'json')
+        throw new UsageError(
+          `--${option} does not apply to media ${mediaCommand}.`,
+        );
+    }
+    if (
+      [projectFile, argument ?? ''].some((value) =>
+        Array.from(value).some((character) => character.charCodeAt(0) < 32),
+      )
+    )
+      throw new UsageError(
+        'Media arguments must not contain control characters.',
+      );
+    const path = resolve(projectFile);
+    if (mediaCommand === 'list') {
+      const result = await listMediaAssets(path);
+      output(
+        result,
+        `Project: ${result.path}\nAssets: ${result.assets.length}\n${result.assets.map(formatAsset).join('\n')}`,
+        values.json,
+      );
+    } else if (mediaCommand === 'import') {
+      const result = await importMediaAsset(path, argument!);
+      output(
+        result,
+        `${result.imported ? 'Imported' : 'Already imported'}: ${result.asset.id}\n${formatAsset(result)}`,
+        values.json,
+      );
+    } else if (mediaCommand === 'info') {
+      const result = await getMediaAsset(path, argument!);
+      output(result, formatAsset(result), values.json);
+    } else {
+      const result = await removeMediaAsset(path, argument!);
+      output(result, `Removed asset: ${result.removedAssetId}\n`, values.json);
+    }
     return;
   }
   if (command === 'project') {

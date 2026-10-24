@@ -1,4 +1,4 @@
-# CLI reference (T06)
+# CLI reference (T07)
 
 Build from the checkout root with `pnpm build`. The `opencut` executable is
 workspace-local. Use the direct Node form for machine-readable stdout; pnpm
@@ -33,6 +33,11 @@ already exist, and the output file must not exist.
 - `project info <project-file> [--json]`: display validated metadata, settings and collection counts.
 - `project validate <project-file> [--json]`: validate project structure, internal references and media availability.
 - `project --help` and `project create|info|validate --help`: show project usage.
+- `media import <project-file> <file> [--json]`: import a source reference and metadata.
+- `media list <project-file> [--json]`: list stored assets and source availability.
+- `media info <project-file> <asset-id> [--json]`: inspect a stable asset ID.
+- `media remove <project-file> <asset-id> [--json]`: remove an unreferenced asset entry.
+- `media --help` and `media import|list|info|remove --help`: show asset usage.
 - `probe <file> [--json]`: inspect a readable local file with ffprobe.
 - `extract-frame <file> --timestamp <seconds> --output <file.png> [--json]`:
   extract one video frame with ffprobe and FFmpeg. Seconds must be a finite,
@@ -81,7 +86,8 @@ The core generates a stable UUID and UTC creation/update timestamps. Assets,
 tracks and clips start empty. Inputs are validated before opening the destination.
 The parent must exist; existing files, directories and symlinks, including dangling
 symlinks, are refused. No force/overwrite mode exists. A disk write failure can
-leave a partially written newly created file; project updates remain deferred.
+leave a partially written newly created file. Media import/remove use the separate
+atomic update path described below.
 
 Creation and info JSON have the same shape:
 
@@ -242,6 +248,87 @@ no partial final output. The destination filesystem must support hard links;
 there is no overwrite option. A forced termination of the parent process can
 leave an `.opencut-compose-*` temporary directory. Inputs are read only.
 
+## Project media assets
+
+```sh
+node apps/cli/dist/index.js media import /path/to/demo.opencut.json /path/to/video.mp4 --json
+node apps/cli/dist/index.js media list /path/to/demo.opencut.json --json
+node apps/cli/dist/index.js media info /path/to/demo.opencut.json ASSET_ID --json
+node apps/cli/dist/index.js media remove /path/to/demo.opencut.json ASSET_ID --json
+```
+
+Replace `ASSET_ID` with the stable `asset.id` from import or the asset list.
+
+`media import <project-file> <file> [--json]` imports one video, audio or image.
+It probes with the existing external ffprobe utility and stores a source reference,
+name, stable UUID, media types and metadata. Files are read in place without
+copying, moving or modifying them. Unsupported formats, streams without video/audio,
+missing sources and unreadable sources fail before a project update is published.
+Metadata probing does not guarantee full-file decodability.
+
+Both input arguments resolve from the working directory. Source symlinks resolve
+to their real target; stored references prefer normalized forward-slash paths
+relative to the project directory, including `..`. Project directory aliases
+resolve to the physical parent directory consistently for import, asset inspection
+and project media validation. Different filesystem roots or
+unrepresentable relative paths use absolute references. Quote spaces and literal
+punctuation; use `--` before positional paths beginning with `-`.
+Reimporting the same path, normalized alias, symlink or hard link returns the
+existing asset with `imported: false`, without probing or changing project bytes
+or timestamps. Different files with identical bytes remain distinct assets;
+there is no content hashing or metadata refresh operation.
+
+For example, if `/links/project` points to `/work/project`, importing
+`/work/media/video.mp4` into `/links/project/demo.json` stores
+`../media/video.mp4`. List, info and project validation resolve that reference
+to `/work/media/video.mp4` through either project-directory path. Directory
+symlinks are supported; mutations still refuse a symlink at the project filename.
+Import/remove return the canonical project `path`; list/info/validate retain the
+requested absolute project `path` and report resolved media locations separately.
+
+Import JSON contains `path` (project), `imported`, `asset`, `source` and
+`referencedBy`. `asset` contains the persisted project asset described in
+[PROJECT_FORMAT.md](PROJECT_FORMAT.md#fields-and-invariants). Its optional
+`metadata` records `kind` (`video`, `audio`, `image`), `formatName`,
+`durationSeconds`, `width`, `height`, `videoCodec`, `audioCodec`, `frameRate`,
+`frameRateRatio` and `hasAudio`. Unknown or inapplicable metadata is `null`.
+Still images have no duration or frame rate; their `mediaTypes` contains `video`
+to represent visual media in the existing model. Animated GIF/APNG with known
+duration are video assets. Imported positive duration also becomes the model's
+rational `duration`, rounded to microseconds. Metadata survives project reloads.
+
+`media list <project-file> [--json]` returns `{ path, assets }`; each entry has
+`asset`, `source`, `referencedBy`. `media info <project-file> <asset-id> [--json]`
+returns `{ path, asset, source, referencedBy }`. `source` contains `assetId`,
+resolved `path`, `status` and actionable `message`, using the same availability
+statuses as project validation. `referencedBy` lists clip IDs. These commands
+read stored metadata and check source readability without probing or writing.
+They succeed for offline assets so their metadata remains inspectable; use
+`project validate` when every source must be available. Legacy assets without
+stored metadata remain inspectable. Unknown asset IDs fail with exit 1.
+
+`media remove <project-file> <asset-id> [--json]` removes only an unreferenced
+project entry, even if its source is missing. JSON is `{ path, removedAssetId }`.
+Any referencing timeline clip blocks removal and is named in the error. No force
+flag or original-file deletion exists.
+
+Import and removal validate project data, update `updatedAt`, and publish complete
+JSON by a same-directory atomic rename after syncing the temporary file. A
+per-project exclusive `.lock` serializes cooperating writers; competing updates
+fail with a retry message. Updates refuse project symlinks and hard-linked project
+files and check for outside changes before publication. Handled failures preserve
+the previous project and clean owned temporary files/locks. Forced termination
+can leave `.opencut-update-*` and `<project-file>.lock`; remove a stale lock only
+after confirming no writer is running. The rename prevents partial JSON visibility;
+power-loss durability and coordination with arbitrary external writers are not
+guaranteed. The containing directory must be writable.
+
+Only import requires ffprobe; list/info/remove require no media tools or Electron.
+All four commands support human-readable output and scoped `--help`. No other
+options apply. They follow existing CLI errors: exit 2 for invalid arguments,
+exit 1 for project/media/filesystem/prerequisite failures, diagnostics on stderr
+and no JSON success result on failure, including with `--json`.
+
 ## Headless media API
 
 Workspace consumers declare `"@opencut/media": "workspace:*"` as a dependency
@@ -329,6 +416,18 @@ loop boundary. Decoded tone pulses and video flashes check sync, and source hash
 ensure that the base fixtures remain unchanged. Unit tests also cover failed render cleanup,
 metadata verification and destination races without requiring media tools.
 
-Timeline editing, media importing into projects, project rendering and desktop
+T07 unit/CLI tests cover persisted metadata, legacy assets, duplicate identities,
+offline/unreadable sources, invalid media, referenced-asset removal, failed atomic
+publication, outside edits and competing writers. Directory-symlink regressions
+check that import, list, info and validation resolve the same source, including
+when a different readable file exists at the misleading lexical location.
+Availability tests also preserve checks for project locations whose parent is
+absent. Native tests import all five
+fixtures through the built CLI, verify stored metadata and stable IDs after
+reload, inspect assets after sources disappear, and verify source hashes before
+and after import/removal. Native outputs stay in an owned `t07-*` directory under
+`tests/fixtures/generated/`, cleaned on success or failure.
+
+Timeline editing, project rendering and desktop
 project integration are not implemented. The existing composition prototype
 continues to take media paths directly, independently of projects.

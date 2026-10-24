@@ -37,7 +37,27 @@ assets or clips.
 Prefer valid relative media references anchored to the containing project
 directory. Retain an absolute reference when a relative reference cannot be
 represented, including POSIX filenames containing colons. Project-file creation
-is exclusive; overwriting and crash-safe updates require a later explicit design.
+is exclusive. T07 adds guarded updates to existing regular project files through
+the Node adapter: lock cooperating writers, validate the updated data, sync a
+temporary file and atomically rename it over the destination. Refuse project
+symlinks/hard links and detected outside edits. This guarantees complete JSON
+visibility, without promising power-loss durability or arbitrary external-writer
+coordination. Handled failures clean owned temporary data and locks; forced
+termination can leave stale artifacts.
+
+Use the physical containing directory consistently for import, asset inspection,
+media availability checks and writer locks. Directory symlinks must resolve to
+the same source and lock as the physical project path, including for references
+containing `..`. Canonicalize the parent only; retaining the filename lets update
+guards detect and refuse project-file symlinks. Keep the standalone portable path
+helpers lexical for inspecting path syntax without filesystem access.
+
+T07 also adds optional asset probe metadata within prerelease schema version 1.
+Existing documents remain readable; older strict readers reject the new field.
+Only the Node adapter uses the headless media package for import probing. The
+main project API still has no filesystem or media-tool access. Imported images
+use visual (`video`) media types with a metadata kind of `image`; no image track
+or timeline editing behavior is introduced.
 
 The full schema and API contract live in [PROJECT_FORMAT.md](../PROJECT_FORMAT.md).
 

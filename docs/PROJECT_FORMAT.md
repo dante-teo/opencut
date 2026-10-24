@@ -1,10 +1,11 @@
-# Project format (T05)
+# Project format (T07)
 
 OpenCut projects are UTF-8 JSON objects with `schemaVersion: 1`. The suggested
 filename is `name.opencut.json`; the API does not require an extension. This is
 the shared headless data model, independent of Electron, React and FFmpeg.
 T05 provides creation, validation and persistence APIs. T06 exposes creation,
-information and validation through the [CLI](CLI.md#projects). Editing commands,
+information and validation through the [CLI](CLI.md#projects). T07 adds media
+import/list/info/remove APIs and CLI commands. Timeline editing commands,
 undo/redo, project rendering and desktop project integration are deferred.
 
 ## Example
@@ -29,7 +30,19 @@ undo/redo, project rendering and desktop project integration are deferred.
       "name": "Camera",
       "file": { "type": "relative", "path": "media/camera.mp4" },
       "mediaTypes": ["video", "audio"],
-      "duration": { "numerator": 1001, "denominator": 100 }
+      "duration": { "numerator": 1001, "denominator": 100 },
+      "metadata": {
+        "kind": "video",
+        "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+        "durationSeconds": 10.01,
+        "width": 640,
+        "height": 360,
+        "videoCodec": "h264",
+        "audioCodec": "aac",
+        "frameRate": 29.97002997002997,
+        "frameRateRatio": "30000/1001",
+        "hasAudio": true
+      }
     },
     {
       "id": "asset-music",
@@ -63,16 +76,19 @@ undo/redo, project rendering and desktop project integration are deferred.
 }
 ```
 
+The camera asset illustrates T07 metadata. The music asset demonstrates that
+existing assets without recorded metadata remain valid.
+
 ## Fields and invariants
 
-| Entity   | Fields and constraints                                                                                                                                                                     |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Project  | Required `schemaVersion`, `metadata`, `settings`, `assets`, `tracks`, `clips`. Empty collections are valid.                                                                                |
-| Metadata | Stable `id`, nonblank `name`, UTC `createdAt` and `updatedAt` timestamps with millisecond precision. `updatedAt` must not precede `createdAt`.                                             |
-| Settings | Positive safe-integer pixel `width` and `height`; positive rational `frameRate` in frames per second. These are project settings, independent of any export codec restrictions.            |
-| Asset    | Stable `id`, nonblank `name`, `file` reference, nonempty unique `mediaTypes` containing `video`, `audio` or both. Optional positive rational `duration` in seconds. Omit unknown duration. |
-| Track    | Stable `id`, nonblank `name`, `type` of `video` or `audio`.                                                                                                                                |
-| Clip     | Stable `id`, `assetId`, `trackId`, and rational `timelineStart`, `sourceIn`, `sourceOut` in seconds. The referenced asset must contain the track's media type.                             |
+| Entity   | Fields and constraints                                                                                                                                                                                                   |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Project  | Required `schemaVersion`, `metadata`, `settings`, `assets`, `tracks`, `clips`. Empty collections are valid.                                                                                                              |
+| Metadata | Stable `id`, nonblank `name`, UTC `createdAt` and `updatedAt` timestamps with millisecond precision. `updatedAt` must not precede `createdAt`.                                                                           |
+| Settings | Positive safe-integer pixel `width` and `height`; positive rational `frameRate` in frames per second. These are project settings, independent of any export codec restrictions.                                          |
+| Asset    | Stable `id`, nonblank `name`, `file` reference, nonempty unique `mediaTypes` containing `video`, `audio` or both. Optional positive rational `duration` in seconds and optional probe `metadata`. Omit unknown duration. |
+| Track    | Stable `id`, nonblank `name`, `type` of `video` or `audio`.                                                                                                                                                              |
+| Clip     | Stable `id`, `assetId`, `trackId`, and rational `timelineStart`, `sourceIn`, `sourceOut` in seconds. The referenced asset must contain the track's media type.                                                           |
 
 IDs start with an ASCII letter or digit and contain only letters, digits,
 underscores and hyphens. They must be unique across metadata, assets, tracks and
@@ -84,8 +100,20 @@ video and audio clips.
 
 All object fields are strict: unknown fields, missing required fields and numeric
 strings are rejected. This prevents typos or unsupported data from being silently
-discarded. Names and paths are preserved rather than trimmed. No probe metadata,
-temporary playback URLs or machine-specific cache state is embedded.
+discarded. Names and paths are preserved rather than trimmed. Temporary playback
+URLs and machine-specific cache state are not embedded.
+
+T07 adds optional strict asset `metadata`: `kind` (`video`, `audio`, `image`),
+`formatName`, `durationSeconds`, pixel `width`/`height`, `videoCodec`, `audioCodec`,
+average `frameRate`, `frameRateRatio` and `hasAudio`. All metadata fields are
+required when the object exists; unknown/inapplicable values are `null`, except
+the required kind and boolean audio presence. Dimensions are positive safe integers;
+duration is finite/nonnegative and FPS is finite/positive when known. Images
+use the existing `video` media type for visual content, with metadata kind `image`
+and null duration/FPS. No image track type or editing policy is introduced.
+Import also stores positive known duration as rational seconds rounded to
+microseconds for the existing source-bound validator. Probe metadata is a snapshot;
+availability checks do not refresh it or detect changed content at the same path.
 
 ## Exact time
 
@@ -146,6 +174,16 @@ reference passes validation. Otherwise it retains an absolute reference, includi
 for POSIX filenames containing colons. Windows input separators are normalized.
 This is lexical path handling, not realpath/symlink canonicalization or proof of
 Windows runtime support.
+
+Filesystem-backed asset inspection and media availability checks resolve project
+directory symlinks to the physical parent before resolving media references,
+matching import/update behavior. `canonicalProjectFilePath(path)` provides this
+parent canonicalization without following a symlink at the project filename;
+updates still reject project-file symlinks and hard links.
+When the native parent is absent or not a directory, canonicalization retains the
+normalized path so availability checks can report missing media. Foreign-platform
+paths remain lexical. This helper requires an absolute path and does not require
+the project file itself to exist.
 
 For example, the following uses an absolute reference even though the media and
 project share a folder root:
@@ -230,9 +268,18 @@ const report = await validateProjectFile('/absolute/path/demo.opencut.json');
 
 File I/O requires an absolute path for the current host. `writeProjectFile`
 creates a new file exclusively in an existing directory and refuses existing
-files and symlinks. It validates before opening the destination. Updates to an
-existing file and crash-safe replacement are deferred. I/O failures throw
-`ProjectFileError` with `READ_FAILED` or `WRITE_FAILED`, `path` and the underlying
+files and symlinks. It validates before opening the destination. T07 adds
+`updateProjectFile(path, async (project, path) => ({ project, result }))` for
+existing regular, singly-linked files. It locks cooperating writers, validates
+the returned project, syncs a temporary file and atomically renames it over the
+destination. A no-op preserves bytes and timestamps; failed publication preserves
+the prior file. The parent must be writable; project symlinks/hard links are
+refused. Outside changes detected before rename cause a retry error. Handled
+failures clean temporary data and locks. Forced termination may leave a stale
+`<project-file>.lock` or `.opencut-update-*` directory. Power-loss durability and
+arbitrary noncooperating writers are outside the guarantee.
+I/O failures throw `ProjectFileError` with `READ_FAILED`, `WRITE_FAILED` or
+`UPDATE_FAILED`, `path` and the underlying
 `cause`. Format/version failures from reads remain `ProjectFormatError`.
 Invalid path arguments, including relative project-file locations or
 foreign-platform paths passed to file I/O, throw `TypeError` before filesystem
@@ -256,11 +303,42 @@ Offline projects remain valid data and loadable even when this combined report
 has `valid: false`. I/O errors still throw `ProjectFileError`; invalid path
 arguments still throw `TypeError`. The CLI maps failed validation to exit 1.
 
+Asset operations are also exported from `@opencut/core/node`:
+
+```ts
+import {
+  importMediaAsset,
+  listMediaAssets,
+  getMediaAsset,
+  removeMediaAsset,
+} from '@opencut/core/node';
+
+const imported = await importMediaAsset(
+  '/work/project.json',
+  '/media/camera.mp4',
+);
+const inventory = await listMediaAssets('/work/project.json');
+const asset = await getMediaAsset('/work/project.json', imported.asset.id);
+await removeMediaAsset('/work/project.json', imported.asset.id);
+```
+
+Project locations must be absolute native paths. Import source paths may be
+absolute or cwd-relative. Import reuses T02 `probeMedia` and requires manually
+installed ffprobe; the other operations do not invoke media tools. The main
+core entry point stays free of filesystem and media-tool imports.
+`AssetError.code` distinguishes `ASSET_NOT_FOUND`, `ASSET_REFERENCED`,
+`SOURCE_UNAVAILABLE` and `INVALID_MEDIA`; tool failures retain `MediaError`.
+See [the asset CLI contract](CLI.md#project-media-assets) for results, canonical
+source references, duplicate identity, offline behavior and atomic-save limits.
+
 ## Version evolution
 
 The top-level safe-integer version is checked before reading a version's structure.
 This schema version is independent of the application version from `opencut --version`.
-Version 1 is the sole supported version. Other safe-integer versions are rejected
+Version 1 is the sole supported version. T07 deliberately extends this prerelease
+version with optional asset metadata: existing T05/T06 files still load unchanged,
+but older strict readers cannot read assets containing the new metadata field.
+Other safe-integer versions are rejected
 with a clear supported-version message; missing, unsafe or malformed versions
 are invalid structures. Future format changes must explicitly decide whether to
 increment the schema version and add a tested migration at this boundary. No migration

@@ -25,7 +25,9 @@ vi.mock('node:fs/promises', async (original) => {
 
 const directories: string[] = [];
 async function temporary(): Promise<string> {
-  const directory = await fs.mkdtemp(join(tmpdir(), 'opencut-project-'));
+  const directory = await fs.realpath(
+    await fs.mkdtemp(join(tmpdir(), 'opencut-project-')),
+  );
   directories.push(directory);
   return directory;
 }
@@ -131,6 +133,35 @@ describe('media reference paths', () => {
 });
 
 describe('project file and media checks', () => {
+  it('retains availability checks for project locations with an absent parent', async () => {
+    const directory = await temporary();
+    const source = join(directory, 'source.txt');
+    await fs.writeFile(source, 'source sentinel');
+    const project = createProject({ name: 'Absent project directory' });
+    project.assets = [
+      {
+        id: 'available',
+        name: 'Available',
+        file: { type: 'absolute', path: source },
+        mediaTypes: ['audio'],
+      },
+      {
+        id: 'missing',
+        name: 'Missing',
+        file: { type: 'relative', path: 'missing.txt' },
+        mediaTypes: ['audio'],
+      },
+    ];
+    expect(
+      (
+        await checkProjectMedia(
+          project,
+          join(directory, 'absent', 'project.json'),
+        )
+      ).map((media) => media.status),
+    ).toEqual(['available', 'missing']);
+  });
+
   it('returns format issues as a validation report while retaining I/O errors', async () => {
     const directory = await temporary();
     const path = join(directory, 'invalid.json');

@@ -20,7 +20,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 (probing, decoding, playback and encoding) are separate concerns. Detailed editing
 contracts and the playback/render backend require later technical validation.
 
-## Current scope: T06
+## Current scope: T07
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -48,10 +48,18 @@ JSON reports, scoped help, predictable exit codes and exclusive project creation
 Validation reports project-data issues and local media availability separately.
 Project commands require no Electron or media tools. See [CLI.md](CLI.md#projects).
 
+T07 adds CLI media import/list/info/remove backed by shared headless core APIs.
+Imports probe video, audio and images, persist metadata and stable UUIDs, and
+reference original files without copying. Normalized paths, symlinks and hard
+links deduplicate by source identity. Inspection reports offline files and
+referencing clips; removal refuses referenced assets and never deletes source
+files. Project mutations use atomic replacement and a writer lock. Only import
+needs ffprobe. See [the asset command contract](CLI.md#project-media-assets).
+
 ## Excluded
 
-T06 does not implement timeline editing, undo/redo, final rendering architecture,
-media importing, project editing commands or desktop project media integration. No FFmpeg or
+T07 does not implement timeline editing, undo/redo, final rendering architecture,
+or desktop project media integration. No FFmpeg or
 MLT runtime is bundled; media commands require manually installed external tools.
 Fixture generation remains an optional development utility.
 
@@ -62,4 +70,4 @@ User media must never be silently changed or overwritten.
 
 macOS is the initial required platform. Package boundaries should stay portable;
 Windows/Linux support requires explicit validation later. No distribution,
-installer, updater, signing or notarization work is included in T06. T07 is not implemented.
+installer, updater, signing or notarization work is included in T07. T08 is not implemented.

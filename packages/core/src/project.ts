@@ -43,6 +43,18 @@ export const mediaReferenceSchema = z.discriminatedUnion('type', [
 ]);
 
 const mediaType = z.enum(['video', 'audio']);
+const assetMetadataSchema = z.strictObject({
+  kind: z.enum(['video', 'audio', 'image']),
+  formatName: z.string().nullable(),
+  durationSeconds: z.number().finite().nonnegative().nullable(),
+  width: z.int().positive().nullable(),
+  height: z.int().positive().nullable(),
+  videoCodec: z.string().nullable(),
+  audioCodec: z.string().nullable(),
+  frameRate: z.number().finite().positive().nullable(),
+  frameRateRatio: z.string().nullable(),
+  hasAudio: z.boolean(),
+});
 const assetSchema = z.strictObject({
   id,
   name,
@@ -57,6 +69,7 @@ const assetSchema = z.strictObject({
   duration: timeSchema
     .refine((value) => value.numerator > 0, 'Known duration must be positive.')
     .optional(),
+  metadata: assetMetadataSchema.optional(),
 });
 const trackSchema = z.strictObject({ id, name, type: mediaType });
 const clipSchema = z.strictObject({

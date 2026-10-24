@@ -44,3 +44,10 @@ T05 follow-up: [ADR 0004](0004-versioned-project-model.md) establishes the proje
 format, rational time model and persistence boundary in core. Editing commands,
 undo/redo and desktop/CLI project integration remain deferred. The original
 shared-core ownership and renderer trust boundary continue to apply.
+
+T06/T07 follow-up: project create/info/validate and media import/list/info/remove
+now invoke shared core APIs from the standalone CLI. The optional core Node
+adapter coordinates probing through the headless media package; the main model
+API remains independent of media tools. Timeline editing and desktop project
+integration remain deferred. See [the current core architecture](../ARCHITECTURE.md)
+and [the project format decision](0004-versioned-project-model.md).
