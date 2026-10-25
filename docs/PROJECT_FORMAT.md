@@ -1,4 +1,4 @@
-# Project format (T09)
+# Project format (T10)
 
 OpenCut projects are UTF-8 JSON objects with `schemaVersion: 1`. The suggested
 filename is `name.opencut.json`; the API does not require an extension. This is
@@ -7,7 +7,7 @@ T05 provides creation, validation and persistence APIs. T06 exposes creation,
 information and validation through the [CLI](CLI.md#projects). T07 adds media
 import/list/info/remove APIs and CLI commands. T08 adds shared timeline editing
 operations and CLI commands. T09 adds atomic transactions and persistent undo/redo.
-Project rendering and desktop project integration are deferred.
+T10 renders a single video track through `project render`; desktop project integration remains deferred. See [render limits and timing](CLI.md#project-rendering).
 
 ## Example
 
@@ -150,7 +150,10 @@ may touch exactly; gaps and cross-track overlap are allowed. This rule applies
 to validation, loading, serialization and every editing operation. Clip duration
 and timeline end must also be representable by safe rational components;
 arithmetic never rounds or silently overflows. Collection order is preserved;
-no rendering or cross-track compositing/mixing behavior is defined.
+T10 rendering sorts clips by timeline position on one video track and rejects
+additional tracks. Cross-track compositing/mixing remains undefined. T10 requires
+project-frame-aligned times and defines source zero as the first video frame;
+see [the rendering contract](CLI.md#project-rendering).
 
 ## Media references and portability
 

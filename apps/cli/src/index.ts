@@ -18,6 +18,7 @@ import {
   importMediaAsset,
   listMediaAssets,
   readProjectFile,
+  renderProjectFile,
   removeMediaAsset,
   validateProjectFile,
   writeProjectFile,
@@ -28,14 +29,15 @@ import type { MediaMetadata } from '@opencut/media';
 
 const help = `Usage: opencut [command] [options]
 
-OpenCut — project, media asset and timeline editing, transactions and headless media tools (T09).
-Project rendering is not implemented yet.
+OpenCut — project, media asset and timeline editing, transactions and headless rendering (T10).
 
 Commands:
   project create <project-file> --name <name> [--width <px>] [--height <px>] [--fps <n|n/d>]
                                        Create a new project without overwriting
   project info <project-file>           Show metadata, settings and statistics
   project validate <project-file>       Check project data and media references
+  project render <project-file> --output <new.mp4>
+                                       Render one video track with black gaps (no audio)
   media import <project-file> <file>    Import a source reference and probe metadata
   media list <project-file>             List assets, metadata and source availability
   media info <project-file> <asset-id>   Inspect an asset by stable ID
@@ -70,13 +72,21 @@ Options:
 
 Project create defaults: 1920x1080, 30/1 fps; positive safe integer dimensions
 and frame-rate components. Relative project paths resolve from the working directory.
-Project commands, timeline edits and media list/info/remove need no media tools. Import/probe need ffprobe;
-extraction/composition also need ffmpeg.
+Project create/info/validate, timeline edits and media list/info/remove need no media tools.
+Import/probe need ffprobe; extraction/composition/project render also need ffmpeg.
 Compose supports 2–16 clips, up to 600 seconds; exports H.264/AAC MP4.
 Exit codes: 0 success, 1 validation/runtime/file/media failure, 2 invalid arguments.
 `;
 
 const projectHelp = {
+  render: `Usage: opencut project render <project-file> --output <new.mp4> [--json] [--help]
+
+Render exactly one video track to H.264 MP4 at project resolution and rational frame rate.
+Gaps are black. Source audio is omitted; audio/additional tracks and still images are rejected.
+Times must align to project frames; source points use the first video frame as zero.
+Supports even dimensions up to 3840x2160, 1–120 fps, 64 clips and 600 seconds.
+Requires FFmpeg 8+ and ffprobe. Output must be new, in an existing directory.
+`,
   create: `Usage: opencut project create <project-file> --name <name> [options]
 
 Create a new version 1 project in an existing directory; never overwrite files or symlinks.
@@ -249,7 +259,7 @@ async function runCli(args: string[]): Promise<void> {
           : command === 'project'
             ? projectCommand
               ? projectHelp[projectCommand]
-              : `Usage: opencut project <create|info|validate> <project-file> [options]\n\n${Object.values(projectHelp).join('\n')}`
+              : `Usage: opencut project <create|info|validate|render> <project-file> [options]\n\n${Object.values(projectHelp).join('\n')}`
             : command === 'media'
               ? mediaCommand
                 ? mediaHelp[mediaCommand]
@@ -350,14 +360,16 @@ async function runCli(args: string[]): Promise<void> {
   if (command === 'project') {
     if (!projectCommand || positionals.length !== 3 || !projectFile?.trim()) {
       throw new UsageError(
-        'Expected project create|info|validate <project-file>; create also requires --name <name>.',
+        'Expected project create|info|validate|render <project-file>; create also requires --name <name>.',
       );
     }
     const allowed = [
       'json',
       ...(projectCommand === 'create'
         ? ['name', 'width', 'height', 'fps']
-        : []),
+        : projectCommand === 'render'
+          ? ['output']
+          : []),
     ];
     for (const option of Object.keys(values)) {
       if (!allowed.includes(option))
@@ -372,6 +384,20 @@ async function runCli(args: string[]): Promise<void> {
         'Project file paths must not contain control characters.',
       );
     const path = resolve(projectFile);
+    if (projectCommand === 'render') {
+      if (
+        !values.output?.trim() ||
+        !values.output.toLowerCase().endsWith('.mp4')
+      )
+        throw new UsageError('project render requires --output <new.mp4>.');
+      const result = await renderProjectFile(path, values.output);
+      output(
+        result,
+        `Saved ${result.frameCount} frames (${result.width}x${result.height}, ${result.frameRate.numerator}/${result.frameRate.denominator} fps, H.264, video only) to ${result.path}\n`,
+        values.json,
+      );
+      return;
+    }
     if (projectCommand === 'validate') {
       const result = await validateProjectFile(path);
       output(

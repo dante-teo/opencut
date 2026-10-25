@@ -1,4 +1,4 @@
-# OpenCut CLI at T09
+# OpenCut CLI at T10
 
 Run commands at the root of an installed checkout. Build with `pnpm build` if
 `apps/cli/dist/index.js` does not exist.
@@ -39,7 +39,7 @@ use `schemaVersion` when checking project-format compatibility.
 
 ## Projects
 
-Project commands run without Electron, FFmpeg or ffprobe. Each takes an explicit
+Project create/info/validate run without Electron, FFmpeg or ffprobe. Project render requires FFmpeg and ffprobe. Each takes an explicit
 project-file path, relative to the working directory or absolute; result paths are
 absolute. No directory discovery, automatic parent creation or extension requirement
 exists. Prefer `.opencut.json` and quote paths containing spaces. Use `--` before
@@ -315,6 +315,79 @@ termination may leave `.opencut-compose-*` beside the destination. Source media
 is not modified. This is an SDR composition spike; HDR/color management,
 misleading source timing, project files and timeline editing are outside scope.
 
+## Project rendering
+
+`project render <project-file> --output <new.mp4> [--json]` reads a saved project
+snapshot and renders one video track to H.264/yuv420p MP4. It requires FFmpeg 8+
+with libx264 and standard filters, plus ffprobe on PATH. The project's resolution
+and exact rational frame rate determine the output. Source audio is omitted;
+the MP4 contains only video. No audio mixing, transitions, effects or GUI project
+integration is implemented.
+
+T10 requires exactly one video track, even if additional tracks would be empty.
+Audio tracks/clips, still images, empty timelines and multi-track projects fail
+explicitly. Remove unsupported tracks/content before rendering. Only referenced
+assets are probed; unused offline assets do not block a render. Relative sources
+resolve from the physical project directory, including directory aliases.
+Projects and original media are read only; history and revisions are unchanged.
+
+Clips play at 1x, sorted by timeline start rather than JSON array order. Leading
+and interior gaps are black; duration ends at the last clip's exclusive end.
+There is no separately stored trailing duration. Every timeline start and source
+in/out must align exactly with a project-frame boundary; subframe times are
+rejected with an alignment error. The CLI's existing frame-based edits satisfy
+this rule. Missing/unreadable media, invalid references/overlaps, unknown video
+duration and source ranges exceeding freshly probed video bounds fail with
+clip/path diagnostics. Stored import metadata is not treated as proof that the
+current file still matches it.
+
+Source time zero is the selected video's first frame, as in T03 composition;
+container/stream start offsets are normalized. Source in/out are positions on the
+project-rate sampling grid, with an exclusive out point. Each source is converted
+to that grid with FFmpeg's `fps` filter (nearest timestamp rounding) before integer
+frame trimming. A split therefore selects exactly the same sampled frames as the
+unsplit clip, even when source and project rates differ. Aspect ratio is preserved
+with square pixels and black letterboxing. At fractional EOF rounding, at most
+one cloned frame completes the last frame interval. Global output timestamps are
+regenerated from integer frame indices using the project's rational time base,
+so concatenation cannot accumulate floating-point timing drift. This is CFR
+resampling, not a promise to retain every frame of a VFR or differently rated source.
+
+Supported limits: even width 2–3840, even height 2–2160, 1–120 fps, at most 64 clips
+and 600 seconds including gaps. Reduced frame-rate numerator/denominator must fit
+positive signed 32-bit FFmpeg rational components. Unsupported settings fail;
+rendering never substitutes defaults. Encoding and output decode/count verification
+each have a 10-minute wall-clock limit and 4 MiB stdout/stderr limits. Each input
+decoder uses one thread; encoding uses two. Whole-source sampling before trim
+can be slow for late in-points. HDR/color management and cross-platform validation
+remain outside this milestone.
+
+Choose a new `.mp4` in an existing writable directory supporting hard links.
+Existing files, directories and symlinks are refused, including publication races.
+The encoder writes to an owned `.opencut-render-*` sibling directory. Before
+publication, ffprobe verifies codec, dimensions, exact frame rate and measured
+duration, then decodes/counts all output frames. Publication uses the same
+exclusive hard-link strategy as T03. Handled failures remove temporary output;
+forced process termination can leave the temporary directory. Check exit status
+before reading JSON, and inspect the resulting output before claiming delivery.
+Errors remain text on stderr with no JSON success result: exit 2 for invalid
+arguments/options, exit 1 for invalid/unsupported projects, media, tools or I/O.
+
+JSON contains `projectPath`, `path` (absolute), `width`, `height`, reduced rational
+`frameRate`, integer `frameCount`, planned `durationSeconds`, and measured `metadata`
+in the probe schema. Human output reports frames, dimensions, rate and destination.
+Only `--output`, `--json` and scoped `--help` apply; settings come from the project.
+
+Headless APIs: `planProjectRender(project)` from `@opencut/core` returns pure,
+ordered clip/gap segments with integer counts. `renderProjectFile(absoluteProjectPath,
+output)` from `@opencut/core/node` reads, resolves and renders that snapshot.
+`renderVideoTimeline(options)` from `@opencut/media` executes resolved frame
+segments without importing the project model, CLI or Electron. The planner and
+media executor remain separate so future tracks/effects can extend the plan.
+
+For a complete create/import/trim/split/gap/render sequence and its expected frame
+count, see the [worked example](../../../docs/CLI.md#worked-render-example).
+
 ## Prerequisites and paths
 
 `probe` requires external `ffprobe` on PATH; extraction also requires `ffmpeg`
@@ -327,4 +400,4 @@ For filenames starting with `-`, place options before `--` and the filename,
 or use an absolute path. For an output name starting with `-`, use
 `--output=-frame.png` or an absolute path. Quote paths in the calling shell.
 The complete [CLI/API contract](../../../docs/CLI.md) describes all fields and
-limits. Project rendering and GUI project commands do not exist.
+limits. Desktop project integration remains deferred.

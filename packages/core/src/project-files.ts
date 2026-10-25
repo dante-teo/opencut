@@ -376,3 +376,5 @@ export {
   removeMediaAsset,
 } from './assets.js';
 export type { AssetInfo, AssetImportResult } from './assets.js';
+
+export { renderProjectFile } from './render-files.js';

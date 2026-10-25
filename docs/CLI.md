@@ -1,4 +1,4 @@
-# CLI reference (T09)
+# CLI reference (T10)
 
 Build from the checkout root with `pnpm build`. The `opencut` executable is
 workspace-local. Use the direct Node form for machine-readable stdout; pnpm
@@ -32,7 +32,8 @@ already exist, and the output file must not exist.
   create an empty version 1 project without overwriting.
 - `project info <project-file> [--json]`: display validated metadata, settings and collection counts.
 - `project validate <project-file> [--json]`: validate project structure, internal references and media availability.
-- `project --help` and `project create|info|validate --help`: show project usage.
+- `project render <project-file> --output <new.mp4> [--json]`: render one video track with black gaps and no audio.
+- `project --help` and `project create|info|validate|render --help`: show project usage.
 - `media import <project-file> <file> [--json]`: import a source reference and metadata.
 - `media list <project-file> [--json]`: list stored assets and source availability.
 - `media info <project-file> <asset-id> [--json]`: inspect a stable asset ID.
@@ -81,7 +82,7 @@ use the latter to identify the supported project format.
 
 ## Projects
 
-Project commands run independently of Electron and need no FFmpeg/ffprobe.
+Project commands run independently of Electron. Create/info/validate need no FFmpeg/ffprobe; render requires both tools.
 `<project-file>` is always an explicit file location, with no implicit project discovery
 or directory creation. Relative paths resolve from the process working directory;
 results report absolute paths. Quote paths with spaces. Any filename extension is
@@ -94,7 +95,7 @@ the T05 core model. Width and height must be positive safe integers (up to
 `--fps` accepts a positive safe integer or a rational with positive safe integer
 components, such as `24` or `30000/1001`. Decimal rates such as `29.97` are rejected;
 use an exact ratio. Ratios are preserved as supplied. These project settings are
-data-model values, not a promise that a future renderer supports every value.
+data-model values; T10 rendering supports the explicit limits below.
 The core generates a stable UUID and UTC creation/update timestamps. Assets,
 tracks and clips start empty. Inputs are validated before opening the destination.
 The parent must exist; existing files, directories and symlinks, including dangling
@@ -271,8 +272,8 @@ apply the same overlap rule, including unsorted hand-edited documents. Pre-T08
 files with same-track overlaps are now invalid; resolve their positions/ranges in
 JSON before using edit commands. There is no silent migration. Derived durations
 and ends must fit safe rational JSON components; arithmetic overflow fails without
-rounding. No ripple, implicit track creation, speed changes, linked AV operations,
-project rendering or GUI integration exists. T09 adds transactions and undo/redo
+rounding. No ripple, implicit track creation, speed changes, linked AV operations
+or GUI project integration exists. T09 adds transactions and undo/redo
 as described below.
 
 `timeline list` returns `{ path, frameRate, duration, tracks }`. All times are
@@ -584,12 +585,110 @@ options apply. They follow existing CLI errors: exit 2 for invalid arguments,
 exit 1 for project/media/filesystem/prerequisite failures, diagnostics on stderr
 and no JSON success result on failure, including with `--json`.
 
+## Project rendering
+
+`project render <project-file> --output <new.mp4> [--json]` reads a saved project
+snapshot and renders one video track to H.264/yuv420p MP4. It requires FFmpeg 8+
+with libx264 and standard filters, plus ffprobe on PATH. The project's resolution
+and exact rational frame rate determine the output. Source audio is omitted;
+the MP4 contains only video. No audio mixing, transitions, effects or GUI project
+integration is implemented.
+
+T10 requires exactly one video track, even if additional tracks would be empty.
+Audio tracks/clips, still images, empty timelines and multi-track projects fail
+explicitly. Remove unsupported tracks/content before rendering. Only referenced
+assets are probed; unused offline assets do not block a render. Relative sources
+resolve from the physical project directory, including directory aliases.
+Projects and original media are read only; history and revisions are unchanged.
+
+Clips play at 1x, sorted by timeline start rather than JSON array order. Leading
+and interior gaps are black; duration ends at the last clip's exclusive end.
+There is no separately stored trailing duration. Every timeline start and source
+in/out must align exactly with a project-frame boundary; subframe times are
+rejected with an alignment error. The CLI's existing frame-based edits satisfy
+this rule. Missing/unreadable media, invalid references/overlaps, unknown video
+duration and source ranges exceeding freshly probed video bounds fail with
+clip/path diagnostics. Stored import metadata is not treated as proof that the
+current file still matches it.
+
+Source time zero is the selected video's first frame, as in T03 composition;
+container/stream start offsets are normalized. Source in/out are positions on the
+project-rate sampling grid, with an exclusive out point. Each source is converted
+to that grid with FFmpeg's `fps` filter (nearest timestamp rounding) before integer
+frame trimming. A split therefore selects exactly the same sampled frames as the
+unsplit clip, even when source and project rates differ. Aspect ratio is preserved
+with square pixels and black letterboxing. At fractional EOF rounding, at most
+one cloned frame completes the last frame interval. Global output timestamps are
+regenerated from integer frame indices using the project's rational time base,
+so concatenation cannot accumulate floating-point timing drift. This is CFR
+resampling, not a promise to retain every frame of a VFR or differently rated source.
+
+Supported limits: even width 2–3840, even height 2–2160, 1–120 fps, at most 64 clips
+and 600 seconds including gaps. Reduced frame-rate numerator/denominator must fit
+positive signed 32-bit FFmpeg rational components. Unsupported settings fail;
+rendering never substitutes defaults. Encoding and output decode/count verification
+each have a 10-minute wall-clock limit and 4 MiB stdout/stderr limits. Each input
+decoder uses one thread; encoding uses two. Whole-source sampling before trim
+can be slow for late in-points. HDR/color management and cross-platform validation
+remain outside this milestone.
+
+Choose a new `.mp4` in an existing writable directory supporting hard links.
+Existing files, directories and symlinks are refused, including publication races.
+The encoder writes to an owned `.opencut-render-*` sibling directory. Before
+publication, ffprobe verifies codec, dimensions, exact frame rate and measured
+duration, then decodes/counts all output frames. Publication uses the same
+exclusive hard-link strategy as T03. Handled failures remove temporary output;
+forced process termination can leave the temporary directory. Check exit status
+before reading JSON, and inspect the resulting output before claiming delivery.
+Errors remain text on stderr with no JSON success result: exit 2 for invalid
+arguments/options, exit 1 for invalid/unsupported projects, media, tools or I/O.
+
+JSON contains `projectPath`, `path` (absolute), `width`, `height`, reduced rational
+`frameRate`, integer `frameCount`, planned `durationSeconds`, and measured `metadata`
+in the probe schema. Human output reports frames, dimensions, rate and destination.
+Only `--output`, `--json` and scoped `--help` apply; settings come from the project.
+
+Headless APIs: `planProjectRender(project)` from `@opencut/core` returns pure,
+ordered clip/gap segments with integer counts. `renderProjectFile(absoluteProjectPath,
+output)` from `@opencut/core/node` reads, resolves and renders that snapshot.
+`renderVideoTimeline(options)` from `@opencut/media` executes resolved frame
+segments without importing the project model, CLI or Electron. The planner and
+media executor remain separate so future tracks/effects can extend the plan.
+
+### Worked render example
+
+From a built checkout, create a 320×180 project at 30 fps. Choose a timed video
+with at least two seconds of video and a new project/output in an existing directory.
+Replace `ASSET_ID`, `TRACK_ID` and `CLIP_ID` with the corresponding `asset.id`,
+`track.id` and `clip.id` from the preceding JSON results. Both clip additions use
+the same asset and track.
+
+```sh
+node apps/cli/dist/index.js project create /path/demo.opencut.json --name "Timeline render" --width 320 --height 180 --fps 30 --json
+node apps/cli/dist/index.js media import /path/demo.opencut.json /path/source.mp4 --json
+node apps/cli/dist/index.js track add /path/demo.opencut.json --type video --name Video --json
+node apps/cli/dist/index.js clip add /path/demo.opencut.json ASSET_ID --track TRACK_ID --at 0 --in 15 --out 45 --json
+node apps/cli/dist/index.js clip split /path/demo.opencut.json CLIP_ID --at 15 --json
+node apps/cli/dist/index.js clip add /path/demo.opencut.json ASSET_ID --track TRACK_ID --at 45 --in 45 --out 60 --json
+node apps/cli/dist/index.js timeline list /path/demo.opencut.json --json
+node apps/cli/dist/index.js project render /path/demo.opencut.json --output /path/demo-render.mp4 --json
+node apps/cli/dist/index.js probe /path/demo-render.mp4 --json
+```
+
+The expected output is 60 frames (2 seconds): the first trimmed clip occupies
+frames 0–29, split at frame 15; frames 30–44 are black; the second source range
+occupies frames 45–59. All in/out values are project-frame indices; the source
+ranges are 0.5–1.5 seconds and 1.5–2 seconds, with exclusive ends. Check the render
+result's `frameCount`, dimensions, rate and measured metadata, then inspect/decode
+the MP4. Validation success alone does not execute a render.
+
 ## Headless media API
 
 Workspace consumers declare `"@opencut/media": "workspace:*"` as a dependency
 and build the headless packages before importing it. The package exports
 `probeMedia(file)`,
 `extractFrame(file, timestampSeconds, output)`, `composeMedia(options)`,
+`renderVideoTimeline(options)`,
 their TypeScript option/result types, and `MediaError`.
 
 ```ts
@@ -624,7 +723,7 @@ Composition needs FFmpeg with `libx264`, AAC, and the standard scale, pad, fps,
 concat, aresample, amix and alimiter filters, including scale's `reset_sar` option
 (FFmpeg 8+; validated here with FFmpeg 9).
 Install them manually through your preferred package manager. OpenCut does not
-install, download or bundle media executables. Project commands, help/version, ordinary unit tests,
+install, download or bundle media executables. Project create/info/validate, help/version, ordinary unit tests,
 and basic desktop playback do not need them. Desktop frame stepping needs ffprobe for average FPS.
 
 Node's built-in `execFile` is sufficient for this small subprocess boundary;
@@ -696,5 +795,11 @@ exact undo/redo across reloads, branch invalidation, individual-command history,
 dry-run bytes/mtime preservation, stale revisions, simultaneous writers, outside
 replacement and failed atomic publication. Sources remain unchanged.
 
-Project rendering and desktop project integration are not implemented. The existing composition prototype
-continues to take media paths directly, independently of projects.
+T10 unit/CLI tests cover exact planning, unsupported projects/settings, output protection,
+publication races, failed encoding/verification cleanup and missing tools. Native
+integration tests render saved fixture projects through the built CLI and independently
+probe/decode output. They check order, trim endpoints, split equivalence, leading/interior
+black boundaries, mixed source rates, fractional-rate PTS spacing, nonzero source starts,
+directory aliases, stale bounds and source/project preservation. Owned `t10-*` native
+test directories are cleaned on success or failure. Desktop project integration remains
+deferred; the existing T03 path-based composition command remains available.

@@ -10,6 +10,7 @@ project creation, information and validation in the CLI. T07 adds media asset
 import, listing, inspection and safe removal. T08 adds shared headless timeline
 editing through the CLI: track management and clip add/move/trim/split/remove.
 T09 adds [atomic batches, persistent undo/redo, dry-run and revision checks](CLI.md#transactions-undo-and-redo).
+T10 adds [saved timeline rendering](CLI.md#project-rendering) to video-only H.264 MP4 with exact project-frame timing and black gaps.
 Desktop project integration remains deferred.
 
 ## Quick start (macOS)
@@ -134,7 +135,8 @@ not impose hardware-dependent latency thresholds.
 ffprobe, generating temporary media rather than depending on existing fixtures.
 `pnpm test:media` requires all five existing generated fixtures and exercises the
 built CLI, including video/audio/image asset import, composition, decoded A/V
-sync and delayed streams. It creates
+sync, delayed streams and saved-timeline rendering. Render checks cover clip order,
+trims/splits, black gaps, fractional frame timing and source preservation. It creates
 and cleans only its own derived inputs and outputs under the generated directory.
 `pnpm fixtures:validate` only needs ffprobe: it counts decoded video frames and
 rejects decoder errors, even when a damaged file retains valid header metadata.
@@ -148,8 +150,8 @@ apps/
   desktop/             Electron main + sandboxed preload + React renderer
   cli/                 Standalone Node CLI
 packages/
-  core/                Headless project model, validation, persistence, assets and timeline editing
-  media/               Headless probing, frame extraction and composition spike
+  core/                Headless project model, persistence, assets, timeline editing and render planning
+  media/               Headless probing, frame extraction, composition and timeline encoding
   shared/              Reserved home for genuinely shared utilities/types
 skills/video-editor/   Product Agent Skill and its current CLI reference
 tests/

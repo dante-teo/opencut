@@ -21,7 +21,7 @@ describe('standalone built CLI', () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(result.stdout).toContain('Usage: opencut');
-      expect(result.stdout).toContain('not implemented yet');
+      expect(result.stdout).toContain('project render');
     },
   );
 
@@ -51,7 +51,7 @@ describe('standalone built CLI', () => {
     );
   });
 
-  it.each(['create', 'info', 'validate'])(
+  it.each(['create', 'info', 'validate', 'render'])(
     'provides scoped help for project %s',
     (command) => {
       const result = run('project', command, '--help');

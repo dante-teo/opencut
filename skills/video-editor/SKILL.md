@@ -1,6 +1,6 @@
 ---
 name: video-editor
-description: Use the OpenCut CLI to create, inspect and validate video projects, manage media assets and timeline tracks/clips, apply atomic batches, undo/redo edits, inspect media, extract PNG frames, or compose video clips with background music. Project rendering is not available.
+description: Use the OpenCut CLI to create, inspect and validate video projects, manage media assets and timeline tracks/clips, apply atomic batches, undo/redo edits, inspect media, extract PNG frames, render a saved single-video-track timeline to MP4, or compose video clips with background music.
 ---
 
 # OpenCut CLI
@@ -29,7 +29,7 @@ T07 adds `media import`, `media list`, `media info` and `media remove` with stab
 asset IDs, persisted metadata, source availability and atomic project updates.
 T08 adds timeline inspection, video/audio track management and clip add/move/trim/split/remove
 through shared headless operations. T09 adds atomic batches, persistent undo/redo,
-dry-run and revision checks. Project rendering remains deferred.
+dry-run and revision checks. T10 renders a saved single-video-track timeline with black gaps to H.264 MP4.
 The desktop preview and path-based media commands remain separate
 from project data.
 
@@ -47,6 +47,7 @@ Implemented commands (use the direct Node form for clean JSON stdout):
 node apps/cli/dist/index.js project create /path/to/new.opencut.json --name "My project" --fps 30000/1001 --json
 node apps/cli/dist/index.js project info /path/to/new.opencut.json --json
 node apps/cli/dist/index.js project validate /path/to/new.opencut.json --json
+node apps/cli/dist/index.js project render /path/to/new.opencut.json --output /path/to/new-render.mp4 --json
 node apps/cli/dist/index.js media import /path/to/new.opencut.json /path/to/video.mp4 --json
 node apps/cli/dist/index.js media list /path/to/new.opencut.json --json
 node apps/cli/dist/index.js media info /path/to/new.opencut.json ASSET_ID --json
@@ -56,7 +57,7 @@ node apps/cli/dist/index.js extract-frame /path/to/video.mp4 --timestamp 0.5 --o
 node apps/cli/dist/index.js compose /path/to/clip1.mp4 /path/to/clip2.mp4 --music /path/to/music.wav --output /path/to/new-composition.mp4 --json
 ```
 
-Project commands need no media tools or Electron. Choose an explicit project-file
+Project create/info/validate need no media tools or Electron; project render needs FFmpeg and ffprobe. Choose an explicit project-file
 path; relative paths use the working directory. Creation requires `--name` and a
 new destination in an existing directory. Existing files and symlinks are refused.
 Defaults are 1920×1080 at 30/1 fps; use `--width`, `--height` and integer or rational
@@ -117,6 +118,21 @@ history stacks. A batch can return operation results with `changed: false`; thos
 results do not imply a saved change. On conflict, reload history/content and
 reconsider the edit before retrying. A dry-run is a preview, not a saved edit; IDs/timestamps can differ on
 real apply. Read back history and timeline/media state after successful mutations.
+
+For saved timeline rendering, read [the rendering reference](references/cli.md#project-rendering).
+Run `project render PROJECT --output NEW.mp4 --json` after reading the timeline.
+Use exactly one video track, with at least one timed-video clip; remove additional
+tracks, including empty and audio tracks. Source audio is omitted. Still images,
+subframe timing and unsupported settings fail explicitly. Resolution and frame
+rate come from the project: even dimensions up to 3840x2160, rational 1–120 fps,
+at most 64 clips and 600 seconds including black gaps. Source in/out use the
+project-rate sampling grid relative to the first video frame; out is exclusive.
+Split clips preserve the sampled source sequence. Only referenced assets must be
+online; the saved project and its history remain unchanged. Choose a new `.mp4`
+in an existing writable directory supporting hard links. Check `frameCount`,
+`frameRate` and measured metadata in the result, and inspect/decode the output
+before claiming completion. The CLI verifies metadata and decoded frame count
+before publishing; handled failures leave no partial destination.
 
 Probing needs `ffprobe` on PATH; extraction/composition also need `ffmpeg`. Never silently
 install these tools. Inspect metadata before selecting a timestamp. Use finite,

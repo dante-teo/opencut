@@ -2,13 +2,13 @@
 
 ## Workspace boundaries
 
-| Package            | Owns                                                                     | Actual dependencies                                       |
-| ------------------ | ------------------------------------------------------------------------ | --------------------------------------------------------- |
-| `@opencut/desktop` | Electron lifecycle, restricted IPC, React source preview                 | core, media, Electron, React, range-parser                |
-| `@opencut/cli`     | Argument parsing, stdout/stderr and exit codes                           | core, media, Node built-ins                               |
-| `@opencut/core`    | Headless identity, project model, persistence, assets and timeline edits | Zod; media and Node built-ins in optional `/node` adapter |
-| `@opencut/media`   | Probing, frame extraction and composition through external tools         | Node built-ins                                            |
-| `@opencut/shared`  | Reserved location for utilities/types used by multiple packages          | none                                                      |
+| Package            | Owns                                                                                      | Actual dependencies                                       |
+| ------------------ | ----------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `@opencut/desktop` | Electron lifecycle, restricted IPC, React source preview                                  | core, media, Electron, React, range-parser                |
+| `@opencut/cli`     | Argument parsing, stdout/stderr and exit codes                                            | core, media, Node built-ins                               |
+| `@opencut/core`    | Headless identity, project model, persistence, assets, timeline edits and render planning | Zod; media and Node built-ins in optional `/node` adapter |
+| `@opencut/media`   | Probing, frame extraction, composition and timeline encoding through external tools       | Node built-ins                                            |
+| `@opencut/shared`  | Reserved location for utilities/types used by multiple packages                           | none                                                      |
 
 Actual runtime dependency direction is `desktop → core ← cli`, with desktop main,
 CLI and the core Node adapter depending on media. The rationale is
@@ -37,8 +37,9 @@ for single-frame PNG extraction in media. T03 adds `composeMedia(options)` in
 media as a technical spike, called directly by the CLI alongside inspection and
 extraction. T04 adds isolated HTML video playback in desktop. The T05 model stores
 intent without executing edits or connecting to these media/preview prototypes.
-Future engine hosting and core coordination remain open decisions. This scoped
-FFmpeg use does not select the eventual playback/render backend.
+T10 coordinates saved-project export through a pure frame plan and the existing
+FFmpeg media backend. Broader engine hosting and desktop playback ownership remain
+open decisions.
 The scoped tool choice and subprocess boundary are recorded in
 [ADR 0002](adr/0002-external-ffmpeg-media-tools.md).
 
@@ -126,8 +127,8 @@ track compatibility, globally unique IDs, safe derived times and no same-track
 overlap are enforced by project validation on edits, load and save. Half-open
 intervals may touch, and separate tracks may overlap. Trims fix timeline start;
 splits preserve source mapping and total duration while retaining the left ID.
-There are no implicit ripple edits or populated-track cascades. Project rendering
-remains deferred. T09 adds a pure transaction dispatcher over these operations.
+There are no implicit ripple edits or populated-track cascades. T10 renders one
+video track from saved project data. T09 adds a pure transaction dispatcher over these operations.
 A transaction validates each evolving state, then records full before/after content
 snapshots as one history entry when the final content changes. If operations cancel
 out, generated `updatedAt` changes alone do not create a commit: revision, both
@@ -188,6 +189,28 @@ validation after replacement. These test observable interaction boundaries rathe
 than relying only on programmatically assigning slider values. See
 [ADR 0003](adr/0003-html-video-preview.md) for the preview recommendation,
 measurement definitions and accuracy limits.
+
+## Timeline rendering (T10)
+
+The pure core `planProjectRender` validates the project, enforces the single-video-track
+scope, converts rational boundaries exactly with bigint, orders clips through existing
+timeline operations, and emits integer-frame clip/gap segments. The optional core Node
+adapter reads one saved snapshot and resolves referenced assets against the physical
+project directory. Media's `renderVideoTimeline` accepts resolved segments without
+importing the project model, CLI or Electron. Existing FFmpeg process execution and
+T03 aspect-ratio normalization are reused; maintained FFmpeg filters supply sampling,
+trimming, black generation and concatenation without another backend/dependency.
+
+The media executor normalizes each source to the project frame grid before trimming,
+so splits cannot change source sampling phase. Global timestamps are regenerated from
+integer indices in the rational project time base after concat, avoiding cumulative
+boundary rounding. MP4 stores the frame-rate numerator as its track timescale. The
+video-only H.264 result is probed and fully decoded/count-checked before exclusive
+hard-link publication. Source audio is omitted; unsupported tracks/images/subframe
+times and out-of-range media fail explicitly. No project mutation occurs. The
+[CLI rendering contract](CLI.md#project-rendering) defines prerequisites and limits.
+[ADR 0007](adr/0007-integer-frame-timeline-rendering.md) records the plan boundary,
+source sampling and publication decisions.
 
 ## Desktop trust boundary
 
@@ -261,7 +284,7 @@ Fixture validation is independent of the application media APIs.
 ## Open decisions for subsequent tasks
 
 - Validate FFmpeg/MLT capabilities, licensing, distribution and process isolation.
-- Define project rendering on top of the shared model and transactional edits.
+- Extend the T10 single-video-track renderer when later tasks define additional tracks, audio and effects.
 - Evolve the scripting contract for later editing capabilities; current
   project, media and timeline JSON is documented in [CLI.md](CLI.md). Stdout is reserved for results,
   stderr for errors.

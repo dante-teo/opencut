@@ -66,3 +66,6 @@ export {
 } from './editing.js';
 export type { EditOperation, EditTransaction } from './editing.js';
 export type { ProjectSnapshot, HistoryEntry } from './project.js';
+
+export { planProjectRender, RenderError } from './render-plan.js';
+export type { ProjectRenderPlan, RenderSegment } from './render-plan.js';

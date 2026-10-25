@@ -5,3 +5,5 @@ export type { CompositionOptions, CompositionResult } from './compose.js';
 export { MediaError } from './process.js';
 export type { MediaMetadata, MediaStream } from './probe.js';
 export type { FrameResult } from './frame.js';
+export { renderVideoTimeline } from './render.js';
+export type { VideoTimelineOptions, VideoTimelineResult } from './render.js';

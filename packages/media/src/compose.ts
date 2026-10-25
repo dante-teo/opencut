@@ -1,5 +1,6 @@
 import { link, lstat, mkdtemp, rm } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
+import { fitVideo } from './video-filter.js';
 import { probeMedia } from './probe.js';
 import type { MediaMetadata, MediaStream } from './probe.js';
 import { MediaError, runMediaTool } from './process.js';
@@ -184,8 +185,7 @@ export async function composeMedia(
     const { video } = clip;
     filters.push(
       `[${i}:${video.index}]setpts=PTS-STARTPTS,` +
-        `scale=${width}:${height}:force_original_aspect_ratio=decrease:force_divisible_by=2:reset_sar=1,` +
-        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,` +
+        `${fitVideo(width, height)},` +
         `fps=${fps}:eof_action=pass,tpad=stop_mode=clone:stop_duration=${duration},trim=end_frame=${clip.frameCount},` +
         `settb=AVTB,setpts=N/(${fps}*TB),format=yuv420p[v${i}]`,
     );

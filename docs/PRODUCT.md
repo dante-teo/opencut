@@ -20,7 +20,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 (probing, decoding, playback and encoding) are separate concerns. Detailed editing
 contracts and the playback/render backend require later technical validation.
 
-## Current scope: T09
+## Current scope: T10
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -46,7 +46,7 @@ T06 adds standalone `project create`, `project info` and `project validate`
 commands over the T05 APIs, with configurable resolution/rational frame rate,
 JSON reports, scoped help, predictable exit codes and exclusive project creation.
 Validation reports project-data issues and local media availability separately.
-Project commands require no Electron or media tools. See [CLI.md](CLI.md#projects).
+These three commands require no Electron or media tools. See [CLI.md](CLI.md#projects).
 
 T07 adds CLI media import/list/info/remove backed by shared headless core APIs.
 Imports probe video, audio and images, persist metadata and stable UUIDs, and
@@ -70,10 +70,15 @@ individual timeline/media edits share the same snapshot history. Failed batches
 leave no partial content or history; changed edits after undo discard redo.
 See [transactions, undo and redo](CLI.md#transactions-undo-and-redo).
 
+T10 adds `project render` over saved timelines, supporting one video track,
+sequential trimmed/split clips, black gaps and exact integer/rational frame timing.
+Output is H.264 MP4 at project resolution/rate. Sources and project history remain
+unchanged. See [project rendering](CLI.md#project-rendering) for limits.
+
 ## Excluded
 
-T09 does not implement final rendering architecture,
-or desktop project media integration. No FFmpeg or
+T10 does not implement multiple-track rendering, audio output/mixing, transitions,
+effects, or desktop project media integration. No FFmpeg or
 MLT runtime is bundled; media commands require manually installed external tools.
 Fixture generation remains an optional development utility.
 
@@ -84,4 +89,4 @@ User media must never be silently changed or overwritten.
 
 macOS is the initial required platform. Package boundaries should stay portable;
 Windows/Linux support requires explicit validation later. No distribution,
-installer, updater, signing or notarization work is included in T09. T10 is not implemented.
+installer, updater, signing or notarization work is included in T10. T11 is not implemented.
