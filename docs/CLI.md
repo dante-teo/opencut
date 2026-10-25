@@ -1,4 +1,4 @@
-# CLI reference (T12)
+# CLI reference (T13)
 
 Build from the checkout root with `pnpm build`. The `opencut` executable is
 workspace-local. Use the direct Node form for machine-readable stdout; pnpm
@@ -32,7 +32,7 @@ already exist, and the output file must not exist.
   create an empty version 1 project without overwriting.
 - `project info <project-file> [--json]`: display validated metadata, settings and collection counts.
 - `project validate <project-file> [--json]`: validate project structure, internal references and media availability.
-- `project render <project-file> --output <new.mp4> [--json]`: composite video/image layers with mixed audio tracks to H.264/AAC MP4.
+- `project render <project-file> --output <file.mp4> [--quality <draft|balanced|high>] [--resolution <project|720p|1080p>] [--overwrite] [--json]`: composite video/image layers with mixed audio tracks to H.264/AAC MP4.
 - `project --help` and `project create|info|validate|render --help`: show project usage.
 - `media import <project-file> <file> [--json]`: import a source reference and metadata.
 - `media list <project-file> [--json]`: list stored assets and source availability.
@@ -68,17 +68,19 @@ name starting with `-`, use `--output=-frame.png` or an absolute path. Quote pat
 containing spaces in the calling shell.
 
 All commands print readable output by default. `--json` prints one JSON
-object followed by a newline, without progress or diagnostics on stdout.
+object followed by a newline, except `project render`, which streams JSONL progress
+and terminal events. Diagnostics never go to stdout.
 Errors always go to stderr as text, including with `--json`.
 
 Exit codes: **0** success, **2** invalid command/arguments, **1** failed project
 validation, invalid project data, media, filesystem, prerequisite or execution failure.
+Project-render cancellation exits **130** for SIGINT or **143** for SIGTERM.
 Unknown commands/options, extra positional arguments and options that do not apply
 to the command fail. Repeated options use the last value, matching Node's parser
 and existing media commands. `--name` applies to project creation and track creation;
 `--width`, `--height` and `--fps` apply to project creation and composition with
 the distinct bounds below. `--timestamp` applies only to extraction; `--output`
-applies to extraction and composition. Help with `--json` returns `{ "help": "..." }`;
+applies to extraction, composition and project rendering. Help with `--json` returns `{ "help": "..." }`;
 version with `--json` returns `{ "name": "OpenCut", "version": "0.1.0" }`.
 The application version is separate from the project file's `schemaVersion`;
 use the latter to identify the supported project format.
@@ -600,10 +602,10 @@ and no JSON success result on failure, including with `--json`.
 
 ## Project rendering
 
-`project render <project-file> --output <new.mp4> [--json]` reads a saved project
+`project render <project-file> --output <file.mp4> [--quality <draft|balanced|high>] [--resolution <project|720p|1080p>] [--overwrite] [--json]` reads a saved project
 snapshot and composites video/image tracks with mixed audio to H.264/yuv420p and AAC MP4. It requires FFmpeg 8+
 with libx264 and standard filters, plus ffprobe on PATH. The project's resolution
-and exact rational frame rate determine the output. Original video audio is preserved
+and exact rational frame rate determine the default output. Original video audio is preserved
 by default. Independent audio clips on any number of audio tracks can overlap
 original audio and each other across tracks. No transitions, audio effects,
 keyframes, fades or GUI project integration are implemented.
@@ -724,22 +726,78 @@ decoder uses one thread; encoding uses two. Whole-source sampling before trim
 can be slow for late in-points. HDR/color management and cross-platform validation
 remain outside this milestone.
 
-Choose a new `.mp4` in an existing writable directory supporting hard links.
-Existing files, directories and symlinks are refused, including publication races.
-The encoder writes to an owned `.opencut-render-*` sibling directory. Before
-publication, ffprobe verifies H.264/AAC codecs, 48 kHz stereo audio, zero audio start,
-dimensions, exact frame rate and measured A/V
-duration, then decodes/counts all output frames. Publication uses the same
-exclusive hard-link strategy as T03. Handled failures remove temporary output;
-forced process termination can leave the temporary directory. Check exit status
-before reading JSON, and inspect the resulting output before claiming delivery.
-Errors remain text on stderr with no JSON success result: exit 2 for invalid
-arguments/options, exit 1 for invalid/unsupported projects, media, tools or I/O.
+### Render presets and progress
 
-JSON contains `projectPath`, `path` (absolute), `width`, `height`, reduced rational
-`frameRate`, integer `frameCount`, planned `durationSeconds`, and measured `metadata`
-in the probe schema. Human output reports frames, dimensions, rate and destination.
-Only `--output`, `--json` and scoped `--help` apply; settings come from the project.
+`--quality draft|balanced|high` selects H.264 encoding: `draft` uses
+ultrafast/CRF 28, `balanced` uses veryfast/CRF 20 (the unchanged default), and
+`high` uses medium/CRF 16. Audio remains 192 kb/s, 48 kHz stereo AAC.
+`--resolution project|720p|1080p` defaults to the project dimensions. `720p`
+fits the finished canvas inside 1280×720 (720×1280 for portrait); `1080p`
+uses 1920×1080 (1080×1920 for portrait). Orientation is retained; aspect ratio
+is preserved up to rounding each side down to an even pixel, minimum 2. Fitting
+uses an integer scale ratio until the final division, so exact even dimensions
+stay exact: 704×396 with `1080p` becomes 1920×1080, and 1248×702 with `720p`
+becomes 1280×720. Portrait equivalents swap the output dimensions. Square output
+is 720×720 or 1080×1080. Presets may upscale smaller projects. Compositing still uses
+project coordinates, then scales the finished canvas; transforms, timing and the
+saved project are unchanged. Project render limits still apply before scaling.
+
+Human progress is written to stderr; stdout contains the final saved-file message.
+With `--json`, **project render streams JSON Lines**, one compact object per line.
+Other commands retain their existing single JSON result. Use the direct Node
+executable to avoid pnpm wrapper output. Parse each line separately and check the
+exit status and terminal event; do not parse the entire stream as one JSON value.
+FFmpeg's structured `-progress` output is sampled every 0.25 seconds when available:
+
+```jsonl
+{"event":"progress","phase":"rendering","percent":25,"processedFrames":30,"totalFrames":120,"elapsedSeconds":2,"remainingSeconds":6}
+{"event":"progress","phase":"verifying","percent":100,"processedFrames":120,"totalFrames":120,"elapsedSeconds":8,"remainingSeconds":null}
+```
+
+Progress begins at zero before encoding. `processedFrames` is a monotonic, bounded
+count of encoded frames; `percent` is that count divided by `totalFrames` × 100.
+`elapsedSeconds` measures wall time since encoding began, including later
+verification. `remainingSeconds` estimates encoding time from average throughput;
+it is `null` before measurable progress, at encoder completion and during
+verification. Startup/input probing has no percentage or ETA. A 100% encoding
+event does not mean the file is ready: verification and atomic publication must
+succeed first. Slow/stalled FFmpeg operations can delay progress records.
+
+The terminal `completed` event contains `projectPath`, `path` (absolute), output
+`width`/`height`, reduced rational `frameRate`, integer `frameCount`, planned
+`durationSeconds`, selected `quality`/`resolution`, and measured `metadata` in the
+probe schema. Runtime/preflight failures emit `{"event":"failed","message":"..."}`;
+cancellation emits `{"event":"cancelled","message":"Render cancelled."}`.
+Invalid arguments emit no events. Diagnostics, including meaningful FFmpeg stderr,
+remain text on stderr. No `completed` event is emitted for failed/cancelled jobs.
+
+Choose a `.mp4` in an existing writable directory. Existing outputs (including
+publication races) are refused by default. `--overwrite` explicitly permits
+atomic replacement of a regular file after verification; source media and the
+project file are protected, including filesystem aliases. Output symlinks and
+directories are refused. New-file publication requires hard-link support;
+replacement uses same-filesystem rename. FFmpeg only writes inside an owned
+`.opencut-render-*` sibling directory on the destination filesystem.
+Before publication, ffprobe verifies H.264/AAC codecs, 48 kHz stereo audio, zero
+start, dimensions, exact frame rate, measured A/V duration and decoded frame count.
+Failures/cancellation remove temporary output and preserve any previous export.
+
+Send SIGINT (Ctrl-C) or SIGTERM to cancel input probes, encoding or verification.
+The CLI forwards cancellation as SIGTERM to the active tool, escalates to SIGKILL
+after two seconds if needed, waits for child closure, cleans up, and exits 130 for
+SIGINT or 143 for SIGTERM. Publication is the commit point: a signal after atomic
+publication cannot retract a successful export. SIGKILL of the CLI, power loss or
+OS termination cannot run cleanup and may leave an owned temporary directory;
+remove it only after confirming the associated render has stopped. No persistent
+job queue or background service is involved. Exit 2 means invalid arguments;
+exit 1 means invalid/unsupported projects, media, tools or I/O. Inspect/decode the
+completed output before claiming delivery.
+
+```sh
+node apps/cli/dist/index.js project render PROJECT --output export.mp4 --quality high --resolution 1080p --json
+# Explicitly replace an existing regular export only after a successful render:
+node apps/cli/dist/index.js project render PROJECT --output export.mp4 --overwrite --json
+```
 
 Headless APIs: `planProjectRender(project)` from `@opencut/core` returns width,
 height, backgroundColor, reduced frameRate, total frameCount, and ordered
@@ -747,10 +805,14 @@ height, backgroundColor, reduced frameRate, total frameCount, and ordered
 timelineStartFrame, sourceStartFrame, frameCount, x/y, scale, opacity and fit;
 array order is bottom to top. Audio entries contain the same identity/time fields,
 plus volume, muted and required (true for audio-track clips).
-`renderProjectFile(absoluteProjectPath, output)` from `@opencut/core/node` resolves
+`renderProjectFile(absoluteProjectPath, output, controls?)` from `@opencut/core/node` resolves
 asset references and executes the plan without saving the project.
 `renderVideoTimeline(options)` from `@opencut/media` takes resolved paths in place
-of asset references, plus output. Direct media callers supply `audioClips`
+of asset references, plus output. Both executors accept optional `quality`,
+`resolution`, `overwrite`, an `AbortSignal` as `signal`, and a synchronous
+`onProgress(event)` callback. Cancellation rejects with `RenderCancelledError`
+from `@opencut/media` after child closure and cleanup. Callback errors also stop
+encoding and clean up. Direct media callers supply `audioClips`
 explicitly; omission produces silence. Legacy sequential `segments` are accepted
 instead of `visualClips`, using default transforms; supplying both fails. The pure
 planner now emits `visualClips` rather than its former sequential `segments` shape.
@@ -1010,3 +1072,12 @@ opacity, PNG and video alpha, image duration/splits, background gaps/audio tails
 frame counts/PTS, codecs, dimensions, SAR and audio amplitude measurements verify
 outputs and guard against duplicated audio. CLI/history and invalid settings are
 also tested offline. Owned `t12-*` directories are cleaned after each run.
+
+T13 tests cover structured progress chunk boundaries, monotonic percentages/frame
+counts, shutdown escalation/timeouts, cancellation before work and during
+encoding/verification, output conflicts and verified atomic replacement. Native
+fixture checks stream JSONL from actual FFmpeg renders, independently probe/decode
+quality/resolution presets, send SIGINT/SIGTERM during live encoding, check child
+termination and temporary cleanup, and preserve previous exports after encoding
+failure/cancellation. Source/project hashes remain unchanged. Owned `t13-*`
+directories are cleaned after each run.

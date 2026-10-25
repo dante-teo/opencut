@@ -1,4 +1,4 @@
-# Project format (T12)
+# Project format (T13)
 
 OpenCut projects are UTF-8 JSON objects with `schemaVersion: 1`. The suggested
 filename is `name.opencut.json`; the API does not require an extension. This is
@@ -8,6 +8,10 @@ information and validation through the [CLI](CLI.md#projects). T07 adds media
 import/list/info/remove APIs and CLI commands. T08 adds shared timeline editing
 operations and CLI commands. T09 adds atomic transactions and persistent undo/redo.
 T12 composites video/image tracks and mixes multiple audio tracks through `project render`; desktop project integration remains deferred. See [render limits and timing](CLI.md#project-rendering).
+T13 adds per-export quality/resolution presets, progress and cancellation without
+changing schema version 1. Render controls, progress events and job state are not
+serialized into project settings or editing history. Exporting with a resolution
+preset leaves the saved canvas dimensions and clip coordinates unchanged.
 
 ## Example
 

@@ -87,9 +87,14 @@ and a configurable opaque canvas background. Portrait 9:16, landscape 16:9 and
 square canvases share the same headless model and CLI. Audio still mixes once per
 clip. Existing projects retain centered contain fitting on a black canvas.
 
+T13 adds observable foreground render jobs: structured JSONL progress, graceful
+SIGINT/SIGTERM cancellation, bounded subprocess shutdown, quality/resolution presets,
+and optional atomic replacement of existing exports after verification. Failed or
+cancelled jobs preserve previous exports and clean owned temporary output.
+
 ## Excluded
 
-T12 does not implement transitions, audio effects,
+T13 does not implement transitions, audio effects,
 keyframes, fades, or desktop project media integration. No FFmpeg or
 MLT runtime is bundled; media commands require manually installed external tools.
 Fixture generation remains an optional development utility.
@@ -101,4 +106,5 @@ User media must never be silently changed or overwritten.
 
 macOS is the initial required platform. Package boundaries should stay portable;
 Windows/Linux support requires explicit validation later. No distribution,
-installer, updater, signing or notarization work is included in T12. T13 is not implemented.
+installer, updater, signing or notarization work is included in T13. Render jobs
+run in the invoking process, without a persistent queue, background service or database.

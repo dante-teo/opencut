@@ -78,15 +78,13 @@ describe('media probing', () => {
       language: 'eng',
       startTimeSeconds: -0.02,
     });
-    expect(runMediaTool).toHaveBeenCalledWith('ffprobe', [
-      '-v',
-      'error',
-      '-show_format',
-      '-show_streams',
-      '-of',
-      'json',
-      file,
-    ]);
+    expect(runMediaTool).toHaveBeenCalledWith(
+      'ffprobe',
+      ['-v', 'error', '-show_format', '-show_streams', '-of', 'json', file],
+      undefined,
+      undefined,
+      undefined,
+    );
   });
 
   it('represents absent audio and unknown values explicitly', async () => {

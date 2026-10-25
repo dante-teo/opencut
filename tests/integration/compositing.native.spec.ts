@@ -227,7 +227,15 @@ test('native T12 visual compositing through the built CLI', async (t) => {
       assert.equal(result.status, 0, result.stderr);
       assert.equal(result.stderr, '');
       assert.equal(await readFile(projectFile, 'utf8'), snapshot);
-      const report = JSON.parse(result.stdout);
+      const events = result.stdout
+        .trim()
+        .split('\n')
+        .map((line: string) => JSON.parse(line));
+      const report = events.at(-1);
+      assert.equal(report.event, 'completed');
+      assert.ok(
+        events.some((event: { event: string }) => event.event === 'progress'),
+      );
       const probe = JSON.parse(
         runTool('ffprobe', [
           '-v',

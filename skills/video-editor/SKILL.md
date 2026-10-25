@@ -31,6 +31,7 @@ T08 adds timeline inspection, video/audio track management and clip add/move/tri
 through shared headless operations. T09 adds atomic batches, persistent undo/redo,
 dry-run and revision checks. T11 extends saved single-video-track rendering with original audio, independent audio tracks, overlap mixing, clip volume and muting, and H.264/AAC MP4 output.
 T12 adds overlapping video/image layers, per-clip position/scale/opacity and contain/cover/stretch fitting, canvas dimensions/background and portrait/square output.
+T13 adds JSONL progress, SIGINT/SIGTERM cancellation, quality/resolution presets and explicit atomic export replacement.
 The desktop preview and path-based media commands remain separate
 from project data.
 
@@ -136,8 +137,7 @@ Canvas/visual mutations and batch canvas.set/clip.visual support history and dry
 For a complete batch and its expected frame count, follow the
 [layered portrait example](../../docs/CLI.md#layered-portrait-render-example).
 Original video audio is preserved; sources without audio supply silence.
-Subframe timing and unsupported settings fail explicitly. Resolution and frame
-rate come from the project: even sides up to 3840, total pixels up to 3840×2160
+Subframe timing and unsupported settings fail explicitly. Frame rate comes from the project; resolution defaults to project dimensions: even sides up to 3840, total pixels up to 3840×2160
 (including 2160×3840 portrait), rational 1–120 fps,
 at most 64 clips across all tracks and 600 seconds including gaps. Source in/out use the
 project-rate sampling grid relative to the first video frame; out is exclusive.
@@ -161,7 +161,22 @@ stream and known in-bounds range. Absolute boundaries round to 48 kHz samples;
 fractional splits can differ by one sample and decoded AAC can have EOF padding.
 Only referenced assets must be
 online; the saved project and its history remain unchanged. Choose a new `.mp4`
-in an existing writable directory supporting hard links. Check `frameCount`,
+in an existing writable directory supporting hard links. Use `--quality draft|balanced|high`
+(default balanced) and `--resolution project|720p|1080p` (default project) for export
+presets. Resolution presets fit and scale the finished canvas, preserving orientation
+and layer layout; they may upscale. Output sides round down to even pixels, minimum
+2, while exact preset dimensions stay exact (704×396 → 1920×1080 with `1080p`).
+These options apply only to the export and are not saved in project settings or history.
+With `--json`, parse **each stdout line** as
+an event: `progress` includes phase, percent, processed/total frames, elapsed seconds
+and nullable remaining seconds. Encoding 100% is followed by verification; require
+exit 0 and `event: "completed"` before using the final result. Runtime failures emit
+`failed`, cancellation emits `cancelled`; invalid arguments emit no events.
+Human progress and diagnostics go to stderr. Send SIGINT or SIGTERM to cancel;
+wait for exit 130/143 and cleanup. Existing outputs are refused unless `--overwrite`
+is explicit; replacement happens atomically after verification and never targets
+source media or the project. Failure/cancellation preserves prior exports. SIGKILL
+cannot clean temporary files. Check `frameCount`,
 `frameRate` and measured metadata in the result, and inspect/decode the output
 before claiming completion. The CLI verifies metadata and decoded frame count
 before publishing; handled failures leave no partial destination.

@@ -1,4 +1,5 @@
 import {
+  link,
   mkdtemp,
   readFile,
   readdir,
@@ -10,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderVideoTimeline } from './render.js';
+import type { RenderProgress } from './render-progress.js';
 import type { VideoTimelineOptions } from './render.js';
 import { probeMedia } from './probe.js';
 import type { MediaMetadata, MediaStream } from './probe.js';
@@ -285,6 +287,152 @@ describe('video timeline executor safety', () => {
       expect(await readdir(directory)).toEqual([]);
     },
   );
+
+  it('replaces only a verified export when explicitly requested', async () => {
+    await writeFile(options.output, 'previous export');
+    await renderVideoTimeline({ ...options, overwrite: true });
+    expect(await readFile(options.output, 'utf8')).toBe('verified output');
+    expect(await readdir(directory)).toEqual(['out.mp4']);
+  });
+
+  it('preserves an existing export on encoder failure and verification failure with overwrite', async () => {
+    await writeFile(options.output, 'previous export');
+    verified.video!.codec = 'mpeg4';
+    await expect(
+      renderVideoTimeline({ ...options, overwrite: true }),
+    ).rejects.toThrow(/verification failed/);
+    vi.mocked(runMediaTool).mockImplementation(async (_, args) => {
+      await writeFile(args.at(-1)!, 'partial');
+      throw new MediaError('FFmpeg meaningful diagnostics');
+    });
+    await expect(
+      renderVideoTimeline({ ...options, overwrite: true }),
+    ).rejects.toThrow(/meaningful diagnostics/);
+    expect(await readFile(options.output, 'utf8')).toBe('previous export');
+    expect(await readdir(directory)).toEqual(['out.mp4']);
+  });
+
+  it('refuses explicit replacement of source aliases and output symlinks', async () => {
+    const original = join(directory, 'source.mp4');
+    await writeFile(original, 'source sentinel');
+    options.segments![1] = {
+      ...options.segments![1]!,
+      kind: 'clip',
+      clipId: 'clip',
+      path: original,
+      sourceStartFrame: 0,
+    };
+    await link(original, options.output);
+    await expect(
+      renderVideoTimeline({ ...options, overwrite: true }),
+    ).rejects.toThrow(/source media/);
+    await rm(options.output);
+    await symlink(original, options.output);
+    await expect(
+      renderVideoTimeline({ ...options, overwrite: true }),
+    ).rejects.toThrow(/overwrite/);
+    expect(await readFile(original, 'utf8')).toBe('source sentinel');
+    expect(runMediaTool).not.toHaveBeenCalled();
+  });
+
+  it.each(['rendering', 'verifying'] as const)(
+    'cancels during %s before publication and cleans up',
+    async (phase) => {
+      const controller = new AbortController();
+      await writeFile(options.output, 'previous export');
+      const onProgress = vi.fn((event: RenderProgress) => {
+        if (event.phase === phase) controller.abort();
+      });
+      await expect(
+        renderVideoTimeline({
+          ...options,
+          overwrite: true,
+          signal: controller.signal,
+          onProgress,
+        }),
+      ).rejects.toThrow(/cancelled/);
+      expect(await readFile(options.output, 'utf8')).toBe('previous export');
+      expect(await readdir(directory)).toEqual(['out.mp4']);
+      expect(onProgress).toHaveBeenCalled();
+    },
+  );
+
+  it('does no work for an already cancelled render', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      renderVideoTimeline({ ...options, signal: controller.signal }),
+    ).rejects.toThrow(/cancelled/);
+    expect(probeMedia).not.toHaveBeenCalled();
+    expect(runMediaTool).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['draft', '720p', 1280, 720, 'ultrafast', '28'],
+    ['balanced', 'project', 320, 180, 'veryfast', '20'],
+    ['high', '1080p', 1920, 1080, 'medium', '16'],
+  ] as const)(
+    'uses %s quality and %s resolution',
+    async (quality, resolution, width, height, preset, crf) => {
+      verified.video!.width = width;
+      verified.video!.height = height;
+      const result = await renderVideoTimeline({
+        ...options,
+        quality,
+        resolution,
+      });
+      expect(result).toMatchObject({ quality, resolution, width, height });
+      const args = vi.mocked(runMediaTool).mock.calls[0]![1];
+      expect(args[args.indexOf('-preset') + 1]).toBe(preset);
+      expect(args[args.indexOf('-crf') + 1]).toBe(crf);
+      expect(args).toContain('-progress');
+      expect(args).toContain('pipe:1');
+    },
+  );
+
+  it.each([
+    [704, 396, '1080p', 1920, 1080],
+    [396, 704, '1080p', 1080, 1920],
+    [1248, 702, '720p', 1280, 720],
+    [702, 1248, '720p', 720, 1280],
+    [1024, 768, '720p', 960, 720],
+    [1000, 700, '1080p', 1542, 1080],
+    [1000, 1000, '720p', 720, 720],
+    [2, 3840, '720p', 2, 1280],
+    [704, 396, 'project', 704, 396],
+  ] as const)(
+    'scales %ix%i to %s with exact even dimensions',
+    async (width, height, resolution, expectedWidth, expectedHeight) => {
+      verified.video!.width = expectedWidth;
+      verified.video!.height = expectedHeight;
+      const result = await renderVideoTimeline({
+        ...options,
+        width,
+        height,
+        resolution,
+      });
+      expect(result).toMatchObject({
+        width: expectedWidth,
+        height: expectedHeight,
+      });
+    },
+  );
+
+  it('preserves portrait orientation when scaling the finished canvas', async () => {
+    verified.video!.width = 720;
+    verified.video!.height = 1280;
+    const result = await renderVideoTimeline({
+      ...options,
+      width: 180,
+      height: 320,
+      resolution: '720p',
+    });
+    expect(result).toMatchObject({ width: 720, height: 1280 });
+    const args = vi.mocked(runMediaTool).mock.calls[0]![1];
+    expect(args[args.indexOf('-filter_complex') + 1]).toContain(
+      'scale=720:1280,setsar=1,format=yuv420p[video]',
+    );
+  });
 
   it('wraps missing source errors with the clip and source location', async () => {
     vi.mocked(probeMedia).mockRejectedValue(

@@ -11,6 +11,7 @@ import, listing, inspection and safe removal. T08 adds shared headless timeline
 editing through the CLI: track management and clip add/move/trim/split/remove.
 T09 adds [atomic batches, persistent undo/redo, dry-run and revision checks](CLI.md#transactions-undo-and-redo).
 T12 extends [saved timeline rendering](CLI.md#project-rendering) to H.264/AAC MP4 with ordered video/image layers, position/scale/opacity, canvas fitting/background, portrait/square output, and the existing original/multi-track audio mix and exact project-frame timing.
+T13 adds structured JSONL progress, SIGINT/SIGTERM cancellation, quality/resolution presets and explicit atomic export replacement.
 Desktop project integration remains deferred.
 
 ## Quick start (macOS)
@@ -137,8 +138,10 @@ ffprobe, generating temporary media rather than depending on existing fixtures.
 built CLI, including video/audio/image asset import, composition, decoded A/V
 sync, delayed streams and saved-timeline rendering. Render checks cover clip order,
 trims/splits, black/silent gaps, overlapping tones, volume/mute, A/V markers,
-delayed audio, fractional frame timing and source preservation. It creates
-and cleans only its own derived inputs and outputs under the generated directory.
+delayed audio, fractional frame timing and source preservation. T13 checks also
+cover JSONL progress, exact preset dimensions, SIGINT/SIGTERM child termination,
+temporary cleanup and safe export replacement. The suite creates and cleans only
+its own derived inputs and outputs under the generated directory.
 `pnpm fixtures:validate` only needs ffprobe: it counts decoded video frames and
 rejects decoder errors, even when a damaged file retains valid header metadata.
 See the [fixture contract](../tests/fixtures/README.md) for prerequisites and safe

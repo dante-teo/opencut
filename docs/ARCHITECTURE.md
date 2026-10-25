@@ -189,7 +189,7 @@ than relying only on programmatically assigning slider values. See
 [ADR 0003](adr/0003-html-video-preview.md) for the preview recommendation,
 measurement definitions and accuracy limits.
 
-## Timeline rendering (T12)
+## Timeline rendering (T10–T13)
 
 The pure core `planProjectRender` validates the project, converts rational boundaries
 exactly with bigint, orders visual clips bottom to top by track order and emits
@@ -208,7 +208,9 @@ canvas rectangle. The final output is opaque yuv420p. Visual filters never mix a
 video inputs are reused by the independent audio graph once per clip.
 Global timestamps use integer indices in the rational time base. MP4 stores the
 frame-rate numerator as its timescale. H.264/AAC output is probed and fully decoded/
-counted before exclusive hard-link publication; no project mutation occurs.
+counted before atomic publication; no project mutation occurs. New outputs use an
+exclusive hard link; explicit replacement uses a same-filesystem rename only after
+verification.
 [ADR 0007](adr/0007-integer-frame-timeline-rendering.md) records timing/publication;
 [ADR 0009](adr/0009-video-compositing-and-canvas.md) records visual semantics.
 The [CLI contract](CLI.md#project-rendering) defines prerequisites and limits.
@@ -229,6 +231,24 @@ Same-track overlaps remain forbidden, and the 64-total-clip limit still applies;
 T12 removes the former single-video-track restriction.
 [ADR 0008](adr/0008-positioned-audio-mixing.md) records the audio timing, gain,
 silence, duration and format-compatibility decisions that extend ADR 0007.
+
+T13 keeps each render in the calling process. Media consumes FFmpeg's structured
+`-progress` records and reports frame counts, percent, elapsed time and an estimated
+remaining encoding time through a callback. CLI owns JSONL progress/terminal events,
+human stderr progress and SIGINT/SIGTERM handlers; core stays independent of process
+signals and output streams. An `AbortSignal` reaches input probes, encoding and output
+verification. Cancellation sends SIGTERM, escalates to SIGKILL after two seconds,
+waits for tool closure and cleans owned temporary output before rejecting.
+
+Quality presets select encoder speed/CRF; resolution presets scale the finished
+canvas without reinterpreting project-space transforms. Fitting retains an integer
+scale ratio until the final even-pixel division, avoiding floating-point underflow
+for exact output dimensions. Export controls do not alter the saved project or its
+history. Both publication modes use a verified file in an owned sibling directory
+on the destination filesystem. SIGKILL of the caller and power loss cannot guarantee
+cleanup. [ADR 0010](adr/0010-foreground-render-lifecycle.md) records the lifecycle,
+progress, preset and replacement decisions. The [rendering contract](CLI.md#render-presets-and-progress)
+defines event fields, presets, exit codes and filesystem requirements.
 
 ## Desktop trust boundary
 
@@ -302,7 +322,7 @@ Fixture validation is independent of the application media APIs.
 ## Open decisions for subsequent tasks
 
 - Validate FFmpeg/MLT capabilities, licensing, distribution and process isolation.
-- Extend the T12 visual/audio renderer only when later tasks define transitions or effects.
+- Extend the T13 visual/audio renderer only when later tasks define transitions or effects.
 - Evolve the scripting contract for later editing capabilities; current
   project, media and timeline JSON is documented in [CLI.md](CLI.md). Stdout is reserved for results,
   stderr for errors.

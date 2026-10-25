@@ -1,8 +1,10 @@
-import { link, lstat, mkdtemp, rm } from 'node:fs/promises';
+import { link, lstat, mkdtemp, rename, rm, stat } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import { probeMedia } from './probe.js';
 import type { MediaMetadata } from './probe.js';
-import { MediaError, runMediaTool } from './process.js';
+import { checkRenderSignal, MediaError, runMediaTool } from './process.js';
+import { renderProgress } from './render-progress.js';
+import type { RenderProgress } from './render-progress.js';
 import { fitVisual } from './video-filter.js';
 
 export interface VisualTimelineClip {
@@ -18,7 +20,19 @@ export interface VisualTimelineClip {
   fit?: 'contain' | 'cover' | 'stretch';
 }
 
-export interface VideoTimelineOptions {
+export const renderQualities = ['draft', 'balanced', 'high'] as const;
+export const renderResolutions = ['project', '720p', '1080p'] as const;
+export type RenderQuality = (typeof renderQualities)[number];
+export type RenderResolution = (typeof renderResolutions)[number];
+export interface RenderControls {
+  quality?: RenderQuality | undefined;
+  resolution?: RenderResolution | undefined;
+  overwrite?: boolean | undefined;
+  signal?: AbortSignal | undefined;
+  onProgress?: (progress: RenderProgress) => void;
+}
+
+export interface VideoTimelineOptions extends RenderControls {
   width: number;
   height: number;
   frameRate: { numerator: number; denominator: number };
@@ -50,6 +64,8 @@ export interface VideoTimelineOptions {
 }
 
 export interface VideoTimelineResult {
+  quality: RenderQuality;
+  resolution: RenderResolution;
   path: string;
   width: number;
   height: number;
@@ -169,8 +185,42 @@ function sameFrameRate(
 export async function renderVideoTimeline(
   options: VideoTimelineOptions,
 ): Promise<VideoTimelineResult> {
+  checkRenderSignal(options.signal);
   validateOptions(options);
+  const quality = options.quality ?? 'balanced';
+  const resolution = options.resolution ?? 'project';
+  if (
+    !renderQualities.includes(quality) ||
+    !renderResolutions.includes(resolution)
+  )
+    throw new MediaError('Unknown render quality or resolution preset.');
+  const encoding = {
+    draft: { preset: 'ultrafast', crf: '28' },
+    balanced: { preset: 'veryfast', crf: '20' },
+    high: { preset: 'medium', crf: '16' },
+  }[quality];
   const { width, height, frameRate, frameCount } = options;
+  // Scale the finished canvas, preserving project-space transforms and layout.
+  const longSide = resolution === '720p' ? 1280 : 1920;
+  const shortSide = resolution === '720p' ? 720 : 1080;
+  const maxWidth = width < height ? shortSide : longSide;
+  const maxHeight = width < height ? longSide : shortSide;
+  // Keep the scale as an integer ratio until the final division, so exact even
+  // dimensions cannot lose two pixels through floating-point multiplication.
+  const [scaleNumerator, scaleDenominator]: [number, number] =
+    resolution === 'project'
+      ? [1, 1]
+      : maxWidth * height <= maxHeight * width
+        ? [maxWidth, width]
+        : [maxHeight, height];
+  const outputWidth = Math.max(
+    2,
+    Math.floor((width * scaleNumerator) / (2 * scaleDenominator)) * 2,
+  );
+  const outputHeight = Math.max(
+    2,
+    Math.floor((height * scaleNumerator) / (2 * scaleDenominator)) * 2,
+  );
   let cursor = 0;
   const visualClips: VisualTimelineClip[] =
     options.visualClips ??
@@ -186,8 +236,11 @@ export async function renderVideoTimeline(
   if (extname(path).toLowerCase() !== '.mp4')
     throw new MediaError('Render output must have a .mp4 extension.');
   try {
-    await lstat(path);
-    throw new MediaError(`Refusing to overwrite existing output '${path}'.`);
+    const existing = await lstat(path);
+    if (!options.overwrite || !existing.isFile())
+      throw new MediaError(
+        `Refusing to overwrite existing output '${path}'. Use --overwrite for a regular file.`,
+      );
   } catch (error) {
     if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT'))
       throw error;
@@ -199,16 +252,45 @@ export async function renderVideoTimeline(
     '-nostdin',
     '-n',
     '-xerror',
+    '-nostats',
+    '-stats_period',
+    '0.25',
+    '-progress',
+    'pipe:1',
   ];
   const filters: string[] = [];
   const sources = new Map<string, MediaMetadata>();
   const inputs = new Map<string, number>();
   const readSource = async (clip: { path: string; clipId: string }) => {
+    checkRenderSignal(options.signal);
+    if (options.overwrite) {
+      // Never let explicit replacement target any source, including aliases.
+      const existing = await stat(path).catch((error: unknown) => {
+        if (
+          error instanceof Error &&
+          'code' in error &&
+          error.code === 'ENOENT'
+        )
+          return null;
+        throw error;
+      });
+      const original = await stat(clip.path).catch(() => null);
+      if (
+        existing &&
+        original &&
+        existing.dev === original.dev &&
+        existing.ino === original.ino
+      )
+        throw new MediaError(
+          `Render output must not replace source media '${clip.path}'.`,
+        );
+    }
     let source = sources.get(clip.path);
     if (!source) {
       try {
-        source = await probeMedia(clip.path);
+        source = await probeMedia(clip.path, options.signal);
       } catch (cause) {
+        checkRenderSignal(options.signal);
         throw new MediaError(
           `Clip '${clip.clipId}' cannot read/probe media '${clip.path}'. Restore a readable source file. ${cause instanceof Error ? cause.message : String(cause)}`,
           { cause },
@@ -273,7 +355,7 @@ export async function renderVideoTimeline(
     );
   }
   filters.push(
-    `[canvas${visualClips.length}]settb=1/${numerator},setpts=N*${denominator},format=yuv420p[video]`,
+    `[canvas${visualClips.length}]settb=1/${numerator},setpts=N*${denominator},${outputWidth === width && outputHeight === height ? '' : `scale=${outputWidth}:${outputHeight},setsar=1,`}format=yuv420p[video]`,
   );
   // Round absolute project boundaries to the nearest 48 kHz sample. Never sum
   // independently rounded durations: fractional frame rates must not accumulate drift.
@@ -341,6 +423,7 @@ export async function renderVideoTimeline(
     `${audioLabels.join('')}amix=inputs=${audioLabels.length}:duration=first:normalize=0,` +
       `alimiter=limit=0.95:level=0:latency=1,atrim=end_sample=${totalSamples},asetpts=N/SR/TB[audio]`,
   );
+  checkRenderSignal(options.signal);
   let temporary: string;
   try {
     temporary = await mkdtemp(join(dirname(path), '.opencut-render-'));
@@ -366,9 +449,9 @@ export async function renderVideoTimeline(
       '-c:v',
       'libx264',
       '-preset',
-      'veryfast',
+      encoding.preset,
       '-crf',
-      '20',
+      encoding.crf,
       '-pix_fmt',
       'yuv420p',
       '-threads',
@@ -393,8 +476,16 @@ export async function renderVideoTimeline(
       'mp4',
       rendered,
     );
-    await runMediaTool('ffmpeg', args, 4 * 1024 * 1024, 600_000);
-    const metadata = await probeMedia(rendered);
+    const progress = renderProgress(frameCount, options.onProgress);
+    progress.start();
+    checkRenderSignal(options.signal);
+    await runMediaTool('ffmpeg', args, 4 * 1024 * 1024, 600_000, {
+      signal: options.signal,
+      onStdout: progress.chunk,
+    });
+    checkRenderSignal(options.signal);
+    progress.verifying();
+    const metadata = await probeMedia(rendered, options.signal);
     const video = metadata.video;
     // Decode/count output frames, rather than trusting container duration alone.
     const frameProbe = await runMediaTool(
@@ -413,6 +504,7 @@ export async function renderVideoTimeline(
       ],
       4 * 1024 * 1024,
       600_000,
+      { signal: options.signal },
     );
     const counted = JSON.parse(frameProbe.toString('utf8')) as {
       streams?: { nb_read_frames?: string }[];
@@ -426,8 +518,8 @@ export async function renderVideoTimeline(
       metadata.audio.startTimeSeconds !== 0 ||
       metadata.audio.durationSeconds === null ||
       Math.abs(metadata.audio.durationSeconds - durationSeconds) > 0.0011 ||
-      video.width !== width ||
-      video.height !== height ||
+      video.width !== outputWidth ||
+      video.height !== outputHeight ||
       !sameFrameRate(video.frameRateRatio, numerator, denominator) ||
       video.durationSeconds === null ||
       Math.abs(video.durationSeconds - durationSeconds) > 0.000002 ||
@@ -439,20 +531,41 @@ export async function renderVideoTimeline(
       throw new MediaError(
         'Render verification failed: unexpected codec, dimensions, frame rate, duration or decoded frame count. Check source decodability and trim ranges.',
       );
+    checkRenderSignal(options.signal);
     try {
-      await link(rendered, path);
+      if (options.overwrite) {
+        const destination = await lstat(path).catch((error: unknown) => {
+          if (
+            error instanceof Error &&
+            'code' in error &&
+            error.code === 'ENOENT'
+          )
+            return null;
+          throw error;
+        });
+        if (destination && !destination.isFile())
+          throw new MediaError(
+            `Refusing to overwrite non-regular output '${path}'.`,
+          );
+        checkRenderSignal(options.signal);
+        // Same-filesystem rename replaces a complete file atomically.
+        await rename(rendered, path);
+      } else await link(rendered, path);
     } catch (cause) {
+      if (cause instanceof MediaError) throw cause;
       throw new MediaError(
         cause instanceof Error && 'code' in cause && cause.code === 'EEXIST'
           ? `Refusing to overwrite existing output '${path}'.`
-          : `Cannot publish render '${path}'; the destination filesystem must support hard links.`,
+          : `Cannot publish render '${path}'; check destination permissions and filesystem support for ${options.overwrite ? 'atomic rename' : 'hard links'}.`,
         { cause },
       );
     }
     return {
       path,
-      width,
-      height,
+      quality,
+      resolution,
+      width: outputWidth,
+      height: outputHeight,
       frameRate,
       frameCount,
       durationSeconds,

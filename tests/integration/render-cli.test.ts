@@ -32,11 +32,50 @@ describe('standalone project render command', () => {
       'music.wav',
     ],
     ['project', 'render', 'project.json', '--output', 'out.mp4', '--dry-run'],
+    [
+      'project',
+      'render',
+      'project.json',
+      '--output',
+      'out.mp4',
+      '--quality',
+      'bogus',
+    ],
+    [
+      'project',
+      'render',
+      'project.json',
+      '--output',
+      'out.mp4',
+      '--resolution',
+      '4k',
+    ],
   ])('rejects invalid arguments %j', (...args) => {
     const result = run(...args, '--json');
     expect(result.status).toBe(2);
     expect(result.stdout).toBe('');
     expect(result.stderr).toContain('opencut:');
+  });
+
+  it.each([
+    ['probe', 'source.mp4', '--quality', 'draft'],
+    ['extract-frame', 'source.mp4', '--resolution', '720p'],
+    [
+      'compose',
+      'a.mp4',
+      'b.mp4',
+      '--music',
+      'music.wav',
+      '--output',
+      'out.mp4',
+      '--overwrite',
+    ],
+    ['--version', '--quality', 'high'],
+  ])('rejects render-only options on other commands %j', (...args) => {
+    const result = run(...args, '--json');
+    expect(result.status).toBe(2);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('applies only to project render');
   });
 
   it('reports invalid timelines, missing sources and tools without modifying the saved project', async () => {
@@ -72,13 +111,13 @@ describe('standalone project render command', () => {
       await writeFile(path, snapshot);
       result = run('project', 'render', path, '--output', output, '--json');
       expect(result.status).toBe(1);
-      expect(result.stdout).toBe('');
+      expect(JSON.parse(result.stdout).event).toBe('failed');
       expect(result.stderr).toContain("Clip 'clip'");
       expect(result.stderr).toContain('Cannot read media file');
       await writeFile(join(dir, 'source.mp4'), 'sentinel');
       result = run('project', 'render', path, '--output', output, '--json');
       expect(result.status).toBe(1);
-      expect(result.stdout).toBe('');
+      expect(JSON.parse(result.stdout).event).toBe('failed');
       expect(result.stderr).toContain("'ffprobe' was not found");
       project.assets[0]!.file = {
         type: 'absolute',
@@ -97,7 +136,7 @@ describe('standalone project render command', () => {
         '--json',
       );
       expect(foreign.status).toBe(1);
-      expect(foreign.stdout).toBe('');
+      expect(JSON.parse(foreign.stdout).event).toBe('failed');
       expect(foreign.stderr).toContain('different operating system');
       await writeFile(path, snapshot);
       expect(await readFile(path, 'utf8')).toBe(snapshot);

@@ -2,12 +2,20 @@ export { probeMedia } from './probe.js';
 export { extractFrame } from './frame.js';
 export { composeMedia } from './compose.js';
 export type { CompositionOptions, CompositionResult } from './compose.js';
-export { MediaError } from './process.js';
+export { MediaError, RenderCancelledError } from './process.js';
 export type { MediaMetadata, MediaStream } from './probe.js';
 export type { FrameResult } from './frame.js';
-export { renderVideoTimeline } from './render.js';
+export {
+  renderVideoTimeline,
+  renderQualities,
+  renderResolutions,
+} from './render.js';
 export type {
   VisualTimelineClip,
   VideoTimelineOptions,
   VideoTimelineResult,
+  RenderControls,
+  RenderQuality,
+  RenderResolution,
 } from './render.js';
+export type { RenderProgress } from './render-progress.js';

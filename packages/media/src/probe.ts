@@ -1,4 +1,9 @@
-import { localFile, MediaError, runMediaTool } from './process.js';
+import {
+  checkRenderSignal,
+  localFile,
+  MediaError,
+  runMediaTool,
+} from './process.js';
 
 export interface MediaStream {
   index: number;
@@ -91,17 +96,19 @@ function parseStream(value: unknown): MediaStream {
   };
 }
 
-export async function probeMedia(file: string): Promise<MediaMetadata> {
+export async function probeMedia(
+  file: string,
+  signal?: AbortSignal,
+): Promise<MediaMetadata> {
+  checkRenderSignal(signal);
   const path = await localFile(file);
-  const output = await runMediaTool('ffprobe', [
-    '-v',
-    'error',
-    '-show_format',
-    '-show_streams',
-    '-of',
-    'json',
-    path,
-  ]);
+  const output = await runMediaTool(
+    'ffprobe',
+    ['-v', 'error', '-show_format', '-show_streams', '-of', 'json', path],
+    undefined,
+    undefined,
+    signal ? { signal } : undefined,
+  );
   let data: Record<string, unknown>;
   try {
     data = record(JSON.parse(output.toString('utf8')) as unknown);

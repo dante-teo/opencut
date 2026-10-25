@@ -7,6 +7,22 @@ export class MediaError extends Error {
   override name = 'MediaError';
 }
 
+export class RenderCancelledError extends MediaError {
+  override name = 'RenderCancelledError';
+  constructor() {
+    super('Render cancelled.');
+  }
+}
+
+export function checkRenderSignal(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new RenderCancelledError();
+}
+
+export interface MediaToolControl {
+  signal?: AbortSignal | undefined;
+  onStdout?: (chunk: Buffer) => void;
+}
+
 export async function localFile(file: string): Promise<string> {
   const path = resolve(file);
   try {
@@ -20,25 +36,58 @@ export async function localFile(file: string): Promise<string> {
 
 // execFile passes arguments directly, without shell expansion. Bound both runtime
 // and buffered output; close stdin so neither executable can wait for user input.
-export function runMediaTool(
+export async function runMediaTool(
   tool: 'ffprobe' | 'ffmpeg',
   args: string[],
   maxBuffer = 4 * 1024 * 1024,
   timeoutMs = 60_000,
+  control?: MediaToolControl,
 ): Promise<Buffer> {
+  checkRenderSignal(control?.signal);
   return new Promise((resolve, reject) => {
+    let closed = false;
+    let callbackError: unknown;
+    let callbackFailed = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
+    const stop = () => {
+      if (closed || killTimer) return;
+      child.kill('SIGTERM');
+      killTimer = setTimeout(() => child.kill('SIGKILL'), 2000);
+    };
     const child = execFile(
       tool,
       args,
       {
         encoding: 'buffer',
         shell: false,
-        timeout: timeoutMs,
+        timeout: control ? 0 : timeoutMs,
         killSignal: 'SIGKILL',
         maxBuffer,
         windowsHide: true,
       },
       (error, stdout, stderr) => {
+        closed = true;
+        clearTimeout(killTimer);
+        clearTimeout(timeout);
+        control?.signal?.removeEventListener('abort', stop);
+        if (control?.signal?.aborted) {
+          reject(new RenderCancelledError());
+          return;
+        }
+        if (callbackFailed) {
+          reject(callbackError);
+          return;
+        }
+        if (timedOut) {
+          reject(
+            new MediaError(
+              `${tool} timed out after ${timeoutMs} ms: ${stderr.toString('utf8').trim()}`,
+            ),
+          );
+          return;
+        }
         if (error && 'code' in error && error.code === 'ENOENT') {
           reject(
             new MediaError(
@@ -62,5 +111,24 @@ export function runMediaTool(
       },
     );
     child.stdin?.end();
+    if (control && !closed) {
+      child.stdout?.on('data', (chunk: Buffer) => {
+        if (!control.onStdout || callbackFailed) return;
+        try {
+          control.onStdout(chunk);
+        } catch (error) {
+          callbackError = error;
+          callbackFailed = true;
+          stop();
+        }
+      });
+      control.signal?.addEventListener('abort', stop, { once: true });
+      // Covers cancellation between the initial check and listener registration.
+      if (control.signal?.aborted) stop();
+      timeout = setTimeout(() => {
+        timedOut = true;
+        stop();
+      }, timeoutMs);
+    }
   });
 }

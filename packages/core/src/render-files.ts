@@ -1,4 +1,7 @@
-import { renderVideoTimeline } from '@opencut/media';
+import { stat } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import type { RenderControls } from '@opencut/media';
+import { renderVideoTimeline, RenderCancelledError } from '@opencut/media';
 import {
   canonicalProjectFilePath,
   readProjectFile,
@@ -11,8 +14,24 @@ import { planProjectRender, RenderError } from './render-plan.js';
 export async function renderProjectFile(
   projectFilePath: string,
   output: string,
+  controls: RenderControls = {},
 ) {
+  if (controls.signal?.aborted) throw new RenderCancelledError();
   const path = await canonicalProjectFilePath(projectFilePath);
+  if (controls.overwrite) {
+    const destination = await stat(resolve(output)).catch((error: unknown) => {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT')
+        return null;
+      throw error;
+    });
+    const projectStat = await stat(path);
+    if (
+      destination &&
+      destination.dev === projectStat.dev &&
+      destination.ino === projectStat.ino
+    )
+      throw new RenderError('Render output must not replace the project file.');
+  }
   const project = await readProjectFile(path);
   const plan = planProjectRender(project);
   const assets = new Map(project.assets.map((asset) => [asset.id, asset]));
@@ -40,6 +59,7 @@ export async function renderProjectFile(
     projectPath: path,
     ...(await renderVideoTimeline({
       ...plan,
+      ...controls,
       visualClips,
       audioClips,
       output,

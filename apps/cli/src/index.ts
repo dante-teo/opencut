@@ -24,12 +24,22 @@ import {
   writeProjectFile,
 } from '@opencut/core/node';
 import type { AssetInfo } from '@opencut/core/node';
-import { composeMedia, extractFrame, probeMedia } from '@opencut/media';
-import type { MediaMetadata } from '@opencut/media';
+import {
+  composeMedia,
+  extractFrame,
+  probeMedia,
+  renderQualities,
+  renderResolutions,
+} from '@opencut/media';
+import type {
+  MediaMetadata,
+  RenderQuality,
+  RenderResolution,
+} from '@opencut/media';
 
 const help = `Usage: opencut [command] [options]
 
-OpenCut — project, media asset and timeline editing, transactions and headless rendering (T12).
+OpenCut — project, media asset and timeline editing, transactions and headless rendering (T13).
 
 Commands:
   project create <project-file> --name <name> [--width <px>] [--height <px>] [--fps <n|n/d>]
@@ -58,12 +68,15 @@ Commands:
 Options:
   -h, --help     Show this help
   -v, --version  Show the application version
-  --json        Print requested output as JSON
+  --json        Print JSON (project render streams JSONL events)
   --dry-run     Validate editing/media mutations without saving
   --expected-revision <n> Reject a stale editing/media mutation
   --name        Nonblank project or track name (project create / track add)
   --timestamp   Frame timestamp in nonnegative decimal seconds
-  --output      New PNG/MP4 output path (parent directory must exist)
+  --output      PNG/MP4 output path (parent directory must exist)
+  --quality     draft|balanced|high (project render; default balanced)
+  --resolution  project|720p|1080p (project render; default project)
+  --overwrite   Atomically replace a regular output file (project render only)
   --music       Background audio path (compose only; looped to fit)
   --width       Even output width, 2–3840 (compose default: 1280)
   --height      Even output height, 2–2160 (compose default: 720)
@@ -76,11 +89,11 @@ and frame-rate components. Relative project paths resolve from the working direc
 Project create/info/validate, timeline edits and media list/info/remove need no media tools.
 Import/probe need ffprobe; extraction/composition/project render also need ffmpeg.
 Compose supports 2–16 clips, up to 600 seconds; exports H.264/AAC MP4.
-Exit codes: 0 success, 1 validation/runtime/file/media failure, 2 invalid arguments.
+Exit codes: 0 success, 1 validation/runtime/file/media failure, 2 invalid arguments; render cancellation 130 (SIGINT), 143 (SIGTERM).
 `;
 
 const projectHelp = {
-  render: `Usage: opencut project render <project-file> --output <new.mp4> [--json] [--help]
+  render: `Usage: opencut project render <project-file> --output <file.mp4> [--quality <draft|balanced|high>] [--resolution <project|720p|1080p>] [--overwrite] [--json] [--help]
 
 Composite ordered video/image tracks and mix audio to H.264/AAC MP4 at project settings.
 Visual gaps use the canvas background; audio gaps are silent. Original audio is preserved by default.
@@ -89,7 +102,10 @@ Use clip visual for position/scale/opacity/contain/cover/stretch and canvas set 
 Later video tracks draw above earlier tracks; still images use their explicit clip duration.
 Times must align to project frames; source points use the first video frame as zero.
 Supports even sides up to 3840 (at most 3840x2160 pixels), 1–120 fps, 64 clips across all tracks and 600 seconds.
-Requires FFmpeg 8+ and ffprobe. Output must be new, in an existing directory.
+Requires FFmpeg 8+ and ffprobe. Output must be in an existing directory; replacement requires --overwrite.
+Balanced quality and project resolution are defaults; resolution presets fit the finished canvas, preserving orientation/aspect.
+Progress goes to stderr, or JSONL progress and completed/failed/cancelled events on stdout with --json.
+SIGINT/SIGTERM cancel encoding or verification and clean temporary output before exit (130/143).
 `,
   create: `Usage: opencut project create <project-file> --name <name> [options]
 
@@ -231,6 +247,9 @@ async function runCli(args: string[]): Promise<void> {
       out: { type: 'string' },
       timestamp: { type: 'string' },
       output: { type: 'string' },
+      quality: { type: 'string' },
+      resolution: { type: 'string' },
+      overwrite: { type: 'boolean' },
       music: { type: 'string' },
       width: { type: 'string' },
       height: { type: 'string' },
@@ -281,6 +300,12 @@ async function runCli(args: string[]): Promise<void> {
               : help;
     output({ help: usage }, usage, values.json);
     return;
+  }
+  if (command !== 'project' || file !== 'render') {
+    for (const option of ['quality', 'resolution', 'overwrite'] as const) {
+      if (values[option] !== undefined)
+        throw new UsageError(`--${option} applies only to project render.`);
+    }
   }
   if (command === 'edit') {
     await runEditCommand(positionals, values);
@@ -396,7 +421,7 @@ async function runCli(args: string[]): Promise<void> {
       ...(projectCommand === 'create'
         ? ['name', 'width', 'height', 'fps']
         : projectCommand === 'render'
-          ? ['output']
+          ? ['output', 'quality', 'resolution', 'overwrite']
           : []),
     ];
     for (const option of Object.keys(values)) {
@@ -418,12 +443,57 @@ async function runCli(args: string[]): Promise<void> {
         !values.output.toLowerCase().endsWith('.mp4')
       )
         throw new UsageError('project render requires --output <new.mp4>.');
-      const result = await renderProjectFile(path, values.output);
-      output(
-        result,
-        `Saved ${result.frameCount} frames (${result.width}x${result.height}, ${result.frameRate.numerator}/${result.frameRate.denominator} fps, H.264/AAC) to ${result.path}\n`,
-        values.json,
-      );
+      if (
+        values.quality !== undefined &&
+        !(renderQualities as readonly string[]).includes(values.quality)
+      )
+        throw new UsageError('--quality must be draft, balanced or high.');
+      if (
+        values.resolution !== undefined &&
+        !(renderResolutions as readonly string[]).includes(values.resolution)
+      )
+        throw new UsageError('--resolution must be project, 720p or 1080p.');
+      const controller = new AbortController();
+      let cancellationCode: number | undefined;
+      const cancel = (signal: NodeJS.Signals) => {
+        cancellationCode ??= signal === 'SIGINT' ? 130 : 143;
+        controller.abort();
+      };
+      const jsonLine = (event: unknown) =>
+        process.stdout.write(`${JSON.stringify(event)}\n`);
+      process.on('SIGINT', cancel);
+      process.on('SIGTERM', cancel);
+      try {
+        const result = await renderProjectFile(path, values.output, {
+          quality: values.quality as RenderQuality | undefined,
+          resolution: values.resolution as RenderResolution | undefined,
+          overwrite: values.overwrite,
+          signal: controller.signal,
+          onProgress: (event) => {
+            if (values.json) jsonLine(event);
+            else
+              process.stderr.write(
+                `${event.phase}: ${event.percent.toFixed(1)}% (${event.processedFrames}/${event.totalFrames} frames), elapsed ${event.elapsedSeconds.toFixed(1)}s, remaining ${event.remainingSeconds === null ? 'unknown' : `${event.remainingSeconds.toFixed(1)}s`}\n`,
+              );
+          },
+        });
+        if (values.json) jsonLine({ event: 'completed', ...result });
+        else
+          process.stdout.write(
+            `Saved ${result.frameCount} frames (${result.width}x${result.height}, ${result.frameRate.numerator}/${result.frameRate.denominator} fps, H.264/AAC) to ${result.path}\n`,
+          );
+      } catch (error) {
+        if (values.json)
+          jsonLine({
+            event: controller.signal.aborted ? 'cancelled' : 'failed',
+            message: error instanceof Error ? error.message : String(error),
+          });
+        if (cancellationCode) process.exitCode = cancellationCode;
+        throw error;
+      } finally {
+        process.removeListener('SIGINT', cancel);
+        process.removeListener('SIGTERM', cancel);
+      }
       return;
     }
     if (projectCommand === 'validate') {
@@ -624,5 +694,5 @@ try {
     `opencut: ${error instanceof Error ? error.message : String(error)}\n`,
   );
   if (usageError) process.stderr.write('Run opencut --help for usage.\n');
-  process.exitCode = usageError ? 2 : 1;
+  process.exitCode ??= usageError ? 2 : 1;
 }
