@@ -37,7 +37,7 @@ for single-frame PNG extraction in media. T03 adds `composeMedia(options)` in
 media as a technical spike, called directly by the CLI alongside inspection and
 extraction. T04 adds isolated HTML video playback in desktop. The T05 model stores
 intent without executing edits or connecting to these media/preview prototypes.
-T11 coordinates saved-project export through a pure frame/audio plan and the existing
+T12 coordinates saved-project export through a pure visual/audio plan and the existing
 FFmpeg media backend. Broader engine hosting and desktop playback ownership remain
 open decisions.
 The scoped tool choice and subprocess boundary are recorded in
@@ -127,8 +127,7 @@ track compatibility, globally unique IDs, safe derived times and no same-track
 overlap are enforced by project validation on edits, load and save. Half-open
 intervals may touch, and separate tracks may overlap. Trims fix timeline start;
 splits preserve source mapping and total duration while retaining the left ID.
-There are no implicit ripple edits or populated-track cascades. T11 renders one
-video track with multiple audio tracks from saved project data. T09 adds a pure transaction dispatcher over these operations.
+There are no implicit ripple edits or populated-track cascades. T12 composites video/image tracks and mixes multiple audio tracks from saved project data. T09 adds a pure transaction dispatcher over these operations.
 A transaction validates each evolving state, then records full before/after content
 snapshots as one history entry when the final content changes. If operations cancel
 out, generated `updatedAt` changes alone do not create a commit: revision, both
@@ -190,27 +189,29 @@ than relying only on programmatically assigning slider values. See
 [ADR 0003](adr/0003-html-video-preview.md) for the preview recommendation,
 measurement definitions and accuracy limits.
 
-## Timeline rendering (T11)
+## Timeline rendering (T12)
 
-The pure core `planProjectRender` validates the project, enforces the single-video-track
-scope, converts rational boundaries exactly with bigint, orders clips through existing
-timeline operations, and emits integer-frame clip/gap segments. The optional core Node
-adapter reads one saved snapshot and resolves referenced assets against the physical
-project directory. Media's `renderVideoTimeline` accepts resolved segments without
-importing the project model, CLI or Electron. Existing FFmpeg process execution and
-T03 aspect-ratio normalization are reused; maintained FFmpeg filters supply sampling,
-trimming, black generation and concatenation without another backend/dependency.
+The pure core `planProjectRender` validates the project, converts rational boundaries
+exactly with bigint, orders visual clips bottom to top by track order and emits
+positioned integer-frame visual/audio clips. The optional core Node adapter reads
+one saved snapshot and resolves assets against its physical project directory.
+Media's `renderVideoTimeline` accepts resolved clips without importing the project
+model, CLI or Electron. Existing FFmpeg process execution supplies scale, crop,
+alpha multiplication and overlay filters without another backend or dependency.
 
-The media executor normalizes each source to the project frame grid before trimming,
-so splits cannot change source sampling phase. Global timestamps are regenerated from
-integer indices in the rational project time base after concat, avoiding cumulative
-boundary rounding. MP4 stores the frame-rate numerator as its track timescale. The
-H.264/AAC result is probed and video is fully decoded/count-checked before exclusive
-hard-link publication. Unsupported video tracks/images/subframe
-times and out-of-range media fail explicitly. No project mutation occurs. The
-[CLI rendering contract](CLI.md#project-rendering) defines prerequisites and limits.
-[ADR 0007](adr/0007-integer-frame-timeline-rendering.md) records the plan boundary,
-source sampling and publication decisions.
+Each source is sampled to the project frame grid before trimming, keeping split
+sampling phase unchanged. Static images loop one frame for the explicit range.
+An opaque canvas source fixes the duration; each layer uses the project time base
+and exclusive frame-index visibility. Layers end without freezing their last frame.
+Contain has transparent margins, cover centrally crops and stretch fills the scaled
+canvas rectangle. The final output is opaque yuv420p. Visual filters never mix audio;
+video inputs are reused by the independent audio graph once per clip.
+Global timestamps use integer indices in the rational time base. MP4 stores the
+frame-rate numerator as its timescale. H.264/AAC output is probed and fully decoded/
+counted before exclusive hard-link publication; no project mutation occurs.
+[ADR 0007](adr/0007-integer-frame-timeline-rendering.md) records timing/publication;
+[ADR 0009](adr/0009-video-compositing-and-canvas.md) records visual semantics.
+The [CLI contract](CLI.md#project-rendering) defines prerequisites and limits.
 
 T11 adds optional linear clip gain/mute fields without inserting defaults into
 legacy documents/history. The same pure plan includes positioned audio entries
@@ -223,8 +224,9 @@ sample indices rather than accumulating rounded clip durations. Missing/short
 video audio supplies silence; audio-track clips require a valid audio stream and
 current known bounds. A finite silence bed fixes the total mix duration; gains
 sum without active-input normalization. AAC output is always present. The longest
-clip defines output duration, with black padding after the last video clip. The
-one-video-track, same-track overlap and 64-total-clip limits remain explicit.
+clip defines output duration, with the canvas background after the last visual clip.
+Same-track overlaps remain forbidden, and the 64-total-clip limit still applies;
+T12 removes the former single-video-track restriction.
 [ADR 0008](adr/0008-positioned-audio-mixing.md) records the audio timing, gain,
 silence, duration and format-compatibility decisions that extend ADR 0007.
 
@@ -300,7 +302,7 @@ Fixture validation is independent of the application media APIs.
 ## Open decisions for subsequent tasks
 
 - Validate FFmpeg/MLT capabilities, licensing, distribution and process isolation.
-- Extend the T11 single-video-track and multiple-audio-track renderer when later tasks define compositing and effects.
+- Extend the T12 visual/audio renderer only when later tasks define transitions or effects.
 - Evolve the scripting contract for later editing capabilities; current
   project, media and timeline JSON is documented in [CLI.md](CLI.md). Stdout is reserved for results,
   stderr for errors.

@@ -40,6 +40,8 @@ export {
   moveClip,
   trimClip,
   setClipAudio,
+  setClipVisual,
+  setCanvas,
   splitClip,
   removeClip,
   listTimeline,
@@ -52,6 +54,7 @@ export type {
   MoveClipOptions,
   TrimClipOptions,
   ClipAudioOptions,
+  ClipVisualOptions,
 } from './timeline.js';
 
 export {
@@ -72,6 +75,6 @@ export type { ProjectSnapshot, HistoryEntry } from './project.js';
 export { planProjectRender, RenderError } from './render-plan.js';
 export type {
   ProjectRenderPlan,
-  RenderSegment,
+  VisualRenderClip,
   AudioRenderClip,
 } from './render-plan.js';

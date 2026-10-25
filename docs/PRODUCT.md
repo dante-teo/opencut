@@ -20,7 +20,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 (probing, decoding, playback and encoding) are separate concerns. Detailed editing
 contracts and the playback/render backend require later technical validation.
 
-## Current scope: T11
+## Current scope: T12
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -81,9 +81,15 @@ gaps. H.264/AAC MP4 output contains 48 kHz stereo audio. Longest audio clips can
 extend black video tails. Existing video-only projects remain valid. The single
 video track limit and same-track overlap rules remain unchanged.
 
+T12 extends saved-project rendering with overlapping video tracks, still-image
+layers, track-order stacking, position/scale/opacity, contain/cover/stretch fitting
+and a configurable opaque canvas background. Portrait 9:16, landscape 16:9 and
+square canvases share the same headless model and CLI. Audio still mixes once per
+clip. Existing projects retain centered contain fitting on a black canvas.
+
 ## Excluded
 
-T11 does not implement multiple-video-track rendering, transitions, audio effects,
+T12 does not implement transitions, audio effects,
 keyframes, fades, or desktop project media integration. No FFmpeg or
 MLT runtime is bundled; media commands require manually installed external tools.
 Fixture generation remains an optional development utility.
@@ -95,4 +101,4 @@ User media must never be silently changed or overwritten.
 
 macOS is the initial required platform. Package boundaries should stay portable;
 Windows/Linux support requires explicit validation later. No distribution,
-installer, updater, signing or notarization work is included in T11. T12 is not implemented.
+installer, updater, signing or notarization work is included in T12. T13 is not implemented.

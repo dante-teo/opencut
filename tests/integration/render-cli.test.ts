@@ -48,7 +48,7 @@ describe('standalone project render command', () => {
       await writeFile(path, serializeProject(project));
       let result = run('project', 'render', path, '--output', output, '--json');
       expect(result.status).toBe(1);
-      expect(result.stderr).toContain('exactly one video track');
+      expect(result.stderr).toContain('Video tracks are empty');
       project.tracks = [{ id: 'v', name: 'Video', type: 'video' }];
       project.assets = [
         {

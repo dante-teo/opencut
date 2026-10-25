@@ -61,27 +61,28 @@ describe('pure project render planning', () => {
       height: 180,
       frameRate: project.settings.frameRate,
       frameCount: 32,
-      segments: [
-        { kind: 'gap', frameCount: 3 },
+      visualClips: [
         {
-          kind: 'clip',
           clipId: 'a',
           assetId: 'source',
+          timelineStartFrame: 3,
           sourceStartFrame: 6,
           frameCount: 10,
+          x: 0,
+          y: 0,
+          scale: 1,
+          opacity: 1,
+          fit: 'contain',
         },
         {
-          kind: 'clip',
           clipId: 'b',
-          assetId: 'source',
+          timelineStartFrame: 13,
           sourceStartFrame: 16,
           frameCount: 14,
         },
-        { kind: 'gap', frameCount: 3 },
         {
-          kind: 'clip',
           clipId: 'c',
-          assetId: 'source',
+          timelineStartFrame: 30,
           sourceStartFrame: 0,
           frameCount: 2,
         },
@@ -95,7 +96,7 @@ describe('pure project render planning', () => {
     for (let i = 0; i < 64; i++) project = clip(project, `c${i}`, i, i, i + 1);
     expect(planProjectRender(project).frameCount).toBe(64);
     expect(
-      planProjectRender(project).segments.every((s) => s.frameCount === 1),
+      planProjectRender(project).visualClips.every((s) => s.frameCount === 1),
     ).toBe(true);
   });
 
@@ -113,13 +114,13 @@ describe('pure project render planning', () => {
     },
   );
 
-  it('allows audio tracks but still requires exactly one video track', () => {
+  it('allows multiple and empty video/audio tracks, requiring at least one visual clip', () => {
     const project = clip(example(), 'a', 0, 0, 30);
-    expect(() =>
+    expect(
       planProjectRender(
         addTrack(project, { name: 'Extra', type: 'video' }).project,
-      ),
-    ).toThrow(/exactly one video track/);
+      ).visualClips,
+    ).toHaveLength(1);
     expect(
       planProjectRender(
         addTrack(project, { name: 'Audio', type: 'audio' }).project,
@@ -127,7 +128,7 @@ describe('pure project render planning', () => {
     ).toBe(30);
     project.tracks[0]!.type = 'audio';
     project.assets[0]!.mediaTypes = ['audio'];
-    expect(() => planProjectRender(project)).toThrow(/exactly one video track/);
+    expect(() => planProjectRender(project)).toThrow(/empty/);
   });
 
   it('plans overlapping audio and extends black video to the longest audio end', () => {
@@ -146,7 +147,10 @@ describe('pure project render planning', () => {
     }).project;
     const plan = planProjectRender(project);
     expect(plan.frameCount).toBe(7);
-    expect(plan.segments.at(-1)).toEqual({ kind: 'gap', frameCount: 4 });
+    expect(plan.visualClips[0]).toMatchObject({
+      timelineStartFrame: 0,
+      frameCount: 3,
+    });
     expect(plan.audioClips).toEqual([
       {
         clipId: 'sound',

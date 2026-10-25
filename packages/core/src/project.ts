@@ -84,6 +84,21 @@ export const clipAudioShape = {
   volume: z.number().finite().min(0).max(1).optional(),
   muted: z.boolean().optional(),
 };
+export const clipVisualSchema = z.strictObject({
+  x: z.number().finite().min(-32768).max(32768).optional(),
+  y: z.number().finite().min(-32768).max(32768).optional(),
+  scale: z.number().finite().min(0.01).max(4).optional(),
+  opacity: z.number().finite().min(0).max(1).optional(),
+  fit: z.enum(['contain', 'cover', 'stretch']).optional(),
+});
+export const canvasShape = {
+  width: z.int().positive().optional(),
+  height: z.int().positive().optional(),
+  backgroundColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional(),
+};
 const clipSchema = z.strictObject({
   id,
   assetId: id,
@@ -92,8 +107,10 @@ const clipSchema = z.strictObject({
   sourceIn: timeSchema,
   sourceOut: timeSchema,
   ...clipAudioShape,
+  visual: clipVisualSchema.optional(),
 });
 const settingsSchema = z.strictObject({
+  backgroundColor: canvasShape.backgroundColor,
   width: z.int().positive(),
   height: z.int().positive(),
   frameRate: frameRateSchema,
@@ -231,6 +248,12 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
         `${location}/assetId`,
         'incompatible_media',
         `Asset '${asset.id}' has no ${track.type} media for track '${track.id}'.`,
+      );
+    if (clip.visual !== undefined && track?.type !== 'video')
+      add(
+        `${location}/visual`,
+        'incompatible_visual',
+        'Visual properties require a video track.',
       );
     if (compareTimes(clip.sourceOut, clip.sourceIn) <= 0)
       add(

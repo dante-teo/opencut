@@ -6,22 +6,27 @@ export class RenderError extends Error {
   override name = 'RenderError';
 }
 
-export type RenderSegment =
-  | { kind: 'gap'; frameCount: number }
-  | {
-      kind: 'clip';
-      clipId: string;
-      assetId: string;
-      sourceStartFrame: number;
-      frameCount: number;
-    };
+export interface VisualRenderClip {
+  clipId: string;
+  assetId: string;
+  timelineStartFrame: number;
+  sourceStartFrame: number;
+  frameCount: number;
+  x: number;
+  y: number;
+  scale: number;
+  opacity: number;
+  fit: 'contain' | 'cover' | 'stretch';
+}
 
 export interface ProjectRenderPlan {
   width: number;
   height: number;
+  backgroundColor: string;
   frameRate: FrameRate;
   frameCount: number;
-  segments: RenderSegment[];
+  /** Bottom to top, by track array order, then timeline start. */
+  visualClips: VisualRenderClip[];
   audioClips: AudioRenderClip[];
 }
 
@@ -59,13 +64,9 @@ function exactFrame(
 export function planProjectRender(project: Project): ProjectRenderPlan {
   const timeline = listTimeline(project);
   const videoTracks = timeline.tracks.filter((track) => track.type === 'video');
-  if (videoTracks.length !== 1)
+  if (!videoTracks.some((track) => track.clips.length > 0))
     throw new RenderError(
-      'Rendering requires exactly one video track. Remove additional video tracks before rendering.',
-    );
-  if (videoTracks[0]!.clips.length === 0)
-    throw new RenderError(
-      'The video track is empty. Add a video clip before rendering.',
+      'Video tracks are empty. Add a video or image clip before rendering.',
     );
   if (project.clips.length > 64)
     throw new RenderError(
@@ -76,12 +77,13 @@ export function planProjectRender(project: Project): ProjectRenderPlan {
     width < 2 ||
     height < 2 ||
     width > 3840 ||
-    height > 2160 ||
+    height > 3840 ||
+    width * height > 3840 * 2160 ||
     width % 2 ||
     height % 2
   )
     throw new RenderError(
-      'H.264 rendering requires even dimensions: width 2–3840 and height 2–2160. Update project settings.',
+      'H.264 rendering requires even dimensions: each side 2–3840, at most 3840×2160 pixels. Update project settings.',
     );
   let { numerator, denominator } = project.settings.frameRate;
   let a = numerator;
@@ -99,10 +101,9 @@ export function planProjectRender(project: Project): ProjectRenderPlan {
     throw new RenderError(
       'Rendering requires an FFmpeg-compatible rational frame rate between 1 and 120 fps. Update project settings.',
     );
-  const segments: RenderSegment[] = [];
+  const visualClips: VisualRenderClip[] = [];
   const audioClips: AudioRenderClip[] = [];
   let totalFrames = 0;
-  let frameCount = 0;
   for (const track of timeline.tracks) {
     for (const clip of track.clips) {
       const start = exactFrame(
@@ -141,27 +142,35 @@ export function planProjectRender(project: Project): ProjectRenderPlan {
         required: track.type === 'audio',
       });
       if (track.type === 'video') {
-        if (start > frameCount)
-          segments.push({ kind: 'gap', frameCount: start - frameCount });
-        segments.push({
-          kind: 'clip',
+        const visual = {
+          x: clip.visual?.x ?? 0,
+          y: clip.visual?.y ?? 0,
+          scale: clip.visual?.scale ?? 1,
+          opacity: clip.visual?.opacity ?? 1,
+          fit: clip.visual?.fit ?? 'contain',
+        };
+        if (width * visual.scale > 8192 || height * visual.scale > 8192)
+          throw new RenderError(
+            `Clip '${clip.id}' scaled canvas exceeds 8192 pixels per side. Reduce scale.`,
+          );
+        visualClips.push({
           clipId: clip.id,
           assetId: clip.assetId,
+          timelineStartFrame: start,
           sourceStartFrame: sourceStart,
           frameCount: count,
+          ...visual,
         });
-        frameCount = end;
       }
     }
   }
-  if (totalFrames > frameCount)
-    segments.push({ kind: 'gap', frameCount: totalFrames - frameCount });
   return {
     width,
     height,
     frameRate,
     frameCount: totalFrames,
-    segments,
+    backgroundColor: project.settings.backgroundColor ?? '#000000',
+    visualClips,
     audioClips,
   };
 }

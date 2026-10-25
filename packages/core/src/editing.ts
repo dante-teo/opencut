@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { clipAudioShape, validateProject } from './project.js';
+import {
+  canvasShape,
+  clipAudioShape,
+  clipVisualSchema,
+  validateProject,
+} from './project.js';
 import type { HistoryEntry, Project, ProjectSnapshot } from './project.js';
 import { frameTime } from './time.js';
 import {
@@ -11,6 +16,8 @@ import {
   splitClip,
   trimClip,
   setClipAudio,
+  setClipVisual,
+  setCanvas,
 } from './timeline.js';
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/);
@@ -35,6 +42,7 @@ const operationSchema = z.discriminatedUnion('type', [
     in: frame,
     out: frame,
     ...clipAudioShape,
+    visual: clipVisualSchema.optional(),
   }),
   z.strictObject({
     type: z.literal('clip.move'),
@@ -56,6 +64,12 @@ const operationSchema = z.discriminatedUnion('type', [
   }),
   z.strictObject({ type: z.literal('clip.remove'), id }),
   z.strictObject({ type: z.literal('clip.audio'), id, ...clipAudioShape }),
+  z.strictObject({
+    type: z.literal('clip.visual'),
+    id,
+    ...clipVisualSchema.shape,
+  }),
+  z.strictObject({ type: z.literal('canvas.set'), ...canvasShape }),
 ]);
 const transactionSchema = z.strictObject({
   expectedRevision: z.int().nonnegative(),
@@ -233,6 +247,7 @@ export function executeTransaction(project: Project, input: EditTransaction) {
             sourceOut: time(operation.out),
             volume: operation.volume,
             muted: operation.muted,
+            visual: operation.visual,
           });
           break;
         case 'clip.move':
@@ -265,6 +280,22 @@ export function executeTransaction(project: Project, input: EditTransaction) {
           break;
         case 'clip.remove':
           changed = removeClip(next, operation.id);
+          break;
+        case 'clip.visual':
+          changed = setClipVisual(next, operation.id, {
+            x: operation.x,
+            y: operation.y,
+            scale: operation.scale,
+            opacity: operation.opacity,
+            fit: operation.fit,
+          });
+          break;
+        case 'canvas.set':
+          changed = setCanvas(next, {
+            width: operation.width,
+            height: operation.height,
+            backgroundColor: operation.backgroundColor,
+          });
           break;
         case 'clip.audio':
           changed = setClipAudio(next, operation.id, operation);

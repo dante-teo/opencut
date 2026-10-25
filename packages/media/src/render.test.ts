@@ -143,6 +143,39 @@ describe('video timeline executor safety', () => {
     expect(graph).toContain('latency=1');
   });
 
+  it('rejects invalid positioned visual plans before probing or encoding', async () => {
+    const base = { ...options };
+    delete base.segments;
+    const clip = {
+      clipId: 'layer',
+      path: source.path,
+      timelineStartFrame: 0,
+      sourceStartFrame: 0,
+      frameCount: 12,
+    };
+    for (const fields of [
+      { x: Infinity },
+      { y: 32769 },
+      { scale: 0 },
+      { opacity: 1.1 },
+      { timelineStartFrame: 1 },
+      { frameCount: 0 },
+    ]) {
+      await expect(
+        renderVideoTimeline({ ...base, visualClips: [{ ...clip, ...fields }] }),
+      ).rejects.toThrow(/Invalid video render plan/);
+    }
+    await expect(
+      renderVideoTimeline({
+        ...base,
+        visualClips: [clip],
+        backgroundColor: '#123456;null',
+      }),
+    ).rejects.toThrow(/Invalid video render plan/);
+    expect(probeMedia).not.toHaveBeenCalled();
+    expect(runMediaTool).not.toHaveBeenCalled();
+  });
+
   it('rejects invalid audio plans and a required missing audio stream before encoding', async () => {
     const clip = {
       clipId: 'sound',
@@ -189,7 +222,7 @@ describe('video timeline executor safety', () => {
       'trim=start_frame=3:end_frame=13',
     );
     expect(args[args.indexOf('-filter_complex') + 1]).toContain(
-      'setpts=N*1001[video]',
+      'setpts=N*1001,format=yuv420p[video]',
     );
   });
 
@@ -263,7 +296,7 @@ describe('video timeline executor safety', () => {
     expect(runMediaTool).not.toHaveBeenCalled();
   });
 
-  it('rejects stills, missing video, unknown duration and stale source ranges', async () => {
+  it('rejects missing or untimed video, unknown duration and stale source ranges', async () => {
     for (const video of [
       null,
       { ...stream, frameRate: null },

@@ -20,8 +20,9 @@ export const editHelp = `Usage: opencut edit apply <project-file> <batch.json> [
 Batch JSON: { "expectedRevision": 0, "label": "Optional description", "operations": [
   { "type": "track.add", "id": "v1", "name": "Video", "mediaType": "video" }
 ] }
-Operations: track.add/remove, clip.add/move/trim/split/remove/audio.
+Operations: track.add/remove, clip.add/move/trim/split/remove/audio/visual, canvas.set.
 clip.add and clip.audio accept volume (linear 0–1, default 1) and muted (boolean, default false).
+clip.add accepts a visual object; clip.visual accepts x/y/scale/opacity/fit. canvas.set accepts width/height/backgroundColor.
 Times (at/in/out) are nonnegative safe integer PROJECT frame indices.
 Use explicit IDs to reference newly added tracks/clips later in the same batch.
 Each operation validates against the preceding result; any failure rolls back the batch.

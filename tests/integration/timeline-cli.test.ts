@@ -103,6 +103,77 @@ afterEach(async () => {
 });
 
 describe('built timeline CLI without Electron or media tools', () => {
+  it('configures visual properties and canvas offline and rejects invalid or misplaced options without writes', async () => {
+    const clip = add();
+    const changed = json(
+      'clip',
+      'visual',
+      path,
+      clip.id,
+      '--x=-10.5',
+      '--y',
+      '12',
+      '--scale',
+      '0.75',
+      '--fit',
+      'cover',
+      '--opacity',
+      '0.5',
+    );
+    expect(changed.clip.visual).toEqual({
+      x: -10.5,
+      y: 12,
+      scale: 0.75,
+      opacity: 0.5,
+      fit: 'cover',
+    });
+    const canvas = json(
+      'canvas',
+      'set',
+      path,
+      '--width',
+      '1080',
+      '--height',
+      '1920',
+      '--background-color',
+      '#123ABC',
+    );
+    expect(canvas.settings).toMatchObject({
+      width: 1080,
+      height: 1920,
+      backgroundColor: '#123ABC',
+    });
+    const before = await readFile(path, 'utf8');
+    const invalid = [
+      ['clip', 'visual', path, clip.id],
+      ...[
+        ['x', 'NaN'],
+        ['y', '32769'],
+        ['scale', '0'],
+        ['opacity', '1.01'],
+        ['fit', 'fill'],
+      ].map(([key, value]) => [
+        'clip',
+        'visual',
+        path,
+        clip.id,
+        `--${key}`,
+        value!,
+      ]),
+      ['canvas', 'set', path],
+      ['canvas', 'set', path, '--width', '0'],
+      ['canvas', 'set', path, '--background-color', 'red'],
+      ['clip', 'audio', path, clip.id, '--opacity', '0.5'],
+      ['project', 'info', path, '--fit', 'contain'],
+    ];
+    for (const args of invalid) {
+      const result = run(...args, '--json');
+      expect(result.status, result.stderr).toBe(2);
+      expect(result.stdout).toBe('');
+      expect(await readFile(path, 'utf8')).toBe(before);
+    }
+  });
+
   it('configures clip gains and muting through add/audio, dry-run, history and batches', async () => {
     const clip = json(
       'clip',

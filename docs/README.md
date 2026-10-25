@@ -10,7 +10,7 @@ project creation, information and validation in the CLI. T07 adds media asset
 import, listing, inspection and safe removal. T08 adds shared headless timeline
 editing through the CLI: track management and clip add/move/trim/split/remove.
 T09 adds [atomic batches, persistent undo/redo, dry-run and revision checks](CLI.md#transactions-undo-and-redo).
-T11 extends [saved timeline rendering](CLI.md#project-rendering) to H.264/AAC MP4 with original audio, multiple audio tracks, overlap mixing, clip gain/mute, exact project-frame video timing and black/silent gaps.
+T12 extends [saved timeline rendering](CLI.md#project-rendering) to H.264/AAC MP4 with ordered video/image layers, position/scale/opacity, canvas fitting/background, portrait/square output, and the existing original/multi-track audio mix and exact project-frame timing.
 Desktop project integration remains deferred.
 
 ## Quick start (macOS)

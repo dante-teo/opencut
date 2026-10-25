@@ -130,6 +130,7 @@ export function addClip(project: Project, options: AddClipOptions) {
     timelineStart: options.timelineStart,
     sourceIn: options.sourceIn,
     sourceOut: options.sourceOut,
+    ...(options.visual !== undefined ? { visual: options.visual } : {}),
     ...(options.volume !== undefined ? { volume: options.volume } : {}),
     ...(options.muted !== undefined ? { muted: options.muted } : {}),
   };
@@ -197,6 +198,61 @@ export function setClipAudio(
   if (options.muted !== undefined) clip.muted = options.muted;
   const updated = finish(next);
   return { project: updated, clip: requireClip(updated, id) };
+}
+
+export type ClipVisualOptions = NonNullable<TimelineClip['visual']>;
+
+/** Merge explicit properties; omitted values retain their current setting. */
+export function setClipVisual(
+  project: Project,
+  id: string,
+  options: ClipVisualOptions,
+) {
+  const next = copyProject(project);
+  const clip = requireClip(next, id);
+  if (!Object.values(options).some((value) => value !== undefined))
+    throw new TimelineError(
+      'INVALID_EDIT',
+      'Specify at least one visual property.',
+    );
+  const visual = {
+    ...clip.visual,
+    ...Object.fromEntries(
+      Object.entries(options).filter(([, value]) => value !== undefined),
+    ),
+  };
+  if (JSON.stringify(visual) === JSON.stringify(clip.visual))
+    return { project: next, clip };
+  clip.visual = visual;
+  const updated = finish(next);
+  return { project: updated, clip: requireClip(updated, id) };
+}
+
+export function setCanvas(
+  project: Project,
+  options: {
+    width?: number | undefined;
+    height?: number | undefined;
+    backgroundColor?: string | undefined;
+  },
+) {
+  const next = copyProject(project);
+  if (!Object.values(options).some((value) => value !== undefined))
+    throw new TimelineError(
+      'INVALID_EDIT',
+      'Specify at least one canvas property.',
+    );
+  const settings = {
+    ...next.settings,
+    ...Object.fromEntries(
+      Object.entries(options).filter(([, value]) => value !== undefined),
+    ),
+  };
+  if (JSON.stringify(settings) === JSON.stringify(next.settings))
+    return { project: next, settings: next.settings };
+  next.settings = settings;
+  const updated = finish(next);
+  return { project: updated, settings: updated.settings };
 }
 
 /** Keep timeline start fixed; changing the source range changes duration at 1x. */

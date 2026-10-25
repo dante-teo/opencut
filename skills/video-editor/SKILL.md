@@ -1,6 +1,6 @@
 ---
 name: video-editor
-description: Use the OpenCut CLI to create, inspect and validate video projects, manage media assets and timeline tracks/clips, apply atomic batches, undo/redo edits, inspect media, extract PNG frames, render a saved timeline with one video track and mixed audio to H.264/AAC MP4, or compose video clips with background music.
+description: Use the OpenCut CLI to create, inspect and validate video projects, manage media assets and timeline tracks/clips, apply atomic batches, undo/redo edits, inspect media, extract PNG frames, render a saved timeline with video/image layers, canvas transforms and mixed audio to H.264/AAC MP4, or compose video clips with background music.
 ---
 
 # OpenCut CLI
@@ -30,6 +30,7 @@ asset IDs, persisted metadata, source availability and atomic project updates.
 T08 adds timeline inspection, video/audio track management and clip add/move/trim/split/remove
 through shared headless operations. T09 adds atomic batches, persistent undo/redo,
 dry-run and revision checks. T11 extends saved single-video-track rendering with original audio, independent audio tracks, overlap mixing, clip volume and muting, and H.264/AAC MP4 output.
+T12 adds overlapping video/image layers, per-clip position/scale/opacity and contain/cover/stretch fitting, canvas dimensions/background and portrait/square output.
 The desktop preview and path-based media commands remain separate
 from project data.
 
@@ -121,16 +122,29 @@ real apply. Read back history and timeline/media state after successful mutation
 
 For saved timeline rendering, read [the rendering reference](references/cli.md#project-rendering).
 Run `project render PROJECT --output NEW.mp4 --json` after reading the timeline.
-Use exactly one video track with at least one timed-video clip and any audio tracks.
-Original video audio is preserved; sources without audio supply silence. Still images,
-subframe timing and unsupported settings fail explicitly. Resolution and frame
-rate come from the project: even dimensions up to 3840x2160, rational 1–120 fps,
-at most 64 clips across all tracks and 600 seconds including black gaps. Source in/out use the
+Use one or more video tracks with at least one video/image clip and any audio tracks.
+Later video tracks draw above earlier tracks; same-track overlaps remain forbidden.
+Use `canvas set PROJECT --width 1080 --height 1920 --background-color '#183048' --json`
+for portrait output (or 1920×1080 / 1080×1080 for landscape/square).
+Use `clip visual PROJECT CLIP_ID --fit contain --scale 0.5 --x=-100 --y 200 --opacity 0.75 --json`;
+`clip add` accepts the same flags. Defaults: centered x/y offsets 0, scale/opacity 1,
+contain. Scale multiplies the canvas fitting rectangle; contain keeps transparent
+margins, cover crops centrally, stretch fills. Opacity multiplies source alpha.
+Images use explicit in/out ranges as duration, including split clips. Background
+shows through gaps and transparent areas. Visual opacity does not mute audio.
+Canvas/visual mutations and batch canvas.set/clip.visual support history and dry-run.
+For a complete batch and its expected frame count, follow the
+[layered portrait example](../../docs/CLI.md#layered-portrait-render-example).
+Original video audio is preserved; sources without audio supply silence.
+Subframe timing and unsupported settings fail explicitly. Resolution and frame
+rate come from the project: even sides up to 3840, total pixels up to 3840×2160
+(including 2160×3840 portrait), rational 1–120 fps,
+at most 64 clips across all tracks and 600 seconds including gaps. Source in/out use the
 project-rate sampling grid relative to the first video frame; out is exclusive.
 Split clips preserve the sampled video sequence and audio timing. Use separate
 audio tracks for overlapping clips. Add imported music with frame-based source
 ranges/positions; music does not loop automatically. An audio tail extends video
-with black frames. Muted and zero-gain clips still contribute to output duration.
+with the canvas background. Muted and zero-gain clips still contribute to output duration.
 Referencing a video asset on an audio track also leaves its original video audio
 active; mute the video clip explicitly when using only the independent audio clip.
 Settings and edits apply per clip, without automatically changing other clips

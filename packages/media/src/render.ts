@@ -3,14 +3,30 @@ import { dirname, extname, join, resolve } from 'node:path';
 import { probeMedia } from './probe.js';
 import type { MediaMetadata } from './probe.js';
 import { MediaError, runMediaTool } from './process.js';
-import { fitVideo } from './video-filter.js';
+import { fitVisual } from './video-filter.js';
+
+export interface VisualTimelineClip {
+  clipId: string;
+  path: string;
+  timelineStartFrame: number;
+  sourceStartFrame: number;
+  frameCount: number;
+  x?: number;
+  y?: number;
+  scale?: number;
+  opacity?: number;
+  fit?: 'contain' | 'cover' | 'stretch';
+}
 
 export interface VideoTimelineOptions {
   width: number;
   height: number;
   frameRate: { numerator: number; denominator: number };
   frameCount: number;
-  segments: Array<
+  backgroundColor?: string;
+  visualClips?: VisualTimelineClip[];
+  /** Legacy sequential plan; supply either segments or visualClips. */
+  segments?: Array<
     | { kind: 'gap'; frameCount: number }
     | {
         kind: 'clip';
@@ -49,8 +65,8 @@ function validateOptions(options: VideoTimelineOptions): void {
     height,
     frameRate: { numerator, denominator },
     frameCount,
-    segments,
   } = options;
+  const segments = options.segments ?? [];
   if (
     ![width, height, numerator, denominator, frameCount].every(
       (n) => Number.isSafeInteger(n) && n > 0,
@@ -58,7 +74,8 @@ function validateOptions(options: VideoTimelineOptions): void {
     width < 2 ||
     height < 2 ||
     width > 3840 ||
-    height > 2160 ||
+    height > 3840 ||
+    width * height > 3840 * 2160 ||
     width % 2 ||
     height % 2 ||
     numerator > 2147483647 ||
@@ -66,19 +83,51 @@ function validateOptions(options: VideoTimelineOptions): void {
     numerator < denominator ||
     numerator > 120 * denominator ||
     BigInt(frameCount) * BigInt(denominator) > 600n * BigInt(numerator) ||
-    segments.length === 0 ||
-    segments.length > 128 ||
-    segments.some(
-      (s) =>
-        !Number.isSafeInteger(s.frameCount) ||
-        s.frameCount <= 0 ||
-        (s.kind !== 'gap' &&
-          (s.kind !== 'clip' ||
-            !Number.isSafeInteger(s.sourceStartFrame) ||
-            s.sourceStartFrame < 0 ||
-            !Number.isSafeInteger(s.sourceStartFrame + s.frameCount))),
-    ) ||
-    segments.reduce((sum, s) => sum + s.frameCount, 0) !== frameCount ||
+    (options.backgroundColor !== undefined &&
+      !/^#[0-9a-fA-F]{6}$/.test(options.backgroundColor)) ||
+    (options.visualClips !== undefined && options.segments !== undefined) ||
+    (options.visualClips === undefined &&
+      (segments.length === 0 ||
+        segments.length > 128 ||
+        segments.some(
+          (s) =>
+            !Number.isSafeInteger(s.frameCount) ||
+            s.frameCount <= 0 ||
+            (s.kind !== 'gap' &&
+              (s.kind !== 'clip' ||
+                !Number.isSafeInteger(s.sourceStartFrame) ||
+                s.sourceStartFrame < 0 ||
+                !Number.isSafeInteger(s.sourceStartFrame + s.frameCount))),
+        ) ||
+        segments.reduce((sum, s) => sum + s.frameCount, 0) !== frameCount)) ||
+    (options.visualClips !== undefined &&
+      (options.visualClips.length === 0 ||
+        options.visualClips.length > 64 ||
+        options.visualClips.some(
+          (clip) =>
+            !Number.isSafeInteger(clip.timelineStartFrame) ||
+            clip.timelineStartFrame < 0 ||
+            !Number.isSafeInteger(clip.sourceStartFrame) ||
+            clip.sourceStartFrame < 0 ||
+            !Number.isSafeInteger(clip.frameCount) ||
+            clip.frameCount <= 0 ||
+            !Number.isSafeInteger(clip.sourceStartFrame + clip.frameCount) ||
+            !Number.isSafeInteger(clip.timelineStartFrame + clip.frameCount) ||
+            clip.timelineStartFrame + clip.frameCount > frameCount ||
+            !Number.isFinite(clip.x ?? 0) ||
+            Math.abs(clip.x ?? 0) > 32768 ||
+            !Number.isFinite(clip.y ?? 0) ||
+            Math.abs(clip.y ?? 0) > 32768 ||
+            !Number.isFinite(clip.scale ?? 1) ||
+            (clip.scale ?? 1) < 0.01 ||
+            (clip.scale ?? 1) > 4 ||
+            width * (clip.scale ?? 1) > 8192 ||
+            height * (clip.scale ?? 1) > 8192 ||
+            !Number.isFinite(clip.opacity ?? 1) ||
+            (clip.opacity ?? 1) < 0 ||
+            (clip.opacity ?? 1) > 1 ||
+            !['contain', 'cover', 'stretch'].includes(clip.fit ?? 'contain'),
+        ))) ||
     (options.audioClips?.length ?? 0) > 64 ||
     options.audioClips?.some(
       (clip) =>
@@ -98,7 +147,7 @@ function validateOptions(options: VideoTimelineOptions): void {
     )
   )
     throw new MediaError(
-      'Invalid video render plan: use positive integer frame counts, even dimensions up to 3840x2160, 1–120 fps, at most 128 segments and 600 seconds.',
+      'Invalid video render plan: use positive integer frame counts, even sides up to 3840 (at most 3840x2160 pixels), 1–120 fps, at most 64 visual/audio clips (or 128 legacy segments), valid transforms and #RRGGBB background, and 600 seconds.',
     );
 }
 
@@ -121,7 +170,15 @@ export async function renderVideoTimeline(
   options: VideoTimelineOptions,
 ): Promise<VideoTimelineResult> {
   validateOptions(options);
-  const { width, height, frameRate, frameCount, segments } = options;
+  const { width, height, frameRate, frameCount } = options;
+  let cursor = 0;
+  const visualClips: VisualTimelineClip[] =
+    options.visualClips ??
+    (options.segments ?? []).flatMap((segment) => {
+      const timelineStartFrame = cursor;
+      cursor += segment.frameCount;
+      return segment.kind === 'gap' ? [] : [{ ...segment, timelineStartFrame }];
+    });
   const { numerator, denominator } = frameRate;
   const rate = `${numerator}/${denominator}`;
   const durationSeconds = (frameCount * denominator) / numerator;
@@ -162,14 +219,12 @@ export async function renderVideoTimeline(
     return source;
   };
   let input = 0;
-  for (const [index, segment] of segments.entries()) {
-    if (segment.kind === 'gap') {
-      filters.push(
-        `color=c=black:s=${width}x${height}:r=${rate},trim=end_frame=${segment.frameCount},setpts=PTS-STARTPTS[v${index}]`,
-      );
-      continue;
-    }
-    const source = await readSource(segment);
+  filters.push(
+    `color=c=${options.backgroundColor ?? '#000000'}:s=${width}x${height}:r=${rate},` +
+      `trim=end_frame=${frameCount},settb=1/${numerator},setpts=N*${denominator}[canvas0]`,
+  );
+  for (const [index, clip] of visualClips.entries()) {
+    const source = await readSource(clip);
     const { video } = source;
     const format = source.formatName ?? '';
     const still =
@@ -177,11 +232,10 @@ export async function renderVideoTimeline(
       (format.endsWith('_pipe') ||
         ['image2', 'image2pipe'].includes(format) ||
         (['gif', 'apng'].includes(format) && !source.durationSeconds));
-    if (!video?.frameRate || video.isAttachedPicture || still)
+    if (!video || video.isAttachedPicture || (!still && !video.frameRate))
       throw new MediaError(
-        `Clip '${segment.clipId}' requires timed video; still images and audio-only sources are unsupported on the video track.`,
+        `Clip '${clip.clipId}' requires timed video or a still image on the video track.`,
       );
-    // Source points are relative to the first video frame, as in T03 composition.
     const offset =
       (video.startTimeSeconds ?? source.startTimeSeconds ?? 0) -
       (source.startTimeSeconds ?? 0);
@@ -190,32 +244,36 @@ export async function renderVideoTimeline(
       (source.durationSeconds === null
         ? null
         : source.durationSeconds - offset);
-    const sourceEnd = segment.sourceStartFrame + segment.frameCount;
+    const sourceEnd = clip.sourceStartFrame + clip.frameCount;
     if (
-      duration === null ||
-      duration <= 0 ||
-      (sourceEnd * denominator) / numerator > duration + 0.000001
+      !still &&
+      (duration === null ||
+        duration <= 0 ||
+        (sourceEnd * denominator) / numerator > duration + 0.000001)
     )
       throw new MediaError(
-        `Clip '${segment.clipId}' source out exceeds the current video duration or its duration is unknown. Re-import the media and trim to a known video range.`,
+        `Clip '${clip.clipId}' source out exceeds the current video duration or its duration is unknown. Re-import the media and trim to a known video range.`,
       );
     args.push('-threads', '1', '-i', source.path);
-    inputs.set(segment.clipId, input);
-    // Sample the entire source on ONE project grid before integer trimming. A split
-    // then selects the same frames as the unsplit clip, even at differing rates.
-    // One cloned frame covers fractional EOF rounding, never an arbitrary shortfall.
+    inputs.set(clip.clipId, input);
+    // Sample before trimming so source selection is invariant under splitting.
+    const sampling = still
+      ? `loop=loop=-1:size=1:start=0,trim=end_frame=${clip.frameCount}`
+      : `setpts=PTS-STARTPTS,fps=${rate}:start_time=0:round=near:eof_action=pass,tpad=stop_mode=clone:stop=1,` +
+        `trim=start_frame=${clip.sourceStartFrame}:end_frame=${sourceEnd}`;
     filters.push(
-      `[${input++}:${video.index}]setpts=PTS-STARTPTS,${fitVideo(width, height)},` +
-        `fps=${rate}:start_time=0:round=near:eof_action=pass,tpad=stop_mode=clone:stop=1,` +
-        `trim=start_frame=${segment.sourceStartFrame}:end_frame=${sourceEnd},` +
-        `settb=1/${numerator},setpts=N*${denominator},format=yuv420p[v${index}]`,
+      `[${input++}:${video.index}]${sampling},` +
+        `${fitVisual(width, height, clip.scale ?? 1, clip.fit ?? 'contain')},format=yuva420p,` +
+        ((clip.opacity ?? 1) === 1 ? '' : `lut=a=val*${clip.opacity},`) +
+        `settb=1/${numerator},setpts=(N+${clip.timelineStartFrame})*${denominator}[layer${index}]`,
+    );
+    filters.push(
+      `[canvas${index}][layer${index}]overlay=x='(W-w)/2+(${clip.x ?? 0})':y='(H-h)/2+(${clip.y ?? 0})':` +
+        `eof_action=pass:repeatlast=0:alpha=straight:enable='gte(n,${clip.timelineStartFrame})*lt(n,${clip.timelineStartFrame + clip.frameCount})'[canvas${index + 1}]`,
     );
   }
-  // concat uses a microsecond time base internally. Discard its timestamps and
-  // regenerate from the global frame index, so boundary rounding cannot accumulate.
   filters.push(
-    `${segments.map((_, i) => `[v${i}]`).join('')}concat=n=${segments.length}:v=1:a=0,` +
-      `settb=1/${numerator},setpts=N*${denominator}[video]`,
+    `[canvas${visualClips.length}]settb=1/${numerator},setpts=N*${denominator},format=yuv420p[video]`,
   );
   // Round absolute project boundaries to the nearest 48 kHz sample. Never sum
   // independently rounded durations: fractional frame rates must not accumulate drift.

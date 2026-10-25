@@ -16,7 +16,7 @@ export async function renderProjectFile(
   const project = await readProjectFile(path);
   const plan = planProjectRender(project);
   const assets = new Map(project.assets.map((asset) => [asset.id, asset]));
-  const segments = [];
+  const visualClips = [];
   const checked = new Set<string>();
   const resolveSource = async (clip: { assetId: string; clipId: string }) => {
     const asset = assets.get(clip.assetId)!;
@@ -31,18 +31,18 @@ export async function renderProjectFile(
     }
     return sourcePath;
   };
-  for (const segment of plan.segments) {
-    if (segment.kind === 'gap') {
-      segments.push(segment);
-      continue;
-    }
-    segments.push({ ...segment, path: await resolveSource(segment) });
-  }
+  for (const clip of plan.visualClips)
+    visualClips.push({ ...clip, path: await resolveSource(clip) });
   const audioClips = [];
   for (const clip of plan.audioClips)
     audioClips.push({ ...clip, path: await resolveSource(clip) });
   return {
     projectPath: path,
-    ...(await renderVideoTimeline({ ...plan, segments, audioClips, output })),
+    ...(await renderVideoTimeline({
+      ...plan,
+      visualClips,
+      audioClips,
+      output,
+    })),
   };
 }

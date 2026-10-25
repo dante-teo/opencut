@@ -29,7 +29,7 @@ import type { MediaMetadata } from '@opencut/media';
 
 const help = `Usage: opencut [command] [options]
 
-OpenCut — project, media asset and timeline editing, transactions and headless rendering (T11).
+OpenCut — project, media asset and timeline editing, transactions and headless rendering (T12).
 
 Commands:
   project create <project-file> --name <name> [--width <px>] [--height <px>] [--fps <n|n/d>]
@@ -37,15 +37,16 @@ Commands:
   project info <project-file>           Show metadata, settings and statistics
   project validate <project-file>       Check project data and media references
   project render <project-file> --output <new.mp4>
-                                       Render one video track with black gaps and mixed audio
+                                       Composite video/image layers and mix audio
   media import <project-file> <file>    Import a source reference and probe metadata
   media list <project-file>             List assets, metadata and source availability
   media info <project-file> <asset-id>   Inspect an asset by stable ID
   media remove <project-file> <asset-id> Remove an unreferenced asset, keeping its file
   timeline list <project-file>          Inspect tracks, clips and exact timing
   track add|remove <project-file>       Manage video/audio tracks (track --help)
-  clip add|move|trim|split|remove|audio <project-file>
+  clip add|move|trim|split|remove|audio|visual <project-file>
                                        Edit clips (clip --help; time arguments are frames)
+  canvas set <project-file>            Configure dimensions and background (canvas --help)
   edit apply <project-file> <batch.json> Apply an atomic transaction
   edit undo|redo|history <project-file>  Restore or inspect persistent editing history
   probe <file>                         Inspect local media metadata
@@ -81,12 +82,13 @@ Exit codes: 0 success, 1 validation/runtime/file/media failure, 2 invalid argume
 const projectHelp = {
   render: `Usage: opencut project render <project-file> --output <new.mp4> [--json] [--help]
 
-Render one video track and multiple audio tracks to H.264/AAC MP4 at project settings.
-Video gaps are black; audio gaps are silent. Original audio is preserved by default.
+Composite ordered video/image tracks and mix audio to H.264/AAC MP4 at project settings.
+Visual gaps use the canvas background; audio gaps are silent. Original audio is preserved by default.
 Use clip audio --volume <0..1> --muted <true|false> to configure gains and muting.
-Additional video tracks and still images are rejected.
+Use clip visual for position/scale/opacity/contain/cover/stretch and canvas set for dimensions/background.
+Later video tracks draw above earlier tracks; still images use their explicit clip duration.
 Times must align to project frames; source points use the first video frame as zero.
-Supports even dimensions up to 3840x2160, 1–120 fps, 64 clips across all tracks and 600 seconds.
+Supports even sides up to 3840 (at most 3840x2160 pixels), 1–120 fps, 64 clips across all tracks and 600 seconds.
 Requires FFmpeg 8+ and ffprobe. Output must be new, in an existing directory.
 `,
   create: `Usage: opencut project create <project-file> --name <name> [options]
@@ -237,13 +239,21 @@ async function runCli(args: string[]): Promise<void> {
       'music-volume': { type: 'string' },
       volume: { type: 'string' },
       muted: { type: 'string' },
+      x: { type: 'string' },
+      y: { type: 'string' },
+      scale: { type: 'string' },
+      opacity: { type: 'string' },
+      fit: { type: 'string' },
+      'background-color': { type: 'string' },
     },
     strict: true,
     allowPositionals: true,
     allowNegative: false,
   });
   const [command, file, projectFile] = positionals;
-  const timelineCommand = ['timeline', 'track', 'clip'].includes(command ?? '');
+  const timelineCommand = ['timeline', 'track', 'clip', 'canvas'].includes(
+    command ?? '',
+  );
   const projectCommand =
     command === 'project' &&
     file !== undefined &&
@@ -288,6 +298,12 @@ async function runCli(args: string[]): Promise<void> {
     'out',
     'volume',
     'muted',
+    'x',
+    'y',
+    'scale',
+    'opacity',
+    'fit',
+    'background-color',
   ] as const) {
     if (values[option] !== undefined)
       throw new UsageError(
@@ -405,7 +421,7 @@ async function runCli(args: string[]): Promise<void> {
       const result = await renderProjectFile(path, values.output);
       output(
         result,
-        `Saved ${result.frameCount} frames (${result.width}x${result.height}, ${result.frameRate.numerator}/${result.frameRate.denominator} fps, H.264, video only) to ${result.path}\n`,
+        `Saved ${result.frameCount} frames (${result.width}x${result.height}, ${result.frameRate.numerator}/${result.frameRate.denominator} fps, H.264/AAC) to ${result.path}\n`,
         values.json,
       );
       return;

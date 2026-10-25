@@ -363,7 +363,7 @@ test('native T10 saved timeline rendering', async (t) => {
     );
 
     await t.test(
-      'rejects missing media, stale bounds, stills, invalid data and unsupported tracks without outputs',
+      'rejects missing media, stale bounds and invalid data without outputs',
       async () => {
         const base = add(example(), 'clip', 'asset0', 0, 0, 30);
         const cases: Array<[Project, RegExp]> = [];
@@ -373,12 +373,6 @@ test('native T10 saved timeline rendering', async (t) => {
         p = structuredClone(base);
         p.clips[0]!.sourceOut = frameTime(1000, rate30);
         cases.push([p, /current video duration/]);
-        p = structuredClone(base);
-        p.clips[0]!.assetId = 'asset3';
-        cases.push([p, /timed video/]);
-        p = structuredClone(base);
-        p.tracks.push({ id: 'extra', name: 'Extra', type: 'video' });
-        cases.push([p, /exactly one video track/]);
         p = structuredClone(base);
         p.settings.width = 161;
         cases.push([p, /even dimensions/]);

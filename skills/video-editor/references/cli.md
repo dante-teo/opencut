@@ -1,4 +1,4 @@
-# OpenCut CLI at T11
+# OpenCut CLI at T12
 
 Run commands at the root of an installed checkout. Build with `pnpm build` if
 `apps/cli/dist/index.js` does not exist.
@@ -58,7 +58,7 @@ The parent must exist. A write failure may leave a partial newly created file.
 `project info <project-file> [--json]` validates data and returns metadata,
 settings and asset/track/clip counts. Offline media does not prevent info.
 Creation and info JSON contain `path`, `schemaVersion`, `metadata` (`id`, `name`,
-`createdAt`, `updatedAt`), `settings` (`width`, `height`, rational `frameRate`) and
+`createdAt`, `updatedAt`), `settings` (`width`, `height`, rational `frameRate`, optional `backgroundColor`) and
 `statistics` (`assets`, `tracks`, `clips`).
 
 `project validate <project-file> [--json]` checks schema/version, unique IDs,
@@ -209,7 +209,7 @@ for the strict batch fields, operation table, result fields and filesystem limit
 A batch is `{ "expectedRevision": N, "label": "Optional description",
 "operations": [...] }`. Use the revision read from history. A supplied CLI
 revision must equal the batch revision. Operations are strict `track.add/remove`
-and `clip.add/move/trim/split/remove/audio` objects; unknown fields fail. Times are safe
+and `clip.add/move/trim/split/remove/audio/visual` and `canvas.set` objects; unknown fields fail. Times are safe
 nonnegative integer project-frame indices. For example, on revision 0:
 
 ```json
@@ -327,25 +327,27 @@ misleading source timing, project files and timeline editing are outside scope.
 ## Project rendering
 
 `project render <project-file> --output <new.mp4> [--json]` reads a saved project
-snapshot and renders one video track with mixed audio to H.264/yuv420p and AAC MP4. It requires FFmpeg 8+
+snapshot and composites video/image tracks with mixed audio to H.264/yuv420p and AAC MP4. It requires FFmpeg 8+
 with libx264 and standard filters, plus ffprobe on PATH. The project's resolution
 and exact rational frame rate determine the output. Original video audio is preserved
 by default. Independent audio clips on any number of audio tracks can overlap
 original audio and each other across tracks. No transitions, audio effects,
 keyframes, fades or GUI project integration are implemented.
 
-T11 requires exactly one video track with at least one timed-video clip; extra
-video tracks (even empty ones), still images and audio-only projects fail explicitly.
-Empty audio tracks are allowed. Same-track overlaps remain forbidden: use separate
-audio tracks for simultaneous sources. Only referenced
+T12 accepts multiple video tracks, still images and any audio tracks. At least one
+video/image clip is required; empty tracks are allowed. Same-track overlaps remain
+forbidden: use separate tracks for simultaneous layers or audio. Only referenced
 assets are probed; unused offline assets do not block a render. Relative sources
 resolve from the physical project directory, including directory aliases.
 Projects and original media are read only; history and revisions are unchanged.
 
-Clips play at 1x, sorted by timeline start rather than JSON array order. Leading
-and interior video gaps are black; duration ends at the last clip's exclusive end
-across all tracks. An audio tail extends the video with black frames. Muted and
-zero-volume clips still occupy their ranges and contribute to output duration.
+Video tracks draw bottom to top in `project.tracks` array order, ignoring audio
+tracks. New tracks append above existing layers; reorder the array in a project
+without conflicting history to change stacking. Clips within each track are sorted
+by timeline start. Every visible layer is composited at each frame, including when
+lower tracks have gaps. Gaps reveal lower layers or the canvas background.
+Duration ends at the last clip's exclusive end across all tracks. Audio tails show
+the background. Muted, zero-volume and zero-opacity clips still contribute to duration.
 There is no separately stored trailing duration. Every timeline start and source
 in/out must align exactly with a project-frame boundary; subframe times are
 rejected with an alignment error. The CLI's existing frame-based edits satisfy
@@ -353,6 +355,50 @@ this rule. Missing/unreadable media, invalid references/overlaps, unknown video
 duration and source ranges exceeding freshly probed video bounds fail with
 clip/path diagnostics. Stored import metadata is not treated as proof that the
 current file still matches it.
+
+Configure the canvas with:
+
+```sh
+node apps/cli/dist/index.js canvas set PROJECT --width 1080 --height 1920 --background-color '#183048' --json
+node apps/cli/dist/index.js clip visual PROJECT CLIP_ID --fit contain --scale 0.5 --x=-120 --y 200 --opacity 0.75 --json
+```
+
+`canvas set` accepts any nonempty subset of width, height and `--background-color`.
+Use 1080×1920 (9:16), 1920×1080 (16:9) or 1080×1080 (1:1), or other supported
+even dimensions. `backgroundColor` is optional `#RRGGBB`, default `#000000`.
+The background is opaque. H.264 output flattens all source transparency onto it.
+`clip visual` accepts any nonempty subset of `--x`, `--y`, `--scale`, `--opacity`
+and `--fit`; `clip add` accepts the same flags. These mutations support dry-run,
+revision guards, atomic save and undo/redo. Omitted properties retain stored values.
+
+Visual defaults are x/y 0, scale 1, opacity 1, fit `contain`. Coordinates are pixel
+offsets from the centered fitted layer: positive x moves right, positive y down.
+Negative offsets use `--x=-120` / `--y=-80`. The fitted layer top left is `(canvas.width - layer.width)/2 + x`,
+`(canvas.height - layer.height)/2 + y`.
+Offsets are finite decimals in [-32768, 32768]. Scale is uniform in [0.01, 4] and
+multiplies the canvas fitting rectangle before centering/translation. Each rectangle
+side rounds to the nearest even pixel (minimum 2, ties upward), with a render limit
+of 8192 per side. `contain` preserves display aspect ratio inside that rectangle;
+its unused margins are transparent. `cover` preserves display aspect ratio, fills
+the rectangle and crops centrally. `stretch` fills the rectangle independently in
+x/y. All modes normalize sample aspect ratio to square pixels. Positioning is
+quantized to the 2-pixel output chroma grid by FFmpeg. Content outside the canvas
+is clipped. Opacity [0, 1] multiplies source alpha; 0 hides visuals while retaining
+audio. Opaque and alpha-bearing videos/images share these rules.
+
+Import PNG/JPEG and other FFmpeg-supported still images as usual and place them
+on video tracks. Their positive `out - in` range specifies a static display duration,
+with no inferred source duration; a nonzero in point still selects the same image.
+Splits retain the image and transforms. Animated GIF/APNG files with a known
+duration are treated as timed video. Attached cover artwork on audio files is
+not a visual source. No keyframes, transitions or GUI canvas controls are included.
+
+JSON clips accept an optional `visual` object containing x/y/scale/opacity/fit.
+`clip.add` batches accept that object; `clip.visual` batches take its properties
+alongside `id`, for example `{ "type": "clip.visual", "id": "c1", "x": 20 }`.
+`canvas.set` batches accept width/height/backgroundColor. Empty visual/canvas
+operations fail. Visual properties require video tracks. New fields remain optional
+in schema version 1 and omission round-trips without defaults, including history.
 
 Audio uses the selected default stream (falling back to the first), resampled and
 downmixed to 48 kHz stereo. Video source time zero is its first video frame;
@@ -389,14 +435,13 @@ container/stream start offsets are normalized. Source in/out are positions on th
 project-rate sampling grid, with an exclusive out point. Each source is converted
 to that grid with FFmpeg's `fps` filter (nearest timestamp rounding) before integer
 frame trimming. A split therefore selects exactly the same sampled frames as the
-unsplit clip, even when source and project rates differ. Aspect ratio is preserved
-with square pixels and black letterboxing. At fractional EOF rounding, at most
+unsplit clip, even when source and project rates differ. The configured fit/scale/position is applied after sampling, preserving source alpha. At fractional EOF rounding, at most
 one cloned frame completes the last frame interval. Global output timestamps are
 regenerated from integer frame indices using the project's rational time base,
-so concatenation cannot accumulate floating-point timing drift. This is CFR
+so composition cannot accumulate floating-point timing drift. This is CFR
 resampling, not a promise to retain every frame of a VFR or differently rated source.
 
-Supported limits: even width 2–3840, even height 2–2160, 1–120 fps, at most 64 clips across all tracks
+Supported limits: even sides 2–3840 with at most 3840×2160 total pixels (including 2160×3840 portrait), 1–120 fps, at most 64 clips across all tracks
 and 600 seconds including gaps. Reduced frame-rate numerator/denominator must fit
 positive signed 32-bit FFmpeg rational components. Unsupported settings fail;
 rendering never substitutes defaults. Encoding and output decode/count verification
@@ -422,14 +467,21 @@ JSON contains `projectPath`, `path` (absolute), `width`, `height`, reduced ratio
 in the probe schema. Human output reports frames, dimensions, rate and destination.
 Only `--output`, `--json` and scoped `--help` apply; settings come from the project.
 
-Headless APIs: `planProjectRender(project)` from `@opencut/core` returns pure,
-ordered video clip/gap segments and positioned `audioClips` with integer frame
-counts, gain, mute and stream requirements. `renderProjectFile(absoluteProjectPath,
-output)` from `@opencut/core/node` reads, resolves and renders that snapshot.
-`renderVideoTimeline(options)` from `@opencut/media` executes resolved frame
-segments without importing the project model, CLI or Electron. The planner and
-media executor remain separate so future tracks/effects can extend the plan.
-Direct media callers supply `audioClips` explicitly; omission produces silence.
+Headless APIs: `planProjectRender(project)` from `@opencut/core` returns width,
+height, backgroundColor, reduced frameRate, total frameCount, and ordered
+`visualClips` / `audioClips`. Visual entries contain clipId, assetId,
+timelineStartFrame, sourceStartFrame, frameCount, x/y, scale, opacity and fit;
+array order is bottom to top. Audio entries contain the same identity/time fields,
+plus volume, muted and required (true for audio-track clips).
+`renderProjectFile(absoluteProjectPath, output)` from `@opencut/core/node` resolves
+asset references and executes the plan without saving the project.
+`renderVideoTimeline(options)` from `@opencut/media` takes resolved paths in place
+of asset references, plus output. Direct media callers supply `audioClips`
+explicitly; omission produces silence. Legacy sequential `segments` are accepted
+instead of `visualClips`, using default transforms; supplying both fails. The pure
+planner now emits `visualClips` rather than its former sequential `segments` shape.
+This API change is separate from saved-project compatibility: existing version 1
+projects still load and render with their original defaults.
 
 To add background music after importing it, use the returned asset and track IDs:
 
@@ -445,6 +497,10 @@ At 30 fps this places two seconds of music at timeline second 1. Read back
 
 For a complete create/import/trim/split/gap/render sequence and its expected frame
 count, see the [worked example](../../../docs/CLI.md#worked-render-example).
+
+For a complete video/image batch with portrait canvas settings, overlay duration,
+transforms and expected output timing, see the
+[layered portrait example](../../../docs/CLI.md#layered-portrait-render-example).
 
 ## Prerequisites and paths
 

@@ -10,7 +10,10 @@ import {
   splitClip,
   trimClip,
   setClipAudio,
+  setClipVisual,
+  setCanvas,
 } from '@opencut/core';
+import type { ClipVisualOptions } from '@opencut/core';
 import { readProjectFile, updateProjectFile } from '@opencut/core/node';
 
 export class UsageError extends Error {}
@@ -47,6 +50,8 @@ export const timelineHelp = `Usage: opencut timeline list <project-file> [--json
        opencut clip add <project-file> <asset-id> --track <track-id> --at <frame> --in <frame> --out <frame> [--json]
        opencut clip move <project-file> <clip-id> [--track <track-id>] [--at <frame>] [--json]
        opencut clip trim <project-file> <clip-id> [--in <frame>] [--out <frame>] [--json]
+       opencut canvas set <project-file> [--width <px>] [--height <px>] [--background-color <#RRGGBB>] [--json]
+       opencut clip visual <project-file> <clip-id> [--x <px>] [--y <px>] [--scale <n>] [--opacity <0..1>] [--fit <contain|cover|stretch>] [--json]
        opencut clip audio <project-file> <clip-id> [--volume <0..1>] [--muted <true|false>] [--json]
        opencut clip split <project-file> <clip-id> --at <frame> [--json]
        opencut clip remove <project-file> <clip-id> [--json]
@@ -57,6 +62,11 @@ including source in/out (not source-file frame indices). Out points are exclusiv
 Trim keeps the timeline start fixed; move preserves source in/out. No implicit ripple or snapping.
 Same-track overlaps fail; touching ends and cross-track overlaps are allowed.
 Remove clips explicitly before removing a populated track. Split keeps the left ID and creates a right ID.
+Later video tracks draw above earlier tracks; new tracks append on top.
+Visual defaults: x/y 0 (pixel offsets from centered fitted rectangle), scale 1, opacity 1, fit contain.
+Scale multiplies the canvas fitting rectangle (0.01–4); contain preserves aspect, cover crops centrally, stretch fills.
+Clip add accepts the same visual flags. Use --x=-20 or --y=-20 for negative offsets.
+Canvas defaults to black; color uses #RRGGBB. Gaps and transparent margins reveal lower layers/background.
 Clip add also accepts --volume <0..1> and --muted <true|false>. Defaults: 1 and false.
 Volume is linear amplitude (0 = silence, 1 = unchanged); mute overrides volume without changing it.
 Known source durations are enforced. Unknown durations/images require explicit ranges with no inferred bound.
@@ -68,9 +78,23 @@ Errors remain text on stderr with --json. Exit codes: 0 success, 1 invalid edit/
 
 const optionsForCommand: Record<string, readonly string[]> = {
   'timeline list': [],
+  'canvas set': ['width', 'height', 'background-color'],
+  'clip visual': ['x', 'y', 'scale', 'opacity', 'fit'],
   'track add': ['type', 'name'],
   'track remove': [],
-  'clip add': ['track', 'at', 'in', 'out', 'volume', 'muted'],
+  'clip add': [
+    'track',
+    'at',
+    'in',
+    'out',
+    'volume',
+    'muted',
+    'x',
+    'y',
+    'scale',
+    'opacity',
+    'fit',
+  ],
   'clip audio': ['volume', 'muted'],
   'clip move': ['track', 'at'],
   'clip trim': ['in', 'out'],
@@ -89,10 +113,10 @@ export async function runTimelineCommand(
   if (
     !allowed ||
     positionals.length !==
-      (['timeline list', 'track add'].includes(command) ? 3 : 4)
+      (['timeline list', 'track add', 'canvas set'].includes(command) ? 3 : 4)
   )
     throw new UsageError(
-      'Expected a timeline list, track add/remove or clip add/move/trim/split/remove/audio command. Run opencut timeline --help for usage.',
+      'Expected a timeline list, track add/remove or clip add/move/trim/split/remove/audio/visual or canvas set command. Run opencut timeline --help for usage.',
     );
   const allowedOptions = [
     'json',
@@ -163,6 +187,53 @@ export async function runTimelineCommand(
   }
   if (command === 'clip audio' && Object.keys(audio).length === 0)
     throw new UsageError('clip audio requires --volume or --muted (or both).');
+  const visual: ClipVisualOptions = {};
+  for (const key of ['x', 'y', 'scale', 'opacity'] as const) {
+    if (values[key] === undefined) continue;
+    const value = required(key);
+    const number = Number(value);
+    const min = key === 'scale' ? 0.01 : key === 'opacity' ? 0 : -32768;
+    const max = key === 'scale' ? 4 : key === 'opacity' ? 1 : 32768;
+    if (
+      !/^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value) ||
+      !Number.isFinite(number) ||
+      number < min ||
+      number > max
+    )
+      throw new UsageError(
+        `--${key} requires a decimal number between ${min} and ${max}.`,
+      );
+    visual[key] = number;
+  }
+  if (values.fit !== undefined) {
+    const fit = required('fit');
+    if (fit !== 'contain' && fit !== 'cover' && fit !== 'stretch')
+      throw new UsageError('--fit requires contain, cover or stretch.');
+    visual.fit = fit;
+  }
+  if (command === 'clip visual' && Object.keys(visual).length === 0)
+    throw new UsageError('clip visual requires at least one visual option.');
+  const canvas: { width?: number; height?: number; backgroundColor?: string } =
+    {};
+  for (const key of ['width', 'height'] as const) {
+    if (values[key] === undefined) continue;
+    const value = required(key);
+    if (
+      !/^\d+$/.test(value) ||
+      !Number.isSafeInteger(Number(value)) ||
+      Number(value) <= 0
+    )
+      throw new UsageError(`--${key} requires a positive safe integer.`);
+    canvas[key] = Number(value);
+  }
+  if (values['background-color'] !== undefined) {
+    const value = required('background-color');
+    if (!/^#[0-9a-fA-F]{6}$/.test(value))
+      throw new UsageError('--background-color requires #RRGGBB.');
+    canvas.backgroundColor = value;
+  }
+  if (command === 'canvas set' && Object.keys(canvas).length === 0)
+    throw new UsageError('canvas set requires at least one canvas option.');
   const frames: Partial<Record<'at' | 'in' | 'out', number>> = {};
   for (const key of ['at', 'in', 'out'] as const) {
     if (values[key] === undefined) continue;
@@ -188,7 +259,7 @@ export async function runTimelineCommand(
         `Track: ${track.id} (${track.type}, ${track.name})`,
         ...track.clips.map(
           (clip) =>
-            `  Clip: ${clip.id}; asset ${clip.assetId}; timeline [${time(clip.timelineStart)}, ${time(clip.timelineEnd)}); source [${time(clip.sourceIn)}, ${time(clip.sourceOut)}); volume ${clip.volume ?? 1}; muted ${clip.muted ?? false}`,
+            `  Clip: ${clip.id}; asset ${clip.assetId}; timeline [${time(clip.timelineStart)}, ${time(clip.timelineEnd)}); source [${time(clip.sourceIn)}, ${time(clip.sourceOut)}); volume ${clip.volume ?? 1}; muted ${clip.muted ?? false}; visual ${JSON.stringify(clip.visual ?? {})}`,
         ),
       ]),
       '',
@@ -222,6 +293,7 @@ export async function runTimelineCommand(
             sourceIn: time('in'),
             sourceOut: time('out'),
             ...audio,
+            ...(Object.keys(visual).length ? { visual } : {}),
           });
           break;
         case 'clip move':
@@ -243,6 +315,12 @@ export async function runTimelineCommand(
           break;
         case 'clip remove':
           changed = removeClip(project, id!);
+          break;
+        case 'canvas set':
+          changed = setCanvas(project, canvas);
+          break;
+        case 'clip visual':
+          changed = setClipVisual(project, id!, visual);
           break;
         case 'clip audio':
           changed = setClipAudio(project, id!, audio);
