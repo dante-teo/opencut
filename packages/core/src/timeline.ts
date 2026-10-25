@@ -130,6 +130,8 @@ export function addClip(project: Project, options: AddClipOptions) {
     timelineStart: options.timelineStart,
     sourceIn: options.sourceIn,
     sourceOut: options.sourceOut,
+    ...(options.volume !== undefined ? { volume: options.volume } : {}),
+    ...(options.muted !== undefined ? { muted: options.muted } : {}),
   };
   next.clips.push(clip);
   const updated = finish(next);
@@ -169,6 +171,32 @@ export function moveClip(
 export interface TrimClipOptions {
   sourceIn?: RationalTime;
   sourceOut?: RationalTime;
+}
+
+export type ClipAudioOptions = Pick<TimelineClip, 'volume' | 'muted'>;
+
+/** Applies to original video audio as well as independent audio clips. */
+export function setClipAudio(
+  project: Project,
+  id: string,
+  options: ClipAudioOptions,
+) {
+  const next = copyProject(project);
+  const clip = requireClip(next, id);
+  if (options.volume === undefined && options.muted === undefined)
+    throw new TimelineError(
+      'INVALID_EDIT',
+      'Specify volume or muted when configuring clip audio.',
+    );
+  if (
+    (options.volume === undefined || options.volume === clip.volume) &&
+    (options.muted === undefined || options.muted === clip.muted)
+  )
+    return { project: next, clip };
+  if (options.volume !== undefined) clip.volume = options.volume;
+  if (options.muted !== undefined) clip.muted = options.muted;
+  const updated = finish(next);
+  return { project: updated, clip: requireClip(updated, id) };
 }
 
 /** Keep timeline start fixed; changing the source range changes duration at 1x. */

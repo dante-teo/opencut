@@ -18,26 +18,31 @@ export async function renderProjectFile(
   const assets = new Map(project.assets.map((asset) => [asset.id, asset]));
   const segments = [];
   const checked = new Set<string>();
+  const resolveSource = async (clip: { assetId: string; clipId: string }) => {
+    const asset = assets.get(clip.assetId)!;
+    const sourcePath = resolveMediaReference(asset.file, path);
+    if (!checked.has(sourcePath)) {
+      const source = await inspectMediaFile(sourcePath);
+      if (source.status === 'unsupported_path')
+        throw new RenderError(
+          `Clip '${clip.clipId}': ${source.message} Relink the source for this operating system before rendering.`,
+        );
+      checked.add(sourcePath);
+    }
+    return sourcePath;
+  };
   for (const segment of plan.segments) {
     if (segment.kind === 'gap') {
       segments.push(segment);
       continue;
     }
-    const asset = assets.get(segment.assetId)!;
-    const sourcePath = resolveMediaReference(asset.file, path);
-    // Foreign-platform absolute references must never become cwd-relative inputs.
-    if (!checked.has(sourcePath)) {
-      const source = await inspectMediaFile(sourcePath);
-      if (source.status === 'unsupported_path')
-        throw new RenderError(
-          `Clip '${segment.clipId}': ${source.message} Relink the source for this operating system before rendering.`,
-        );
-      checked.add(sourcePath);
-    }
-    segments.push({ ...segment, path: sourcePath });
+    segments.push({ ...segment, path: await resolveSource(segment) });
   }
+  const audioClips = [];
+  for (const clip of plan.audioClips)
+    audioClips.push({ ...clip, path: await resolveSource(clip) });
   return {
     projectPath: path,
-    ...(await renderVideoTimeline({ ...plan, segments, output })),
+    ...(await renderVideoTimeline({ ...plan, segments, audioClips, output })),
   };
 }

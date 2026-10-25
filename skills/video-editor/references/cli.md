@@ -1,4 +1,4 @@
-# OpenCut CLI at T10
+# OpenCut CLI at T11
 
 Run commands at the root of an installed checkout. Build with `pnpm build` if
 `apps/cli/dist/index.js` does not exist.
@@ -168,6 +168,15 @@ strictly inside the clip, returns `{ path, left, right }`, preserves source mapp
 and total duration, keeps the left ID and creates a right UUID.
 `clip remove PROJECT CLIP_ID --json` leaves a gap.
 
+`clip add` also accepts `--volume <0..1>` and `--muted <true|false>`.
+`clip audio PROJECT CLIP_ID [--volume <0..1>] [--muted <true|false>] --json`
+updates either property (at least one required). Volume is linear amplitude gain:
+0 is silence, 0.5 halves amplitude, 1 is unchanged; omitted volume defaults to 1.
+Muted defaults to false and overrides gain without changing it. Split copies both
+properties; move/trim retain them. Both flags work on video and audio clips and
+share dry-run, revision and undo/redo behavior. Batch `clip.add` and `clip.audio`
+use numeric `volume` and boolean `muted` with the same bounds/defaults.
+
 Same-track video/audio overlaps fail; touching boundaries and cross-track overlaps
 are allowed. Known asset durations are enforced; unknown-duration/image ranges
 must be explicit and have no inferred finite source bound. No ripple edits,
@@ -200,7 +209,7 @@ for the strict batch fields, operation table, result fields and filesystem limit
 A batch is `{ "expectedRevision": N, "label": "Optional description",
 "operations": [...] }`. Use the revision read from history. A supplied CLI
 revision must equal the batch revision. Operations are strict `track.add/remove`
-and `clip.add/move/trim/split/remove` objects; unknown fields fail. Times are safe
+and `clip.add/move/trim/split/remove/audio` objects; unknown fields fail. Times are safe
 nonnegative integer project-frame indices. For example, on revision 0:
 
 ```json
@@ -318,21 +327,25 @@ misleading source timing, project files and timeline editing are outside scope.
 ## Project rendering
 
 `project render <project-file> --output <new.mp4> [--json]` reads a saved project
-snapshot and renders one video track to H.264/yuv420p MP4. It requires FFmpeg 8+
+snapshot and renders one video track with mixed audio to H.264/yuv420p and AAC MP4. It requires FFmpeg 8+
 with libx264 and standard filters, plus ffprobe on PATH. The project's resolution
-and exact rational frame rate determine the output. Source audio is omitted;
-the MP4 contains only video. No audio mixing, transitions, effects or GUI project
-integration is implemented.
+and exact rational frame rate determine the output. Original video audio is preserved
+by default. Independent audio clips on any number of audio tracks can overlap
+original audio and each other across tracks. No transitions, audio effects,
+keyframes, fades or GUI project integration are implemented.
 
-T10 requires exactly one video track, even if additional tracks would be empty.
-Audio tracks/clips, still images, empty timelines and multi-track projects fail
-explicitly. Remove unsupported tracks/content before rendering. Only referenced
+T11 requires exactly one video track with at least one timed-video clip; extra
+video tracks (even empty ones), still images and audio-only projects fail explicitly.
+Empty audio tracks are allowed. Same-track overlaps remain forbidden: use separate
+audio tracks for simultaneous sources. Only referenced
 assets are probed; unused offline assets do not block a render. Relative sources
 resolve from the physical project directory, including directory aliases.
 Projects and original media are read only; history and revisions are unchanged.
 
 Clips play at 1x, sorted by timeline start rather than JSON array order. Leading
-and interior gaps are black; duration ends at the last clip's exclusive end.
+and interior video gaps are black; duration ends at the last clip's exclusive end
+across all tracks. An audio tail extends the video with black frames. Muted and
+zero-volume clips still occupy their ranges and contribute to output duration.
 There is no separately stored trailing duration. Every timeline start and source
 in/out must align exactly with a project-frame boundary; subframe times are
 rejected with an alignment error. The CLI's existing frame-based edits satisfy
@@ -340,6 +353,36 @@ this rule. Missing/unreadable media, invalid references/overlaps, unknown video
 duration and source ranges exceeding freshly probed video bounds fail with
 clip/path diagnostics. Stored import metadata is not treated as proof that the
 current file still matches it.
+
+Audio uses the selected default stream (falling back to the first), resampled and
+downmixed to 48 kHz stereo. Video source time zero is its first video frame;
+audio-only source time zero is its first audio sample. Audio clips referencing video
+assets use that video's time origin too. Relative stream delays, early audio and
+timestamp gaps are normalized before source trimming. Short/missing video audio
+and timeline gaps supply silence. An audio-track source missing its audio stream,
+with unknown duration, or with source out beyond its current audio end fails with
+clip diagnostics, even when muted. Music does not loop; add explicit clips/ranges.
+
+An independent audio clip referencing a video asset plays alongside that video's
+original audio; it does not detach, link or mute the video clip. To use only the
+independent audio clip, mute the corresponding video clip with
+`clip audio PROJECT VIDEO_CLIP_ID --muted true --json`. Audio settings and edits
+apply to each clip independently, even when clips reference the same asset.
+
+Per-clip `volume` is linear amplitude gain in [0, 1], default 1; `muted` is boolean,
+default false. Configure either on `clip add` or later with
+`clip audio PROJECT CLIP_ID --volume 0.25 --muted false --json`. Use
+`--muted true` to silence original video audio or independent audio clips. JSON
+batch `clip.add` and `clip.audio` use numeric `volume` and boolean `muted`.
+Mixing sums gains without automatic normalization as tracks enter/leave. The
+existing T03 safety limiter caps peaks at 0.95 with latency compensation; dense
+mixes can therefore reduce loud peaks. A silent 48 kHz stereo AAC stream is
+exported even when no source has audio, preserving video-only T10 projects.
+Audio boundaries round absolute project-frame times to nearest 48 kHz samples
+(half up), avoiding cumulative duration drift. Fractional frame/sample boundaries
+can differ by at most one sample at a split; AAC may add one decoded padding
+packet at EOF. MP4 timing excludes encoder delay and reports the planned duration
+within 1.1 ms. No sample-exact lossless audio guarantee is made for AAC.
 
 Source time zero is the selected video's first frame, as in T03 composition;
 container/stream start offsets are normalized. Source in/out are positions on the
@@ -353,7 +396,7 @@ regenerated from integer frame indices using the project's rational time base,
 so concatenation cannot accumulate floating-point timing drift. This is CFR
 resampling, not a promise to retain every frame of a VFR or differently rated source.
 
-Supported limits: even width 2–3840, even height 2–2160, 1–120 fps, at most 64 clips
+Supported limits: even width 2–3840, even height 2–2160, 1–120 fps, at most 64 clips across all tracks
 and 600 seconds including gaps. Reduced frame-rate numerator/denominator must fit
 positive signed 32-bit FFmpeg rational components. Unsupported settings fail;
 rendering never substitutes defaults. Encoding and output decode/count verification
@@ -365,7 +408,8 @@ remain outside this milestone.
 Choose a new `.mp4` in an existing writable directory supporting hard links.
 Existing files, directories and symlinks are refused, including publication races.
 The encoder writes to an owned `.opencut-render-*` sibling directory. Before
-publication, ffprobe verifies codec, dimensions, exact frame rate and measured
+publication, ffprobe verifies H.264/AAC codecs, 48 kHz stereo audio, zero audio start,
+dimensions, exact frame rate and measured A/V
 duration, then decodes/counts all output frames. Publication uses the same
 exclusive hard-link strategy as T03. Handled failures remove temporary output;
 forced process termination can leave the temporary directory. Check exit status
@@ -379,11 +423,25 @@ in the probe schema. Human output reports frames, dimensions, rate and destinati
 Only `--output`, `--json` and scoped `--help` apply; settings come from the project.
 
 Headless APIs: `planProjectRender(project)` from `@opencut/core` returns pure,
-ordered clip/gap segments with integer counts. `renderProjectFile(absoluteProjectPath,
+ordered video clip/gap segments and positioned `audioClips` with integer frame
+counts, gain, mute and stream requirements. `renderProjectFile(absoluteProjectPath,
 output)` from `@opencut/core/node` reads, resolves and renders that snapshot.
 `renderVideoTimeline(options)` from `@opencut/media` executes resolved frame
 segments without importing the project model, CLI or Electron. The planner and
 media executor remain separate so future tracks/effects can extend the plan.
+Direct media callers supply `audioClips` explicitly; omission produces silence.
+
+To add background music after importing it, use the returned asset and track IDs:
+
+```sh
+node apps/cli/dist/index.js media import /path/demo.opencut.json /path/music.wav --json
+node apps/cli/dist/index.js track add /path/demo.opencut.json --type audio --name "Music" --json
+node apps/cli/dist/index.js clip add /path/demo.opencut.json MUSIC_ASSET_ID --track AUDIO_TRACK_ID --at 30 --in 0 --out 60 --volume 0.25 --json
+node apps/cli/dist/index.js clip audio /path/demo.opencut.json VIDEO_CLIP_ID --muted false --volume 1 --json
+```
+
+At 30 fps this places two seconds of music at timeline second 1. Read back
+`timeline list`, render to a new path, and probe/decode the result to verify the mix.
 
 For a complete create/import/trim/split/gap/render sequence and its expected frame
 count, see the [worked example](../../../docs/CLI.md#worked-render-example).

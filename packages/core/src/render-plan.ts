@@ -22,6 +22,19 @@ export interface ProjectRenderPlan {
   frameRate: FrameRate;
   frameCount: number;
   segments: RenderSegment[];
+  audioClips: AudioRenderClip[];
+}
+
+export interface AudioRenderClip {
+  clipId: string;
+  assetId: string;
+  timelineStartFrame: number;
+  sourceStartFrame: number;
+  frameCount: number;
+  volume: number;
+  muted: boolean;
+  /** Audio tracks require an audio stream; video clips may provide silence. */
+  required: boolean;
 }
 
 /** Never round each clip independently: every boundary must lie on the project grid. */
@@ -45,17 +58,18 @@ function exactFrame(
 /** Pure compilation from saved-model semantics to ordered, integer-frame segments. */
 export function planProjectRender(project: Project): ProjectRenderPlan {
   const timeline = listTimeline(project);
-  if (project.tracks.length !== 1 || project.tracks[0]?.type !== 'video')
+  const videoTracks = timeline.tracks.filter((track) => track.type === 'video');
+  if (videoTracks.length !== 1)
     throw new RenderError(
-      'T10 rendering requires exactly one video track and no audio or additional tracks. Remove unsupported tracks before rendering.',
+      'Rendering requires exactly one video track. Remove additional video tracks before rendering.',
     );
-  if (project.clips.length === 0)
+  if (videoTracks[0]!.clips.length === 0)
     throw new RenderError(
       'The video track is empty. Add a video clip before rendering.',
     );
   if (project.clips.length > 64)
     throw new RenderError(
-      'T10 rendering supports at most 64 clips. Render a smaller project.',
+      'Rendering supports at most 64 clips across all tracks. Render a smaller project.',
     );
   const { width, height } = project.settings;
   if (
@@ -86,41 +100,68 @@ export function planProjectRender(project: Project): ProjectRenderPlan {
       'Rendering requires an FFmpeg-compatible rational frame rate between 1 and 120 fps. Update project settings.',
     );
   const segments: RenderSegment[] = [];
+  const audioClips: AudioRenderClip[] = [];
+  let totalFrames = 0;
   let frameCount = 0;
-  for (const clip of timeline.tracks[0]!.clips) {
-    const start = exactFrame(
-      clip.timelineStart,
-      frameRate,
-      `Clip '${clip.id}' timeline start`,
-    );
-    const sourceStartFrame = exactFrame(
-      clip.sourceIn,
-      frameRate,
-      `Clip '${clip.id}' source in`,
-    );
-    const sourceEndFrame = exactFrame(
-      clip.sourceOut,
-      frameRate,
-      `Clip '${clip.id}' source out`,
-    );
-    const count = sourceEndFrame - sourceStartFrame;
-    if (start > frameCount)
-      segments.push({ kind: 'gap', frameCount: start - frameCount });
-    segments.push({
-      kind: 'clip',
-      clipId: clip.id,
-      assetId: clip.assetId,
-      sourceStartFrame,
-      frameCount: count,
-    });
-    frameCount = start + count;
-    if (
-      !Number.isSafeInteger(frameCount) ||
-      BigInt(frameCount) * BigInt(denominator) > 600n * BigInt(numerator)
-    )
-      throw new RenderError(
-        'T10 rendering supports at most 600 seconds. Shorten the timeline.',
+  for (const track of timeline.tracks) {
+    for (const clip of track.clips) {
+      const start = exactFrame(
+        clip.timelineStart,
+        frameRate,
+        `Clip '${clip.id}' timeline start`,
       );
+      const sourceStart = exactFrame(
+        clip.sourceIn,
+        frameRate,
+        `Clip '${clip.id}' source in`,
+      );
+      const sourceEnd = exactFrame(
+        clip.sourceOut,
+        frameRate,
+        `Clip '${clip.id}' source out`,
+      );
+      const count = sourceEnd - sourceStart;
+      const end = start + count;
+      if (
+        !Number.isSafeInteger(end) ||
+        BigInt(end) * BigInt(denominator) > 600n * BigInt(numerator)
+      )
+        throw new RenderError(
+          'Rendering supports at most 600 seconds. Shorten the timeline.',
+        );
+      totalFrames = Math.max(totalFrames, end);
+      audioClips.push({
+        clipId: clip.id,
+        assetId: clip.assetId,
+        timelineStartFrame: start,
+        sourceStartFrame: sourceStart,
+        frameCount: count,
+        volume: clip.volume ?? 1,
+        muted: clip.muted ?? false,
+        required: track.type === 'audio',
+      });
+      if (track.type === 'video') {
+        if (start > frameCount)
+          segments.push({ kind: 'gap', frameCount: start - frameCount });
+        segments.push({
+          kind: 'clip',
+          clipId: clip.id,
+          assetId: clip.assetId,
+          sourceStartFrame: sourceStart,
+          frameCount: count,
+        });
+        frameCount = end;
+      }
+    }
   }
-  return { width, height, frameRate, frameCount, segments };
+  if (totalFrames > frameCount)
+    segments.push({ kind: 'gap', frameCount: totalFrames - frameCount });
+  return {
+    width,
+    height,
+    frameRate,
+    frameCount: totalFrames,
+    segments,
+    audioClips,
+  };
 }

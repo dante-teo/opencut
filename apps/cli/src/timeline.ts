@@ -9,6 +9,7 @@ import {
   removeTrack,
   splitClip,
   trimClip,
+  setClipAudio,
 } from '@opencut/core';
 import { readProjectFile, updateProjectFile } from '@opencut/core/node';
 
@@ -46,6 +47,7 @@ export const timelineHelp = `Usage: opencut timeline list <project-file> [--json
        opencut clip add <project-file> <asset-id> --track <track-id> --at <frame> --in <frame> --out <frame> [--json]
        opencut clip move <project-file> <clip-id> [--track <track-id>] [--at <frame>] [--json]
        opencut clip trim <project-file> <clip-id> [--in <frame>] [--out <frame>] [--json]
+       opencut clip audio <project-file> <clip-id> [--volume <0..1>] [--muted <true|false>] [--json]
        opencut clip split <project-file> <clip-id> --at <frame> [--json]
        opencut clip remove <project-file> <clip-id> [--json]
 
@@ -55,6 +57,8 @@ including source in/out (not source-file frame indices). Out points are exclusiv
 Trim keeps the timeline start fixed; move preserves source in/out. No implicit ripple or snapping.
 Same-track overlaps fail; touching ends and cross-track overlaps are allowed.
 Remove clips explicitly before removing a populated track. Split keeps the left ID and creates a right ID.
+Clip add also accepts --volume <0..1> and --muted <true|false>. Defaults: 1 and false.
+Volume is linear amplitude (0 = silence, 1 = unchanged); mute overrides volume without changing it.
 Known source durations are enforced. Unknown durations/images require explicit ranges with no inferred bound.
 Offline editing needs no media tools; stored metadata is not refreshed or decoded.
 Mutations create undo/redo history; --dry-run previews; --expected-revision <n> guards stale edits.
@@ -66,7 +70,8 @@ const optionsForCommand: Record<string, readonly string[]> = {
   'timeline list': [],
   'track add': ['type', 'name'],
   'track remove': [],
-  'clip add': ['track', 'at', 'in', 'out'],
+  'clip add': ['track', 'at', 'in', 'out', 'volume', 'muted'],
+  'clip audio': ['volume', 'muted'],
   'clip move': ['track', 'at'],
   'clip trim': ['in', 'out'],
   'clip split': ['at'],
@@ -87,7 +92,7 @@ export async function runTimelineCommand(
       (['timeline list', 'track add'].includes(command) ? 3 : 4)
   )
     throw new UsageError(
-      'Expected a timeline list, track add/remove or clip add/move/trim/split/remove command. Run opencut timeline --help for usage.',
+      'Expected a timeline list, track add/remove or clip add/move/trim/split/remove/audio command. Run opencut timeline --help for usage.',
     );
   const allowedOptions = [
     'json',
@@ -137,6 +142,27 @@ export async function runTimelineCommand(
   )
     throw new UsageError('clip trim requires --in or --out (or both).');
   if (values.track !== undefined) required('track');
+  const audio: { volume?: number; muted?: boolean } = {};
+  if (values.volume !== undefined) {
+    const value = required('volume');
+    if (
+      !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(value) ||
+      !Number.isFinite(Number(value)) ||
+      Number(value) > 1
+    )
+      throw new UsageError(
+        '--volume requires a decimal linear gain between 0 and 1.',
+      );
+    audio.volume = Number(value);
+  }
+  if (values.muted !== undefined) {
+    const value = required('muted');
+    if (value !== 'true' && value !== 'false')
+      throw new UsageError('--muted requires true or false.');
+    audio.muted = value === 'true';
+  }
+  if (command === 'clip audio' && Object.keys(audio).length === 0)
+    throw new UsageError('clip audio requires --volume or --muted (or both).');
   const frames: Partial<Record<'at' | 'in' | 'out', number>> = {};
   for (const key of ['at', 'in', 'out'] as const) {
     if (values[key] === undefined) continue;
@@ -162,7 +188,7 @@ export async function runTimelineCommand(
         `Track: ${track.id} (${track.type}, ${track.name})`,
         ...track.clips.map(
           (clip) =>
-            `  Clip: ${clip.id}; asset ${clip.assetId}; timeline [${time(clip.timelineStart)}, ${time(clip.timelineEnd)}); source [${time(clip.sourceIn)}, ${time(clip.sourceOut)})`,
+            `  Clip: ${clip.id}; asset ${clip.assetId}; timeline [${time(clip.timelineStart)}, ${time(clip.timelineEnd)}); source [${time(clip.sourceIn)}, ${time(clip.sourceOut)}); volume ${clip.volume ?? 1}; muted ${clip.muted ?? false}`,
         ),
       ]),
       '',
@@ -195,6 +221,7 @@ export async function runTimelineCommand(
             timelineStart: time('at'),
             sourceIn: time('in'),
             sourceOut: time('out'),
+            ...audio,
           });
           break;
         case 'clip move':
@@ -216,6 +243,9 @@ export async function runTimelineCommand(
           break;
         case 'clip remove':
           changed = removeClip(project, id!);
+          break;
+        case 'clip audio':
+          changed = setClipAudio(project, id!, audio);
           break;
         default:
           throw new UsageError('Unknown timeline operation.');

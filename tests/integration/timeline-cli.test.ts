@@ -103,6 +103,113 @@ afterEach(async () => {
 });
 
 describe('built timeline CLI without Electron or media tools', () => {
+  it('configures clip gains and muting through add/audio, dry-run, history and batches', async () => {
+    const clip = json(
+      'clip',
+      'add',
+      path,
+      'sound',
+      '--track',
+      'a1',
+      '--at',
+      '0',
+      '--in',
+      '0',
+      '--out',
+      '60',
+      '--volume',
+      '0.25',
+      '--muted',
+      'true',
+    ).clip;
+    expect(clip).toMatchObject({ volume: 0.25, muted: true });
+    const before = await readFile(path, 'utf8');
+    json('clip', 'audio', path, clip.id, '--volume', '0.5', '--dry-run');
+    expect(await readFile(path, 'utf8')).toBe(before);
+    const unmuted = json(
+      'clip',
+      'audio',
+      path,
+      clip.id,
+      '--muted',
+      'false',
+    ).clip;
+    expect(unmuted).toMatchObject({ volume: 0.25, muted: false });
+    json('edit', 'undo', path);
+    expect(
+      deserializeProject(await readFile(path, 'utf8')).clips[0],
+    ).toMatchObject({ volume: 0.25, muted: true });
+    json('edit', 'redo', path);
+    const revision = json('edit', 'history', path).revision;
+    const batch = join(directory, 'audio.json');
+    await writeFile(
+      batch,
+      JSON.stringify({
+        expectedRevision: revision,
+        operations: [
+          { type: 'clip.audio', id: clip.id, volume: 0.75 },
+          {
+            type: 'clip.add',
+            id: 'new',
+            assetId: 'av',
+            trackId: 'v1',
+            at: 0,
+            in: 0,
+            out: 60,
+            muted: true,
+            volume: 0.5,
+          },
+        ],
+      }),
+    );
+    json('edit', 'apply', path, batch);
+    expect(
+      deserializeProject(await readFile(path, 'utf8')).clips.map((clip) => [
+        clip.volume,
+        clip.muted,
+      ]),
+    ).toEqual([
+      [0.75, false],
+      [0.5, true],
+    ]);
+    const saved = await readFile(path, 'utf8');
+    json(
+      'clip',
+      'audio',
+      path,
+      clip.id,
+      '--volume',
+      '0.75',
+      '--muted',
+      'false',
+    );
+    expect(await readFile(path, 'utf8')).toBe(saved);
+    for (const args of [
+      [],
+      ['--volume', '-1'],
+      ['--volume', '1.1'],
+      ['--volume', 'NaN'],
+      ['--volume', '1e-1'],
+      ['--muted', 'yes'],
+    ]) {
+      expect(run('clip', 'audio', path, clip.id, ...args).status).toBe(2);
+      expect(await readFile(path, 'utf8')).toBe(saved);
+    }
+    expect(
+      run(
+        'clip',
+        'audio',
+        path,
+        clip.id,
+        '--volume',
+        '0.3',
+        '--expected-revision',
+        '0',
+      ).status,
+    ).toBe(1);
+    expect(await readFile(path, 'utf8')).toBe(saved);
+  });
+
   it('performs the full editing lifecycle with exact JSON, stable IDs and persisted reloads', async () => {
     const track: Track = json(
       'track',
@@ -449,6 +556,8 @@ describe('built timeline CLI without Electron or media tools', () => {
     ['project', 'info', 'project.json', '--at', '0'],
     ['probe', 'sentinel.wav', '--track', 'v1'],
     ['--version', '--in', '0'],
+    ['--version', '--volume', '0.5'],
+    ['probe', 'sentinel.wav', '--muted', 'true'],
   ])(
     'rejects invalid arguments %j without changing project bytes',
     async (...args) => {

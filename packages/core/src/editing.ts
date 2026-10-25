@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { validateProject } from './project.js';
+import { clipAudioShape, validateProject } from './project.js';
 import type { HistoryEntry, Project, ProjectSnapshot } from './project.js';
 import { frameTime } from './time.js';
 import {
@@ -10,6 +10,7 @@ import {
   removeTrack,
   splitClip,
   trimClip,
+  setClipAudio,
 } from './timeline.js';
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/);
@@ -33,6 +34,7 @@ const operationSchema = z.discriminatedUnion('type', [
     at: frame,
     in: frame,
     out: frame,
+    ...clipAudioShape,
   }),
   z.strictObject({
     type: z.literal('clip.move'),
@@ -53,6 +55,7 @@ const operationSchema = z.discriminatedUnion('type', [
     rightId: id.optional(),
   }),
   z.strictObject({ type: z.literal('clip.remove'), id }),
+  z.strictObject({ type: z.literal('clip.audio'), id, ...clipAudioShape }),
 ]);
 const transactionSchema = z.strictObject({
   expectedRevision: z.int().nonnegative(),
@@ -228,6 +231,8 @@ export function executeTransaction(project: Project, input: EditTransaction) {
             timelineStart: time(operation.at),
             sourceIn: time(operation.in),
             sourceOut: time(operation.out),
+            volume: operation.volume,
+            muted: operation.muted,
           });
           break;
         case 'clip.move':
@@ -260,6 +265,9 @@ export function executeTransaction(project: Project, input: EditTransaction) {
           break;
         case 'clip.remove':
           changed = removeClip(next, operation.id);
+          break;
+        case 'clip.audio':
+          changed = setClipAudio(next, operation.id, operation);
           break;
       }
       const { project: updated, ...result } = changed;

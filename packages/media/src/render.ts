@@ -20,6 +20,16 @@ export interface VideoTimelineOptions {
         frameCount: number;
       }
   >;
+  audioClips?: Array<{
+    clipId: string;
+    path: string;
+    timelineStartFrame: number;
+    sourceStartFrame: number;
+    frameCount: number;
+    volume: number;
+    muted: boolean;
+    required: boolean;
+  }>;
   output: string;
 }
 
@@ -68,7 +78,24 @@ function validateOptions(options: VideoTimelineOptions): void {
             s.sourceStartFrame < 0 ||
             !Number.isSafeInteger(s.sourceStartFrame + s.frameCount))),
     ) ||
-    segments.reduce((sum, s) => sum + s.frameCount, 0) !== frameCount
+    segments.reduce((sum, s) => sum + s.frameCount, 0) !== frameCount ||
+    (options.audioClips?.length ?? 0) > 64 ||
+    options.audioClips?.some(
+      (clip) =>
+        !Number.isSafeInteger(clip.timelineStartFrame) ||
+        clip.timelineStartFrame < 0 ||
+        !Number.isSafeInteger(clip.sourceStartFrame) ||
+        clip.sourceStartFrame < 0 ||
+        !Number.isSafeInteger(clip.frameCount) ||
+        clip.frameCount <= 0 ||
+        !Number.isSafeInteger(clip.sourceStartFrame + clip.frameCount) ||
+        clip.timelineStartFrame + clip.frameCount > frameCount ||
+        !Number.isFinite(clip.volume) ||
+        clip.volume < 0 ||
+        clip.volume > 1 ||
+        typeof clip.muted !== 'boolean' ||
+        typeof clip.required !== 'boolean',
+    )
   )
     throw new MediaError(
       'Invalid video render plan: use positive integer frame counts, even dimensions up to 3840x2160, 1–120 fps, at most 128 segments and 600 seconds.',
@@ -118,6 +145,22 @@ export async function renderVideoTimeline(
   ];
   const filters: string[] = [];
   const sources = new Map<string, MediaMetadata>();
+  const inputs = new Map<string, number>();
+  const readSource = async (clip: { path: string; clipId: string }) => {
+    let source = sources.get(clip.path);
+    if (!source) {
+      try {
+        source = await probeMedia(clip.path);
+      } catch (cause) {
+        throw new MediaError(
+          `Clip '${clip.clipId}' cannot read/probe media '${clip.path}'. Restore a readable source file. ${cause instanceof Error ? cause.message : String(cause)}`,
+          { cause },
+        );
+      }
+      sources.set(clip.path, source);
+    }
+    return source;
+  };
   let input = 0;
   for (const [index, segment] of segments.entries()) {
     if (segment.kind === 'gap') {
@@ -126,18 +169,7 @@ export async function renderVideoTimeline(
       );
       continue;
     }
-    let source = sources.get(segment.path);
-    if (!source) {
-      try {
-        source = await probeMedia(segment.path);
-      } catch (cause) {
-        throw new MediaError(
-          `Clip '${segment.clipId}' cannot read/probe media '${segment.path}'. Restore a readable source file. ${cause instanceof Error ? cause.message : String(cause)}`,
-          { cause },
-        );
-      }
-      sources.set(segment.path, source);
-    }
+    const source = await readSource(segment);
     const { video } = source;
     const format = source.formatName ?? '';
     const still =
@@ -147,7 +179,7 @@ export async function renderVideoTimeline(
         (['gif', 'apng'].includes(format) && !source.durationSeconds));
     if (!video?.frameRate || video.isAttachedPicture || still)
       throw new MediaError(
-        `Clip '${segment.clipId}' requires timed video; still images and audio-only sources are unsupported in T10.`,
+        `Clip '${segment.clipId}' requires timed video; still images and audio-only sources are unsupported on the video track.`,
       );
     // Source points are relative to the first video frame, as in T03 composition.
     const offset =
@@ -168,6 +200,7 @@ export async function renderVideoTimeline(
         `Clip '${segment.clipId}' source out exceeds the current video duration or its duration is unknown. Re-import the media and trim to a known video range.`,
       );
     args.push('-threads', '1', '-i', source.path);
+    inputs.set(segment.clipId, input);
     // Sample the entire source on ONE project grid before integer trimming. A split
     // then selects the same frames as the unsplit clip, even at differing rates.
     // One cloned frame covers fractional EOF rounding, never an arbitrary shortfall.
@@ -183,6 +216,72 @@ export async function renderVideoTimeline(
   filters.push(
     `${segments.map((_, i) => `[v${i}]`).join('')}concat=n=${segments.length}:v=1:a=0,` +
       `settb=1/${numerator},setpts=N*${denominator}[video]`,
+  );
+  // Round absolute project boundaries to the nearest 48 kHz sample. Never sum
+  // independently rounded durations: fractional frame rates must not accumulate drift.
+  const sample = (frame: number) => {
+    const n = BigInt(frame) * BigInt(denominator) * 48000n;
+    return Number((2n * n + BigInt(numerator)) / (2n * BigInt(numerator)));
+  };
+  const totalSamples = sample(frameCount);
+  const audioLabels = ['[silence]'];
+  filters.push(
+    `anullsrc=r=48000:cl=stereo,atrim=end_sample=${totalSamples},asetpts=N/SR/TB[silence]`,
+  );
+  for (const [index, clip] of (options.audioClips ?? []).entries()) {
+    const source = await readSource(clip);
+    const { audio, video } = source;
+    if (!audio) {
+      if (clip.required)
+        throw new MediaError(
+          `Clip '${clip.clipId}' requires an audio stream. Re-import or relink the audio asset.`,
+        );
+      continue;
+    }
+    const origin =
+      video?.startTimeSeconds ??
+      audio.startTimeSeconds ??
+      source.startTimeSeconds ??
+      0;
+    const offset = (audio.startTimeSeconds ?? origin) - origin;
+    const duration =
+      audio.durationSeconds === null
+        ? source.durationSeconds === null
+          ? null
+          : source.durationSeconds -
+            (origin - (source.startTimeSeconds ?? origin))
+        : audio.durationSeconds + offset;
+    if (
+      clip.required &&
+      (duration === null ||
+        ((clip.sourceStartFrame + clip.frameCount) * denominator) / numerator >
+          duration + 0.000001)
+    )
+      throw new MediaError(
+        `Clip '${clip.clipId}' source out exceeds the current audio duration or its duration is unknown. Re-import the media and trim to a known audio range.`,
+      );
+    if (clip.muted || clip.volume === 0) continue;
+    let audioInput = inputs.get(clip.clipId);
+    if (audioInput === undefined) {
+      audioInput = input++;
+      args.push('-threads', '1', '-i', source.path);
+    }
+    const start = sample(clip.timelineStartFrame);
+    const count = sample(clip.timelineStartFrame + clip.frameCount) - start;
+    const sourceStart = sample(clip.sourceStartFrame);
+    filters.push(
+      `[${audioInput}:${audio.index}]asetpts=PTS-STARTPTS+(${offset.toFixed(9)})/TB,` +
+        'aresample=48000:async=1:min_hard_comp=0:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,' +
+        `apad,atrim=start_sample=${sourceStart}:end_sample=${sourceStart + count},asetpts=N/SR/TB,` +
+        `volume=${clip.volume},adelay=${start}S:all=1[a${index}]`,
+    );
+    audioLabels.push(`[a${index}]`);
+  }
+  // Stable linear gains, independent of the number of active sources. Match the
+  // existing composer limiter, including latency compensation for sync markers.
+  filters.push(
+    `${audioLabels.join('')}amix=inputs=${audioLabels.length}:duration=first:normalize=0,` +
+      `alimiter=limit=0.95:level=0:latency=1,atrim=end_sample=${totalSamples},asetpts=N/SR/TB[audio]`,
   );
   let temporary: string;
   try {
@@ -202,7 +301,8 @@ export async function renderVideoTimeline(
       filters.join(';'),
       '-map',
       '[video]',
-      '-an',
+      '-map',
+      '[audio]',
       '-map_metadata',
       '-1',
       '-c:v',
@@ -221,8 +321,14 @@ export async function renderVideoTimeline(
       `1/${numerator}`,
       '-video_track_timescale',
       String(numerator),
-      '-frames:v',
-      String(frameCount),
+      '-c:a',
+      'aac',
+      '-b:a',
+      '192k',
+      '-ar',
+      '48000',
+      '-ac',
+      '2',
       '-movflags',
       '+faststart',
       '-f',
@@ -255,7 +361,13 @@ export async function renderVideoTimeline(
     };
     if (
       video?.codec !== 'h264' ||
-      metadata.streams.length !== 1 ||
+      metadata.streams.length !== 2 ||
+      metadata.audio?.codec !== 'aac' ||
+      metadata.audio.sampleRate !== 48000 ||
+      metadata.audio.channels !== 2 ||
+      metadata.audio.startTimeSeconds !== 0 ||
+      metadata.audio.durationSeconds === null ||
+      Math.abs(metadata.audio.durationSeconds - durationSeconds) > 0.0011 ||
       video.width !== width ||
       video.height !== height ||
       !sameFrameRate(video.frameRateRatio, numerator, denominator) ||

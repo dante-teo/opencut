@@ -56,7 +56,7 @@ describe('pure project render planning', () => {
     project = clip(project, 'c', 30, 0, 2);
     project.clips.reverse();
     const before = structuredClone(project);
-    expect(planProjectRender(project)).toEqual({
+    expect(planProjectRender(project)).toMatchObject({
       width: 320,
       height: 180,
       frameRate: project.settings.frameRate,
@@ -113,15 +113,64 @@ describe('pure project render planning', () => {
     },
   );
 
-  it('rejects multiple tracks even when empty and rejects audio content', () => {
+  it('allows audio tracks but still requires exactly one video track', () => {
     const project = clip(example(), 'a', 0, 0, 30);
-    for (const type of ['video', 'audio'] as const)
-      expect(() =>
-        planProjectRender(addTrack(project, { name: 'Extra', type }).project),
-      ).toThrow(/exactly one video track/);
+    expect(() =>
+      planProjectRender(
+        addTrack(project, { name: 'Extra', type: 'video' }).project,
+      ),
+    ).toThrow(/exactly one video track/);
+    expect(
+      planProjectRender(
+        addTrack(project, { name: 'Audio', type: 'audio' }).project,
+      ).frameCount,
+    ).toBe(30);
     project.tracks[0]!.type = 'audio';
     project.assets[0]!.mediaTypes = ['audio'];
-    expect(() => planProjectRender(project)).toThrow(/no audio/);
+    expect(() => planProjectRender(project)).toThrow(/exactly one video track/);
+  });
+
+  it('plans overlapping audio and extends black video to the longest audio end', () => {
+    let project = clip(example(), 'video-clip', 0, 0, 3);
+    project.tracks.unshift({ id: 'music', name: 'Music', type: 'audio' });
+    project.assets[0]!.mediaTypes.push('audio');
+    project = addClip(project, {
+      id: 'sound',
+      assetId: 'source',
+      trackId: 'music',
+      timelineStart: at(2),
+      sourceIn: at(5),
+      sourceOut: at(10),
+      volume: 0.25,
+      muted: true,
+    }).project;
+    const plan = planProjectRender(project);
+    expect(plan.frameCount).toBe(7);
+    expect(plan.segments.at(-1)).toEqual({ kind: 'gap', frameCount: 4 });
+    expect(plan.audioClips).toEqual([
+      {
+        clipId: 'sound',
+        assetId: 'source',
+        timelineStartFrame: 2,
+        sourceStartFrame: 5,
+        frameCount: 5,
+        volume: 0.25,
+        muted: true,
+        required: true,
+      },
+      {
+        clipId: 'video-clip',
+        assetId: 'source',
+        timelineStartFrame: 0,
+        sourceStartFrame: 0,
+        frameCount: 3,
+        volume: 1,
+        muted: false,
+        required: false,
+      },
+    ]);
+    project.clips[1]!.sourceIn = { numerator: 1, denominator: 1000 };
+    expect(() => planProjectRender(project)).toThrow(/between project frames/);
   });
 
   it('validates the project before compiling it', () => {

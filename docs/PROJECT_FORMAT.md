@@ -1,4 +1,4 @@
-# Project format (T10)
+# Project format (T11)
 
 OpenCut projects are UTF-8 JSON objects with `schemaVersion: 1`. The suggested
 filename is `name.opencut.json`; the API does not require an extension. This is
@@ -7,7 +7,7 @@ T05 provides creation, validation and persistence APIs. T06 exposes creation,
 information and validation through the [CLI](CLI.md#projects). T07 adds media
 import/list/info/remove APIs and CLI commands. T08 adds shared timeline editing
 operations and CLI commands. T09 adds atomic transactions and persistent undo/redo.
-T10 renders a single video track through `project render`; desktop project integration remains deferred. See [render limits and timing](CLI.md#project-rendering).
+T11 renders a single video track and multiple audio tracks through `project render`; desktop project integration remains deferred. See [render limits and timing](CLI.md#project-rendering).
 
 ## Example
 
@@ -82,14 +82,14 @@ existing assets without recorded metadata remain valid.
 
 ## Fields and invariants
 
-| Entity   | Fields and constraints                                                                                                                                                                                                   |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Project  | Required `schemaVersion`, `metadata`, `settings`, `assets`, `tracks`, `clips`. Empty collections are valid.                                                                                                              |
-| Metadata | Stable `id`, nonblank `name`, UTC `createdAt` and `updatedAt` timestamps with millisecond precision. `updatedAt` must not precede `createdAt`.                                                                           |
-| Settings | Positive safe-integer pixel `width` and `height`; positive rational `frameRate` in frames per second. These are project settings, independent of any export codec restrictions.                                          |
-| Asset    | Stable `id`, nonblank `name`, `file` reference, nonempty unique `mediaTypes` containing `video`, `audio` or both. Optional positive rational `duration` in seconds and optional probe `metadata`. Omit unknown duration. |
-| Track    | Stable `id`, nonblank `name`, `type` of `video` or `audio`.                                                                                                                                                              |
-| Clip     | Stable `id`, `assetId`, `trackId`, and rational `timelineStart`, `sourceIn`, `sourceOut` in seconds. The referenced asset must contain the track's media type.                                                           |
+| Entity   | Fields and constraints                                                                                                                                                                                                                         |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Project  | Required `schemaVersion`, `metadata`, `settings`, `assets`, `tracks`, `clips`. Empty collections are valid.                                                                                                                                    |
+| Metadata | Stable `id`, nonblank `name`, UTC `createdAt` and `updatedAt` timestamps with millisecond precision. `updatedAt` must not precede `createdAt`.                                                                                                 |
+| Settings | Positive safe-integer pixel `width` and `height`; positive rational `frameRate` in frames per second. These are project settings, independent of any export codec restrictions.                                                                |
+| Asset    | Stable `id`, nonblank `name`, `file` reference, nonempty unique `mediaTypes` containing `video`, `audio` or both. Optional positive rational `duration` in seconds and optional probe `metadata`. Omit unknown duration.                       |
+| Track    | Stable `id`, nonblank `name`, `type` of `video` or `audio`.                                                                                                                                                                                    |
+| Clip     | Stable `id`, `assetId`, `trackId`, and rational `timelineStart`, `sourceIn`, `sourceOut` in seconds. The referenced asset must contain the track's media type. Optional `volume` (linear 0–1, default 1) and `muted` (boolean, default false). |
 
 IDs start with an ASCII letter or digit and contain only letters, digits,
 underscores and hyphens. They must be unique across metadata, assets, tracks and
@@ -150,10 +150,24 @@ may touch exactly; gaps and cross-track overlap are allowed. This rule applies
 to validation, loading, serialization and every editing operation. Clip duration
 and timeline end must also be representable by safe rational components;
 arithmetic never rounds or silently overflows. Collection order is preserved;
-T10 rendering sorts clips by timeline position on one video track and rejects
-additional tracks. Cross-track compositing/mixing remains undefined. T10 requires
-project-frame-aligned times and defines source zero as the first video frame;
+T11 rendering sorts clips by timeline position on one video track and mixes
+original audio with independent audio tracks. Extra video tracks are rejected. It requires
+project-frame-aligned times and defines source zero as the first video frame
+(or first audio sample for audio-only assets);
 see [the rendering contract](CLI.md#project-rendering).
+
+T11 adds optional clip `volume` (finite linear amplitude gain 0–1, default 1) and
+`muted` (boolean, default false). Omission remains omission on load/save, so old
+version 1 projects and history snapshots round trip without inserted defaults.
+`volume: 0` is silence; `volume: 0.5` halves amplitude; `volume: 1` is unchanged.
+Muting overrides gain without changing the stored volume. These fields affect
+both original video audio and audio-track clips. Splits copy them; trims/moves
+preserve them. They are included in transaction snapshots and undo/redo.
+For example, add `"volume": 0.25, "muted": false` to a clip object. Schema version
+remains 1 as an additive prerelease extension; earlier readers reject these new
+fields. Rendering uses frame-aligned audio boundaries, rounds absolute positions
+to 48 kHz samples, fills gaps with silence and ends at the longest clip across
+all tracks. Same-track overlap validation remains unchanged.
 
 ## Media references and portability
 
@@ -350,6 +364,7 @@ import {
   addClip,
   moveClip,
   trimClip,
+  setClipAudio,
   splitClip,
   removeClip,
   removeTrack,
@@ -367,7 +382,11 @@ const added = addClip(video.project, {
   sourceOut: at(75),
 });
 const moved = moveClip(added.project, added.clip.id, { timelineStart: at(60) });
-const trimmed = trimClip(moved.project, added.clip.id, { sourceIn: at(30) });
+const adjusted = setClipAudio(moved.project, added.clip.id, {
+  volume: 0.25,
+  muted: false,
+});
+const trimmed = trimClip(adjusted.project, added.clip.id, { sourceIn: at(30) });
 const split = splitClip(trimmed.project, added.clip.id, at(90));
 const timeline = listTimeline(split.project);
 const leftRemoved = removeClip(split.project, split.left.id);
@@ -377,7 +396,7 @@ const trackRemoved = removeTrack(allRemoved.project, video.track.id);
 
 Operations validate and copy the input before editing, return a validated new
 `project`, and never mutate caller data on success or failure. Add functions
-return the created `track` or `clip`; move/trim return `clip`; split returns
+return the created `track` or `clip`; move/trim/audio updates return `clip`; split returns
 `left` and `right`; removal returns `removedTrackId` or `removedClipId`.
 Optional `id` on add options and optional fourth `rightId` on `splitClip` support
 explicit identities for core callers; all IDs must remain globally unique.
@@ -391,6 +410,11 @@ inside the clip; left keeps its ID and right gets a new ID, preserving the same
 asset, track, contiguous source mapping, total duration and timeline coverage.
 Removing a populated track fails until its clips are moved/removed explicitly.
 No operation changes neighboring clip positions or removes source files/assets.
+`setClipAudio(project, clipId, options)` requires at least one of `volume` or
+`muted`; omitted properties keep their stored values. `addClip` accepts these
+same optional properties. They apply equally to video and audio clips; they do
+not automatically update other clips referencing the same asset. Muting and zero
+gain leave clip duration and timeline coverage unchanged.
 Known duration bounds are enforced; explicit ranges for unknown-duration assets
 are allowed without inferring physical source bounds. Offline editing is valid.
 
@@ -506,6 +530,9 @@ T08 tightens prerelease version 1 semantic validation to forbid same-track overl
 and unsafe derived times without changing stored fields. Pre-T08 documents that
 violate those rules are rejected with actionable issues; they require explicit
 position/range correction, with no automatic migration or ripple adjustment.
+T09 adds optional editing history. T11 adds optional clip audio properties without
+inserting defaults into existing clips or snapshots; older strict readers reject
+these new fields. See [ADR 0008](adr/0008-positioned-audio-mixing.md).
 Other safe-integer versions are rejected
 with a clear supported-version message; missing, unsafe or malformed versions
 are invalid structures. Future format changes must explicitly decide whether to

@@ -4,6 +4,10 @@ Status: Accepted
 
 Date: 2026-10-25
 
+T11's [ADR 0008](0008-positioned-audio-mixing.md) extends this plan with audio
+mixing and replaces the T10 audio-track rejection and video-only output limits.
+The video sampling and publication decisions below remain in effect.
+
 ## Context
 
 T10 connects saved project timelines to the existing FFmpeg media infrastructure.

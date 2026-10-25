@@ -1,6 +1,6 @@
 ---
 name: video-editor
-description: Use the OpenCut CLI to create, inspect and validate video projects, manage media assets and timeline tracks/clips, apply atomic batches, undo/redo edits, inspect media, extract PNG frames, render a saved single-video-track timeline to MP4, or compose video clips with background music.
+description: Use the OpenCut CLI to create, inspect and validate video projects, manage media assets and timeline tracks/clips, apply atomic batches, undo/redo edits, inspect media, extract PNG frames, render a saved timeline with one video track and mixed audio to H.264/AAC MP4, or compose video clips with background music.
 ---
 
 # OpenCut CLI
@@ -29,7 +29,7 @@ T07 adds `media import`, `media list`, `media info` and `media remove` with stab
 asset IDs, persisted metadata, source availability and atomic project updates.
 T08 adds timeline inspection, video/audio track management and clip add/move/trim/split/remove
 through shared headless operations. T09 adds atomic batches, persistent undo/redo,
-dry-run and revision checks. T10 renders a saved single-video-track timeline with black gaps to H.264 MP4.
+dry-run and revision checks. T11 extends saved single-video-track rendering with original audio, independent audio tracks, overlap mixing, clip volume and muting, and H.264/AAC MP4 output.
 The desktop preview and path-based media commands remain separate
 from project data.
 
@@ -121,13 +121,31 @@ real apply. Read back history and timeline/media state after successful mutation
 
 For saved timeline rendering, read [the rendering reference](references/cli.md#project-rendering).
 Run `project render PROJECT --output NEW.mp4 --json` after reading the timeline.
-Use exactly one video track, with at least one timed-video clip; remove additional
-tracks, including empty and audio tracks. Source audio is omitted. Still images,
+Use exactly one video track with at least one timed-video clip and any audio tracks.
+Original video audio is preserved; sources without audio supply silence. Still images,
 subframe timing and unsupported settings fail explicitly. Resolution and frame
 rate come from the project: even dimensions up to 3840x2160, rational 1–120 fps,
-at most 64 clips and 600 seconds including black gaps. Source in/out use the
+at most 64 clips across all tracks and 600 seconds including black gaps. Source in/out use the
 project-rate sampling grid relative to the first video frame; out is exclusive.
-Split clips preserve the sampled source sequence. Only referenced assets must be
+Split clips preserve the sampled video sequence and audio timing. Use separate
+audio tracks for overlapping clips. Add imported music with frame-based source
+ranges/positions; music does not loop automatically. An audio tail extends video
+with black frames. Muted and zero-gain clips still contribute to output duration.
+Referencing a video asset on an audio track also leaves its original video audio
+active; mute the video clip explicitly when using only the independent audio clip.
+Settings and edits apply per clip, without automatically changing other clips
+that reference the same asset. Configure video/audio clips with
+`clip audio PROJECT CLIP_ID --volume 0.25 --muted false --json` or the same flags
+on `clip add`. Volume is linear amplitude in [0, 1], default 1; 0 is silence.
+Mute defaults to false, overrides gain and preserves the stored volume. Split,
+trim, move, batches and undo/redo preserve these settings. Mixing sums gains
+without normalization; the existing latency-compensated safety limiter caps peaks.
+Output always includes 48 kHz stereo AAC, even for silence. Audio source zero
+uses the first video frame for video assets or first audio sample for audio-only
+assets; relative stream delays are retained. Audio tracks require a current audio
+stream and known in-bounds range. Absolute boundaries round to 48 kHz samples;
+fractional splits can differ by one sample and decoded AAC can have EOF padding.
+Only referenced assets must be
 online; the saved project and its history remain unchanged. Choose a new `.mp4`
 in an existing writable directory supporting hard links. Check `frameCount`,
 `frameRate` and measured metadata in the result, and inspect/decode the output

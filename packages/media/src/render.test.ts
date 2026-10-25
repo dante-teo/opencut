@@ -75,11 +75,21 @@ beforeEach(async () => {
     output: join(directory, 'out.mp4'),
   };
   const video = { ...stream, durationSeconds: (12 * 1001) / 30000 };
+  const audio = {
+    ...stream,
+    index: 1,
+    type: 'audio',
+    codec: 'aac',
+    sampleRate: 48000,
+    channels: 2,
+    durationSeconds: video.durationSeconds,
+  };
   verified = {
     ...source,
     durationSeconds: video.durationSeconds,
     video,
-    streams: [video],
+    audio,
+    streams: [video, audio],
   };
   count = 12;
   vi.mocked(probeMedia).mockImplementation(async (path) =>
@@ -97,6 +107,72 @@ beforeEach(async () => {
 afterEach(async () => rm(directory, { recursive: true, force: true }));
 
 describe('video timeline executor safety', () => {
+  it('uses stream offsets, sample trims/delays, stable gains and the selected audio stream', async () => {
+    const audio = {
+      ...stream,
+      index: 4,
+      type: 'audio',
+      codec: 'aac',
+      startTimeSeconds: 0.25,
+    };
+    vi.mocked(probeMedia).mockImplementation(async (path) =>
+      path.endsWith('render.mp4')
+        ? { ...verified, path }
+        : { ...source, path, audio },
+    );
+    options.audioClips = [
+      {
+        clipId: 'clip',
+        path: source.path,
+        timelineStartFrame: 2,
+        sourceStartFrame: 3,
+        frameCount: 10,
+        volume: 0.25,
+        muted: false,
+        required: false,
+      },
+    ];
+    await renderVideoTimeline(options);
+    const args = vi.mocked(runMediaTool).mock.calls[0]![1];
+    const graph = args[args.indexOf('-filter_complex') + 1]!;
+    expect(args.filter((arg) => arg === '-i')).toHaveLength(1);
+    expect(graph).toContain('[0:4]asetpts=PTS-STARTPTS+(0.250000000)/TB');
+    expect(graph).toContain('atrim=start_sample=4805:end_sample=20821');
+    expect(graph).toContain('volume=0.25,adelay=3203S:all=1');
+    expect(graph).toContain('normalize=0');
+    expect(graph).toContain('latency=1');
+  });
+
+  it('rejects invalid audio plans and a required missing audio stream before encoding', async () => {
+    const clip = {
+      clipId: 'sound',
+      path: source.path,
+      timelineStartFrame: 0,
+      sourceStartFrame: 0,
+      frameCount: 12,
+      volume: 1,
+      muted: false,
+      required: true,
+    };
+    for (const fields of [
+      { volume: 1.1 },
+      { frameCount: 13 },
+      { sourceStartFrame: -1 },
+      { timelineStartFrame: 0.5 },
+    ]) {
+      await expect(
+        renderVideoTimeline({
+          ...options,
+          audioClips: [{ ...clip, ...fields }],
+        }),
+      ).rejects.toThrow(/Invalid video render plan/);
+    }
+    await expect(
+      renderVideoTimeline({ ...options, audioClips: [clip] }),
+    ).rejects.toThrow(/requires an audio stream/);
+    expect(runMediaTool).not.toHaveBeenCalled();
+  });
+
   it('publishes only verified output and passes literal paths to the existing subprocess utility', async () => {
     const result = await renderVideoTimeline(options);
     expect(result).toMatchObject({
@@ -108,7 +184,7 @@ describe('video timeline executor safety', () => {
     expect(await readdir(directory)).toEqual(['out.mp4']);
     const args = vi.mocked(runMediaTool).mock.calls[0]![1];
     expect(args).toContain(source.path);
-    expect(args).toContain('-an');
+    expect(args).toContain('[audio]');
     expect(args[args.indexOf('-filter_complex') + 1]).toContain(
       'trim=start_frame=3:end_frame=13',
     );
@@ -168,7 +244,7 @@ describe('video timeline executor safety', () => {
       if (bad === 'codec') verified.video!.codec = 'mpeg4';
       if (bad === 'duration') verified.video!.durationSeconds = 0.5;
       if (bad === 'frames') count = 11;
-      if (bad === 'audio') verified.streams.push({ ...stream, type: 'audio' });
+      if (bad === 'audio') verified.audio = null;
       if (bad === 'unknown duration') verified.durationSeconds = null;
       await expect(renderVideoTimeline(options)).rejects.toThrow(
         /verification failed/,

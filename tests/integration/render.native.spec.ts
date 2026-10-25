@@ -168,7 +168,8 @@ test('native T10 saved timeline rendering', async (t) => {
         output,
       ]),
     );
-    assert.equal(probe.streams.length, 1);
+    assert.equal(probe.streams.length, 2);
+    assert.equal(probe.streams[1].codec_name, 'aac');
     const video = probe.streams[0];
     assert.equal(video.codec_name, 'h264');
     assert.equal(video.width, width);
@@ -378,9 +379,6 @@ test('native T10 saved timeline rendering', async (t) => {
         p = structuredClone(base);
         p.tracks.push({ id: 'extra', name: 'Extra', type: 'video' });
         cases.push([p, /exactly one video track/]);
-        p = structuredClone(base);
-        p.tracks.push({ id: 'audio', name: 'Audio', type: 'audio' });
-        cases.push([p, /no audio/]);
         p = structuredClone(base);
         p.settings.width = 161;
         cases.push([p, /even dimensions/]);

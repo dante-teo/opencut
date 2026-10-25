@@ -79,6 +79,11 @@ const assetSchema = z.strictObject({
   metadata: assetMetadataSchema.optional(),
 });
 const trackSchema = z.strictObject({ id, name, type: mediaType });
+/** Linear amplitude gain: 0 is silence, 1 is unchanged. Omission preserves old files. */
+export const clipAudioShape = {
+  volume: z.number().finite().min(0).max(1).optional(),
+  muted: z.boolean().optional(),
+};
 const clipSchema = z.strictObject({
   id,
   assetId: id,
@@ -86,6 +91,7 @@ const clipSchema = z.strictObject({
   timelineStart: timeSchema,
   sourceIn: timeSchema,
   sourceOut: timeSchema,
+  ...clipAudioShape,
 });
 const settingsSchema = z.strictObject({
   width: z.int().positive(),

@@ -29,7 +29,7 @@ import type { MediaMetadata } from '@opencut/media';
 
 const help = `Usage: opencut [command] [options]
 
-OpenCut — project, media asset and timeline editing, transactions and headless rendering (T10).
+OpenCut — project, media asset and timeline editing, transactions and headless rendering (T11).
 
 Commands:
   project create <project-file> --name <name> [--width <px>] [--height <px>] [--fps <n|n/d>]
@@ -37,14 +37,14 @@ Commands:
   project info <project-file>           Show metadata, settings and statistics
   project validate <project-file>       Check project data and media references
   project render <project-file> --output <new.mp4>
-                                       Render one video track with black gaps (no audio)
+                                       Render one video track with black gaps and mixed audio
   media import <project-file> <file>    Import a source reference and probe metadata
   media list <project-file>             List assets, metadata and source availability
   media info <project-file> <asset-id>   Inspect an asset by stable ID
   media remove <project-file> <asset-id> Remove an unreferenced asset, keeping its file
   timeline list <project-file>          Inspect tracks, clips and exact timing
   track add|remove <project-file>       Manage video/audio tracks (track --help)
-  clip add|move|trim|split|remove <project-file>
+  clip add|move|trim|split|remove|audio <project-file>
                                        Edit clips (clip --help; time arguments are frames)
   edit apply <project-file> <batch.json> Apply an atomic transaction
   edit undo|redo|history <project-file>  Restore or inspect persistent editing history
@@ -81,10 +81,12 @@ Exit codes: 0 success, 1 validation/runtime/file/media failure, 2 invalid argume
 const projectHelp = {
   render: `Usage: opencut project render <project-file> --output <new.mp4> [--json] [--help]
 
-Render exactly one video track to H.264 MP4 at project resolution and rational frame rate.
-Gaps are black. Source audio is omitted; audio/additional tracks and still images are rejected.
+Render one video track and multiple audio tracks to H.264/AAC MP4 at project settings.
+Video gaps are black; audio gaps are silent. Original audio is preserved by default.
+Use clip audio --volume <0..1> --muted <true|false> to configure gains and muting.
+Additional video tracks and still images are rejected.
 Times must align to project frames; source points use the first video frame as zero.
-Supports even dimensions up to 3840x2160, 1–120 fps, 64 clips and 600 seconds.
+Supports even dimensions up to 3840x2160, 1–120 fps, 64 clips across all tracks and 600 seconds.
 Requires FFmpeg 8+ and ffprobe. Output must be new, in an existing directory.
 `,
   create: `Usage: opencut project create <project-file> --name <name> [options]
@@ -233,6 +235,8 @@ async function runCli(args: string[]): Promise<void> {
       fps: { type: 'string' },
       'clip-volume': { type: 'string' },
       'music-volume': { type: 'string' },
+      volume: { type: 'string' },
+      muted: { type: 'string' },
     },
     strict: true,
     allowPositionals: true,
@@ -276,7 +280,15 @@ async function runCli(args: string[]): Promise<void> {
     await runTimelineCommand(positionals, values);
     return;
   }
-  for (const option of ['type', 'track', 'at', 'in', 'out'] as const) {
+  for (const option of [
+    'type',
+    'track',
+    'at',
+    'in',
+    'out',
+    'volume',
+    'muted',
+  ] as const) {
     if (values[option] !== undefined)
       throw new UsageError(
         `--${option} applies only to timeline editing commands.`,

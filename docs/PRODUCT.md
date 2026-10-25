@@ -20,7 +20,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 (probing, decoding, playback and encoding) are separate concerns. Detailed editing
 contracts and the playback/render backend require later technical validation.
 
-## Current scope: T10
+## Current scope: T11
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -75,10 +75,16 @@ sequential trimmed/split clips, black gaps and exact integer/rational frame timi
 Output is H.264 MP4 at project resolution/rate. Sources and project history remain
 unchanged. See [project rendering](CLI.md#project-rendering) for limits.
 
+T11 extends the same renderer with original video audio, independent audio tracks,
+overlap mixing, clip volume/mute, trimmed/split source synchronization and silent
+gaps. H.264/AAC MP4 output contains 48 kHz stereo audio. Longest audio clips can
+extend black video tails. Existing video-only projects remain valid. The single
+video track limit and same-track overlap rules remain unchanged.
+
 ## Excluded
 
-T10 does not implement multiple-track rendering, audio output/mixing, transitions,
-effects, or desktop project media integration. No FFmpeg or
+T11 does not implement multiple-video-track rendering, transitions, audio effects,
+keyframes, fades, or desktop project media integration. No FFmpeg or
 MLT runtime is bundled; media commands require manually installed external tools.
 Fixture generation remains an optional development utility.
 
@@ -89,4 +95,4 @@ User media must never be silently changed or overwritten.
 
 macOS is the initial required platform. Package boundaries should stay portable;
 Windows/Linux support requires explicit validation later. No distribution,
-installer, updater, signing or notarization work is included in T10. T11 is not implemented.
+installer, updater, signing or notarization work is included in T11. T12 is not implemented.
