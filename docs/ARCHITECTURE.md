@@ -311,6 +311,18 @@ The native fixture regression is a separate opt-in
 suite that creates synthetic media in an OS temporary directory and cleans it up.
 It does not use or change the working fixture set.
 
+T14 adds `scripts/cli-e2e.ts` as a consumer of the built public CLI. Every project
+command starts a fresh process; no core APIs construct or repair its project.
+Independent ffprobe/FFmpeg checks verify decoded frames, layer regions, audio
+gains and timing. `tests/e2e/cli.native.spec.ts` runs the workflow twice and checks
+identical MP4 hashes with the same fixtures/toolchain, plus per-run cleanup.
+`pnpm test:e2e` is opt-in and remains separate from `pnpm test` and `pnpm test:media`.
+It generates fixtures only when their directory is absent, validates an existing
+set, and never overwrites it. `pnpm e2e --keep` retains a successful run for inspection;
+otherwise the workflow removes its owned directory. See the
+[official workflow](../skills/video-editor/references/workflow.md) for the recipe
+and verification boundaries.
+
 Fixture validation decodes media with ffprobe and checks `nb_read_frames` against
 the expected video frame count. Container headers alone are insufficient: an MP4
 can retain its declared duration and frame count after its media data is truncated.

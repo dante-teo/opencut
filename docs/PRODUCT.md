@@ -20,7 +20,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 (probing, decoding, playback and encoding) are separate concerns. Detailed editing
 contracts and the playback/render backend require later technical validation.
 
-## Current scope: T12
+## Current scope: T14
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -92,9 +92,16 @@ SIGINT/SIGTERM cancellation, bounded subprocess shutdown, quality/resolution pre
 and optional atomic replacement of existing exports after verification. Failed or
 cancelled jobs preserve previous exports and clean owned temporary output.
 
+T14 adds a reproducible CLI-only 18-second edit and automated repeatability test.
+It covers creation/import, track and clip edits, transforms/overlays, original and
+background audio, persistent history across processes, validation, export and
+independent decoded frame/audio checks. The official Agent Skill includes the
+complete workflow. This validates the existing headless capabilities without
+adding editing features or desktop integration.
+
 ## Excluded
 
-T13 does not implement transitions, audio effects,
+T14 does not implement transitions, audio effects,
 keyframes, fades, or desktop project media integration. No FFmpeg or
 MLT runtime is bundled; media commands require manually installed external tools.
 Fixture generation remains an optional development utility.
@@ -106,5 +113,5 @@ User media must never be silently changed or overwritten.
 
 macOS is the initial required platform. Package boundaries should stay portable;
 Windows/Linux support requires explicit validation later. No distribution,
-installer, updater, signing or notarization work is included in T13. Render jobs
+installer, updater, signing or notarization work is included in T14. Render jobs
 run in the invoking process, without a persistent queue, background service or database.

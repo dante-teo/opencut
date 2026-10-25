@@ -12,6 +12,8 @@ editing through the CLI: track management and clip add/move/trim/split/remove.
 T09 adds [atomic batches, persistent undo/redo, dry-run and revision checks](CLI.md#transactions-undo-and-redo).
 T12 extends [saved timeline rendering](CLI.md#project-rendering) to H.264/AAC MP4 with ordered video/image layers, position/scale/opacity, canvas fitting/background, portrait/square output, and the existing original/multi-track audio mix and exact project-frame timing.
 T13 adds structured JSONL progress, SIGINT/SIGTERM cancellation, quality/resolution presets and explicit atomic export replacement.
+T14 adds a repeatable [CLI-only end-to-end workflow](../skills/video-editor/references/workflow.md)
+covering creation, imports, edits, layers, mixed audio, history and verified 18-second export.
 Desktop project integration remains deferred.
 
 ## Quick start (macOS)
@@ -118,6 +120,8 @@ and standard filters. Existing output files are refused. See
 | `pnpm test:desktop`                      | Build and check shell security, appearance, reopening and available fixture playback    |
 | `pnpm test:preview`                      | Build and measure real Electron playback/seek performance (FFmpeg + ffprobe + fixtures) |
 | `pnpm test:fixtures`                     | Run the optional native intact/truncated-media regression (FFmpeg + ffprobe)            |
+| `pnpm e2e --keep`                        | Build and run the complete 18-second CLI workflow; retain verified MP4 and evidence     |
+| `pnpm test:e2e`                          | Run the CLI-only workflow twice and clean per-run artifacts (FFmpeg + ffprobe)          |
 | `pnpm test:media`                        | Build and test real media CLI against existing generated fixtures (FFmpeg + ffprobe)    |
 | `pnpm fixtures:generate`                 | Generate and validate five small synthetic media files (optional FFmpeg + ffprobe)      |
 | `pnpm fixtures:validate`                 | Decode generated media and check metadata/readable video frame counts (ffprobe)         |
@@ -130,6 +134,14 @@ native pointer movement and release outside the slider, immediate keyboard seeks
 and a gated import followed by validation of the replacement source. Performance
 measurements are separate in `pnpm test:preview`; desktop correctness checks do
 not impose hardware-dependent latency thresholds.
+
+`pnpm e2e --keep` builds and validates the complete T14 workflow, creating fixtures
+only when their generated directory is absent. Existing fixtures must pass validation.
+It retains successful output/evidence in a unique `tests/fixtures/generated/t14-e2e-*`
+directory; omit `--keep` to clean it. `pnpm test:e2e` runs twice from fresh projects
+and verifies cleanup. Every project operation runs through a separate public CLI
+process. See the [official workflow](../skills/video-editor/references/workflow.md)
+for commands, expected timing and independent frame/audio checks.
 
 `pnpm test` runs the headless suite with Vitest and needs no native media tools.
 `pnpm test:fixtures` runs the separate Node native regression with FFmpeg and
@@ -161,8 +173,9 @@ skills/video-editor/   Product Agent Skill and its current CLI reference
 tests/
   fixtures/            Expected metadata and fixture documentation
   integration/         Headless CLI/fixture-contract tests and opt-in native media tests
+  e2e/                 Repeatable public-CLI editing/export workflow test
   desktop/             Electron integration and opt-in playback performance tests
-scripts/               Optional fixture tooling (TypeScript)
+scripts/               Optional fixture generation/validation and CLI E2E tooling (TypeScript)
 docs/                  Product, architecture and architectural decisions (adr/)
 ```
 

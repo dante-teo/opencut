@@ -1,4 +1,4 @@
-# CLI reference (T13)
+# CLI reference (T14)
 
 Build from the checkout root with `pnpm build`. The `opencut` executable is
 workspace-local. Use the direct Node form for machine-readable stdout; pnpm
@@ -1081,3 +1081,15 @@ quality/resolution presets, send SIGINT/SIGTERM during live encoding, check chil
 termination and temporary cleanup, and preserve previous exports after encoding
 failure/cancellation. Source/project hashes remain unchanged. Owned `t13-*`
 directories are cleaned after each run.
+
+## Complete end-to-end workflow
+
+Run `pnpm e2e --keep` to build and execute the T14 CLI-only 18-second workflow,
+retaining a verified MP4, project, representative frames, ffprobe/frame/audio
+measurements and CLI process transcript in a unique generated directory. Run
+`pnpm test:e2e` for two independent runs with automatic cleanup. Missing fixtures
+are generated only when their directory is absent; existing fixtures are validated
+and never overwritten. The [official Agent Skill workflow](../skills/video-editor/references/workflow.md)
+contains the complete public command recipe, timing and verification contract.
+It also covers [20-second portrait photo stories and collages](../skills/video-editor/references/workflow.md#photo-slideshows-and-vertical-edits),
+including static transforms, imported caption/music assets and cleanup boundaries.

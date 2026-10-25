@@ -32,6 +32,14 @@ through shared headless operations. T09 adds atomic batches, persistent undo/red
 dry-run and revision checks. T11 extends saved single-video-track rendering with original audio, independent audio tracks, overlap mixing, clip volume and muting, and H.264/AAC MP4 output.
 T12 adds overlapping video/image layers, per-clip position/scale/opacity and contain/cover/stretch fitting, canvas dimensions/background and portrait/square output.
 T13 adds JSONL progress, SIGINT/SIGTERM cancellation, quality/resolution presets and explicit atomic export replacement.
+T14 validates the complete 18-second editing/export workflow using fresh CLI processes,
+including persistence, dry-run, rejected edits, undo/no-op/redo, decoded frames and audio.
+Follow the [complete tested workflow](references/workflow.md) to reproduce it or adapt
+its public commands to other media. Run `pnpm e2e --keep` from the checkout root for
+a verified MP4, representative PNGs, ffprobe results and a CLI transcript in a new
+isolated generated directory. `pnpm test:e2e` runs it twice and cleans each run.
+For image-only stories and collages, follow the [portrait/photo adaptation](references/workflow.md#photo-slideshows-and-vertical-edits),
+including imported caption/music assets and project cleanup boundaries.
 The desktop preview and path-based media commands remain separate
 from project data.
 

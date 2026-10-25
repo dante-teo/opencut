@@ -1,4 +1,7 @@
-# OpenCut CLI at T13
+# OpenCut CLI at T14
+
+For a complete CLI-only edit with tested timing, layers, audio and persistent history,
+see the [T14 workflow](workflow.md).
 
 Run commands at the root of an installed checkout. Build with `pnpm build` if
 `apps/cli/dist/index.js` does not exist.
