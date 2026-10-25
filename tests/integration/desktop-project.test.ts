@@ -99,6 +99,51 @@ it('rejects malformed IPC inputs without changing the session', async () => {
   });
 });
 
+it('authorizes only current video IDs and rechecks local media before preview', async () => {
+  const { session, dialogs } = setup();
+  await expect(session.previewAsset('video')).rejects.toThrow('Open a project');
+  const project = createProject(input);
+  project.assets = [
+    {
+      id: 'video',
+      name: 'Video',
+      file: { type: 'relative', path: 'source.mp4' },
+      mediaTypes: ['video'],
+    },
+    {
+      id: 'audio',
+      name: 'Audio',
+      file: { type: 'relative', path: 'source.wav' },
+      mediaTypes: ['audio'],
+    },
+  ];
+  const path = join(directory, 'preview.json');
+  await writeProjectFile(project, path);
+  await writeFile(join(directory, 'source.mp4'), 'Synthetic video placeholder');
+  dialogs.open.mockResolvedValue(path);
+  await session.run('open');
+  for (const value of [undefined, null, {}, 1])
+    await expect(session.previewAsset(value)).rejects.toThrow(
+      'Expected a video asset ID',
+    );
+  await expect(session.previewAsset('/etc/passwd')).rejects.toThrow(
+    'not in the current project',
+  );
+  await expect(session.previewAsset('audio')).rejects.toThrow(
+    'Select a video asset',
+  );
+  expect(await session.previewAsset('video')).toMatchObject({
+    path: join(directory, 'source.mp4'),
+    asset: { id: 'video' },
+  });
+  await rm(join(directory, 'source.mp4'));
+  await expect(session.previewAsset('video')).rejects.toThrow(
+    'Media file is missing',
+  );
+  await session.run('close');
+  await expect(session.previewAsset('video')).rejects.toThrow('Open a project');
+});
+
 it('preserves unsaved work on cancel, save cancellation, existing destination and failed write', async () => {
   const { session, dialogs } = setup();
   await session.run('create', input);

@@ -9,6 +9,8 @@ import {
   readProjectFile,
   updateProjectFile,
   writeProjectFile,
+  inspectMediaFile,
+  resolveMediaReference,
 } from '@opencut/core/node';
 import type {
   DesktopProject,
@@ -33,6 +35,30 @@ export class ProjectSession {
 
   get needsCloseGuard(): boolean {
     return this.busy || this.state?.dirty === true;
+  }
+
+  /** Resolve only an ID in the active session; never accept a renderer path. */
+  async previewAsset(id: unknown) {
+    const state = this.state;
+    if (this.busy) throw new Error('Wait for the project operation to finish.');
+    if (!state?.path)
+      throw new Error('Open a project with imported video first.');
+    if (typeof id !== 'string') throw new Error('Expected a video asset ID.');
+    const asset = state.project.assets.find((asset) => asset.id === id);
+    if (!asset) throw new Error('Video asset is not in the current project.');
+    if (!asset.mediaTypes.includes('video') || asset.metadata?.kind === 'image')
+      throw new Error(
+        'Select a video asset. Audio and still preview are not available.',
+      );
+    const path = resolveMediaReference(asset.file, state.path);
+    const availability = await inspectMediaFile(path);
+    if (availability.status !== 'available')
+      throw new Error(availability.message);
+    if (this.state !== state || this.busy)
+      throw new Error(
+        'Project changed while opening the preview. Select the asset again.',
+      );
+    return { asset, path };
   }
 
   async run(action: ProjectAction, input?: unknown): Promise<ProjectReply> {

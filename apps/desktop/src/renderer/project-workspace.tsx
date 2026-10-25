@@ -13,6 +13,13 @@ export function ProjectWorkspace() {
   const pending = useRef(false);
   const formDialog = useRef<HTMLDialogElement>(null);
   const [viewer, setViewer] = useState<'project' | 'source'>('project');
+  const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
+  const [previewRequest, setPreviewRequest] = useState(0);
+  const [previewSession, setPreviewSession] = useState(0);
+  const sourceViewer = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (sourceViewer.current) sourceViewer.current.scrollTop = 0;
+  }, [previewRequest, previewSession]);
   const [selection, setSelection] = useState<{
     kind: 'asset' | 'clip';
     id: string;
@@ -31,7 +38,11 @@ export function ProjectWorkspace() {
         setState(reply.state);
         if (!reply.canceled) {
           setCreating(false);
-          setSelection(null);
+          if (label !== 'Saving project…') {
+            setSelection(null);
+            setPreviewAssetId(null);
+            setPreviewSession((value) => value + 1);
+          }
           setNotice(label === 'Saving project…' ? 'Project saved.' : '');
         }
       }
@@ -148,9 +159,13 @@ export function ProjectWorkspace() {
                           selection?.kind === 'asset' &&
                           selection.id === asset.id
                         }
-                        onClick={() =>
-                          setSelection({ kind: 'asset', id: asset.id })
-                        }
+                        onClick={() => {
+                          setSelection({ kind: 'asset', id: asset.id });
+                          setPreviewAssetId(asset.id);
+                          setPreviewRequest((value) => value + 1);
+                          setViewer('source');
+                        }}
+                        disabled={!!busy}
                       >
                         <span
                           className={`asset-icon ${asset.metadata?.kind ?? asset.mediaTypes[0]}`}
@@ -252,8 +267,15 @@ export function ProjectWorkspace() {
             aria-labelledby="source-viewer-tab"
             hidden={viewer !== 'source'}
             className="source-viewer"
+            ref={sourceViewer}
           >
-            <Preview />
+            <Preview
+              key={previewSession}
+              assetId={previewAssetId}
+              requestKey={previewRequest}
+              projectFrameRate={project?.settings.frameRate}
+              active={viewer === 'source'}
+            />
           </div>
         </section>
         <ProjectInspector

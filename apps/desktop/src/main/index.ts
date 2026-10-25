@@ -19,6 +19,8 @@ import {
   PROJECT_CHANNELS,
   OPEN_PREVIEW_CHANNEL,
   PREVIEW_METRICS_CHANNEL,
+  ASSET_PREVIEW_CHANNEL,
+  RELEASE_PREVIEW_CHANNEL,
   type PreviewSource,
 } from '../bridge.js';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -48,6 +50,7 @@ let mainWindow: BrowserWindow | null = null;
 let previewFile: { url: string; path: string } | null = null;
 let openingPreview = false;
 let closingProject = false;
+let previewGeneration = 0;
 const projectSession = new ProjectSession({
   async open() {
     const window = mainWindow;
@@ -127,6 +130,7 @@ async function openPreview(
   const window = mainWindow;
   if (!window || openingPreview) return null;
   openingPreview = true;
+  const generation = ++previewGeneration;
   try {
     const selection = await dialog.showOpenDialog(window, {
       title: 'Open video preview',
@@ -170,10 +174,14 @@ async function openPreview(
       }
     } catch {
       warning =
-        'Metadata unavailable (ffprobe is optional). Playback can still work; frame stepping is disabled.';
+        'Metadata unavailable (ffprobe is optional). Playback can still work; no source frame rate is available.';
     }
     // Revalidate after the native dialog/probe, including a window closing/reopening.
     assertSender(event);
+    if (generation !== previewGeneration)
+      throw new Error(
+        'Project changed while opening the preview. Open the video again.',
+      );
     const url = `opencut://media/${randomUUID()}`;
     previewFile = { url, path };
     return {
@@ -291,10 +299,44 @@ app
           args[0],
         );
         assertSender(event);
+        if (
+          reply.ok &&
+          !reply.canceled &&
+          ['create', 'open', 'close'].includes(action)
+        ) {
+          previewGeneration++;
+          previewFile = null;
+        }
         return reply;
       });
     }
     ipcMain.handle(OPEN_PREVIEW_CHANNEL, openPreview);
+    ipcMain.handle(ASSET_PREVIEW_CHANNEL, async (event, ...args: unknown[]) => {
+      assertSender(event);
+      if (args.length !== 1) throw new Error('Expected one video asset ID.');
+      const generation = ++previewGeneration;
+      const { asset, path } = await projectSession.previewAsset(args[0]);
+      assertSender(event);
+      if (generation !== previewGeneration)
+        throw new Error('Preview selection changed.');
+      const url = `opencut://media/${randomUUID()}`;
+      previewFile = { url, path };
+      return {
+        url,
+        name: asset.name,
+        frameRate: asset.metadata?.frameRate ?? null,
+        videoEndSeconds: null,
+        width: asset.metadata?.width ?? null,
+        height: asset.metadata?.height ?? null,
+        warning: null,
+      } satisfies PreviewSource;
+    });
+    ipcMain.handle(RELEASE_PREVIEW_CHANNEL, (event, ...args: unknown[]) => {
+      assertSender(event);
+      if (args.length !== 1 || typeof args[0] !== 'string')
+        throw new Error('Expected one preview URL.');
+      if (previewFile?.url === args[0]) previewFile = null;
+    });
     ipcMain.handle(PREVIEW_METRICS_CHANNEL, (event) => {
       assertSender(event);
       const metrics = app.getAppMetrics();

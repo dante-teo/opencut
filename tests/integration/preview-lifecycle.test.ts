@@ -65,6 +65,47 @@ afterEach(() => {
 });
 
 describe('preview failure cleanup', () => {
+  it('aborts an in-flight seek immediately and removes callbacks and timeout', async () => {
+    vi.useFakeTimers();
+    const video = new PreviewVideo();
+    video.presentOnSeek = false;
+    const controller = new AbortController();
+    const pending = seekPresented(
+      video as unknown as HTMLVideoElement,
+      1,
+      controller.signal,
+    );
+    const result = expect(pending).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    controller.abort();
+    await result;
+    expect(video.pendingFrameCallbacks).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('cancels a benchmark during playback without leaving its observers or timer', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('document', { visibilityState: 'visible' });
+    const controller = new AbortController();
+    const video = new PreviewVideo();
+    const playing = vi.spyOn(video, 'play');
+    const pending = benchmarkPreview(
+      video as unknown as HTMLVideoElement,
+      30,
+      async () => ({ cpuPercent: 0, workingSetMiB: 0, processCount: 1 }),
+      controller.signal,
+    );
+    const result = expect(pending).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    await vi.waitFor(() => expect(playing).toHaveBeenCalled());
+    controller.abort();
+    await result;
+    expect(video.paused).toBe(true);
+    expect(video.pendingFrameCallbacks).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it('releases the frame callback and timer if setting the seek position throws', async () => {
     vi.useFakeTimers();
     const video = new PreviewVideo();

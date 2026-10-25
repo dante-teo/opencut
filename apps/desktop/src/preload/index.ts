@@ -4,6 +4,8 @@ import {
   PROJECT_CHANNELS,
   OPEN_PREVIEW_CHANNEL,
   PREVIEW_METRICS_CHANNEL,
+  ASSET_PREVIEW_CHANNEL,
+  RELEASE_PREVIEW_CHANNEL,
   type DesktopAPI,
 } from '../bridge.js';
 
@@ -15,6 +17,8 @@ const api: DesktopAPI = {
   closeProject: () => ipcRenderer.invoke(PROJECT_CHANNELS.close),
   getApplicationInfo: () => ipcRenderer.invoke(APP_INFO_CHANNEL),
   openPreview: () => ipcRenderer.invoke(OPEN_PREVIEW_CHANNEL),
+  previewAsset: (assetId) => ipcRenderer.invoke(ASSET_PREVIEW_CHANNEL, assetId),
+  releasePreview: (url) => ipcRenderer.invoke(RELEASE_PREVIEW_CHANNEL, url),
   getPreviewMetrics: () => ipcRenderer.invoke(PREVIEW_METRICS_CHANNEL),
 };
 contextBridge.exposeInMainWorld('opencut', api);

@@ -22,6 +22,8 @@ test('built desktop displays React through the sandboxed bridge', async () => {
       'closeProject',
       'getApplicationInfo',
       'openPreview',
+      'previewAsset',
+      'releasePreview',
       'getPreviewMetrics',
     ]);
     expect(

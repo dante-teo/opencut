@@ -4,9 +4,25 @@ import {
   frameAt,
   frameTarget,
   lastFrameIndex,
+  previewTimecode,
 } from '../../apps/desktop/src/renderer/preview.js';
 
 describe('preview timing and statistics', () => {
+  it('formats nominal non-drop project timecode at integer and rational rates', () => {
+    expect(previewTimecode(1, { numerator: 24, denominator: 1 })).toBe(
+      '00:00:01:00',
+    );
+    expect(previewTimecode(1.5, { numerator: 24, denominator: 1 })).toBe(
+      '00:00:01:12',
+    );
+    const rate = { numerator: 30000, denominator: 1001 };
+    expect(previewTimecode((30 * 1001) / 30000, rate)).toBe('00:00:01:00');
+    expect(previewTimecode((1800 * 1001) / 30000, rate)).toBe('00:01:00:00');
+    expect(previewTimecode(0, rate)).toBe('00:00:00:00');
+    expect(previewTimecode(3600, { numerator: 30, denominator: 1 })).toBe(
+      '01:00:00:00',
+    );
+  });
   it('uses a nominal zero-based frame and seeks inside its display interval', () => {
     for (const fps of [24, 25, 30, 30000 / 1001, 60000 / 1001]) {
       for (const frame of [0, 1, 17, 63]) {

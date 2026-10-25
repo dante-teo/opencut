@@ -1,4 +1,19 @@
 import type { PreviewMetrics } from '../bridge.js';
+import type { FrameRate } from '@opencut/core';
+
+/** Non-drop timecode: nominal frame labels at the project rate, not source frame IDs. */
+export function previewTimecode(seconds: number, rate: FrameRate): string {
+  const fps = rate.numerator / rate.denominator;
+  const frame = Math.max(0, Math.floor(seconds * fps + 0.000001));
+  const base = Math.max(1, Math.round(fps));
+  const fields = [
+    Math.floor(frame / (base * 3600)),
+    Math.floor(frame / (base * 60)) % 60,
+    Math.floor(frame / base) % 60,
+    frame % base,
+  ];
+  return fields.map((field) => String(field).padStart(2, '0')).join(':');
+}
 
 // Presentation time is observed; a frame index derived from average FPS is nominal.
 export function frameAt(seconds: number, fps: number): number {
@@ -51,7 +66,9 @@ export interface SeekSample {
 export function seekPresented(
   video: HTMLVideoElement,
   target: number,
+  signal?: AbortSignal,
 ): Promise<SeekSample> {
+  signal?.throwIfAborted();
   video.pause();
   return new Promise((resolve, reject) => {
     const started = performance.now();
@@ -65,6 +82,7 @@ export function seekPresented(
       video.removeEventListener('seeked', onSeeked);
       video.removeEventListener('error', onError);
       video.removeEventListener('emptied', onError);
+      signal?.removeEventListener('abort', onAbort);
     };
     const finish = () => {
       if (seekedMs === null || presentedMs === null) return;
@@ -84,6 +102,10 @@ export function seekPresented(
       cleanup();
       reject(new Error('Video changed or could not be decoded during seek.'));
     };
+    const onAbort = () => {
+      cleanup();
+      reject(signal?.reason);
+    };
     const timeout = setTimeout(() => {
       cleanup();
       reject(
@@ -95,6 +117,7 @@ export function seekPresented(
     video.addEventListener('seeked', onSeeked);
     video.addEventListener('error', onError);
     video.addEventListener('emptied', onError);
+    signal?.addEventListener('abort', onAbort, { once: true });
     callback = video.requestVideoFrameCallback((_now, metadata) => {
       presentedMs = performance.now() - started;
       presentedSeconds = metadata.mediaTime;
@@ -145,7 +168,9 @@ export async function benchmarkPreview(
   video: HTMLVideoElement,
   fps: number | null,
   metrics: () => Promise<PreviewMetrics>,
+  signal?: AbortSignal,
 ): Promise<PreviewBenchmark> {
+  signal?.throwIfAborted();
   if (
     document.visibilityState !== 'visible' ||
     !Number.isFinite(video.duration) ||
@@ -166,12 +191,17 @@ export async function benchmarkPreview(
   await seekPresented(
     video,
     video.currentTime < duration / 2 ? duration * 0.9 : duration * 0.1,
+    signal,
   );
-  for (let i = 0; i < 3; i++) await seekPresented(video, targetFor(i));
+  for (let i = 0; i < 3; i++) await seekPresented(video, targetFor(i), signal);
   const samples: SeekSample[] = [];
   for (let i = 0; i < 30; i++)
-    samples.push(await seekPresented(video, targetFor(i + 3)));
-  await seekPresented(video, fps ? frameTarget(0, fps, duration) : 0.001);
+    samples.push(await seekPresented(video, targetFor(i + 3), signal));
+  await seekPresented(
+    video,
+    fps ? frameTarget(0, fps, duration) : 0.001,
+    signal,
+  );
   const baseline = video.getVideoPlaybackQuality();
   const mediaStart = video.currentTime;
   const resources: PreviewMetrics[] = [];
@@ -185,6 +215,7 @@ export async function benchmarkPreview(
   };
   // Prime delta CPU counters before installing observers that need cleanup.
   await metrics();
+  signal?.throwIfAborted();
   video.addEventListener('waiting', waiting);
   video.addEventListener('stalled', stalled);
   const callbackTimes: number[] = [];
@@ -200,24 +231,36 @@ export async function benchmarkPreview(
     await video.play();
     const playUntil = Math.min(duration, mediaStart + 8);
     while (!video.ended && video.currentTime < playUntil) {
-      await new Promise<void>((resolve) => {
-        const complete = () => {
+      await new Promise<void>((resolve, reject) => {
+        const cleanup = () => {
           clearTimeout(timer);
           video.removeEventListener('ended', complete);
+          signal?.removeEventListener('abort', abort);
+        };
+        const complete = () => {
+          cleanup();
           resolve();
+        };
+        const abort = () => {
+          cleanup();
+          reject(signal?.reason);
         };
         const timer = setTimeout(
           complete,
           Math.min(500, Math.max(1, (playUntil - video.currentTime) * 1000)),
         );
         video.addEventListener('ended', complete, { once: true });
+        signal?.addEventListener('abort', abort, { once: true });
+        if (signal?.aborted) abort();
       });
+      signal?.throwIfAborted();
       if (document.visibilityState !== 'visible')
         throw new Error('Benchmark window became hidden.');
       if (video.error) throw new Error('Playback decoding failed.');
       if (performance.now() - started > 15000)
         throw new Error('Playback did not advance within 15 seconds.');
       resources.push(await metrics());
+      signal?.throwIfAborted();
     }
   } finally {
     video.pause();

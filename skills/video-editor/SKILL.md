@@ -10,15 +10,30 @@ It will grow with the CLI to cover project inspection, modification, validation
 and rendering. T03 includes a composition/export prototype. T04 adds an
 interactive Electron source preview (launch with `pnpm dev`) with playback,
 seeking, nominal frame stepping and a performance-validation button. This preview
-has no CLI command and remains independent of the project workspace. Select the
-**Source preview** tab, then **Open video**, to use it. The **Project viewer** tab
-currently shows a canvas placeholder. Preview frame numbers use average FPS from
-optional ffprobe and are not a frame-accurate editing guarantee. Headless timeline editing uses exact
+has no CLI command. T16 connects it to imported video assets: select a library
+video to open **Source preview**, or use **Open video** for a local source.
+Imported video preview reuses stored import metadata and rechecks readability,
+without running ffprobe again. Reopening refreshes availability, not stored FPS
+or codec metadata.
+The **Project viewer** tab currently shows a canvas placeholder. With a project
+open, steps/frame positions and nominal non-drop timecode use project FPS;
+otherwise steps/frame numbers use average FPS from optional ffprobe. These are
+best-effort HTML video seeks, not a frame-accurate editing guarantee. VFR and
+differing source/project rates may repeat or skip decoded frames. Headless timeline editing uses exact
 project-rate frame boundaries through the CLI. The optional `pnpm test:preview` command measures
 fixture/1080p playback in the built Electron app; see
 [the preview architecture decision](../../docs/adr/0003-html-video-preview.md).
 In the desktop, pointer drags seek on release and keyboard seeks are immediate.
-Import, seeking and performance validation are serialized; keep the window visible
+Focus the player for Space/K playback, Left/Right or comma/period steps, Home/End
+seeks. Form controls keep their own shortcuts. Preview scales to preserve aspect
+ratio. Library switches cancel seeks/validation and unload the old source;
+project close/replacement clears the preview and revokes media access. Viewer tab
+changes pause playback. Errors for missing, corrupt and unsupported media are
+recoverable by selecting another source. Transport state is never saved.
+After repairing a missing file, clicking the same asset retries preview. Imported
+media uses browser duration, so an audio tail can advance the nominal clock while
+the final video picture remains unchanged.
+The local picker, seeking and performance validation are serialized; keep the window visible
 while measuring. See [desktop usage](../../docs/README.md) for optional-tool
 prerequisites and the separate correctness/performance test commands.
 
@@ -51,8 +66,7 @@ a verified MP4, representative PNGs, ffprobe results and a CLI transcript in a n
 isolated generated directory. `pnpm test:e2e` runs it twice and cleans each run.
 For image-only stories and collages, follow the [portrait/photo adaptation](references/workflow.md#photo-slideshows-and-vertical-edits),
 including imported caption/music assets and project cleanup boundaries.
-The desktop preview and path-based media commands remain separate
-from project data.
+Preview transport and path-based media commands do not modify project data.
 
 From an installed and built OpenCut checkout, run `pnpm cli --help` to discover
 supported capabilities and `pnpm cli --version` to check the application version.

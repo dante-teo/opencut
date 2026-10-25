@@ -16,6 +16,8 @@ T14 adds a repeatable [CLI-only end-to-end workflow](../skills/video-editor/refe
 covering creation, imports, edits, layers, mixed audio, history and verified 18-second export.
 T15 connects the desktop to the shared core for project creation, opening, saving,
 and read-only metadata, asset and timeline inspection.
+T16 connects imported video selection to a reusable source player with keyboard
+transport, project-rate timecode and explicit playback cleanup.
 
 ## Quick start (macOS)
 
@@ -63,21 +65,48 @@ loading indicators and errors shown in the workspace. Only newly created project
 can be dirty in T15 because loaded settings, assets and timelines are read only.
 There is no Save As, project playback, GUI import/editing or render control.
 
-The **Project viewer** tab shows the canvas placeholder; it does not play or
-composite the project. Select **Source preview**, then **Open video**, to use the
-earlier T04 prototype with a local file. Play/Pause, the Seek
-slider and Previous/Next frame operate on that source without modifying it.
-The timestamp distinguishes the playback clock from the last compositor frame PTS;
-frame numbers are zero based and nominal. Frame stepping requires optional `ffprobe`
-on PATH to obtain average FPS. Playback and timestamp seeking work without it.
+The **Project viewer** tab shows the canvas placeholder. Select an imported video
+in the media library to open **Source preview** automatically, or use **Open video**
+for a local file. Import assets with the CLI and reopen the project to refresh the
+library. Play/Pause, the Seek slider and Previous/Next frame operate on one source.
+Imported video preview reuses the metadata saved at import and needs no new
+ffprobe call. Selecting an asset checks that its file is still readable; reopening
+a project refreshes availability, without refreshing stored codec/FPS metadata.
+The preview scales to fit while preserving the video's aspect ratio.
+Focus the player region for Space/K (play/pause), Left/Right or comma/period
+(step), and Home/End (start/end). Inputs and buttons retain their own keyboard
+behavior. Changing viewer tabs pauses playback.
+
+Time and duration are seconds; Presented is the last compositor frame PTS.
+With a project open, Frame is the zero-based project-clock position and timecode
+uses project FPS with nominal non-drop labels (including fractional rates).
+For example, at `30000/1001` fps, `00:01:00:00` labels frame 1800 at 60.06 seconds.
+Stepping seeks by one project frame interval. Outside a project, frame numbers
+and steps use average source FPS from optional `ffprobe`; without it, playback
+and timestamp seeking still work but stepping/timecode are unavailable.
+HTML video seeks are best effort: VFR, source/project rate differences, stream
+offsets and codec support can repeat or skip decoded frames. Nominal frame
+positions and timecode do not establish frame-accurate seeking or source frame IDs.
+Imported assets use the browser's duration as the seek bound. When audio extends
+beyond the video stream, the clock can continue over the final picture; Presented
+can remain at the last video timestamp while the nominal project frame advances.
 Dragging the seek slider stages a target and seeks when released; keyboard changes
-seek immediately. Importing a replacement disables the current player's controls,
-and importing and performance validation run exclusively. Unsupported codecs show
-a decode error. The source preview remains independent of the current project.
+seek immediately. **Open video** disables the current player's controls during
+selection/probing, and stays disabled during a seek, drag or performance validation.
+Library selection can replace a busy player and cancels its pending work.
+Unsupported codecs show
+a decode error; missing files and non-video selections show an error and can be
+reselected after repair, including clicking the same asset again to retry.
+Asset replacement pauses/unloads the old element and revokes its media URL. Closing or
+replacing a project clears the player. Preview state is transient and does not
+modify the project or source files. This is source playback; it does not composite
+timeline tracks or implement editing/render controls.
 
 **Run performance validation** runs a positioning seek, three warm-up seeks,
 30 fixed target seeks, then up to eight seconds of playback. Keep the window visible.
-The UI shows median/p95 seek latency, dropped frames and expandable measurement JSON.
+Open **Details & measurements** after validation for median/p95 seek latency,
+dropped frames and expandable measurement JSON. **Details & shortcuts** also
+explains keyboard controls and preview precision limits.
 For the reproducible fixture/1080p suite, run `pnpm test:preview` after generating
 fixtures. It uses FFmpeg/ffprobe already on PATH, creates and cleans only an owned
 `tests/fixtures/generated/t04-*` directory, and writes environment, raw samples,
@@ -162,7 +191,11 @@ handlers with native dialog results stubbed; real native dialog interaction is a
 separate manual check. Screenshots are saved under the ignored `test-results/`
 directory. Preview regressions cover pointer dragging and release outside the
 slider, immediate keyboard seeks, and a gated import followed by validation of
-the replacement source. The drag test window ignores physical mouse input to
+the replacement source. Imported-asset checks cover differing source/project FPS,
+scoped shortcuts, video/transport visibility, busy-player replacement, media URL
+revocation, unchanged project/source bytes, and recovery after missing/corrupt
+media. They also verify preview with ffprobe absent from the Electron app's PATH,
+using metadata imported before launch. The drag test window ignores physical mouse input to
 avoid interference from activity on the shared desktop. Performance
 measurements are separate in `pnpm test:preview`; desktop correctness checks do
 not impose hardware-dependent latency thresholds.

@@ -131,7 +131,7 @@ test('preview IPC rejects another window even at the trusted application URL', a
         try {
           await other.loadURL('opencut://app/index.html');
           return (await other.webContents
-            .executeJavaScript(`Promise.all(['openPreview', 'getPreviewMetrics'].map(async method => {
+            .executeJavaScript(`Promise.all(['openPreview', 'getPreviewMetrics', 'previewAsset', 'releasePreview'].map(async method => {
           try { await window.opencut[method](); return 'allowed'; }
           catch (error) { return error.message; }
         }))`)) as string[];
@@ -141,7 +141,7 @@ test('preview IPC rejects another window even at the trusted application URL', a
       },
       resolve('apps/desktop/dist/preload/index.cjs'),
     );
-    expect(rejected).toHaveLength(2);
+    expect(rejected).toHaveLength(4);
     for (const message of rejected)
       expect(message).toContain('Untrusted IPC sender');
   } finally {

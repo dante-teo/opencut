@@ -21,7 +21,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 (probing, decoding, playback and encoding) are separate concerns. Detailed editing
 contracts and the playback/render backend require later technical validation.
 
-## Current scope: T15
+## Current scope: T16
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -112,9 +112,20 @@ shown without preventing project inspection. The existing source preview stays
 independent. There is no project playback, GUI import, editing, drag-and-drop,
 Save As, file watching or render control in this task.
 
+T16 reuses the HTML video player for imported video assets: selecting a library
+asset opens source preview with play/pause, seeking, nominal forward/backward
+steps, scoped keyboard shortcuts, time/duration, project-rate non-drop timecode
+and aspect-ratio-preserving scaling. Missing, unsupported and corrupt files show
+recoverable errors. Main grants a revocable local media URL from an asset ID;
+renderer security settings remain intact. Asset/project switches cancel playback
+work and unload the element. Preview state is transient. HTML video seeks and
+project-rate frame positions are approximate, particularly for VFR or differing
+source/project rates; no frame-accurate decoding contract is implied. Timeline
+playback/compositing, desktop imports and editing remain future work.
+
 ## Excluded
 
-T15 does not implement transitions, audio effects,
+T16 does not implement transitions, audio effects,
 keyframes, fades, or desktop media import/timeline editing. No FFmpeg or
 MLT runtime is bundled; media commands require manually installed external tools.
 Fixture generation remains an optional development utility.

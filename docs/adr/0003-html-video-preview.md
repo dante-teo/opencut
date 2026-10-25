@@ -3,6 +3,13 @@
 Status: accepted for the T04 prototype; recommendation for the initial editor.
 Date: 2026-10-24.
 
+T16 retains this approach for the reusable desktop source player and imported
+asset preview. Project FPS supplies nominal clock/frame/timecode labels; source
+PTS is displayed separately. Revocable asset-ID capabilities extend the original
+picker boundary, and abortable actions unload cleanly on asset/project changes.
+The precision and codec limits below still apply; T16 does not add a frame index
+or timeline compositor. See [desktop usage](../README.md) for controls and timing.
+
 ## Decision
 
 Use one HTML video element inside the sandboxed Electron renderer for the initial
@@ -14,9 +21,9 @@ add native media bindings or an MLT/FFmpeg preview process at this stage.
 The native seek slider remains enabled throughout a pointer drag and commits the
 final target on release, including releases outside the input. Cancellation or
 window blur releases the interaction lock. Keyboard seeking remains immediate.
-Replacement imports disable the old player's controls through selection/probing;
-imports, seeks and validation are mutually exclusive, so replacement cannot
-abandon an old validation run.
+Native-picker replacement disables the old player's controls through selection/probing;
+picker requests, seeks and validation are mutually exclusive. T16 library selection
+can replace a busy player by aborting its pending work and unloading its element.
 
 This decision covers source preview only. It does not select a multitrack,
 effects, synchronization or export architecture. T05 is outside this change.
@@ -34,8 +41,10 @@ The local-file transport requires byte-range streaming. Electron's
 `net.fetch(file:)` returned 200/full content for a Range request in integration
 validation, so main uses bounded Node file streams and the maintained
 [range-parser](https://github.com/jshttp/range-parser) library. This is the only
-new non-workspace runtime dependency. Picker-granted, unguessable URLs authorize
-one selected source; renderer code cannot pass filesystem paths to main.
+new non-workspace runtime dependency. Unguessable URLs authorize one selected
+source, selected through the native picker or resolved from an active-project
+asset ID. Renderer code cannot pass filesystem paths to main. Releasing or
+replacing the source, or closing/replacing the project, revokes future URL requests.
 
 ## Reproducible measurement contract
 
@@ -135,9 +144,14 @@ frame PTS. Display both values in the prototype.
 Average FPS is sufficient to demonstrate stepping on known, zero-start CFR files;
 it does not establish an exact frame index for variable-rate video, timestamp
 gaps, delayed streams, nonzero starts or unusual track selection. The UI labels
-frame numbers as nominal. The prototype does not build a frame PTS index. If
-ffprobe is absent, timestamp playback/seeking remain available but stepping is
-disabled. Browser codec/container support is narrower than FFmpeg's; unsupported
+frame numbers as nominal. The player does not build a frame PTS index. Without a
+project, stepping needs average FPS from optional ffprobe; playback and timestamp
+seeking remain available without it. T16 uses the project rate when a project is
+open, including when source FPS is unknown. Imported media reuses saved metadata
+and browser duration; an audio tail can extend the nominal clock past the final
+video frame. Timecode uses nominal non-drop labels, which accumulate a difference
+from elapsed wall-clock seconds at fractional rates. Browser codec/container
+support is narrower than FFmpeg's; unsupported
 sources surface a decode error. Nothing installs tools or changes user media.
 
 One HTML video element owns the audio/video clock, but T04 does not measure

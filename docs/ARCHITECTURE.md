@@ -163,24 +163,46 @@ The source-preview controller lives only in desktop renderer code. One HTML vide
 element owns A/V playback; `currentTime` is the playback clock and
 `requestVideoFrameCallback` supplies the last observed compositor frame PTS through
 its `metadata.mediaTime` argument.
-The UI displays both and derives a nominal zero-based frame index from average
-FPS. The preview does not use the T05 project model. Core has no Electron
+The reusable `VideoPreview` accepts a source, optional project frame rate,
+external `positionSeconds` and `onPositionChange` callback. Source URL changes
+reset transport state; changed external finite positions request a paused seek
+clamped to the loaded duration, coalescing while an interactive seek or drag is
+pending. Each changed request is consumed once, and echoes of the last reported
+position are ignored so parent feedback does not pause playback. Consumers
+should key the player by source URL (as the workspace does). The UI displays both
+clock and presented PTS. With a project it derives the nominal frame position and
+non-drop timecode from the project clock/rate; otherwise it uses source average
+FPS. Project steps advance the requested clock by a project frame interval even
+when successive targets decode to the same source frame. This does not index VFR
+timestamps or promise decoded-frame accuracy. Core has no Electron
 dependency; media and CLI remain headless.
+
+`Preview` coordinates library and native-picker requests and owns media-URL
+release. Their shared completion path accepts only the current request generation;
+replacement and unmount invalidate older completions, and late grants are released.
+`VideoPreview` owns element playback and decoder cleanup, without granting or
+revoking file access. Direct consumers must release their source capability when
+it is no longer needed.
 
 A pointer drag stages a target while leaving the range input enabled, then seeks
 to the committed target on release, including releases outside the input. Playback
-pauses when the gesture starts. Other controls and source replacement stay locked
-through the gesture and seek. Cancellation, window blur or unmount removes gesture
+pauses when the gesture starts. Other transport controls and the native picker stay
+locked through the gesture and seek. Library selection can replace the player
+and cancel the gesture. Cancellation, window blur or unmount removes gesture
 listeners and releases its lock. Keyboard changes seek immediately. The final seek
 uses the latest observed frame rather than the frame snapshot at pointer-down.
 
-Imports and discrete player actions are mutually exclusive in both directions. A
+Native-picker requests and discrete player actions are mutually exclusive. A
 pending native selection/probe disables the old player's controls, while a seek, drag or
-validation disables Open video. This prevents replacement from unmounting a running
-validation and leaving its busy state behind. A canceled selection preserves the
+validation disables Open video. A canceled picker selection preserves the
 source. Normal playback permits file selection; successful replacement pauses the
-old video. Failed seeks and benchmark startup release their callbacks/listeners and
-seek timers before another operation can begin.
+old video. T16 library selection may replace even a busy player: abort signals
+cancel pending seek/benchmark timers, frame callbacks and event listeners. Cleanup
+pauses the video, removes `src` and calls `load()` to release decoding/network
+resources. Switching viewer tabs pauses playback and cancels outstanding actions.
+Shortcuts are scoped to the focusable player region and ignore form controls,
+editable content, modifiers and key repeats. Failed seeks and benchmark startup
+also release their callbacks/listeners and seek timers.
 
 Real Electron regressions cover pointer dragging, release outside the slider,
 keyboard seeking and pending-import/validation exclusion, including a successful
@@ -259,7 +281,8 @@ Electron main owns native privileges. React runs with `contextIsolation: true`,
 `nodeIntegration: false`, `sandbox: true`, web security enabled and webviews
 disabled. A bundled **CommonJS preload** exposes typed capabilities:
 `getApplicationInfo()`, `openPreview()`, `getPreviewMetrics()`, `getProject()`,
-`createProject(input)`, `openProject()`, `saveProject()` and `closeProject()` on
+`createProject(input)`, `openProject()`, `saveProject()`, `closeProject()`,
+`previewAsset(assetId)` and `releasePreview(url)` on
 `window.opencut`. ESM is used elsewhere. CommonJS here keeps
 Electron's renderer sandbox enabled; sandboxed preloads cannot use native ESM.
 No raw IPC, arbitrary channel, filesystem or shell API reaches React.
@@ -275,15 +298,28 @@ no extra React refresh framework is needed.
 These choices follow [Electron's security guidance](https://www.electronjs.org/docs/latest/tutorial/security)
 and [sandboxed preload constraints](https://www.electronjs.org/docs/latest/tutorial/sandbox).
 Main owns the native picker and issues one random, session-only media URL.
-Only that exact URL can stream the selected file. Replacement/window close revokes
+T16 also resolves an asset ID against the current `ProjectSession`, uses core
+path resolution and a fresh readable-file check, and reuses imported metadata.
+Stored codec, dimensions and average FPS remain an import snapshot; opening a
+project or previewing an asset does not re-probe them. Imported sources have no
+separate probed video-end bound, so seeks clamp to browser duration. An audio-only
+tail can advance the project clock over an unchanged final video frame. The native
+picker retains T04's optional probe-derived video-end bound for interactive steps.
+Audio/still selections and unknown IDs fail without granting access. Project media
+preview requires no additional ffprobe call. A generation guard prevents older
+asynchronous selections from replacing a newer grant. Successful project
+create/open/close revokes access, while canceled/failed operations preserve it.
+Releasing an older URL cannot revoke a newer grant.
+Only that exact URL can stream the selected file. Release/replacement/window close revokes
 future requests to the old URL; streams already accepted may finish. Canceled
 selection preserves the current source. The renderer cannot submit arbitrary paths.
 Range responses use the maintained `range-parser` library and Node file streams;
 partial reads return 206, unsupported/unsatisfiable ranges return 416. Files are
 never buffered in full or written. `net.fetch(file:)` did not honor Range in the
 T04 integration check, so it remains used only for bundled assets. Frame-rate
-metadata reuses `probeMedia` in main; missing ffprobe degrades to clock-only
-playback/seeking. Main returns aggregate Electron process CPU and working-set
+metadata reuses `probeMedia` in main; missing ffprobe still allows clock
+playback/seeking and, with a project open, nominal project-rate stepping.
+Main returns aggregate Electron process CPU and working-set
 samples without exposing process or filesystem APIs. Tests cover token revocation,
 byte ranges, missing ffprobe, and IPC rejection from a second window.
 
@@ -292,10 +328,11 @@ unsaved status. React uses local hooks for snapshots, inspection selection, view
 tabs and operation feedback. The creation dialog keeps field values in HTML
 form controls and reads them with `FormData` on submit. React cannot submit a
 path or replacement document. The desktop uses a three-pane editor workspace (media library, viewer, inspector) above a read-only
-track timeline. Selecting assets/clips changes only inspection state. SVG clip
+track timeline. Selecting video assets also opens source preview; clips remain
+inspection-only. Playback/selection/timecode state is never saved in the project. SVG clip
 blocks reflect stored start/duration with approximate screen coordinates; exact
 rational times remain visible in the inspector. The project viewer is an explicit
-placeholder, with the existing independent source preview in a separate tab.
+placeholder, with the reusable source preview in a separate tab.
 Creation accepts only name/settings and reuses core validation. Main's native file dialogs select paths;
 core `readProjectFile`, `writeProjectFile`, `checkProjectMedia` and
 `updateProjectFile` perform persistence and media checks directly, without CLI
@@ -369,7 +406,7 @@ Fixture validation is independent of the application media APIs.
 - Evolve the scripting contract for later editing capabilities; current
   project, media and timeline JSON is documented in [CLI.md](CLI.md). Stdout is reserved for results,
   stderr for errors.
-- Extend the picker capability boundary for future project media access; define rendering/playback ownership beyond a single source.
+- Define rendering/playback ownership beyond a single source.
 - Choose distribution tooling and signing, then validate other operating systems.
 
 These are decisions to investigate, not APIs promised or implemented by T05.
