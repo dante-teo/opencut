@@ -2,8 +2,9 @@
 
 OpenCut will be a lightweight, local desktop video editor for YouTubers,
 TikTok and Instagram creators, vloggers, and streamers. A clear conventional
-interface should make everyday editing accessible without code: media library,
-timeline and editing controls are intended future capabilities. A source preview prototype is available.
+interface should make everyday editing accessible without code. The desktop now
+provides project management, a media library and a read-only timeline. Interactive
+timeline editing remains future work; an independent source preview is available.
 
 ## Two equally important workflows
 
@@ -20,7 +21,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 (probing, decoding, playback and encoding) are separate concerns. Detailed editing
 contracts and the playback/render backend require later technical validation.
 
-## Current scope: T14
+## Current scope: T15
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -99,10 +100,22 @@ independent decoded frame/audio checks. The official Agent Skill includes the
 complete workflow. This validates the existing headless capabilities without
 adding editing features or desktop integration.
 
+T15 adds Electron project management: create with configurable dimensions and
+rational frame rate, open/save shared project files, inspect metadata/settings,
+and display imported assets and tracks/clips in a read-only workspace. The GUI
+uses a conventional video-editor layout: media library on the left, viewer in the
+center, inspector on the right and horizontal timeline tracks below. Selecting
+assets or clips exposes their stored details in the inspector. Native
+Save/Discard/Cancel prompts protect unsaved projects during switch, close and quit.
+The core's validation and persistence are shared with the CLI; missing media is
+shown without preventing project inspection. The existing source preview stays
+independent. There is no project playback, GUI import, editing, drag-and-drop,
+Save As, file watching or render control in this task.
+
 ## Excluded
 
-T14 does not implement transitions, audio effects,
-keyframes, fades, or desktop project media integration. No FFmpeg or
+T15 does not implement transitions, audio effects,
+keyframes, fades, or desktop media import/timeline editing. No FFmpeg or
 MLT runtime is bundled; media commands require manually installed external tools.
 Fixture generation remains an optional development utility.
 
@@ -113,5 +126,5 @@ User media must never be silently changed or overwritten.
 
 macOS is the initial required platform. Package boundaries should stay portable;
 Windows/Linux support requires explicit validation later. No distribution,
-installer, updater, signing or notarization work is included in T14. Render jobs
+installer, updater, signing or notarization work is included in T15. Render jobs
 run in the invoking process, without a persistent queue, background service or database.

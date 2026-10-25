@@ -9,12 +9,17 @@ test('built desktop displays React through the sandboxed bridge', async () => {
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await expect(
-      page.getByRole('heading', { name: 'Video preview' }),
+      page.getByRole('heading', { name: 'Project viewer' }),
     ).toBeVisible();
     await expect(page.getByRole('status')).toHaveText(
       'OpenCut is running · v0.1.0',
     );
     expect(await page.evaluate(() => Object.keys(window.opencut))).toEqual([
+      'getProject',
+      'createProject',
+      'openProject',
+      'saveProject',
+      'closeProject',
       'getApplicationInfo',
       'openPreview',
       'getPreviewMetrics',

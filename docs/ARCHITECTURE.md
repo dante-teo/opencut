@@ -4,7 +4,7 @@
 
 | Package            | Owns                                                                                      | Actual dependencies                                       |
 | ------------------ | ----------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| `@opencut/desktop` | Electron lifecycle, restricted IPC, React source preview                                  | core, media, Electron, React, range-parser                |
+| `@opencut/desktop` | Electron lifecycle, project session, restricted IPC, React workspace and source preview   | core, media, Electron, React, range-parser                |
 | `@opencut/cli`     | Argument parsing, stdout/stderr and exit codes                                            | core, media, Node built-ins                               |
 | `@opencut/core`    | Headless identity, project model, persistence, assets, timeline edits and render planning | Zod; media and Node built-ins in optional `/node` adapter |
 | `@opencut/media`   | Probing, frame extraction, composition and timeline encoding through external tools       | Node built-ins                                            |
@@ -97,8 +97,8 @@ still reject project-file symlinks. The standalone portable reference helpers
 remain lexical; see [the path contract](PROJECT_FORMAT.md#media-references-and-portability).
 Unsupported schema versions are rejected before structural parsing; future
 migrations can be added there without introducing a framework now. T06 exposes
-project create/info/validate in the standalone CLI; the desktop does not consume
-the model yet. Core owns validated metadata/counts and combined file validation;
+project create/info/validate in the standalone CLI; T15 consumes the same model
+in Electron main. Core owns validated metadata/counts and combined file validation;
 the CLI owns argument parsing, cwd-relative project paths, stdout/stderr and exit
 codes. Node's existing `util.parseArgs` and Zod cover this scope without a command
 framework dependency. File validation distinguishes data validity from media
@@ -182,10 +182,13 @@ source. Normal playback permits file selection; successful replacement pauses th
 old video. Failed seeks and benchmark startup release their callbacks/listeners and
 seek timers before another operation can begin.
 
-Real Electron regressions cover native dragging, release outside the slider,
+Real Electron regressions cover pointer dragging, release outside the slider,
 keyboard seeking and pending-import/validation exclusion, including a successful
-validation after replacement. These test observable interaction boundaries rather
-than relying only on programmatically assigning slider values. See
+validation after replacement. The drag regression sends pointer events through
+Playwright and makes its test window ignore physical mouse input so activity on
+the shared desktop cannot interrupt the automated gesture. Production input
+handling is unchanged. These tests exercise the range input's default behavior
+rather than relying only on programmatically assigning slider values. See
 [ADR 0003](adr/0003-html-video-preview.md) for the preview recommendation,
 measurement definitions and accuracy limits.
 
@@ -254,8 +257,10 @@ defines event fields, presets, exit codes and filesystem requirements.
 
 Electron main owns native privileges. React runs with `contextIsolation: true`,
 `nodeIntegration: false`, `sandbox: true`, web security enabled and webviews
-disabled. A bundled **CommonJS preload** exposes three typed capabilities:
-`getApplicationInfo()`, `openPreview()` and `getPreviewMetrics()` on `window.opencut`. ESM is used elsewhere. CommonJS here keeps
+disabled. A bundled **CommonJS preload** exposes typed capabilities:
+`getApplicationInfo()`, `openPreview()`, `getPreviewMetrics()`, `getProject()`,
+`createProject(input)`, `openProject()`, `saveProject()` and `closeProject()` on
+`window.opencut`. ESM is used elsewhere. CommonJS here keeps
 Electron's renderer sandbox enabled; sandboxed preloads cannot use native ESM.
 No raw IPC, arbitrary channel, filesystem or shell API reaches React.
 
@@ -282,7 +287,33 @@ playback/seeking. Main returns aggregate Electron process CPU and working-set
 samples without exposing process or filesystem APIs. Tests cover token revocation,
 byte ranges, missing ffprobe, and IPC rejection from a second window.
 
-Future project import/export and IPC need their own validated capabilities.
+T15's main-process `ProjectSession` owns the current project, path, baseline and
+unsaved status. React uses local hooks for snapshots, inspection selection, viewer
+tabs and operation feedback. The creation dialog keeps field values in HTML
+form controls and reads them with `FormData` on submit. React cannot submit a
+path or replacement document. The desktop uses a three-pane editor workspace (media library, viewer, inspector) above a read-only
+track timeline. Selecting assets/clips changes only inspection state. SVG clip
+blocks reflect stored start/duration with approximate screen coordinates; exact
+rational times remain visible in the inspector. The project viewer is an explicit
+placeholder, with the existing independent source preview in a separate tab.
+Creation accepts only name/settings and reuses core validation. Main's native file dialogs select paths;
+core `readProjectFile`, `writeProjectFile`, `checkProjectMedia` and
+`updateProjectFile` perform persistence and media checks directly, without CLI
+subprocesses. No new dependencies are needed: React hooks and the existing core
+provide state, schemas and persistence; Electron provides dialogs and IPC.
+
+IPC validates request arity as well as sender identity, and returns discriminated
+success/cancellation/error results. Project operations are serialized across IPC
+and native window-close/quit requests. Unsaved new projects require a native
+Save/Discard/Cancel choice before switching or closing; cancellation or a failed
+save retains the session. Clean loaded documents are read only, so saving is a
+core-guarded no-op. A serialized baseline check plus the core revision guard
+refuses stale writes, including external same-revision changes. Directory aliases
+are canonicalized, and existing creation destinations and project symlink/hard-link
+updates follow the CLI's refusal rules. History and schema version are unchanged.
+Media availability is a snapshot refreshed on open, not a file watcher or probe.
+Future GUI imports, timeline edits, project playback and render controls need
+separate capabilities.
 
 ## Tooling and build
 

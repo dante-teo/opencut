@@ -14,7 +14,8 @@ T12 extends [saved timeline rendering](CLI.md#project-rendering) to H.264/AAC MP
 T13 adds structured JSONL progress, SIGINT/SIGTERM cancellation, quality/resolution presets and explicit atomic export replacement.
 T14 adds a repeatable [CLI-only end-to-end workflow](../skills/video-editor/references/workflow.md)
 covering creation, imports, edits, layers, mixed audio, history and verified 18-second export.
-Desktop project integration remains deferred.
+T15 connects the desktop to the shared core for project creation, opening, saving,
+and read-only metadata, asset and timeline inspection.
 
 ## Quick start (macOS)
 
@@ -38,7 +39,33 @@ running. On macOS it uses a normal resizable window with native window buttons
 and a hidden title bar. Drag the header, including the space above the logo,
 to move the window.
 
-Use **Open video** in the desktop to choose a local file. Play/Pause, the Seek
+Use **New project** to enter a name, width, height and integer or rational frame
+rate (for example, `30000/1001`). **Create project** opens an unsaved project;
+**Save project** chooses a new `.opencut.json` file in an existing directory.
+Existing files and symlinks are refused for new projects, even if the native
+save dialog offers replacement. **Open project** reads the same JSON files as
+the CLI. **Save project** on an existing project uses the core's lock, revision
+check and atomic update; saving unchanged content preserves timestamps and history.
+External changes are refused: reopen the project to refresh before saving.
+
+Project metadata/settings, imported assets (including missing-media warnings),
+and video/audio tracks and clips appear in a docked editor workspace: media
+library on the left, viewer in the center, inspector on the right, and a timeline
+below. Select an asset or clip to inspect its stored details. Timeline blocks
+show relative positions and durations; this view is read only. Source ranges
+and timeline starts retain exact rational seconds. Use the CLI for imports and
+edits, then reopen the project to refresh; there is no automatic file watching.
+Project management needs no FFmpeg or ffprobe. Closing, quitting, creating or
+opening another project offers **Save**, **Discard**, and **Cancel** when the
+current project is unsaved. Canceled dialogs and failed saves preserve it; failed
+opens leave the current project displayed. Operations run one at a time, with
+loading indicators and errors shown in the workspace. Only newly created projects
+can be dirty in T15 because loaded settings, assets and timelines are read only.
+There is no Save As, project playback, GUI import/editing or render control.
+
+The **Project viewer** tab shows the canvas placeholder; it does not play or
+composite the project. Select **Source preview**, then **Open video**, to use the
+earlier T04 prototype with a local file. Play/Pause, the Seek
 slider and Previous/Next frame operate on that source without modifying it.
 The timestamp distinguishes the playback clock from the last compositor frame PTS;
 frame numbers are zero based and nominal. Frame stepping requires optional `ffprobe`
@@ -46,7 +73,7 @@ on PATH to obtain average FPS. Playback and timestamp seeking work without it.
 Dragging the seek slider stages a target and seeks when released; keyboard changes
 seek immediately. Importing a replacement disables the current player's controls,
 and importing and performance validation run exclusively. Unsupported codecs show
-a decode error. The desktop has no timeline or project integration.
+a decode error. The source preview remains independent of the current project.
 
 **Run performance validation** runs a positioning seek, three warm-up seeks,
 30 fixed target seeks, then up to eight seconds of playback. Keep the window visible.
@@ -106,32 +133,37 @@ and standard filters. Existing output files are refused. See
 
 ## Commands
 
-| Command                                  | Purpose                                                                                 |
-| ---------------------------------------- | --------------------------------------------------------------------------------------- |
-| `pnpm install`                           | Install and link workspace dependencies                                                 |
-| `pnpm dev` / `pnpm dev:desktop`          | Build internal packages, run the desktop dev server, open Electron                      |
-| `pnpm dev:cli --help`                    | Run the TypeScript CLI without launching Electron                                       |
-| `pnpm cli --help` / `pnpm cli --version` | Run the built CLI (build first)                                                         |
-| `pnpm build`                             | Build libraries, CLI and Electron main/preload/React assets in dependency order         |
-| `pnpm typecheck`                         | Build library declarations and strictly check all source, scripts and tests             |
-| `pnpm lint`                              | Run ESLint                                                                              |
-| `pnpm format` / `pnpm format:check`      | Apply / check Prettier formatting                                                       |
-| `pnpm test`                              | Build prerequisites and run headless unit + CLI/fixture-contract tests                  |
-| `pnpm test:desktop`                      | Build and check shell security, appearance, reopening and available fixture playback    |
-| `pnpm test:preview`                      | Build and measure real Electron playback/seek performance (FFmpeg + ffprobe + fixtures) |
-| `pnpm test:fixtures`                     | Run the optional native intact/truncated-media regression (FFmpeg + ffprobe)            |
-| `pnpm e2e --keep`                        | Build and run the complete 18-second CLI workflow; retain verified MP4 and evidence     |
-| `pnpm test:e2e`                          | Run the CLI-only workflow twice and clean per-run artifacts (FFmpeg + ffprobe)          |
-| `pnpm test:media`                        | Build and test real media CLI against existing generated fixtures (FFmpeg + ffprobe)    |
-| `pnpm fixtures:generate`                 | Generate and validate five small synthetic media files (optional FFmpeg + ffprobe)      |
-| `pnpm fixtures:validate`                 | Decode generated media and check metadata/readable video frame counts (ffprobe)         |
+| Command                                  | Purpose                                                                                      |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `pnpm install`                           | Install and link workspace dependencies                                                      |
+| `pnpm dev` / `pnpm dev:desktop`          | Build internal packages, run the desktop dev server, open Electron                           |
+| `pnpm dev:cli --help`                    | Run the TypeScript CLI without launching Electron                                            |
+| `pnpm cli --help` / `pnpm cli --version` | Run the built CLI (build first)                                                              |
+| `pnpm build`                             | Build libraries, CLI and Electron main/preload/React assets in dependency order              |
+| `pnpm typecheck`                         | Build library declarations and strictly check all source, scripts and tests                  |
+| `pnpm lint`                              | Run ESLint                                                                                   |
+| `pnpm format` / `pnpm format:check`      | Apply / check Prettier formatting                                                            |
+| `pnpm test`                              | Build prerequisites and run headless unit + CLI/fixture-contract tests                       |
+| `pnpm test:desktop`                      | Build and check projects, IPC security, appearance, reopening and available fixture playback |
+| `pnpm test:preview`                      | Build and measure real Electron playback/seek performance (FFmpeg + ffprobe + fixtures)      |
+| `pnpm test:fixtures`                     | Run the optional native intact/truncated-media regression (FFmpeg + ffprobe)                 |
+| `pnpm e2e --keep`                        | Build and run the complete 18-second CLI workflow; retain verified MP4 and evidence          |
+| `pnpm test:e2e`                          | Run the CLI-only workflow twice and clean per-run artifacts (FFmpeg + ffprobe)               |
+| `pnpm test:media`                        | Build and test real media CLI against existing generated fixtures (FFmpeg + ffprobe)         |
+| `pnpm fixtures:generate`                 | Generate and validate five small synthetic media files (optional FFmpeg + ffprobe)           |
+| `pnpm fixtures:validate`                 | Decode generated media and check metadata/readable video frame counts (ffprobe)              |
 
 `build` emits development-ready production assets, not a signed `.app`, DMG,
 or installer. `test:desktop` needs a graphical desktop session but no downloaded
-Playwright browser; it also checks the typed core bridge and saves screenshots
-under the ignored `test-results/` directory. The interaction regressions use
-native pointer movement and release outside the slider, immediate keyboard seeks,
-and a gated import followed by validation of the replacement source. Performance
+Playwright browser. Project regressions cover GUI/CLI file compatibility, offline
+assets, invalid files, stale saves, unsaved-close/quit choices, loading states and
+IPC rejection from another window. They exercise the production preload and main
+handlers with native dialog results stubbed; real native dialog interaction is a
+separate manual check. Screenshots are saved under the ignored `test-results/`
+directory. Preview regressions cover pointer dragging and release outside the
+slider, immediate keyboard seeks, and a gated import followed by validation of
+the replacement source. The drag test window ignores physical mouse input to
+avoid interference from activity on the shared desktop. Performance
 measurements are separate in `pnpm test:preview`; desktop correctness checks do
 not impose hardware-dependent latency thresholds.
 

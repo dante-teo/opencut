@@ -16,12 +16,14 @@ import { getApplicationInfo } from '@opencut/core';
 import { probeMedia } from '@opencut/media';
 import {
   APP_INFO_CHANNEL,
+  PROJECT_CHANNELS,
   OPEN_PREVIEW_CHANNEL,
   PREVIEW_METRICS_CHANNEL,
   type PreviewSource,
 } from '../bridge.js';
 import type { IpcMainInvokeEvent } from 'electron';
 import { servePreviewFile } from './preview-file.js';
+import { ProjectSession, type ProjectAction } from './project-session.js';
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -45,6 +47,68 @@ const rendererURL = new URL(devURL ?? 'opencut://app/index.html').href;
 let mainWindow: BrowserWindow | null = null;
 let previewFile: { url: string; path: string } | null = null;
 let openingPreview = false;
+let closingProject = false;
+const projectSession = new ProjectSession({
+  async open() {
+    const window = mainWindow;
+    if (!window) throw new Error('No project window is available.');
+    const selection = await dialog.showOpenDialog(window, {
+      title: 'Open project',
+      properties: ['openFile'],
+      filters: [{ name: 'OpenCut project', extensions: ['json'] }],
+    });
+    return selection.canceled ? null : (selection.filePaths[0] ?? null);
+  },
+  async save() {
+    const window = mainWindow;
+    if (!window) throw new Error('No project window is available.');
+    const selection = await dialog.showSaveDialog(window, {
+      title: 'Save new project',
+      defaultPath: 'Untitled.opencut.json',
+      filters: [{ name: 'OpenCut project', extensions: ['json'] }],
+      buttonLabel: 'Save new file',
+    });
+    return selection.canceled ? null : (selection.filePath ?? null);
+  },
+  async unsaved() {
+    const window = mainWindow;
+    if (!window) return 'cancel';
+    const { response } = await dialog.showMessageBox(window, {
+      type: 'warning',
+      message: 'Save your unsaved project?',
+      detail: 'Save before continuing, or discard the unsaved project.',
+      buttons: ['Save', 'Discard', 'Cancel'],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true,
+    });
+    return response === 0 ? 'save' : response === 1 ? 'discard' : 'cancel';
+  },
+});
+
+async function closeProjectWindow(
+  window: BrowserWindow,
+  quit: boolean,
+): Promise<void> {
+  if (closingProject) return;
+  closingProject = true;
+  try {
+    const reply = await projectSession.run('close');
+    if (!reply.ok) {
+      await dialog.showMessageBox(window, {
+        type: 'error',
+        message: 'Unable to close project',
+        detail: reply.error,
+      });
+      return;
+    }
+    if (reply.canceled) return;
+    if (quit) app.quit();
+    else window.close();
+  } finally {
+    closingProject = false;
+  }
+}
 
 function assertSender(event: IpcMainInvokeEvent): void {
   if (
@@ -154,6 +218,15 @@ async function createWindow(): Promise<void> {
     },
   });
   mainWindow = window;
+  window.on('close', (event) => {
+    if (projectSession.needsCloseGuard) {
+      event.preventDefault();
+      void closeProjectWindow(window, false);
+    } else {
+      // Closing a clean window clears the session before macOS activation reopens it.
+      void projectSession.run('close');
+    }
+  });
   window.on('closed', () => {
     if (mainWindow === window) {
       mainWindow = null;
@@ -208,6 +281,19 @@ app
       assertSender(event);
       return getApplicationInfo();
     });
+    for (const [action, channel] of Object.entries(PROJECT_CHANNELS)) {
+      ipcMain.handle(channel, async (event, ...args: unknown[]) => {
+        assertSender(event);
+        if (args.length !== (action === 'create' ? 1 : 0))
+          return { ok: false, error: 'Invalid project request arguments.' };
+        const reply = await projectSession.run(
+          action as ProjectAction,
+          args[0],
+        );
+        assertSender(event);
+        return reply;
+      });
+    }
     ipcMain.handle(OPEN_PREVIEW_CHANNEL, openPreview);
     ipcMain.handle(PREVIEW_METRICS_CHANNEL, (event) => {
       assertSender(event);
@@ -235,4 +321,11 @@ app.on('activate', () => {
 });
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', (event) => {
+  if (mainWindow && projectSession.needsCloseGuard) {
+    event.preventDefault();
+    void closeProjectWindow(mainWindow, true);
+  }
 });

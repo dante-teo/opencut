@@ -38,6 +38,7 @@ export async function chooseVideo(
   page: Page,
   path: string | null,
 ) {
+  await page.getByRole('tab', { name: 'Source preview', exact: true }).click();
   // Exercise the production picker IPC and protocol; only the native dialog is stubbed.
   await application.evaluate(({ dialog }, path) => {
     dialog.showOpenDialog = async () => ({

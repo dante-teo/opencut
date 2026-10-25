@@ -290,10 +290,9 @@ export function Preview() {
   const [error, setError] = useState('');
   return (
     <section className="preview">
-      <p className="eyebrow">T04 / PLAYBACK PROTOTYPE</p>
-      <h1>Video preview</h1>
+      <h2>Video preview</h2>
       <p className="intro">
-        Load a local video to play, seek and inspect frames.
+        Independent source preview · select a local video.
       </p>
       <button
         disabled={opening || playerBusy}

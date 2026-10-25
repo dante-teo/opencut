@@ -55,3 +55,10 @@ and [the project format decision](0004-versioned-project-model.md).
 T08 follow-up: [ADR 0005](0005-explicit-timeline-editing.md) defines the first
 shared timeline editing operations and their CLI adapter. Core remains independent
 of Electron and media-tool access; GUI timeline integration remains deferred.
+
+T15 follow-up: Electron main now owns a project session and invokes the same
+core model, validation and Node persistence APIs as the CLI. Narrow preload
+capabilities return project snapshots to a read-only media/timeline workspace;
+React owns presentation and inspection state. This implements desktop project
+integration without adding a second editing model. See the
+[desktop trust boundary](../ARCHITECTURE.md#desktop-trust-boundary).

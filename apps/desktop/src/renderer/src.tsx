@@ -2,7 +2,7 @@ import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { ApplicationInfo } from '@opencut/core';
 import './style.css';
-import { Preview } from './video-preview.js';
+import { ProjectWorkspace } from './project-workspace.js';
 
 function App() {
   const [info, setInfo] = useState<ApplicationInfo | null>(null);
@@ -14,14 +14,14 @@ function App() {
       .catch(() => setError(true));
   }, []);
   return (
-    <main>
+    <main className="app-shell">
       <header>
         <span className="mark" aria-hidden="true">
           OC
         </span>
         <span>OpenCut</span>
       </header>
-      <Preview />
+      <ProjectWorkspace />
       <p className="status" role="status">
         <span className="dot" aria-hidden="true" />
         {error
@@ -30,7 +30,6 @@ function App() {
             ? `${info.name} is running · v${info.version}`
             : 'Starting OpenCut…'}
       </p>
-      <footer>OpenCut / Development preview</footer>
     </main>
   );
 }

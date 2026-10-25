@@ -157,6 +157,11 @@ test('seek dragging commits the final pointer position and releases interaction 
   const { application, page } = await launchDesktop();
   try {
     await chooseVideo(application, page, fixture);
+    // Keep physical desktop pointer events from interrupting the CDP drag.
+    // Playwright still exercises the real range input and its default behavior.
+    await application.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.setIgnoreMouseEvents(true);
+    });
     const slider = page.getByRole('slider', { name: 'Seek', exact: true });
     const open = page.getByRole('button', { name: 'Open video', exact: true });
     await slider.fill('6');

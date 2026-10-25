@@ -10,9 +10,10 @@ It will grow with the CLI to cover project inspection, modification, validation
 and rendering. T03 includes a composition/export prototype. T04 adds an
 interactive Electron source preview (launch with `pnpm dev`) with playback,
 seeking, nominal frame stepping and a performance-validation button. This preview
-has no CLI command or project integration; desktop project integration remains
-unavailable. Preview frame numbers use average FPS from optional ffprobe and are
-not a frame-accurate editing guarantee. Headless timeline editing uses exact
+has no CLI command and remains independent of the project workspace. Select the
+**Source preview** tab, then **Open video**, to use it. The **Project viewer** tab
+currently shows a canvas placeholder. Preview frame numbers use average FPS from
+optional ffprobe and are not a frame-accurate editing guarantee. Headless timeline editing uses exact
 project-rate frame boundaries through the CLI. The optional `pnpm test:preview` command measures
 fixture/1080p playback in the built Electron app; see
 [the preview architecture decision](../../docs/adr/0003-html-video-preview.md).
@@ -20,6 +21,16 @@ In the desktop, pointer drags seek on release and keyboard seeks are immediate.
 Import, seeking and performance validation are serialized; keep the window visible
 while measuring. See [desktop usage](../../docs/README.md) for optional-tool
 prerequisites and the separate correctness/performance test commands.
+
+T15 adds desktop project creation, open/save and read-only inspection through the
+shared core. Use **New project**, configure dimensions and integer/rational FPS,
+then **Save project** to a new file; existing creation destinations are refused.
+**Open project** accepts CLI-created JSON. The workspace has a media library on
+the left, viewer in the center, inspector on the right and timeline tracks below.
+Select assets to inspect metadata, or clips to inspect exact stored timing.
+Unsaved projects prompt Save/Discard/Cancel before switching, closing or quitting.
+Reopen after CLI edits; stale saves are refused. GUI media import, timeline
+editing, project playback and rendering controls remain unavailable.
 
 T05 adds a versioned project data model, exact rational time, JSON save/load,
 validation and media availability checks as headless core APIs. See
