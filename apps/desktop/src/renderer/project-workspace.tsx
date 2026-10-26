@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DesktopProject, ProjectReply } from '../bridge.js';
 import { Preview } from './video-preview.js';
+import type { RationalTime } from '@opencut/core';
+import {
+  sourceToTimeline,
+  timelineToSource,
+  ZERO,
+} from './timeline-geometry.js';
 import { ProjectTimeline } from './project-timeline.js';
 import { ProjectInspector } from './project-inspector.js';
 
@@ -16,6 +22,27 @@ export function ProjectWorkspace() {
   const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
   const [previewRequest, setPreviewRequest] = useState(0);
   const [previewSession, setPreviewSession] = useState(0);
+  const [playhead, setPlayhead] = useState<RationalTime>(ZERO);
+  const [linkedClipId, setLinkedClipId] = useState<string | null>(null);
+  const [previewPosition, setPreviewPosition] = useState<number | undefined>();
+  const [previewSeekRequest, setPreviewSeekRequest] = useState(0);
+  const linkedClip = state?.project.clips.find(
+    (clip) => clip.id === linkedClipId,
+  );
+  function seekTimeline(time: RationalTime) {
+    setPlayhead(time);
+    if (!linkedClip) return;
+    const sourceTime = timelineToSource(linkedClip, time);
+    if (sourceTime === undefined) {
+      setViewer('project');
+      setLinkedClipId(null);
+      setPreviewPosition(undefined);
+    } else {
+      setPreviewPosition(sourceTime);
+      setPreviewSeekRequest((value) => value + 1);
+    }
+  }
+
   const sourceViewer = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (sourceViewer.current) sourceViewer.current.scrollTop = 0;
@@ -40,6 +67,9 @@ export function ProjectWorkspace() {
           setCreating(false);
           if (label !== 'Saving project…') {
             setSelection(null);
+            setPlayhead(ZERO);
+            setLinkedClipId(null);
+            setPreviewPosition(undefined);
             setPreviewAssetId(null);
             setPreviewSession((value) => value + 1);
           }
@@ -161,6 +191,8 @@ export function ProjectWorkspace() {
                         }
                         onClick={() => {
                           setSelection({ kind: 'asset', id: asset.id });
+                          setLinkedClipId(null);
+                          setPreviewPosition(undefined);
                           setPreviewAssetId(asset.id);
                           setPreviewRequest((value) => value + 1);
                           setViewer('source');
@@ -275,6 +307,22 @@ export function ProjectWorkspace() {
               requestKey={previewRequest}
               projectFrameRate={project?.settings.frameRate}
               active={viewer === 'source'}
+              positionSeconds={previewPosition}
+              positionRequestKey={previewSeekRequest}
+              onPositionChange={(seconds) => {
+                if (linkedClip && viewer === 'source')
+                  setPlayhead(
+                    sourceToTimeline(
+                      linkedClip,
+                      seconds,
+                      project!.settings.frameRate,
+                    ),
+                  );
+              }}
+              onOpenLocal={() => {
+                setLinkedClipId(null);
+                setPreviewPosition(undefined);
+              }}
             />
           </div>
         </section>
@@ -285,7 +333,23 @@ export function ProjectWorkspace() {
         />
       </div>
       <ProjectTimeline
+        key={previewSession}
         project={project}
+        position={playhead}
+        onSeek={seekTimeline}
+        linkedClipId={linkedClipId}
+        onPreviewClip={(id) => {
+          const clip = project?.clips.find((clip) => clip.id === id);
+          if (!clip) return;
+          setLinkedClipId(id);
+          setPlayhead(clip.timelineStart);
+          setPreviewPosition(
+            clip.sourceIn.numerator / clip.sourceIn.denominator,
+          );
+          setPreviewAssetId(clip.assetId);
+          setPreviewRequest((value) => value + 1);
+          setViewer('source');
+        }}
         selected={selection?.kind === 'clip' ? selection.id : null}
         onSelect={(id) => setSelection({ kind: 'clip', id })}
       />

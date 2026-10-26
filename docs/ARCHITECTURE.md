@@ -328,11 +328,57 @@ unsaved status. React uses local hooks for snapshots, inspection selection, view
 tabs and operation feedback. The creation dialog keeps field values in HTML
 form controls and reads them with `FormData` on submit. React cannot submit a
 path or replacement document. The desktop uses a three-pane editor workspace (media library, viewer, inspector) above a read-only
-track timeline. Selecting video assets also opens source preview; clips remain
-inspection-only. Playback/selection/timecode state is never saved in the project. SVG clip
-blocks reflect stored start/duration with approximate screen coordinates; exact
-rational times remain visible in the inspector. The project viewer is an explicit
-placeholder, with the reusable source preview in a separate tab.
+track timeline. Selecting video assets also opens source preview. Playback,
+selection, scroll, zoom and timecode state are never saved in the project. The
+project viewer is an explicit placeholder, with source preview in a separate tab.
+
+T17's React/SVG timeline consumes `Project` directly. A memoized per-track search
+index references existing clips, sorts by exact starts and caches core-derived
+ends; it is view geometry, not an independent project model. Clip durations and
+ends come from core rational helpers. View-coordinate differences and source/timeline
+translations use bigint intermediates before conversion to pixels or browser seconds.
+Frame counts and non-drop timecode labels use bigint cross-multiplication at the
+project's rational rate. Browser coordinates convert to rational times once at
+the input boundary; ruler seeks snap to the nearest project frame (the exact
+exclusive end remains reachable). Tick positions derive independently from bigint
+frame multiples and fractions, avoiding accumulated rounding and JSON-integer limits;
+labels come directly from the corresponding frame counts. Labels and lanes share
+one mapping. Seeking, keyboard stepping and preview reports first use core
+`frameTime` when the frame count is a safe integer. If that API's frame-count or
+reduced-fraction limits are exceeded, `framePosition` constructs a transient rational
+approximation using the largest denominator that keeps both components safe.
+It rounds toward the following instant so boundary rounding does not select the
+preceding frame, caps the representable time at `Number.MAX_SAFE_INTEGER` seconds,
+and callers clamp it to project or linked-clip bounds. At extreme rates or positions,
+finite precision can skip frame labels. The [exact-time contract](PROJECT_FORMAT.md#exact-time)
+continues to govern persisted timing and strict core arithmetic.
+React and native scrolling/SVG suffice here; an additional timeline/editor or
+virtualization dependency would duplicate the core model or add unnecessary scope.
+
+Binary search culls horizontal clips; fixed-height rows cull vertical tracks.
+Same-track overlap remains prohibited by the existing core validator, while
+cross-track overlaps are visible. SVG coordinates are clipped to the viewport
+before paint. The physical horizontal scroll surface caps at 8,000,000 pixels,
+with a proportional logical offset beyond that size. Logical scale stays in pixels
+per second; extreme-duration native scrollbar navigation is coarser. Zoom anchors
+the pointer for Ctrl/Command wheel gestures and viewport center for controls,
+subject to sequence-start/end clamping and browser scroll rounding. Ordinary
+rerenders retain the scroll element and zoom state; a project-session key resets
+both when a different project is opened or the current project is reopened.
+
+An explicit **Preview selected clip** action links one video clip to T16's
+source player. Timeline-to-source mapping uses source-in plus the exact timeline
+delta. The source callback converts observed browser seconds at microsecond
+precision, quantizes to the nearest project frame and clamps the playhead to the
+clip's timeline range. External seek request keys are tracked separately from
+position reports: unchanged reports do not issue new seeks, while an explicit
+repeat request for the same target can be applied again. Known limitation:
+repeated ruler seeks followed by Play can leave the linked source paused.
+Inspection selection is independent of playhead/link state. Seeking
+outside the linked range pauses/hides and unlinks the source; library/local source
+selection also unlinks. The source transport still spans the full source; there
+is no timeline playback engine, clip switching, compositing or audio mixing.
+T16's codec, VFR, stream-offset and approximate HTML seek limitations remain.
 Creation accepts only name/settings and reuses core validation. Main's native file dialogs select paths;
 core `readProjectFile`, `writeProjectFile`, `checkProjectMedia` and
 `updateProjectFile` perform persistence and media checks directly, without CLI

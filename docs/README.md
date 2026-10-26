@@ -18,6 +18,8 @@ T15 connects the desktop to the shared core for project creation, opening, savin
 and read-only metadata, asset and timeline inspection.
 T16 connects imported video selection to a reusable source player with keyboard
 transport, project-rate timecode and explicit playback cleanup.
+T17 adds a zoomable, scrollable read-only timeline with an independent playhead
+and explicit links to source preview.
 
 ## Quick start (macOS)
 
@@ -64,6 +66,37 @@ opens leave the current project displayed. Operations run one at a time, with
 loading indicators and errors shown in the workspace. Only newly created projects
 can be dirty in T15 because loaded settings, assets and timelines are read only.
 There is no Save As, project playback, GUI import/editing or render control.
+
+The timeline preserves project track order, with separate video/audio styling.
+Gaps and overlaps across tracks follow stored rational timing. Select a clip for
+inspection; selection leaves the playhead unchanged. Click/drag the ruler to seek,
+or focus it and use Left/Right (one project frame) and Home/End. The timeline clock
+uses exact project-frame non-drop labels, including `30000/1001`. Choose **Zoom**
+or use +/− to zoom around the viewport center. Ctrl/Command + wheel zooms around
+the pointer. Use horizontal/vertical scrolling to reach distant clips and tracks.
+Zoom and scroll survive selection, playback and saving; replacing/reopening the
+project resets view state. Clips and tracks outside the viewport are culled.
+Ruler ticks support valid rational rates even when their frame times exceed JSON
+integer limits. In that case, playhead seeks and preview positions use a bounded
+rational approximation; extreme rates or positions can skip frame labels.
+See the [exact-time contract](PROJECT_FORMAT.md#exact-time) for the distinction
+between transient UI positions and persisted project timing.
+
+Select a video clip and click **Preview selected clip** to link source playback.
+This explicit action sets the playhead to the clip start and opens its source-in.
+Ruler seeks within the linked clip seek the matching source time. Source playback
+updates the playhead, clamped to the clip range, while the source transport retains
+its full-source bounds. Selecting another clip only changes the inspector; the
+source link stays with the explicitly previewed clip. Seeking outside the linked
+range switches to Project viewer and pauses/unlinks the source. Library selection
+and **Open video** also unlink. Audio/image clips have no linked source preview;
+there is no automatic playback across clips, timeline mixing or compositing.
+Very long timelines use a proportional scrollbar to stay within browser layout
+limits; scrollbar precision becomes coarser at extreme durations.
+
+Known limitation: after repeated ruler seeks, pressing **Play** can intermittently
+leave the linked source paused, with its source clock and the timeline playhead
+remaining fixed.
 
 The **Project viewer** tab shows the canvas placeholder. Select an imported video
 in the media library to open **Source preview** automatically, or use **Open video**

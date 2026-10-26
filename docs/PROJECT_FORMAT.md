@@ -133,6 +133,17 @@ unsafe integers are invalid. Unreduced rational pairs are accepted and preserved
 a reduced rational time. Frame 1 at 30000/1001 fps is exactly `1001/30000` seconds;
 frame 30000 is exactly 1001 seconds. The helper uses bigint for intermediate
 arithmetic and rejects a result that cannot fit in safe JSON integers.
+
+A valid frame rate and safe frame index do not guarantee a representable frame
+time. For example, frame 100 at `3000000000000001/100000000000000` fps is exactly
+`10000000000000000/3000000000000001` seconds; its reduced numerator exceeds the
+safe-integer limit, so `frameTime` throws `RangeError`. The rate itself is valid.
+The desktop ruler calculates tick positions and labels directly with bigint
+fractions and frame counts. Transient playhead positions use a bounded rational
+approximation when the frame-count API or exact result cannot fit its integer
+limits. This view-state fallback does not change the stored project, relax core
+validation or make an unrepresentable exact edit persistable.
+
 `compareTimes(a, b)` also uses bigint cross multiplication and returns -1, 0 or 1.
 Never convert to floating-point seconds to compare boundaries or repeatedly add
 decimal frame durations.

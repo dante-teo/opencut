@@ -24,6 +24,7 @@ export function VideoPreview({
   active = true,
   projectFrameRate,
   positionSeconds,
+  positionRequestKey = 0,
   onPositionChange,
   onBusyChange,
 }: {
@@ -31,8 +32,9 @@ export function VideoPreview({
   opening?: boolean;
   active?: boolean;
   projectFrameRate?: FrameRate | undefined;
-  positionSeconds?: number;
-  onPositionChange?: (seconds: number) => void;
+  positionSeconds?: number | undefined;
+  positionRequestKey?: number;
+  onPositionChange?: ((seconds: number) => void) | undefined;
   onBusyChange?: (busy: boolean) => void;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
@@ -44,6 +46,7 @@ export function VideoPreview({
   positionCallback.current = onPositionChange;
   const reportedPosition = useRef<number | null>(null);
   const appliedPosition = useRef<number | undefined>(undefined);
+  const appliedRequest = useRef<number | undefined>(undefined);
   const busyCallback = useRef(onBusyChange);
   busyCallback.current = onBusyChange;
   const [seekDraft, setSeekDraft] = useState<number | null>(null);
@@ -70,6 +73,7 @@ export function VideoPreview({
     latestPresented.current = null;
     reportedPosition.current = null;
     appliedPosition.current = undefined;
+    appliedRequest.current = undefined;
     setReady(false);
     setPlaying(false);
     setTime(0);
@@ -114,7 +118,7 @@ export function VideoPreview({
       lifetime.current = new AbortController();
     }
   }, [active, opening]);
-  // A future timeline may supply a playhead without storing transport in the project.
+  // Timeline seek requests are transient and never stored in the project.
   // Apply each changed external request once. Echoing reported positions must
   // not pause playback or keep reapplying an old seek after pressing Play.
   // Coalesce external positions while an interactive seek/drag is settling.
@@ -129,16 +133,26 @@ export function VideoPreview({
       opening ||
       positionSeconds === undefined ||
       !Number.isFinite(positionSeconds) ||
-      positionSeconds === appliedPosition.current
+      (positionSeconds === appliedPosition.current &&
+        positionRequestKey === appliedRequest.current)
     )
       return;
     appliedPosition.current = positionSeconds;
+    appliedRequest.current = positionRequestKey;
     if (positionSeconds === reportedPosition.current) return;
     const target = Math.max(0, Math.min(duration - 0.000001, positionSeconds));
     if (Math.abs(video.currentTime - target) < 0.000001) return;
     video.pause();
     video.currentTime = target;
-  }, [positionSeconds, ready, busy, seekDraft, opening, duration]);
+  }, [
+    positionSeconds,
+    positionRequestKey,
+    ready,
+    busy,
+    seekDraft,
+    opening,
+    duration,
+  ]);
   async function perform(
     action: (video: HTMLVideoElement, signal: AbortSignal) => Promise<void>,
   ) {
@@ -481,11 +495,19 @@ export function Preview({
   requestKey = 0,
   projectFrameRate,
   active = true,
+  positionSeconds,
+  positionRequestKey = 0,
+  onPositionChange,
+  onOpenLocal,
 }: {
   assetId?: string | null;
   requestKey?: number;
   projectFrameRate?: FrameRate | undefined;
   active?: boolean;
+  positionSeconds?: number | undefined;
+  positionRequestKey?: number;
+  onPositionChange?: ((seconds: number) => void) | undefined;
+  onOpenLocal?: () => void;
 }) {
   const [source, setSource] = useState<PreviewSource | null>(null);
   const [opening, setOpening] = useState(false);
@@ -538,7 +560,10 @@ export function Preview({
         <h2>Video preview</h2>
         <button
           disabled={opening || playerBusy}
-          onClick={() => openSource(() => window.opencut.openPreview())}
+          onClick={() => {
+            onOpenLocal?.();
+            openSource(() => window.opencut.openPreview());
+          }}
         >
           {opening ? 'Opening…' : 'Open video'}
         </button>
@@ -556,6 +581,9 @@ export function Preview({
           opening={opening}
           active={active}
           projectFrameRate={projectFrameRate}
+          positionSeconds={positionSeconds}
+          positionRequestKey={positionRequestKey}
+          onPositionChange={onPositionChange}
           onBusyChange={setPlayerBusy}
         />
       )}

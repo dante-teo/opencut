@@ -4,7 +4,8 @@ OpenCut will be a lightweight, local desktop video editor for YouTubers,
 TikTok and Instagram creators, vloggers, and streamers. A clear conventional
 interface should make everyday editing accessible without code. The desktop now
 provides project management, a media library and a read-only timeline. Interactive
-timeline editing remains future work; an independent source preview is available.
+timeline editing remains future work; single-source preview can link to an
+individual video clip.
 
 ## Two equally important workflows
 
@@ -21,7 +22,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 (probing, decoding, playback and encoding) are separate concerns. Detailed editing
 contracts and the playback/render backend require later technical validation.
 
-## Current scope: T16
+## Current scope: T17
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -123,9 +124,40 @@ project-rate frame positions are approximate, particularly for VFR or differing
 source/project rates; no frame-accurate decoding contract is implied. Timeline
 playback/compositing, desktop imports and editing remain future work.
 
+T17 replaces the static timeline overview with a scrollable, zoomable read-only
+visualization. Video/audio tracks retain project insertion order and distinguish
+media types with labels and colors. Exact clip start/source ranges determine
+geometry; gaps and cross-track overlaps remain visible (the core still rejects
+same-track overlaps). The adaptive ruler and independent playhead use project-rate
+non-drop timecode, including fractional rates. Click or drag the ruler to seek;
+arrow keys step one project frame and Home/End move to timeline boundaries.
+Zoom controls anchor the viewport center; Ctrl/Command + wheel anchors the pointer.
+Ordinary selection, playback and save updates preserve zoom and scroll.
+Ruler ticks support all valid rational project rates. If a frame boundary exceeds
+the project format's safe-integer precision, transient seeking and preview positions
+use a bounded rational approximation; extreme rates or positions can skip frame labels.
+
+Select a video clip, then **Preview selected clip** to link the existing source
+player using that clip's source-in and timeline-start mapping. Selection alone
+does not move the playhead or change its link. Ruler seeks inside the linked clip
+seek its source; leaving its range pauses/hides the source and clears the link.
+Source playback updates the timeline playhead, clamped to the linked clip range;
+the source transport itself still spans the entire source. Library selection and
+**Open video** clear the link. There is no automatic clip switching, audio-track
+preview, timeline mix/compositing or frame-accurate decoding. The T16 limitations
+still apply. After repeated ruler seeks, pressing Play can intermittently leave the
+linked source paused and its playhead fixed. All view/transport state is transient
+and resets on project replacement.
+
+Horizontal clip and vertical track culling bound rendered DOM work. Long sequences
+use a capped physical scrollbar with a proportional logical offset so SVG coordinates
+stay viewport-sized; at extreme durations scrollbar navigation is correspondingly
+coarser. No waveforms, thumbnails, trimming, moving, splitting or rendering controls
+are introduced.
+
 ## Excluded
 
-T16 does not implement transitions, audio effects,
+T17 does not implement transitions, audio effects,
 keyframes, fades, or desktop media import/timeline editing. No FFmpeg or
 MLT runtime is bundled; media commands require manually installed external tools.
 Fixture generation remains an optional development utility.

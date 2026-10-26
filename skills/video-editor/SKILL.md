@@ -47,6 +47,30 @@ Unsaved projects prompt Save/Discard/Cancel before switching, closing or quittin
 Reopen after CLI edits; stale saves are refused. GUI media import, timeline
 editing, project playback and rendering controls remain unavailable.
 
+T17 adds read-only timeline navigation: video/audio tracks retain project order;
+clip positions, gaps and cross-track overlaps follow exact stored timing. Use the
+**Zoom** control or +/− (center anchor), Ctrl/Command + wheel (pointer anchor), and
+horizontal/vertical scrolling. Click/drag the ruler to seek; focused Left/Right
+step one project frame and Home/End seek boundaries. The timeline clock displays
+project-rate non-drop timecode. Selection alone does not move the playhead.
+Ruler ticks support all valid rational rates. Frame boundaries beyond safe JSON
+integer precision use bounded playhead approximations; extreme rates or positions
+can skip frame labels. See the [exact-time contract](../../docs/PROJECT_FORMAT.md#exact-time)
+for the distinction between transient UI positions and persisted timing.
+
+**Preview selected clip** explicitly links a video clip to source preview at its
+source-in. Ruler seeks within it map to source time; source playback updates the
+playhead clamped to the clip range while transport remains full-source. Seeking
+outside the clip pauses/hides and unlinks the source. Library selection or
+**Open video** also unlinks. No automatic clip switching, image/audio timeline
+preview, mixing or compositing is available; T16 precision limitations still apply.
+Known limitation: repeated ruler seeks followed by **Play** can leave the linked
+source paused. Confirm that the source clock advances when checking playback.
+Zoom/scroll persist during selection/playback/save, and reset on project replacement.
+The timeline culls offscreen clips/tracks and caps the physical scrollbar for long
+sequences; extreme-duration scrollbar navigation is coarser. No timeline edits,
+waveforms or rendering controls are added. Reopen after CLI edits.
+
 T05 adds a versioned project data model, exact rational time, JSON save/load,
 validation and media availability checks as headless core APIs. See
 [the project format](../../docs/PROJECT_FORMAT.md) when using those APIs directly.
