@@ -2,6 +2,7 @@ import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { ApplicationInfo } from '@opencut/core';
 import './style.css';
+import appIcon from '../../resources/opencut-icon.png';
 import { ProjectWorkspace } from './project-workspace.js';
 
 function App() {
@@ -17,12 +18,17 @@ function App() {
     <main className="app-shell">
       <header>
         <span className="mark" aria-hidden="true">
-          OC
+          <img src={appIcon} alt="" draggable={false} />
         </span>
-        <span>OpenCut</span>
+        <span className="brand-name">
+          OpenCut<span className="brand-dot">.</span>
+        </span>
       </header>
       <ProjectWorkspace />
-      <p className="status" role="status">
+      <p
+        className={`status ${info && !error ? 'status-ready' : ''}`}
+        role="status"
+      >
         <span className="dot" aria-hidden="true" />
         {error
           ? 'Unable to connect to the application'

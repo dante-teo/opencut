@@ -316,9 +316,7 @@ test('empty and large timelines bound DOM work and scroll to distant tracks and 
   try {
     await writeProjectFile(project, path);
     await openProject(application, page, path);
-    await expect(
-      page.getByText('Drag library assets onto a new-track target to begin.'),
-    ).toBeVisible();
+    await expect(page.getByText('Drag media here')).toBeVisible();
     project.assets = [
       {
         id: 'offline',

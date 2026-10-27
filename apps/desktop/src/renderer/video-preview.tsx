@@ -127,7 +127,10 @@ export function VideoPreview({
     if (
       !video ||
       !ready ||
-      video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
+      // A second ruler request can arrive while the first seek is decoding.
+      // Apply it once metadata exists instead of deferring it until Play,
+      // which would otherwise pause playback with an old seek request.
+      video.readyState < HTMLMediaElement.HAVE_METADATA ||
       busy ||
       seekDraft !== null ||
       opening ||
@@ -393,23 +396,19 @@ export function VideoPreview({
           }}
         />
       </label>
-      <output data-testid="position">
-        Time {time.toFixed(3)} / {duration.toFixed(3)} s · Presented{' '}
-        {presented === null ? '—' : presented.toFixed(6)} s · Frame{' '}
-        {fps
-          ? projectFrameRate
-            ? Math.floor(time * fps + 0.000001)
-            : presented !== null
-              ? frameAt(presented, fps)
-              : '—'
-          : '—'}{' '}
-        (nominal, zero based{projectFrameRate ? ', project clock' : ''})
-      </output>
       {rate && (
-        <output data-testid="timecode">
-          Timecode {previewTimecode(time, rate)} /{' '}
-          {previewTimecode(duration, rate)} (non-drop
-          {projectFrameRate ? ', project rate' : ', source average rate'})
+        <output
+          data-testid="timecode"
+          title={
+            projectFrameRate
+              ? 'Project rate, non-drop timecode'
+              : 'Source average rate, non-drop timecode'
+          }
+        >
+          {previewTimecode(time, rate)}{' '}
+          <span className="timecode-divider">/</span>{' '}
+          {previewTimecode(duration, rate)}{' '}
+          <span className="timecode-divider">NDF</span>
         </output>
       )}
       {source.warning && <p role="note">{source.warning}</p>}
@@ -420,28 +419,41 @@ export function VideoPreview({
         </p>
       )}
       <div className="preview-tools">
-        <button
-          disabled={transportDisabled}
-          onClick={() =>
-            void perform(async (video, signal) => {
-              setReport(null);
-              const result = await benchmarkPreview(
-                video,
-                source.frameRate,
-                () => window.opencut.getPreviewMetrics(),
-                signal,
-              );
-              if (!signal.aborted) setReport(result);
-            })
-          }
-        >
-          Run performance validation
-        </button>
         <details className="preview-details">
           <summary>
             {report ? 'Details & measurements' : 'Details & shortcuts'}
           </summary>
           <div className="preview-details-content">
+            <output data-testid="position">
+              Time {time.toFixed(3)} / {duration.toFixed(3)} s · Presented{' '}
+              {presented === null ? '—' : presented.toFixed(6)} s · Frame{' '}
+              {fps
+                ? projectFrameRate
+                  ? Math.floor(time * fps + 0.000001)
+                  : presented !== null
+                    ? frameAt(presented, fps)
+                    : '—'
+                : '—'}{' '}
+              (nominal, zero based{projectFrameRate ? ', project clock' : ''})
+            </output>
+            <button
+              disabled={transportDisabled}
+              onClick={() =>
+                void perform(async (video, signal) => {
+                  setReport(null);
+                  const result = await benchmarkPreview(
+                    video,
+                    source.frameRate,
+                    () => window.opencut.getPreviewMetrics(),
+                    signal,
+                  );
+                  if (!signal.aborted) setReport(result);
+                })
+              }
+            >
+              Run performance validation
+            </button>
+
             {latency !== null && (
               <p className="media-detail">
                 Last seek to presented frame: {latency.toFixed(1)} ms
@@ -619,11 +631,6 @@ export function Preview({
           {opening ? 'Opening…' : 'Open video'}
         </button>
       </div>
-      {!source && (
-        <p className="intro">
-          Select media in the library, or open a local video.
-        </p>
-      )}
       {error && <p role="alert">{error}</p>}
       {source &&
         (source.kind === 'image' || source.kind === 'audio' ? (

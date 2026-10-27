@@ -153,6 +153,7 @@ test('imported source transport, project timing, scoped shortcuts and lifecycle'
       .click();
     const oldVideo = (await page.locator('video').elementHandle())!;
     const oldURL = (await page.locator('video').getAttribute('src'))!;
+    await page.locator('.preview-details > summary').click();
     await page
       .getByRole('button', { name: 'Run performance validation' })
       .click();

@@ -122,6 +122,7 @@ test('reproducible HTML video preview measurements', async () => {
           .update(await readFile(path))
           .digest('hex');
         await chooseVideo(application, page, path);
+        await page.locator('.preview-details > summary').click();
         await page
           .getByRole('button', { name: 'Run performance validation' })
           .click();

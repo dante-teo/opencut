@@ -673,7 +673,7 @@ export function ProjectTimeline({
           </div>
           {!trackCount && (
             <div className="timeline-empty">
-              <p>Drag library assets onto a new-track target to begin.</p>
+              <p>Drag media here</p>
             </div>
           )}
           {project?.tracks.slice(firstTrack, lastTrack).map((track, offset) => {
@@ -936,27 +936,29 @@ export function ProjectTimeline({
           )}
         </div>
       </div>
-      <div className="timeline-footer">
-        {(proposal?.error || editError) && (
-          <span role="alert">{proposal?.error || editError} </span>
-        )}
-        {proposal && !proposal.error && (
-          <span role="status">
-            {gesture.current?.kind === 'move' ? 'Move' : 'Trim'} ·{' '}
-            {exactTime(proposal.clip.timelineStart)} →{' '}
-            {exactTime(clipTimelineEnd(proposal.clip))}
-            {proposal.snap ? ' · Snapped' : ''} · Release to commit · Esc to
-            cancel.{' '}
-          </span>
-        )}
-        Drag clips or edges · S split · Delete remove · Arrows move focused
-        clips/edges · Ctrl/⌘ Z undo · Click/drag ruler to seek · Ctrl/⌘ + wheel
-        to zoom ·{' '}
-        {linkedClipId
-          ? `Source linked to ${linkedClipId}; playhead clamps to its range.`
-          : 'Select a video clip, then Preview selected clip to link source playback.'}{' '}
-        Reopen after CLI edits.
-      </div>
+      {(proposal || editError || linkedClipId) && (
+        <div className="timeline-footer">
+          {(proposal?.error || editError) && (
+            <span role="alert">{proposal?.error || editError} </span>
+          )}
+          {proposal && !proposal.error && (
+            <span role="status">
+              {gesture.current?.kind === 'move' ? 'Move' : 'Trim'} ·{' '}
+              {exactTime(proposal.clip.timelineStart)} →{' '}
+              {exactTime(clipTimelineEnd(proposal.clip))}
+              {proposal.snap ? ' · Snapped' : ''} · Release to commit · Esc to
+              cancel.{' '}
+            </span>
+          )}
+          {linkedClipId && (
+            <span
+              title={`Source linked to ${linkedClipId}; playhead clamps to its range.`}
+            >
+              Source linked
+            </span>
+          )}
+        </div>
+      )}
     </section>
   );
 }

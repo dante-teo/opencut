@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { Undo2, Redo2, FolderOpen, Plus, Save } from 'lucide-react';
+import { StudioArtwork } from './studio-graphics.js';
 import type {
   DesktopProject,
   ProjectReply,
@@ -231,13 +233,9 @@ export function ProjectWorkspace() {
             className={`save-indicator ${state?.dirty ? 'unsaved' : ''}`}
             aria-hidden="true"
           />
-          <h1>{project?.metadata.name ?? 'Your workspace'}</h1>
+          <h1>{project?.metadata.name ?? 'No project'}</h1>
           <span className="project-save-state">
-            {state?.dirty
-              ? 'Unsaved changes'
-              : project
-                ? 'Saved project'
-                : 'No project open'}
+            {state?.dirty ? 'Unsaved changes' : project ? 'Saved project' : ''}
           </span>
         </div>
         <div className="project-actions">
@@ -245,16 +243,16 @@ export function ProjectWorkspace() {
             disabled={!!busy || !project?.editing?.undo.length}
             onClick={() => history('undo')}
           >
-            Undo
+            <Undo2 aria-hidden="true" focusable="false" /> Undo
           </button>
           <button
             disabled={!!busy || !project?.editing?.redo.length}
             onClick={() => history('redo')}
           >
-            Redo
+            <Redo2 aria-hidden="true" focusable="false" /> Redo
           </button>
           <button disabled={!!busy} onClick={() => setCreating(true)}>
-            New project
+            <Plus aria-hidden="true" focusable="false" /> New project
           </button>
           <button
             disabled={!!busy}
@@ -262,7 +260,7 @@ export function ProjectWorkspace() {
               void run('Opening project…', () => window.opencut.openProject())
             }
           >
-            Open project
+            <FolderOpen aria-hidden="true" focusable="false" /> Open project
           </button>
           <button
             className="primary-button"
@@ -271,7 +269,7 @@ export function ProjectWorkspace() {
               void run('Saving project…', () => window.opencut.saveProject())
             }
           >
-            Save project
+            <Save aria-hidden="true" focusable="false" /> Save project
           </button>
           <button
             disabled={!!busy || !project}
@@ -292,6 +290,7 @@ export function ProjectWorkspace() {
       )}
       <div className="editor-panels">
         <MediaLibrary
+          key={project?.metadata.id ?? 'empty'}
           state={state}
           busy={!!busy}
           selection={selection}
@@ -363,27 +362,29 @@ export function ProjectWorkspace() {
                 />
               </svg>
               <div className="viewer-placeholder">
-                <span aria-hidden="true">▣</span>
-                <h2>Project viewer</h2>
-                <p>
-                  {project
-                    ? 'Project preview is not available yet.'
-                    : 'Open a project to begin'}
-                </p>
+                <StudioArtwork />
+                {project && <p>Project preview is not available yet.</p>}
+                {!project && (
+                  <button
+                    className="primary-button"
+                    disabled={!!busy}
+                    onClick={() => setCreating(true)}
+                  >
+                    Start creating <span aria-hidden="true">↗</span>
+                  </button>
+                )}
               </div>
             </div>
-            <div className="viewer-caption">
-              <span>
-                {project
-                  ? `${project.settings.width} × ${project.settings.height}`
-                  : 'No sequence loaded'}
-              </span>
-              <span>
-                {project
-                  ? `${project.settings.frameRate.numerator}/${project.settings.frameRate.denominator} fps`
-                  : '—'}
-              </span>
-            </div>
+            {project && (
+              <div className="viewer-caption">
+                <span>
+                  {`${project.settings.width} × ${project.settings.height}`}
+                </span>
+                <span>
+                  {`${project.settings.frameRate.numerator}/${project.settings.frameRate.denominator} fps`}
+                </span>
+              </div>
+            )}
           </div>
           <div
             id="source-viewer"
@@ -491,7 +492,6 @@ export function ProjectWorkspace() {
           }}
         >
           <h2>New project settings</h2>
-          <p className="muted">Set up your project canvas and frame rate.</p>
           <div className="project-fields">
             <label>
               Project name

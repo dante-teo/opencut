@@ -226,6 +226,7 @@ test('pending import excludes validation and the replacement player can validate
         });
     }, resolve('tests/fixtures/generated/video-long.mp4'));
     const open = page.getByRole('button', { name: 'Open video', exact: true });
+    await page.locator('.preview-details > summary').click();
     const validation = page.getByRole('button', {
       name: 'Run performance validation',
     });
@@ -262,6 +263,7 @@ test('pending import excludes validation and the replacement player can validate
     ).toBeEnabled();
     await expect(open).toBeEnabled();
     await expect(page.locator('.player')).toHaveAttribute('aria-busy', 'false');
+    await page.locator('.preview-details > summary').click();
     await validation.click();
     await expect(open).toBeDisabled();
     await expect(slider).toBeDisabled();

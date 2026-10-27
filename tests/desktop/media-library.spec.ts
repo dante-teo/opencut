@@ -113,6 +113,20 @@ test('imports multiple sources, drops disk-backed Files and library assets, prev
       page
         .locator('.asset-list')
         .getByRole('button', { name: new RegExp(name) });
+    await page
+      .getByRole('searchbox', { name: 'Search media' })
+      .fill('VIDEO-MEDIUM');
+    await expect(page.locator('.asset-list > li')).toHaveCount(1);
+    await page.getByLabel('Filter media type').selectOption('image');
+    await expect(
+      page.getByText('No matching media', { exact: true }),
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'Clear filters' }).click();
+    await expect(page.locator('.asset-list > li')).toHaveCount(3);
+    await page.getByLabel('Filter media type').selectOption('image');
+    await expect(page.locator('.asset-list > li')).toHaveCount(1);
+    await expect(asset('still.png')).toBeVisible();
+    await page.getByLabel('Filter media type').selectOption('all');
     await asset('video-medium').click();
     await expect(
       page.getByRole('button', { name: 'Play', exact: true }),

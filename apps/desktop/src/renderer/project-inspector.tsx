@@ -1,3 +1,5 @@
+import { SlidersHorizontal } from 'lucide-react';
+import { CanvasArtwork } from './studio-graphics.js';
 import type { DesktopProject } from '../bridge.js';
 import { exactTime } from './project-timeline.js';
 
@@ -20,10 +22,15 @@ export function ProjectInspector({
   );
   const availability = state?.media.find((item) => item.assetId === asset?.id);
   return (
-    <aside className="inspector-panel" aria-label="Inspector">
+    <aside
+      className="inspector-panel"
+      aria-label="Inspector"
+      title="Read-only properties"
+    >
       <div className="panel-heading">
-        <h2>Inspector</h2>
-        <span className="panel-hint">Read only</span>
+        <h2>
+          <SlidersHorizontal aria-hidden="true" focusable="false" /> Inspector
+        </h2>
       </div>
       <div className="inspector-content">
         {selection && (
@@ -106,13 +113,12 @@ export function ProjectInspector({
             )}
           </>
         )}
-        <h3>Project settings</h3>
-        {!project ? (
-          <p className="muted">
-            Create or open a project to inspect its settings.
-          </p>
-        ) : (
+        <div className="inspector-overview" aria-hidden="true">
+          <CanvasArtwork />
+        </div>
+        {project && (
           <>
+            <h3>Project settings</h3>
             <dl className="project-metadata">
               <dt>Resolution</dt>
               <dd>

@@ -9,7 +9,7 @@ This is the official product skill for external coding agents using OpenCut.
 It will grow with the CLI to cover project inspection, modification, validation
 and rendering. T03 includes a composition/export prototype. T04 adds an
 interactive Electron source preview (launch with `pnpm dev`) with playback,
-seeking, nominal frame stepping and a performance-validation button. This preview
+seeking, nominal frame stepping and performance validation under **Details & shortcuts**. This preview
 has no CLI command. T16 connects it to imported video assets: select a library
 video to open **Source preview**, or use **Open video** for a local source.
 Imported video preview reuses stored import metadata and rechecks readability,
@@ -42,6 +42,9 @@ shared core. Use **New project**, configure dimensions and integer/rational FPS,
 then **Save project** to a new file; existing creation destinations are refused.
 **Open project** accepts CLI-created JSON. The workspace has a media library on
 the left, viewer in the center, inspector on the right and timeline tracks below.
+Use **Search media** and **Filter media type** to narrow the library without
+changing project assets. Filters combine and reset when switching to a different
+project. **Clear filters** shows the full library when a search has no matches.
 Select assets to inspect metadata, or clips to inspect exact stored timing.
 Unsaved projects prompt Save/Discard/Cancel before switching, closing or quitting.
 Reopen after CLI edits; stale saves are refused. Project playback and rendering controls remain unavailable.

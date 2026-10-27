@@ -4,7 +4,7 @@
 
 | Package            | Owns                                                                                      | Actual dependencies                                       |
 | ------------------ | ----------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| `@opencut/desktop` | Electron lifecycle, project session, restricted IPC, React workspace and source preview   | core, media, Electron, React, range-parser                |
+| `@opencut/desktop` | Electron lifecycle, project session, restricted IPC, React workspace and source preview   | core, media, Electron, React, Lucide, range-parser        |
 | `@opencut/cli`     | Argument parsing, stdout/stderr and exit codes                                            | core, media, Node built-ins                               |
 | `@opencut/core`    | Headless identity, project model, persistence, assets, timeline edits and render planning | Zod; media and Node built-ins in optional `/node` adapter |
 | `@opencut/media`   | Probing, frame extraction, composition and timeline encoding through external tools       | Node built-ins                                            |
@@ -156,6 +156,29 @@ The desktop follows the system light/dark appearance, including live changes,
 through Electron nativeTheme and CSS prefers-color-scheme. On macOS the native
 title bar is hidden; the full header (including its padding and text) is draggable,
 while the standard window controls and normal resizable window behavior remain.
+
+### Visual language and icon assets
+
+The docked workspace uses violet tools, mint audio accents and system light/dark
+surfaces. Shared CSS radius tokens distinguish controls, cards, panels and dialogs.
+Keep labels concise and use grouping and hierarchy to explain the interface;
+reserve supporting text for ambiguity, errors and unavailable capabilities.
+Lucide supplies control icons, while `studio-graphics.tsx` owns decorative SVG
+artwork. Decorative graphics are hidden from assistive technology; controls keep
+accessible names independently of their icons.
+
+The app identity is a flat violet character with expressive eyes and a detached
+coral cut corner on a peach tile. The editable master is
+[`opencut-icon.svg`](../apps/desktop/resources/opencut-icon.svg). Its transparent
+1024 × 1024 PNG export, [`opencut-icon.png`](../apps/desktop/resources/opencut-icon.png),
+is the shared runtime asset: the renderer imports it for the header, and main
+imports it with electron-vite's `?asset` handling for `BrowserWindow` and macOS
+`app.dock.setIcon`. Update the SVG and PNG together when changing the identity;
+changing the SVG alone does not update the running app. Rebuild and relaunch to
+load the new asset. `tests/desktop/icon.spec.ts` checks the bundled header image
+and the image passed to the real macOS Dock setter when a window reopens.
+This runtime wiring does not configure Finder, installer or signed-app bundle
+icons; packaging remains outside the current build.
 
 ## Desktop source preview
 

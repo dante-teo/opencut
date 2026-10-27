@@ -80,9 +80,7 @@ test('creates and saves in Electron, reads through CLI, and opens a CLI-created 
   const { application, page } = await launchDesktop();
   try {
     await expect(
-      page.getByText(
-        'Create a project or open an existing OpenCut JSON file to get started.',
-      ),
+      page.getByRole('button', { name: 'Start creating' }),
     ).toBeVisible();
     await createProject(page);
     await expect(
@@ -133,7 +131,7 @@ test('creates and saves in Electron, reads through CLI, and opens a CLI-created 
       .getByRole('button', { name: 'Close project', exact: true })
       .click();
     await expect(
-      page.getByRole('heading', { name: 'Your workspace' }),
+      page.getByRole('heading', { name: 'No project' }),
     ).toBeVisible();
     const cliPath = join(directory, 'cli.json');
     cli(
@@ -325,7 +323,7 @@ test('native close and quit preserve unsaved work after Cancel or canceled Save'
       .getByRole('button', { name: 'Close project', exact: true })
       .click();
     await expect(
-      page.getByRole('heading', { name: 'Your workspace' }),
+      page.getByRole('heading', { name: 'No project' }),
     ).toBeVisible();
     expect(cli('project', 'info', path, '--json').metadata.name).toBe(
       'Desktop portrait',
@@ -342,7 +340,7 @@ test('native close and quit preserve unsaved work after Cancel or canceled Save'
       await application.evaluate(({ app }) => app.emit('activate'));
       const reopened = await next;
       await expect(
-        reopened.getByRole('heading', { name: 'Your workspace' }),
+        reopened.getByRole('heading', { name: 'No project' }),
       ).toBeVisible();
     }
   } finally {

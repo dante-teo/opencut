@@ -41,7 +41,7 @@ Electron downloads its development binary on first launch, requiring network acc
 Quit the app and press Ctrl-C in the terminal to stop the dev server.
 FFmpeg is optional and is not needed for either command.
 
-The desktop follows the system light/dark appearance, including changes while
+The desktop uses a violet-accented studio layout and follows the system light/dark appearance, including changes while
 running. On macOS it uses a normal resizable window with native window buttons
 and a hidden title bar. Drag the header, including the space above the logo,
 to move the window.
@@ -77,6 +77,11 @@ existing asset. Progress identifies the current file; errors preserve the sessio
 Unsaved projects can import before their first save, using absolute references.
 Saving preserves those absolute references; it does not relocate the media or
 convert them to project-relative paths.
+
+Use **Search media** to filter filenames, and **Filter media type** to show video,
+audio or images. Filters combine, affect only the library view, and reset when
+switching to a different project. **Clear filters** shows the full library when a
+search has no matches.
 
 The library shows type, duration and native thumbnails where available (macOS and
 Windows; icons elsewhere or for unsupported sources). Select media for source
@@ -195,7 +200,8 @@ replacing a project clears the player. Preview state is transient and does not
 modify the project or source files. This is source playback; it does not composite
 timeline tracks or implement editing/render controls.
 
-**Run performance validation** runs a positioning seek, three warm-up seeks,
+Open **Details & shortcuts** for source-frame diagnostics and
+**Run performance validation**, which runs a positioning seek, three warm-up seeks,
 30 fixed target seeks, then up to eight seconds of playback. Keep the window visible.
 Open **Details & measurements** after validation for median/p95 seek latency,
 dropped frames and expandable measurement JSON. **Details & shortcuts** also

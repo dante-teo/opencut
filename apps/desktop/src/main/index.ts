@@ -9,6 +9,7 @@ import {
   protocol,
   session,
 } from 'electron';
+import iconPath from '../../resources/opencut-icon.png?asset';
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
@@ -243,7 +244,7 @@ async function openPreview(
 }
 
 function getWindowBackgroundColor(): string {
-  return nativeTheme.shouldUseDarkColors ? '#101416' : '#f6f8f7';
+  return nativeTheme.shouldUseDarkColors ? '#111015' : '#f3f2f7';
 }
 
 function handleStartupError(error: unknown): void {
@@ -252,8 +253,12 @@ function handleStartupError(error: unknown): void {
 }
 
 async function createWindow(): Promise<void> {
+  const icon = nativeImage.createFromPath(iconPath);
+  if (icon.isEmpty()) throw new Error('Unable to load the OpenCut app icon.');
+  app.dock?.setIcon(icon);
   const window = new BrowserWindow({
     title: 'OpenCut',
+    icon,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     width: 1080,
     height: 720,

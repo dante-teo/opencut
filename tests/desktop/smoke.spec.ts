@@ -9,7 +9,7 @@ test('built desktop displays React through the sandboxed bridge', async () => {
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await expect(
-      page.getByRole('heading', { name: 'Project viewer' }),
+      page.getByRole('button', { name: 'Start creating' }),
     ).toBeVisible();
     await expect(page.getByRole('status')).toHaveText(
       'OpenCut is running · v0.1.0',
@@ -87,9 +87,9 @@ test('built desktop displays React through the sandboxed bridge', async () => {
         nativeTheme.themeSource = theme;
       }, theme);
       const background =
-        theme === 'dark' ? 'rgb(16, 20, 22)' : 'rgb(246, 248, 247)';
+        theme === 'dark' ? 'rgb(17, 16, 21)' : 'rgb(243, 242, 247)';
       const foreground =
-        theme === 'dark' ? 'rgb(239, 244, 242)' : 'rgb(25, 40, 32)';
+        theme === 'dark' ? 'rgb(238, 235, 245)' : 'rgb(41, 38, 55)';
       await expect(page.locator('html')).toHaveCSS(
         'background-color',
         background,
@@ -104,8 +104,11 @@ test('built desktop displays React through the sandboxed bridge', async () => {
               .slice(-6),
           ),
         )
-        .toBe(theme === 'dark' ? '101416' : 'f6f8f7');
-      await page.screenshot({ path: 'test-results/desktop-' + theme + '.png' });
+        .toBe(theme === 'dark' ? '111015' : 'f3f2f7');
+      await page.screenshot({
+        path: 'test-results/desktop-' + theme + '.png',
+        animations: 'disabled',
+      });
     }
     await application.evaluate(({ nativeTheme }) => {
       nativeTheme.themeSource = 'system';
@@ -128,6 +131,68 @@ test('built desktop displays React through the sandboxed bridge', async () => {
       });
     }
     expect(errors).toEqual([]);
+  } finally {
+    await application.close();
+  }
+});
+
+test('studio panels stay reachable at compact, default and large window sizes', async () => {
+  const { application, page } = await launchDesktop();
+  try {
+    for (const [width, height] of [
+      [640, 480],
+      [1080, 720],
+      [1440, 900],
+    ]) {
+      await application.evaluate(
+        ({ BrowserWindow }, size) => {
+          BrowserWindow.getAllWindows()[0]!.setContentSize(
+            size.width!,
+            size.height!,
+          );
+        },
+        { width, height },
+      );
+      await expect(
+        page.getByRole('button', { name: 'Start creating' }),
+      ).toBeVisible();
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth,
+        ),
+      ).toBe(true);
+      const timelineBounds = await page
+        .locator('.timeline-panel')
+        .boundingBox();
+      const workspaceBounds = await page.locator('.workspace').boundingBox();
+      expect(
+        workspaceBounds!.y + workspaceBounds!.height,
+      ).toBeGreaterThanOrEqual(timelineBounds!.y + timelineBounds!.height);
+      const panels = page.locator('.editor-panels');
+      await panels.evaluate((element) => {
+        element.scrollLeft = element.scrollWidth;
+      });
+      await expect(
+        page.getByRole('heading', { name: 'Inspector', exact: true }),
+      ).toBeInViewport();
+      await panels.evaluate((element) => {
+        element.scrollLeft = 0;
+      });
+      await expect(
+        page.getByRole('searchbox', { name: 'Search media' }),
+      ).toBeInViewport();
+      await page.screenshot({
+        path: `test-results/studio-${width}.png`,
+        animations: 'disabled',
+      });
+    }
+    await page.getByRole('button', { name: 'Start creating' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(
+      page.getByRole('textbox', { name: 'Project name', exact: true }),
+    ).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).not.toBeVisible();
   } finally {
     await application.close();
   }
