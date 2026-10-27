@@ -1,5 +1,7 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { expect, it } from 'vitest';
 import { servePreviewFile } from '../../apps/desktop/src/main/preview-file.js';
 
@@ -45,4 +47,29 @@ it('serves exact byte, suffix and open ranges and rejects invalid ranges', async
   );
   expect(response.status).toBe(200);
   expect(Buffer.from(await response.arrayBuffer())).toEqual(content);
+});
+
+it('serves audio and still sources with their media content type', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'opencut-preview-types-'));
+  try {
+    for (const [extension, type] of [
+      ['wav', 'audio/wav'],
+      ['mp3', 'audio/mpeg'],
+      ['m4a', 'audio/mp4'],
+      ['png', 'image/png'],
+      ['jpeg', 'image/jpeg'],
+      ['webp', 'image/webp'],
+    ]) {
+      const source = join(directory, `source.${extension}`);
+      await writeFile(source, 'Synthetic source sentinel');
+      const response = await servePreviewFile(
+        source,
+        new Request('https://example.invalid'),
+      );
+      expect(response.headers.get('Content-Type')).toBe(type);
+      expect(await response.text()).toBe('Synthetic source sentinel');
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

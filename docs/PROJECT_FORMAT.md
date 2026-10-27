@@ -224,6 +224,13 @@ for POSIX filenames containing colons. Windows input separators are normalized.
 This is lexical path handling, not realpath/symlink canonicalization or proof of
 Windows runtime support.
 
+T19 desktop imports made before the first save store absolute source references,
+since the project directory is not known yet. Saving preserves those references;
+it does not rebase them, copy media, or change the schema. Imports made after a
+project has a saved path use the normal relative-preferred policy above. After
+moving the project, absolute references still depend on their original source
+paths.
+
 Filesystem-backed asset inspection and media availability checks resolve project
 directory symlinks to the physical parent before resolving media references,
 matching import/update behavior. `canonicalProjectFilePath(path)` provides this

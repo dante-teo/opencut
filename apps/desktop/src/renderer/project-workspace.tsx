@@ -12,6 +12,7 @@ import {
   ZERO,
 } from './timeline-geometry.js';
 import { ProjectTimeline } from './project-timeline.js';
+import { MediaLibrary } from './media-library.js';
 import { ProjectInspector } from './project-inspector.js';
 
 export function ProjectWorkspace() {
@@ -84,17 +85,29 @@ export function ProjectWorkspace() {
           if (editing) {
             const next = reply.state?.project;
             if (
-              selection?.kind === 'clip' &&
-              !next?.clips.some((clip) => clip.id === selection.id)
+              selection &&
+              !(selection.kind === 'clip' ? next?.clips : next?.assets)?.some(
+                (entry) => entry.id === selection.id,
+              )
             )
               setSelection(null);
+            if (
+              previewAssetId &&
+              !next?.assets.some((asset) => asset.id === previewAssetId)
+            ) {
+              setPreviewAssetId(null);
+              setPreviewSession((value) => value + 1);
+            }
             // Pause/unlink the source on edits so its old clock cannot overwrite
             // the project playhead after moving, trimming, deleting or restoring.
             setLinkedClipId(null);
             setPreviewPosition(undefined);
             setViewer('project');
           }
-          setNotice(label === 'Saving project…' ? 'Project saved.' : '');
+          setNotice(
+            reply.notice ??
+              (label === 'Saving project…' ? 'Project saved.' : ''),
+          );
         }
       }
     } catch (error) {
@@ -105,6 +118,26 @@ export function ProjectWorkspace() {
     }
   }
 
+  useEffect(
+    () =>
+      window.opencut.onImportProgress((progress) => {
+        setBusy(
+          `Importing ${progress.completed}/${progress.total} · ${progress.name}`,
+        );
+      }),
+    [],
+  );
+  useEffect(() => {
+    const prevent = (event: DragEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener('dragover', prevent);
+    window.addEventListener('drop', prevent);
+    return () => {
+      window.removeEventListener('dragover', prevent);
+      window.removeEventListener('drop', prevent);
+    };
+  }, []);
   useEffect(() => {
     void run('Loading project…', () => window.opencut.getProject());
   }, []);
@@ -119,6 +152,21 @@ export function ProjectWorkspace() {
     else if (!creating && dialog?.open) dialog.close();
   }, [creating]);
   const project = state?.project;
+  function importMedia(files?: File[]) {
+    if (!project) return;
+    const input = {
+      projectId: project.metadata.id,
+      expectedRevision: projectRevision(project),
+    };
+    void run(
+      'Importing media…',
+      () =>
+        files
+          ? window.opencut.importDroppedMedia(input, files)
+          : window.opencut.importMedia(input),
+      true,
+    );
+  }
   function edit(operations: TimelineOperation[], label: string) {
     if (!project) return Promise.resolve();
     return run(
@@ -243,76 +291,35 @@ export function ProjectWorkspace() {
         </div>
       )}
       <div className="editor-panels">
-        <aside className="library-panel" aria-label="Media library">
-          <div className="panel-heading">
-            <h2>Media assets ({project?.assets.length ?? 0})</h2>
-          </div>
-          <div className="library-content">
-            {!project?.assets.length ? (
-              <div className="library-empty">
-                <span className="empty-symbol" aria-hidden="true">
-                  ▧
-                </span>
-                <h3>Your media lives here</h3>
-                <p>
-                  {project
-                    ? 'No media assets. Import media through the CLI.'
-                    : 'Create a project or open an existing OpenCut JSON file to get started.'}
-                </p>
-              </div>
-            ) : (
-              <ul className="asset-list">
-                {project.assets.map((asset) => {
-                  const availability = state?.media.find(
-                    (item) => item.assetId === asset.id,
-                  );
-                  const offline = availability?.status !== 'available';
-                  return (
-                    <li key={asset.id}>
-                      <button
-                        aria-pressed={
-                          selection?.kind === 'asset' &&
-                          selection.id === asset.id
-                        }
-                        onClick={() => {
-                          setSelection({ kind: 'asset', id: asset.id });
-                          setLinkedClipId(null);
-                          setPreviewPosition(undefined);
-                          setPreviewAssetId(asset.id);
-                          setPreviewRequest((value) => value + 1);
-                          setViewer('source');
-                        }}
-                        disabled={!!busy}
-                      >
-                        <span
-                          className={`asset-icon ${asset.metadata?.kind ?? asset.mediaTypes[0]}`}
-                          aria-hidden="true"
-                        >
-                          {asset.metadata?.kind === 'audio' ||
-                          asset.mediaTypes[0] === 'audio'
-                            ? '♫'
-                            : '▧'}
-                        </span>
-                        <span className="asset-label">
-                          <strong>{asset.name}</strong>
-                          <small>
-                            {asset.metadata?.kind ??
-                              asset.mediaTypes.join(', ')}{' '}
-                            · {offline ? 'Offline' : 'Available'}
-                          </small>
-                        </span>
-                      </button>
-                      <p className="asset-availability">
-                        {availability?.message}
-                      </p>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-          <div className="panel-footnote">Project media · read only</div>
-        </aside>
+        <MediaLibrary
+          state={state}
+          busy={!!busy}
+          selection={selection}
+          revision={project ? projectRevision(project) : 0}
+          onImport={() => importMedia()}
+          onDrop={importMedia}
+          onRemove={(assetId) => {
+            if (project)
+              void run(
+                'Removing media…',
+                () =>
+                  window.opencut.removeAsset({
+                    projectId: project.metadata.id,
+                    expectedRevision: projectRevision(project),
+                    assetId,
+                  }),
+                true,
+              );
+          }}
+          onSelect={(id) => {
+            setSelection({ kind: 'asset', id });
+            setLinkedClipId(null);
+            setPreviewPosition(undefined);
+            setPreviewAssetId(id);
+            setPreviewRequest((value) => value + 1);
+            setViewer('source');
+          }}
+        />
         <section className="viewer-panel" aria-label="Viewer">
           <div className="panel-heading viewer-tabs">
             <div role="tablist" aria-label="Viewer mode">
@@ -422,6 +429,13 @@ export function ProjectWorkspace() {
         project={project}
         disabled={!!busy}
         onEdit={edit}
+        onAddAsset={(input) =>
+          run(
+            'Adding media clip…',
+            () => window.opencut.addAssetClip(input),
+            true,
+          )
+        }
         position={playhead}
         onSeek={seekTimeline}
         linkedClipId={linkedClipId}

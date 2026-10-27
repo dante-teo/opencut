@@ -234,7 +234,8 @@ test('missing, non-video and corrupt assets fail gracefully and allow recovery',
       .locator('.asset-list')
       .getByRole('button', { name: /audio-tone/ })
       .click();
-    await expect(page.getByRole('alert')).toContainText('Select a video asset');
+    await expect(page.locator('audio')).toHaveCount(1);
+    await expect(page.getByRole('alert')).toHaveCount(0);
     await expect(page.locator('video')).toHaveCount(0);
     // Rapid selection requests must leave only the last selected source authorized.
     await page

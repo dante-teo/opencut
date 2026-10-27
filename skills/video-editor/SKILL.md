@@ -44,8 +44,7 @@ then **Save project** to a new file; existing creation destinations are refused.
 the left, viewer in the center, inspector on the right and timeline tracks below.
 Select assets to inspect metadata, or clips to inspect exact stored timing.
 Unsaved projects prompt Save/Discard/Cancel before switching, closing or quitting.
-Reopen after CLI edits; stale saves are refused. GUI media import, project
-playback and rendering controls remain unavailable.
+Reopen after CLI edits; stale saves are refused. Project playback and rendering controls remain unavailable.
 
 T17 adds read-only timeline navigation: video/audio tracks retain project order;
 clip positions, gaps and cross-track overlaps follow exact stored timing. Use the
@@ -93,8 +92,26 @@ tracks; focused edge handles
 support Left/Right trims, without proximity snapping. Save persists completed
 edits and history; reopen and inspect with `timeline list` to verify. Successful
 edits pause/unlink source preview and retain the project playhead. Zoom is locked
-during gestures; scroll manually to reach offscreen targets. Media import,
-transitions, keyframes, project playback and rendering controls are not added.
+during gestures; scroll manually to reach offscreen targets. Transitions, keyframes, project playback and rendering controls are not added.
+
+T19 adds **Import media** (multi-selection) and Finder file drops into the library.
+ffprobe must be installed manually and available on PATH. Imports reference
+originals, reuse file identity duplicates and commit each batch as one undo step;
+any failed file leaves the batch unchanged. Unsaved projects can import before
+saving; these assets use absolute paths that remain absolute after saving.
+Undo/redo refreshes changed asset availability even before the first save;
+restored readable assets can be dragged again, while missing sources remain offline.
+The library shows type, duration and native thumbnails where available (macOS/Windows; icon fallback otherwise).
+Select video/audio/image assets for source preview; browser codec support applies.
+Switching to Project viewer pauses audio, and replacing a source unloads the old
+media element. Drag library assets to compatible timeline lanes or **+ Video track** / **+ Audio
+track** targets (new tracks start their clip at the playhead). Lane drops use scroll/zoom-aware project frames and the Snap controls.
+Timed sources use complete frames within their duration; stills default to about
+five seconds. A new track and clip form one undoable edit. Incompatible or
+overlapping drops fail without edits. External files must first enter the library.
+Select an unused asset, then **Remove asset**; referenced assets are protected.
+Save/reopen and use CLI `media list` / `timeline list` to inspect saved GUI edits.
+No waveforms, advanced organization, transitions or rendering controls are added.
 
 T05 adds a versioned project data model, exact rational time, JSON save/load,
 validation and media availability checks as headless core APIs. See

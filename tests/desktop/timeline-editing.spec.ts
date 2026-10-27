@@ -146,7 +146,18 @@ async function startDrag(
     : clip(page, id).locator(':scope > rect').first();
   const box = (await target.boundingBox())!;
   const x = box.x + box.width / 2;
-  const y = box.y + box.height / 2;
+  const viewport = await page
+    .locator('.timeline-scroll')
+    .evaluate((element) => ({
+      y: element.getBoundingClientRect().top,
+      height: element.clientHeight,
+    }));
+  // Lower lanes can be partly clipped at the default window size. Begin on
+  // the visible part of the handle rather than beneath the timeline footer.
+  const y = Math.max(
+    box.y + 1,
+    Math.min(box.y + box.height / 2, viewport.y + viewport.height - 4),
+  );
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(x + dx, y + dy, { steps: 6 });
@@ -400,10 +411,12 @@ test('undo/redo of CLI media removal refreshes library availability and survives
     const unused = library.getByRole('button', { name: /Unused video/ });
     await expect(unused).toHaveCount(0);
     await page.getByRole('button', { name: 'Undo', exact: true }).click();
-    await expect(unused).toContainText('Available');
-    await expect(
-      library.getByText('Media file is readable.', { exact: true }),
-    ).toHaveCount(3);
+    await expect(unused).toHaveAttribute('draggable', 'true');
+    const restored = await page.evaluate(() => window.opencut.getProject());
+    expect(
+      restored.ok &&
+        restored.state?.media.filter((item) => item.status === 'available'),
+    ).toHaveLength(3);
     expect(await readFile(path, 'utf8')).toBe(saved);
     await page.getByRole('button', { name: 'Redo', exact: true }).click();
     await expect(unused).toHaveCount(0);
@@ -417,7 +430,7 @@ test('undo/redo of CLI media removal refreshes library availability and survives
       },
     });
     await page.getByRole('button', { name: 'Undo', exact: true }).click();
-    await expect(unused).toContainText('Available');
+    await expect(unused).toHaveAttribute('draggable', 'true');
     await page
       .getByRole('button', { name: 'Save project', exact: true })
       .click();
@@ -425,7 +438,7 @@ test('undo/redo of CLI media removal refreshes library availability and survives
       page.getByText('Project saved.', { exact: true }),
     ).toBeVisible();
     await open(application, page, path);
-    await expect(unused).toContainText('Available');
+    await expect(unused).toHaveAttribute('draggable', 'true');
     expect((await current(page)).assets).toContainEqual(
       expect.objectContaining({ id: 'unused' }),
     );

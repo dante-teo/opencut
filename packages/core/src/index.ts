@@ -79,3 +79,5 @@ export type {
   VisualRenderClip,
   AudioRenderClip,
 } from './render-plan.js';
+
+export { addAssetClip } from './library.js';

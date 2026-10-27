@@ -12,6 +12,7 @@ export const ASSET_PREVIEW_CHANNEL = 'preview:asset';
 export const RELEASE_PREVIEW_CHANNEL = 'preview:release';
 
 export interface PreviewSource {
+  kind?: 'video' | 'audio' | 'image';
   url: string;
   name: string;
   frameRate: number | null;
@@ -36,6 +37,9 @@ export const PROJECT_CHANNELS = {
   edit: 'project:edit',
   undo: 'project:undo',
   redo: 'project:redo',
+  import: 'project:import',
+  removeAsset: 'project:remove-asset',
+  addAssetClip: 'project:add-asset-clip',
 } as const;
 
 export interface NewProjectInput {
@@ -51,7 +55,12 @@ export interface DesktopProject {
 }
 
 export type ProjectReply =
-  | { ok: true; state: DesktopProject | null; canceled: boolean }
+  | {
+      ok: true;
+      state: DesktopProject | null;
+      canceled: boolean;
+      notice?: string;
+    }
   | { ok: false; error: string };
 
 export interface HistoryInput {
@@ -69,7 +78,28 @@ export interface TimelineEditInput extends HistoryInput {
   label: string;
 }
 
+export const IMPORT_PROGRESS_CHANNEL = 'media:import-progress';
+export const THUMBNAIL_CHANNEL = 'media:thumbnail';
+export interface ImportProgress {
+  completed: number;
+  total: number;
+  name: string;
+}
+export interface AssetRemoveInput extends HistoryInput {
+  assetId: string;
+}
+export interface AssetClipInput extends AssetRemoveInput {
+  trackId?: string;
+  mediaType: 'video' | 'audio';
+  at: number;
+}
 export interface DesktopAPI {
+  importMedia(input: HistoryInput): Promise<ProjectReply>;
+  importDroppedMedia(input: HistoryInput, files: File[]): Promise<ProjectReply>;
+  onImportProgress(callback: (progress: ImportProgress) => void): () => void;
+  removeAsset(input: AssetRemoveInput): Promise<ProjectReply>;
+  addAssetClip(input: AssetClipInput): Promise<ProjectReply>;
+  assetThumbnail(assetId: string): Promise<string | null>;
   editTimeline(input: TimelineEditInput): Promise<ProjectReply>;
   undoProject(input: HistoryInput): Promise<ProjectReply>;
   redoProject(input: HistoryInput): Promise<ProjectReply>;

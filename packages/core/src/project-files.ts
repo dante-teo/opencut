@@ -380,6 +380,8 @@ export async function updateProjectFile<T>(
 export {
   AssetError,
   importMediaAsset,
+  prepareMediaAsset,
+  removeAssetFromProject,
   listMediaAssets,
   getMediaAsset,
   removeMediaAsset,

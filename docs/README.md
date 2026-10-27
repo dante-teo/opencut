@@ -21,6 +21,8 @@ transport, project-rate timecode and explicit playback cleanup.
 T17 adds a zoomable, scrollable read-only timeline with an independent playhead
 and explicit links to source preview.
 T18 adds shared-core timeline move, edge trim, split, delete, snapping and persistent undo/redo.
+T19 adds multi-file media import, Finder drops, library thumbnails, source selection,
+unused-asset removal and dragging assets onto the timeline.
 
 ## Quick start (macOS)
 
@@ -58,15 +60,38 @@ and video/audio tracks and clips appear in a docked editor workspace: media
 library on the left, viewer in the center, inspector on the right, and a timeline
 below. Select an asset or clip to inspect its stored details. Timeline blocks
 show relative positions and durations. Source ranges and timeline starts retain
-exact rational seconds. Use the CLI for imports, then reopen the project to
+exact rational seconds. Reopen after external CLI edits to
 refresh; there is no automatic file watching.
 Project management needs no FFmpeg or ffprobe. Closing, quitting, creating or
 opening another project offers **Save**, **Discard**, and **Cancel** when the
 current project is unsaved. Canceled dialogs and failed saves preserve it; failed
 opens leave the current project displayed. Operations run one at a time, with
 loading indicators and errors shown in the workspace. New projects and edited
-timelines can be unsaved. There is no Save As, project playback, GUI media import
-or render control.
+timelines can be unsaved. There is no Save As, project playback or render control.
+
+Use **Import media** to choose several video, audio or image files, or drop files
+from Finder into the media library. Import requires ffprobe on PATH; original
+files are referenced in place. Each batch is one undoable edit and commits only
+if every source succeeds. Existing file identities (including aliases) reuse the
+existing asset. Progress identifies the current file; errors preserve the session.
+Unsaved projects can import before their first save, using absolute references.
+Saving preserves those absolute references; it does not relocate the media or
+convert them to project-relative paths.
+
+The library shows type, duration and native thumbnails where available (macOS and
+Windows; icons elsewhere or for unsupported sources). Select media for source
+preview: video uses the existing transport, audio uses native playback controls,
+and images show a still. Browser codec support limits source playback.
+Drag a library asset onto a compatible track, or onto **+ Video track** / **+ Audio
+track** to create a track and clip together at the playhead. Drop x-position includes timeline
+scroll and zoom, rounds to project frames and respects **Snap**. Timed sources use
+all complete project frames; stills default to the nearest five-second frame
+count. A video with audio may also be placed on an audio track. Core validation
+rejects overlaps and incompatible tracks without partial changes. External files
+must enter through the library first; scroll manually to reach distant lanes.
+Select an unused asset and click **Remove asset**; used assets are protected.
+Save and reopen to persist library changes, clips and shared undo/redo history;
+`media list` and `timeline list` expose the same saved data in the CLI.
 
 The timeline preserves project track order, with separate video/audio styling.
 Gaps and overlaps across tracks follow stored rational timing. Select a clip for
@@ -103,7 +128,9 @@ restore shared CLI/GUI history, including after save/reopen.
 Shared history can also restore or remove imported asset entries. When undo/redo
 changes assets or their references, the library refreshes availability before
 accepting the restored state; a failed refresh retains the previous session.
-This checks source readability without re-probing codecs or changing source files.
+This also applies before the first save: undoing an unused asset's removal restores
+its current availability, so readable sources can be dragged again and missing
+sources remain marked offline. This checks source readability without re-probing codecs or changing source files.
 Clip-only edits keep the existing availability snapshot. Reopen the project to
 refresh availability after external file changes.
 
@@ -112,7 +139,7 @@ to the next compatible track. Focus an edge handle and use Left/Right to trim.
 Keyboard edits use frame stepping without proximity snapping. Scroll to reach
 other tracks/times; there is no automatic edge scrolling during a drag. Zoom is
 locked while dragging. Successful edits and undo/redo pause and unlink source preview,
-retaining the project playhead. GUI editing does not add media import, transitions,
+retaining the project playhead. GUI editing does not add transitions,
 keyframes, project playback or rendering controls.
 
 Select a video clip and click **Preview selected clip** to link source playback.
@@ -160,10 +187,10 @@ Dragging the seek slider stages a target and seeks when released; keyboard chang
 seek immediately. **Open video** disables the current player's controls during
 selection/probing, and stays disabled during a seek, drag or performance validation.
 Library selection can replace a busy player and cancels its pending work.
-Unsupported codecs show
-a decode error; missing files and non-video selections show an error and can be
-reselected after repair, including clicking the same asset again to retry.
-Asset replacement pauses/unloads the old element and revokes its media URL. Closing or
+Unsupported codecs and missing files show an error. After repairing a source,
+reselect the asset, including clicking the same asset again to retry. Audio and image
+assets open their own source previews; switching to Project viewer pauses audio.
+Asset replacement pauses/unloads the old media element and revokes its media URL. Closing or
 replacing a project clears the player. Preview state is transient and does not
 modify the project or source files. This is source playback; it does not composite
 timeline tracks or implement editing/render controls.
@@ -180,8 +207,8 @@ source hashes, metadata and screenshots under ignored `test-results/preview-perf
 It tests the production build and native picker IPC (stubbing only the dialog result).
 The shell/security checks run without fixtures or media tools. Fixture-backed
 playback, dragging and import/validation regressions need the generated fixture
-set and `ffprobe` on PATH for nominal frame assertions; they skip when the base
-video fixture is absent. A separate case deliberately removes ffprobe from the
+set and `ffprobe` on PATH for nominal frame assertions; individual cases skip
+when their required fixtures are absent. A separate case deliberately removes ffprobe from the
 app's PATH to verify basic playback and timestamp seeking without it.
 See [the preview architecture decision](adr/0003-html-video-preview.md) for the
 measurement definitions, findings, recommendation and accuracy limits.
@@ -254,8 +281,13 @@ Playwright browser. Project regressions cover GUI/CLI file compatibility, offlin
 assets, invalid files, stale saves, unsaved-close/quit choices, loading states and
 IPC rejection from another window. They exercise the production preload and main
 handlers with native dialog results stubbed; real native dialog interaction is a
-separate manual check. Screenshots are saved under the ignored `test-results/`
-directory. Preview regressions cover pointer dragging and release outside the
+separate manual check. T19 regressions cover unsaved import/remove/undo/redo,
+readable and missing source availability, and dragging restored library assets.
+The audio regression additionally runs the development renderer with StrictMode
+replay and verifies playback, pausing when hidden, unloading on replacement, and
+reselection. It needs port 5173 free and cleans its Vite cache from an owned
+generated-fixture directory. Screenshots are saved under the ignored
+`test-results/` directory. Preview regressions cover pointer dragging and release outside the
 slider, immediate keyboard seeks, and a gated import followed by validation of
 the replacement source. Imported-asset checks cover differing source/project FPS,
 scoped shortcuts, video/transport visibility, busy-player replacement, media URL

@@ -4,6 +4,7 @@ import {
   ipcMain,
   dialog,
   nativeTheme,
+  nativeImage,
   net,
   protocol,
   session,
@@ -16,6 +17,8 @@ import { getApplicationInfo } from '@opencut/core';
 import { probeMedia } from '@opencut/media';
 import {
   APP_INFO_CHANNEL,
+  IMPORT_PROGRESS_CHANNEL,
+  THUMBNAIL_CHANNEL,
   PROJECT_CHANNELS,
   OPEN_PREVIEW_CHANNEL,
   PREVIEW_METRICS_CHANNEL,
@@ -51,43 +54,84 @@ let previewFile: { url: string; path: string } | null = null;
 let openingPreview = false;
 let closingProject = false;
 let previewGeneration = 0;
-const projectSession = new ProjectSession({
-  async open() {
-    const window = mainWindow;
-    if (!window) throw new Error('No project window is available.');
-    const selection = await dialog.showOpenDialog(window, {
-      title: 'Open project',
-      properties: ['openFile'],
-      filters: [{ name: 'OpenCut project', extensions: ['json'] }],
-    });
-    return selection.canceled ? null : (selection.filePaths[0] ?? null);
+const projectSession = new ProjectSession(
+  {
+    async open() {
+      const window = mainWindow;
+      if (!window) throw new Error('No project window is available.');
+      const selection = await dialog.showOpenDialog(window, {
+        title: 'Open project',
+        properties: ['openFile'],
+        filters: [{ name: 'OpenCut project', extensions: ['json'] }],
+      });
+      return selection.canceled ? null : (selection.filePaths[0] ?? null);
+    },
+    async importMedia() {
+      const window = mainWindow;
+      if (!window) throw new Error('No project window is available.');
+      const selection = await dialog.showOpenDialog(window, {
+        title: 'Import media',
+        properties: ['openFile', 'multiSelections'],
+        filters: [
+          {
+            name: 'Media',
+            extensions: [
+              'mp4',
+              'mov',
+              'm4v',
+              'webm',
+              'mkv',
+              'avi',
+              'mp3',
+              'wav',
+              'm4a',
+              'aac',
+              'flac',
+              'ogg',
+              'png',
+              'jpg',
+              'jpeg',
+              'webp',
+              'gif',
+              'bmp',
+              'tiff',
+            ],
+          },
+          { name: 'All files', extensions: ['*'] },
+        ],
+      });
+      return selection.canceled ? null : selection.filePaths;
+    },
+    async save() {
+      const window = mainWindow;
+      if (!window) throw new Error('No project window is available.');
+      const selection = await dialog.showSaveDialog(window, {
+        title: 'Save new project',
+        defaultPath: 'Untitled.opencut.json',
+        filters: [{ name: 'OpenCut project', extensions: ['json'] }],
+        buttonLabel: 'Save new file',
+      });
+      return selection.canceled ? null : (selection.filePath ?? null);
+    },
+    async unsaved() {
+      const window = mainWindow;
+      if (!window) return 'cancel';
+      const { response } = await dialog.showMessageBox(window, {
+        type: 'warning',
+        message: 'Save your unsaved project?',
+        detail: 'Save before continuing, or discard the unsaved project.',
+        buttons: ['Save', 'Discard', 'Cancel'],
+        defaultId: 0,
+        cancelId: 2,
+        noLink: true,
+      });
+      return response === 0 ? 'save' : response === 1 ? 'discard' : 'cancel';
+    },
   },
-  async save() {
-    const window = mainWindow;
-    if (!window) throw new Error('No project window is available.');
-    const selection = await dialog.showSaveDialog(window, {
-      title: 'Save new project',
-      defaultPath: 'Untitled.opencut.json',
-      filters: [{ name: 'OpenCut project', extensions: ['json'] }],
-      buttonLabel: 'Save new file',
-    });
-    return selection.canceled ? null : (selection.filePath ?? null);
+  (progress) => {
+    mainWindow?.webContents.send(IMPORT_PROGRESS_CHANNEL, progress);
   },
-  async unsaved() {
-    const window = mainWindow;
-    if (!window) return 'cancel';
-    const { response } = await dialog.showMessageBox(window, {
-      type: 'warning',
-      message: 'Save your unsaved project?',
-      detail: 'Save before continuing, or discard the unsaved project.',
-      buttons: ['Save', 'Discard', 'Cancel'],
-      defaultId: 0,
-      cancelId: 2,
-      noLink: true,
-    });
-    return response === 0 ? 'save' : response === 1 ? 'discard' : 'cancel';
-  },
-});
+);
 
 async function closeProjectWindow(
   window: BrowserWindow,
@@ -294,7 +338,17 @@ app
         assertSender(event);
         if (
           args.length !==
-          (['create', 'edit', 'undo', 'redo'].includes(action) ? 1 : 0)
+          ([
+            'create',
+            'edit',
+            'undo',
+            'redo',
+            'import',
+            'removeAsset',
+            'addAssetClip',
+          ].includes(action)
+            ? 1
+            : 0)
         )
           return { ok: false, error: 'Invalid project request arguments.' };
         const reply = await projectSession.run(
@@ -313,6 +367,33 @@ app
         return reply;
       });
     }
+    // Bound concurrent native thumbnail work; unsupported platforms/formats use icons.
+    let thumbnailQueue = Promise.resolve<string | null>(null);
+    ipcMain.handle(THUMBNAIL_CHANNEL, (event, ...args: unknown[]) => {
+      assertSender(event);
+      if (args.length !== 1 || typeof args[0] !== 'string')
+        throw new Error('Expected one asset ID.');
+      const work = thumbnailQueue.then(async () => {
+        assertSender(event);
+        const { asset, path } = await projectSession.libraryAsset(args[0]);
+        if (!asset.mediaTypes.includes('video') || process.platform === 'linux')
+          return null;
+        try {
+          const image = await nativeImage.createThumbnailFromPath(path, {
+            width: 96,
+            height: 64,
+          });
+          if ((await projectSession.libraryAsset(args[0])).path !== path)
+            return null;
+          assertSender(event);
+          return image.isEmpty() ? null : image.toDataURL();
+        } catch {
+          return null;
+        }
+      });
+      thumbnailQueue = work.catch(() => null);
+      return work;
+    });
     ipcMain.handle(OPEN_PREVIEW_CHANNEL, openPreview);
     ipcMain.handle(ASSET_PREVIEW_CHANNEL, async (event, ...args: unknown[]) => {
       assertSender(event);
@@ -327,6 +408,9 @@ app
       return {
         url,
         name: asset.name,
+        kind:
+          asset.metadata?.kind ??
+          (asset.mediaTypes.includes('video') ? 'video' : 'audio'),
         frameRate: asset.metadata?.frameRate ?? null,
         videoEndSeconds: null,
         width: asset.metadata?.width ?? null,

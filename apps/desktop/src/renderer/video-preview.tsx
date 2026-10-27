@@ -490,6 +490,57 @@ export function VideoPreview({
   );
 }
 
+function SimpleSourcePreview({
+  source,
+  active,
+}: {
+  source: PreviewSource;
+  active: boolean;
+}) {
+  const audio = useRef<HTMLAudioElement>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!active) audio.current?.pause();
+  }, [active]);
+  useEffect(() => {
+    const player = audio.current;
+    // StrictMode replays cleanup without recreating the audio element.
+    if (player && player.getAttribute('src') !== source.url)
+      player.src = source.url;
+    return () => {
+      if (player) {
+        player.pause();
+        player.removeAttribute('src');
+        player.load();
+      }
+    };
+  }, [source.url]);
+  return (
+    <div className="simple-source-preview">
+      <h2>{source.name}</h2>
+      {source.kind === 'image' ? (
+        <img
+          src={source.url}
+          alt={source.name}
+          onError={() => setError('Unable to decode this image.')}
+        />
+      ) : (
+        <audio
+          ref={audio}
+          src={source.url}
+          controls
+          preload="metadata"
+          onPlay={() => {
+            if (!active) audio.current?.pause();
+          }}
+          onError={() => setError('Unable to decode this audio.')}
+        />
+      )}
+      {error && <p role="alert">{error}</p>}
+    </div>
+  );
+}
+
 export function Preview({
   assetId = null,
   requestKey = 0,
@@ -570,23 +621,30 @@ export function Preview({
       </div>
       {!source && (
         <p className="intro">
-          Select a video in the media library, or open a local video.
+          Select media in the library, or open a local video.
         </p>
       )}
       {error && <p role="alert">{error}</p>}
-      {source && (
-        <VideoPreview
-          key={source.url}
-          source={source}
-          opening={opening}
-          active={active}
-          projectFrameRate={projectFrameRate}
-          positionSeconds={positionSeconds}
-          positionRequestKey={positionRequestKey}
-          onPositionChange={onPositionChange}
-          onBusyChange={setPlayerBusy}
-        />
-      )}
+      {source &&
+        (source.kind === 'image' || source.kind === 'audio' ? (
+          <SimpleSourcePreview
+            key={source.url}
+            source={source}
+            active={active}
+          />
+        ) : (
+          <VideoPreview
+            key={source.url}
+            source={source}
+            opening={opening}
+            active={active}
+            projectFrameRate={projectFrameRate}
+            positionSeconds={positionSeconds}
+            positionRequestKey={positionRequestKey}
+            onPositionChange={onPositionChange}
+            onBusyChange={setPlayerBusy}
+          />
+        ))}
     </section>
   );
 }

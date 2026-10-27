@@ -135,13 +135,13 @@ it('authorizes only current video IDs and rechecks local media before preview', 
   await session.run('open');
   for (const value of [undefined, null, {}, 1])
     await expect(session.previewAsset(value)).rejects.toThrow(
-      'Expected a video asset ID',
+      'Expected a media asset ID',
     );
   await expect(session.previewAsset('/etc/passwd')).rejects.toThrow(
     'not in the current project',
   );
   await expect(session.previewAsset('audio')).rejects.toThrow(
-    'Select a video asset',
+    'Media file is missing',
   );
   expect(await session.previewAsset('video')).toMatchObject({
     path: join(directory, 'source.mp4'),

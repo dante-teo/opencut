@@ -395,9 +395,12 @@ refuses stale writes, including external same-revision changes. Directory aliase
 are canonicalized, and existing creation destinations and project symlink/hard-link
 updates follow the CLI's refusal rules. History and schema version are unchanged.
 Media availability is refreshed on open and when undo/redo changes the asset
-inventory or references; clip-only edits retain the availability snapshot. It is
-not a file watcher or probe.
-Future GUI imports, project playback and render controls need separate capabilities.
+inventory or references, including unsaved projects; clip-only edits retain the
+availability snapshot. Unsaved sessions use the same fallback project location as
+import, with absolute references resolving directly to their sources. A refresh
+must succeed before the restored session is accepted; failure preserves the prior
+session. This checks readability, without watching files or refreshing probe metadata.
+Project playback and render controls need separate capabilities.
 
 T18 adds narrow `editTimeline`, `undoProject` and `redoProject` preload methods.
 Main checks sender, arity, project identity, revision and request shape, allows only
@@ -434,6 +437,36 @@ already committed in-memory transactions without recording a duplicate entry.
 Changed sessions must advance revision, retain project identity and have consistent
 history. The serialized disk baseline, writer lock, external-change detection and
 atomic rename still guard publication. Undo/redo remain available after reopening.
+
+T19 extracts T07 import preparation and unused-asset removal into shared core Node
+functions used by both CLI file transactions and the desktop session. Main prepares
+an entire multi-file batch on a private project copy, checks availability, then
+records one `commitEdit`; failures retain the original session. Imports before a
+project's first save use absolute references, which saving preserves. Imports into
+a saved project use T07's reference policy: prefer project-relative paths where
+valid, otherwise retain absolute paths. No source file is copied or modified. The core `addAssetClip` builds
+ordinary track/clip operations with whole project-frame source bounds and a
+five-second still default. New tracks and clips commit together with T09 history.
+
+The sandboxed preload uses Electron `webUtils.getPathForFile` for dropped native
+Files and sends paths only to the import handler; the renderer has no path-based
+filesystem API. Picker/import/removal/clip commands retain sender, arity, identity,
+revision and strict shape checks. Import progress is an event with a removable
+listener. Library drags have a distinct MIME type with project ID, revision and
+asset ID, while external Files are accepted only in the library. Timeline drop
+coordinates reuse the virtual scrollbar, track geometry and exact frame helpers.
+
+Thumbnails use Electron's asynchronous native thumbnail service at 96 by 64,
+serialized in main; unavailable platforms/formats fall back to icons. The renderer
+requests IDs, receives data URLs and ignores stale results; it never decodes a
+full video for a thumbnail. Audio/image source previews reuse the revocable
+single-source media protocol, with native audio controls or an image element;
+source previews remain separate from project compositing/playback. Hiding source
+preview pauses audio; replacing it unloads the previous media element. Audio
+setup restores a source removed by cleanup, mirroring the video player's lifecycle:
+React StrictMode replays effects in development while retaining the DOM element.
+The development Electron regression exercises actual replay and decoded playback,
+while the production workflow verifies library selection and timeline drops.
 
 ## Tooling and build
 

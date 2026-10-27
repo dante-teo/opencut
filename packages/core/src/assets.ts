@@ -100,128 +100,136 @@ export async function importMediaAsset(
   mediaFilePath: string,
   options: Pick<ProjectUpdateOptions, 'dryRun' | 'expectedRevision'> = {},
 ): Promise<AssetImportResult> {
-  const requested = resolve(mediaFilePath);
-  return updateProjectFile<AssetImportResult>(
+  return updateProjectFile(
     projectFilePath,
-    async (project, path) => {
-      const availability = await inspectMediaFile(requested);
-      if (availability.status !== 'available')
-        throw new AssetError(
-          'SOURCE_UNAVAILABLE',
-          `Cannot import '${requested}': ${availability.message} Restore the source path or grant read permission, then retry.`,
-        );
-      const source = await realpath(requested);
-      const before = await stat(source);
-      for (const asset of project.assets) {
-        const existing = resolveMediaReference(asset.file, path);
-        // Foreign-platform absolute references are data, never cwd-relative host paths.
-        if ((await inspectMediaFile(existing)).status === 'unsupported_path')
-          continue;
-        let same = existing === source;
-        if (!same) {
-          try {
-            const candidate = await stat(existing);
-            same =
-              candidate.isFile() &&
-              candidate.ino !== 0 &&
-              candidate.dev === before.dev &&
-              candidate.ino === before.ino;
-          } catch {
-            // Offline assets remain in the project and do not block other imports.
-          }
-        }
-        if (same)
-          return {
-            project,
-            result: {
-              path,
-              imported: false,
-              ...(await assetInfo(project, path, asset)),
-            },
-          };
+    (project, path) => prepareMediaAsset(project, path, mediaFilePath),
+    { ...options, label: 'media import' },
+  );
+}
+
+/** Shared import preparation for disk transactions and unsaved desktop sessions. */
+export async function prepareMediaAsset(
+  original: Project,
+  path: string,
+  mediaFilePath: string,
+): Promise<{ project: Project; result: AssetImportResult }> {
+  const project = structuredClone(original);
+  const requested = resolve(mediaFilePath);
+  const availability = await inspectMediaFile(requested);
+  if (availability.status !== 'available')
+    throw new AssetError(
+      'SOURCE_UNAVAILABLE',
+      `Cannot import '${requested}': ${availability.message} Restore the source path or grant read permission, then retry.`,
+    );
+  const source = await realpath(requested);
+  const before = await stat(source);
+  for (const asset of project.assets) {
+    const existing = resolveMediaReference(asset.file, path);
+    // Foreign-platform absolute references are data, never cwd-relative host paths.
+    if ((await inspectMediaFile(existing)).status === 'unsupported_path')
+      continue;
+    let same = existing === source;
+    if (!same) {
+      try {
+        const candidate = await stat(existing);
+        same =
+          candidate.isFile() &&
+          candidate.ino !== 0 &&
+          candidate.dev === before.dev &&
+          candidate.ino === before.ino;
+      } catch {
+        // Offline assets remain in the project and do not block other imports.
       }
-      const probed = await probeMedia(source);
-      if (!probed.video && !probed.audio)
-        throw new AssetError(
-          'INVALID_MEDIA',
-          `No supported video, audio or image stream in '${source}'. Choose a media file supported by ffprobe.`,
-        );
-      const after = await stat(source);
-      if (
-        after.dev !== before.dev ||
-        after.ino !== before.ino ||
-        after.size !== before.size ||
-        after.mtimeMs !== before.mtimeMs
-      )
-        throw new AssetError(
-          'SOURCE_UNAVAILABLE',
-          `Source '${source}' changed while probing. Wait for it to finish writing and retry.`,
-        );
-      const format = probed.formatName ?? '';
-      const image = Boolean(
-        probed.video &&
-        !probed.audio &&
-        (format.endsWith('_pipe') ||
-          ['image2', 'image2pipe'].includes(format) ||
-          (['gif', 'apng'].includes(format) && !probed.durationSeconds)),
-      );
-      const durationSeconds = image ? null : probed.durationSeconds;
-      const mediaTypes: MediaAsset['mediaTypes'] = [];
-      if (probed.video) mediaTypes.push('video');
-      if (probed.audio) mediaTypes.push('audio');
-      const ids = new Set([
-        project.metadata.id,
-        ...project.assets.map((asset) => asset.id),
-        ...project.tracks.map((track) => track.id),
-        ...project.clips.map((clip) => clip.id),
-      ]);
-      let id = randomUUID();
-      while (ids.has(id)) id = randomUUID();
-      const asset: MediaAsset = {
-        id,
-        name: basename(source),
-        file: createMediaReference(source, path),
-        mediaTypes,
-        metadata: {
-          kind: image ? 'image' : probed.video ? 'video' : 'audio',
-          formatName: probed.formatName,
-          durationSeconds,
-          width: probed.video?.width ?? null,
-          height: probed.video?.height ?? null,
-          videoCodec: probed.video?.codec ?? null,
-          audioCodec: probed.audio?.codec ?? null,
-          frameRate: image ? null : (probed.video?.frameRate ?? null),
-          frameRateRatio: image ? null : (probed.video?.frameRateRatio ?? null),
-          hasAudio: probed.hasAudio,
-        },
-      };
-      // ffprobe exposes decimal seconds; persist the model's source bound to microsecond precision.
-      if (durationSeconds !== null && durationSeconds > 0) {
-        const numerator = Math.round(durationSeconds * 1_000_000);
-        if (Number.isSafeInteger(numerator) && numerator > 0)
-          asset.duration = { numerator, denominator: 1_000_000 };
-      }
-      project.assets.push(asset);
-      project.metadata.updatedAt = new Date(
-        Math.max(Date.now(), Date.parse(project.metadata.updatedAt)),
-      ).toISOString();
-      const info = await assetInfo(project, path, asset);
-      if (info.source.status !== 'available')
-        throw new AssetError(
-          'SOURCE_UNAVAILABLE',
-          `Source '${source}' became unavailable during import. Restore it or grant read permission, then retry.`,
-        );
+    }
+    if (same)
       return {
         project,
         result: {
           path,
-          imported: true,
-          ...info,
+          imported: false,
+          ...(await assetInfo(project, path, asset)),
         },
       };
-    },
-    { ...options, label: 'media import' },
+  }
+  const probed = await probeMedia(source);
+  if (!probed.video && !probed.audio)
+    throw new AssetError(
+      'INVALID_MEDIA',
+      `No supported video, audio or image stream in '${source}'. Choose a media file supported by ffprobe.`,
+    );
+  const after = await stat(source);
+  if (
+    after.dev !== before.dev ||
+    after.ino !== before.ino ||
+    after.size !== before.size ||
+    after.mtimeMs !== before.mtimeMs
+  )
+    throw new AssetError(
+      'SOURCE_UNAVAILABLE',
+      `Source '${source}' changed while probing. Wait for it to finish writing and retry.`,
+    );
+  const format = probed.formatName ?? '';
+  const image = Boolean(
+    probed.video &&
+    !probed.audio &&
+    (format.endsWith('_pipe') ||
+      ['image2', 'image2pipe'].includes(format) ||
+      (['gif', 'apng'].includes(format) && !probed.durationSeconds)),
   );
+  const durationSeconds = image ? null : probed.durationSeconds;
+  const mediaTypes: MediaAsset['mediaTypes'] = [];
+  if (probed.video) mediaTypes.push('video');
+  if (probed.audio) mediaTypes.push('audio');
+  const ids = new Set([
+    project.metadata.id,
+    ...project.assets.map((asset) => asset.id),
+    ...project.tracks.map((track) => track.id),
+    ...project.clips.map((clip) => clip.id),
+  ]);
+  let id = randomUUID();
+  while (ids.has(id)) id = randomUUID();
+  const asset: MediaAsset = {
+    id,
+    name: basename(source),
+    file: createMediaReference(source, path),
+    mediaTypes,
+    metadata: {
+      kind: image ? 'image' : probed.video ? 'video' : 'audio',
+      formatName: probed.formatName,
+      durationSeconds,
+      width: probed.video?.width ?? null,
+      height: probed.video?.height ?? null,
+      videoCodec: probed.video?.codec ?? null,
+      audioCodec: probed.audio?.codec ?? null,
+      frameRate: image ? null : (probed.video?.frameRate ?? null),
+      frameRateRatio: image ? null : (probed.video?.frameRateRatio ?? null),
+      hasAudio: probed.hasAudio,
+    },
+  };
+  // ffprobe exposes decimal seconds; persist the model's source bound to microsecond precision.
+  if (durationSeconds !== null && durationSeconds > 0) {
+    const numerator = Math.round(durationSeconds * 1_000_000);
+    if (Number.isSafeInteger(numerator) && numerator > 0)
+      asset.duration = { numerator, denominator: 1_000_000 };
+  }
+  project.assets.push(asset);
+  project.metadata.updatedAt = new Date(
+    Math.max(Date.now(), Date.parse(project.metadata.updatedAt)),
+  ).toISOString();
+  const info = await assetInfo(project, path, asset);
+  if (info.source.status !== 'available')
+    throw new AssetError(
+      'SOURCE_UNAVAILABLE',
+      `Source '${source}' became unavailable during import. Restore it or grant read permission, then retry.`,
+    );
+  return {
+    project,
+    result: {
+      path,
+      imported: true,
+      ...info,
+    },
+  };
 }
 
 /** Remove only the project entry, including when its source is offline. Never unlink media. */
@@ -233,17 +241,7 @@ export async function removeMediaAsset(
   return updateProjectFile(
     projectFilePath,
     async (project, path) => {
-      requireAsset(project, id);
-      const clips = project.clips.filter((clip) => clip.assetId === id);
-      if (clips.length)
-        throw new AssetError(
-          'ASSET_REFERENCED',
-          `Cannot remove asset '${id}'; referenced by timeline clips: ${clips.map((clip) => clip.id).join(', ')}. Remove those references before removing the asset.`,
-        );
-      project.assets = project.assets.filter((asset) => asset.id !== id);
-      project.metadata.updatedAt = new Date(
-        Math.max(Date.now(), Date.parse(project.metadata.updatedAt)),
-      ).toISOString();
+      project = removeAssetFromProject(project, id);
       return {
         project,
         result: { path, removedAssetId: id },
@@ -251,4 +249,21 @@ export async function removeMediaAsset(
     },
     { ...options, label: 'media remove' },
   );
+}
+
+/** Remove an unused entry without touching its original file. */
+export function removeAssetFromProject(original: Project, id: string): Project {
+  const project = structuredClone(original);
+  requireAsset(project, id);
+  const clips = project.clips.filter((clip) => clip.assetId === id);
+  if (clips.length)
+    throw new AssetError(
+      'ASSET_REFERENCED',
+      `Cannot remove asset '${id}'; referenced by timeline clips: ${clips.map((clip) => clip.id).join(', ')}. Remove those references before removing the asset.`,
+    );
+  project.assets = project.assets.filter((asset) => asset.id !== id);
+  project.metadata.updatedAt = new Date(
+    Math.max(Date.now(), Date.parse(project.metadata.updatedAt)),
+  ).toISOString();
+  return project;
 }

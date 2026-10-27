@@ -1,6 +1,8 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import {
   APP_INFO_CHANNEL,
+  IMPORT_PROGRESS_CHANNEL,
+  THUMBNAIL_CHANNEL,
   PROJECT_CHANNELS,
   OPEN_PREVIEW_CHANNEL,
   PREVIEW_METRICS_CHANNEL,
@@ -10,6 +12,32 @@ import {
 } from '../bridge.js';
 
 const api: DesktopAPI = {
+  importMedia: (input) =>
+    ipcRenderer.invoke(PROJECT_CHANNELS.import, {
+      projectId: input.projectId,
+      expectedRevision: input.expectedRevision,
+    }),
+  importDroppedMedia: (input, files) =>
+    ipcRenderer.invoke(PROJECT_CHANNELS.import, {
+      projectId: input.projectId,
+      expectedRevision: input.expectedRevision,
+      paths: files.map((file) => webUtils.getPathForFile(file)),
+    }),
+  onImportProgress: (callback) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      progress: Parameters<typeof callback>[0],
+    ) => callback(progress);
+    ipcRenderer.on(IMPORT_PROGRESS_CHANNEL, listener);
+    return () => {
+      ipcRenderer.removeListener(IMPORT_PROGRESS_CHANNEL, listener);
+    };
+  },
+  removeAsset: (input) =>
+    ipcRenderer.invoke(PROJECT_CHANNELS.removeAsset, input),
+  addAssetClip: (input) =>
+    ipcRenderer.invoke(PROJECT_CHANNELS.addAssetClip, input),
+  assetThumbnail: (id) => ipcRenderer.invoke(THUMBNAIL_CHANNEL, id),
   editTimeline: (input) => ipcRenderer.invoke(PROJECT_CHANNELS.edit, input),
   undoProject: (input) => ipcRenderer.invoke(PROJECT_CHANNELS.undo, input),
   redoProject: (input) => ipcRenderer.invoke(PROJECT_CHANNELS.redo, input),

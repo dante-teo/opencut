@@ -317,9 +317,7 @@ test('empty and large timelines bound DOM work and scroll to distant tracks and 
     await writeProjectFile(project, path);
     await openProject(application, page, path);
     await expect(
-      page.getByText(
-        'No timeline tracks. Add tracks and clips through the CLI.',
-      ),
+      page.getByText('Drag library assets onto a new-track target to begin.'),
     ).toBeVisible();
     project.assets = [
       {

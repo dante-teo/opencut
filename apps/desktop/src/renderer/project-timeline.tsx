@@ -1,13 +1,15 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { PointerEvent } from 'react';
+import type { DragEvent, PointerEvent } from 'react';
 import {
   compareTimes,
+  projectRevision,
   clipTimelineEnd,
   type Project,
   type RationalTime,
   type TimelineClip,
 } from '@opencut/core';
-import type { TimelineOperation } from '../bridge.js';
+import { ASSET_DRAG_TYPE, readAssetDrag } from './media-library.js';
+import type { AssetClipInput, TimelineOperation } from '../bridge.js';
 import {
   proposeEdit,
   createTimelinePreview,
@@ -47,6 +49,7 @@ export function ProjectTimeline({
   linkedClipId,
   disabled = false,
   onEdit,
+  onAddAsset,
 }: {
   project: Project | undefined;
   selected: string | null;
@@ -56,6 +59,7 @@ export function ProjectTimeline({
   onPreviewClip?: (id: string) => void;
   linkedClipId?: string | null;
   disabled?: boolean;
+  onAddAsset?: (input: AssetClipInput) => Promise<void>;
   onEdit?: (operations: TimelineOperation[], label: string) => Promise<void>;
 }) {
   const gesture = useRef<{
@@ -303,6 +307,93 @@ export function ProjectTimeline({
     return () => element.removeEventListener('wheel', wheel);
   }, []);
 
+  async function dropAsset(
+    event: DragEvent<HTMLElement>,
+    mediaType?: 'video' | 'audio',
+  ) {
+    event.preventDefault();
+    if (disabled || !project || !onAddAsset) return;
+    try {
+      if (!event.dataTransfer.types.includes(ASSET_DRAG_TYPE))
+        throw new Error('Import external files into the media library first.');
+      const drag = readAssetDrag(event.dataTransfer.getData(ASSET_DRAG_TYPE));
+      if (
+        drag.projectId !== project.metadata.id ||
+        drag.revision !== projectRevision(project)
+      )
+        throw new Error(
+          'Library changed during the drag. Drag the asset again.',
+        );
+      const element = scrollRef.current!;
+      const bounds = element.getBoundingClientRect();
+      const x = event.clientX - bounds.left - LABEL_WIDTH;
+      if (x < 0 && mediaType === undefined)
+        throw new Error('Drop onto a timeline lane.');
+      const row = Math.floor(
+        (event.clientY - bounds.top - RULER_HEIGHT + element.scrollTop) /
+          TRACK_HEIGHT,
+      );
+      const track = mediaType ? undefined : project.tracks[row];
+      if (!track && !mediaType)
+        throw new Error('Drop onto a track or a new-track target.');
+      // Header targets have no time axis; create their clips at the playhead.
+      let at = frameIndex(
+        mediaType
+          ? position
+          : pixelTime(
+              element.scrollLeft * geometry.ratio + Math.max(0, x),
+              zoom,
+            ),
+        rate,
+        true,
+      );
+      if (snapping) {
+        let distance = snapPixels;
+        const target = framePosition(at, rate);
+        for (const candidate of [
+          ZERO,
+          position,
+          ...project.clips.flatMap((clip) => [
+            clip.timelineStart,
+            clipTimelineEnd(clip),
+          ]),
+        ]) {
+          const frame = frameIndex(candidate, rate, true);
+          if (compareTimes(framePosition(frame, rate), candidate) !== 0)
+            continue;
+          const pixels = Math.abs(relativePixels(candidate, target, zoom));
+          if (pixels <= distance) {
+            at = frame;
+            distance = pixels;
+          }
+        }
+      }
+      const frame = Number(at);
+      if (!Number.isSafeInteger(frame))
+        throw new Error('Drop is outside the supported frame range.');
+      setEditError('');
+      await onAddAsset({
+        projectId: drag.projectId,
+        expectedRevision: drag.revision,
+        assetId: drag.assetId,
+        ...(track ? { trackId: track.id } : {}),
+        mediaType: mediaType ?? track!.type,
+        at: frame,
+      });
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : String(error));
+    }
+  }
+  function allowAssetDrop(event: DragEvent<HTMLElement>) {
+    if (
+      !disabled &&
+      project &&
+      event.dataTransfer.types.includes(ASSET_DRAG_TYPE)
+    ) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+    }
+  }
   function seekRuler(event: PointerEvent<SVGSVGElement>) {
     const x = event.clientX - event.currentTarget.getBoundingClientRect().left;
     onSeek?.(
@@ -350,9 +441,28 @@ export function ProjectTimeline({
       }}
     >
       <div className="panel-heading timeline-heading">
-        <h2>
-          Timeline ({trackCount} tracks · {project?.clips.length ?? 0} clips)
-        </h2>
+        <div className="timeline-title">
+          <h2>
+            Timeline ({trackCount} tracks · {project?.clips.length ?? 0} clips)
+          </h2>
+          {project && (
+            <div className="new-track-targets">
+              {(['video', 'audio'] as const).map((type) => (
+                <div
+                  key={type}
+                  role="region"
+                  aria-label={`New ${type} track drop target`}
+                  onDragOver={allowAssetDrop}
+                  onDrop={(event) => {
+                    void dropAsset(event, type);
+                  }}
+                >
+                  + {type === 'video' ? 'Video' : 'Audio'} track
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <div className="timeline-controls">
           <button
             disabled={disabled || !canSplit || !!proposal}
@@ -445,6 +555,10 @@ export function ProjectTimeline({
       </div>
       <div
         className="timeline-scroll"
+        onDragOver={allowAssetDrop}
+        onDrop={(event) => {
+          void dropAsset(event);
+        }}
         ref={scrollRef}
         onScroll={measure}
         onPointerMove={updateGesture}
@@ -559,7 +673,7 @@ export function ProjectTimeline({
           </div>
           {!trackCount && (
             <div className="timeline-empty">
-              <p>No timeline tracks. Add tracks and clips through the CLI.</p>
+              <p>Drag library assets onto a new-track target to begin.</p>
             </div>
           )}
           {project?.tracks.slice(firstTrack, lastTrack).map((track, offset) => {
