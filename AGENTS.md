@@ -3,6 +3,9 @@
 - Use pnpm (never npm/npx); keep `pnpm-lock.yaml` synchronized with manifests.
 - Use TypeScript, strict checking and ESM, except the sandbox-compatible CJS preload.
 - Follow existing conventions, work on one task at a time and avoid unrelated changes.
+- For UI/UX, avoid unnecessary secondary labels and descriptions. Let layout,
+  grouping and visual hierarchy explain the interface; add supporting text only
+  when it resolves real ambiguity.
 - Check reliable maintained libraries before implementing a common capability;
   prefer an appropriate library unless its cost outweighs its benefit.
 - Keep the core headless. GUI and CLI must share future editing operations.
