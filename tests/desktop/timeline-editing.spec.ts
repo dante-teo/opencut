@@ -1,0 +1,436 @@
+import { spawnSync } from 'node:child_process';
+import { access, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import {
+  expect,
+  test,
+  type ElectronApplication,
+  type Page,
+} from '@playwright/test';
+import {
+  deserializeProject,
+  executeTransaction,
+  frameTime,
+  projectRevision,
+  serializeProject,
+  type Project,
+} from '@opencut/core';
+import { writeProjectFile, updateProjectFile } from '@opencut/core/node';
+import { launchDesktop } from './helpers.js';
+
+const root = resolve('tests/fixtures/generated');
+const video = join(root, 'video-medium.mp4');
+const audio = join(root, 'audio-tone.wav');
+const available = await Promise.all(
+  [video, audio].map((path) =>
+    access(path).then(
+      () => true,
+      () => false,
+    ),
+  ),
+);
+const cli = (...args: string[]) => {
+  const result = spawnSync(
+    process.execPath,
+    [resolve('apps/cli/dist/index.js'), ...args, '--json'],
+    { encoding: 'utf8' },
+  );
+  expect(result.status, result.stderr).toBe(0);
+  return JSON.parse(result.stdout);
+};
+async function fixture() {
+  test.skip(available.includes(false), 'Generate synthetic fixtures first.');
+  await mkdir(root, { recursive: true });
+  const directory = await mkdtemp(join(root, 't18-'));
+  const path = join(directory, 'project.json');
+  cli('project', 'create', path, '--name', 'T18 editing verification');
+  const videoId = cli('media', 'import', path, video).asset.id as string;
+  const audioId = cli('media', 'import', path, audio).asset.id as string;
+  const original = deserializeProject(await readFile(path, 'utf8'));
+  const project = executeTransaction(original, {
+    expectedRevision: projectRevision(original),
+    operations: [
+      { type: 'track.add', id: 'v1', name: 'Camera', mediaType: 'video' },
+      { type: 'track.add', id: 'v2', name: 'Overlay', mediaType: 'video' },
+      { type: 'track.add', id: 'a1', name: 'Music', mediaType: 'audio' },
+      { type: 'track.add', id: 'a2', name: 'Effects', mediaType: 'audio' },
+      {
+        type: 'clip.add',
+        id: 'c1',
+        assetId: videoId,
+        trackId: 'v1',
+        at: 30,
+        in: 30,
+        out: 90,
+      },
+      {
+        type: 'clip.add',
+        id: 'c2',
+        assetId: videoId,
+        trackId: 'v1',
+        at: 180,
+        in: 0,
+        out: 60,
+      },
+      {
+        type: 'clip.add',
+        id: 'overlay',
+        assetId: videoId,
+        trackId: 'v2',
+        at: 300,
+        in: 0,
+        out: 60,
+      },
+      {
+        type: 'clip.add',
+        id: 'music',
+        assetId: audioId,
+        trackId: 'a1',
+        at: 0,
+        in: 0,
+        out: 90,
+      },
+      {
+        type: 'clip.add',
+        id: 'effect',
+        assetId: audioId,
+        trackId: 'a2',
+        at: 150,
+        in: 0,
+        out: 60,
+      },
+    ],
+  }).project;
+  await rm(path);
+  await writeProjectFile(project, path);
+  return { directory, path, project };
+}
+async function open(
+  application: ElectronApplication,
+  page: Page,
+  path: string,
+) {
+  await application.evaluate(({ dialog }, path) => {
+    dialog.showOpenDialog = async () => ({
+      canceled: false,
+      filePaths: [path],
+    });
+    dialog.showMessageBox = async () => ({
+      response: 1,
+      checkboxChecked: false,
+    });
+  }, path);
+  await page.getByRole('button', { name: 'Open project', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Open project', exact: true }),
+  ).toBeEnabled();
+}
+const clip = (page: Page, id = 'c1') =>
+  page.getByRole('button', { name: `Inspect clip ${id}`, exact: true });
+async function current(page: Page): Promise<Project> {
+  return page.evaluate(async () => {
+    const reply = await window.opencut.getProject();
+    if (!reply.ok || !reply.state) throw new Error('No project state');
+    return reply.state.project;
+  });
+}
+async function startDrag(
+  page: Page,
+  id: string,
+  dx: number,
+  dy = 0,
+  edge?: 'left' | 'right',
+) {
+  const target = edge
+    ? clip(page, id).locator(`[data-trim="${edge}"]`)
+    : clip(page, id).locator(':scope > rect').first();
+  const box = (await target.boundingBox())!;
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + dx, y + dy, { steps: 6 });
+}
+async function release(page: Page) {
+  await page.mouse.up();
+  await expect(
+    page.getByRole('button', { name: 'Save project', exact: true }),
+  ).toBeEnabled();
+}
+async function expectClip(
+  page: Page,
+  id: string,
+  values: Partial<Project['clips'][number]>,
+) {
+  await expect
+    .poll(async () =>
+      (await current(page)).clips.find((clip) => clip.id === id),
+    )
+    .toMatchObject(values);
+}
+const rate = { numerator: 30, denominator: 1 };
+
+test('moves, changes track, trims both edges, splits, deletes, restores history and saves the same state the CLI reads', async () => {
+  const { directory, path, project } = await fixture();
+  const { application, page } = await launchDesktop();
+  try {
+    await application.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0]!.setSize(1280, 1000),
+    );
+    await open(application, page, path);
+    await page.getByLabel('Snap', { exact: true }).uncheck();
+    const revision = projectRevision(project);
+    await startDrag(page, 'c1', 80);
+    await expect(page.getByTestId('edit-preview')).toBeVisible();
+    expect(projectRevision(await current(page))).toBe(revision);
+    expect(await readFile(path, 'utf8')).toBe(serializeProject(project));
+    await release(page);
+    await expectClip(page, 'c1', { timelineStart: frameTime(60, rate) });
+    expect(projectRevision(await current(page))).toBe(revision + 1);
+    await startDrag(page, 'c1', 40, 64);
+    await release(page);
+    await expectClip(page, 'c1', {
+      timelineStart: frameTime(75, rate),
+      trackId: 'v2',
+    });
+    await startDrag(page, 'c1', -40, 0, 'right');
+    await release(page);
+    await expectClip(page, 'c1', { sourceOut: frameTime(75, rate) });
+    await startDrag(page, 'c1', 40, 0, 'left');
+    await release(page);
+    await expectClip(page, 'c1', {
+      timelineStart: frameTime(90, rate),
+      sourceIn: frameTime(45, rate),
+    });
+    const trimmed = await current(page);
+    expect(trimmed.editing?.undo.length).toBe(project.editing!.undo.length + 4);
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await expectClip(page, 'c1', {
+      timelineStart: frameTime(75, rate),
+      sourceIn: frameTime(30, rate),
+    });
+    await page.getByRole('button', { name: 'Redo', exact: true }).click();
+    await expectClip(page, 'c1', {
+      timelineStart: frameTime(90, rate),
+      sourceIn: frameTime(45, rate),
+    });
+    const ruler = page.getByRole('slider', { name: 'Timeline playhead' });
+    await ruler.click({ position: { x: 280, y: 20 } });
+    await page
+      .getByRole('button', { name: 'Split at playhead', exact: true })
+      .click();
+    await expect.poll(async () => (await current(page)).clips.length).toBe(6);
+    const right = (await current(page)).clips.find(
+      (entry) => !project.clips.some((old) => old.id === entry.id),
+    )!;
+    await clip(page, right.id).locator(':scope > rect').first().click();
+    await page.keyboard.press('Delete');
+    await expect.poll(async () => (await current(page)).clips.length).toBe(5);
+    await page.keyboard.press(
+      process.platform === 'darwin' ? 'Meta+z' : 'Control+z',
+    );
+    await expect.poll(async () => (await current(page)).clips.length).toBe(6);
+    await page.keyboard.press(
+      process.platform === 'darwin' ? 'Meta+Shift+z' : 'Control+Shift+z',
+    );
+    await expect.poll(async () => (await current(page)).clips.length).toBe(5);
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect.poll(async () => (await current(page)).clips.length).toBe(6);
+    const edited = await current(page);
+    await page
+      .getByRole('button', { name: 'Save project', exact: true })
+      .click();
+    await expect(
+      page.getByText('Project saved.', { exact: true }),
+    ).toBeVisible();
+    expect(deserializeProject(await readFile(path, 'utf8'))).toEqual(edited);
+    const inspected = cli('timeline', 'list', path);
+    expect(
+      inspected.tracks
+        .flatMap((track: { clips: { id: string }[] }) => track.clips)
+        .map((entry: { id: string }) => entry.id)
+        .sort(),
+    ).toEqual(edited.clips.map((entry) => entry.id).sort());
+    await open(application, page, path);
+    expect(await current(page)).toEqual(edited);
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect.poll(async () => (await current(page)).clips.length).toBe(5);
+    await page.getByRole('button', { name: 'Redo', exact: true }).click();
+    await expect.poll(async () => (await current(page)).clips.length).toBe(6);
+    await page.screenshot({ path: 'test-results/t18-edited.png' });
+  } finally {
+    await application.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects overlap and incompatible tracks, cancels gestures and handles rejected IPC without changing project state', async () => {
+  const { directory, path, project } = await fixture();
+  const { application, page } = await launchDesktop();
+  try {
+    await application.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0]!.setSize(1280, 1000),
+    );
+    await open(application, page, path);
+    await page.getByLabel('Snap', { exact: true }).uncheck();
+    await startDrag(page, 'c1', 400);
+    await expect(page.getByTestId('edit-preview')).toHaveClass(/invalid/);
+    await release(page);
+    await expect(page.getByRole('alert')).toContainText('overlap');
+    expect(await current(page)).toEqual(project);
+    await startDrag(page, 'music', 0, -128);
+    await release(page);
+    await expect(page.getByRole('alert')).toBeVisible();
+    expect(await current(page)).toEqual(project);
+    await startDrag(page, 'c1', 80);
+    await page.keyboard.press('Escape');
+    await release(page);
+    await expect(page.getByTestId('edit-preview')).toHaveCount(0);
+    expect(await current(page)).toEqual(project);
+    await startDrag(page, 'c1', 80);
+    await page
+      .locator('.timeline-scroll')
+      .dispatchEvent('pointercancel', { pointerId: 1 });
+    await release(page);
+    expect(await current(page)).toEqual(project);
+    // An obsolete GUI revision is rejected by production IPC; the preview clears.
+    await startDrag(page, 'c1', 80);
+    const reply = await page.evaluate(
+      async (project) =>
+        window.opencut.editTimeline({
+          projectId: project.metadata.id,
+          expectedRevision: project.editing!.revision,
+          label: 'Competing edit',
+          operations: [{ type: 'clip.move', id: 'c2', at: 210 }],
+        }),
+      project,
+    );
+    expect(reply.ok).toBe(true);
+    await release(page);
+    await expect(page.getByRole('alert')).toContainText('revision conflict');
+    await expect(page.getByTestId('edit-preview')).toHaveCount(0);
+    await expect(clip(page)).toHaveAttribute('aria-pressed', 'true');
+    // The rejected operation preserved the last displayed clip and never wrote disk.
+    expect(
+      (await current(page)).clips.find((entry) => entry.id === 'c1'),
+    ).toEqual(project.clips[0]);
+    expect(deserializeProject(await readFile(path, 'utf8'))).toEqual(project);
+  } finally {
+    await application.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('snaps at different zooms and supports focused keyboard movement and trimming', async () => {
+  const { directory, path } = await fixture();
+  const { application, page } = await launchDesktop();
+  try {
+    await open(application, page, path);
+    await page.getByLabel('Snap threshold pixels', { exact: true }).fill('8');
+    for (const zoom of [80, 160]) {
+      await page
+        .getByLabel('Timeline zoom', { exact: true })
+        .selectOption(String(zoom));
+      await page.locator('.timeline-scroll').evaluate((element) => {
+        element.scrollLeft = 0;
+      });
+      await startDrag(page, 'c1', 3 * zoom - 5);
+      await expect(page.locator('.snap-guide')).toHaveCount(1);
+      await release(page);
+      // Moving right edge meets the next clip's left edge at frame 180.
+      await expectClip(page, 'c1', { timelineStart: frameTime(120, rate) });
+      await page.getByRole('button', { name: 'Undo', exact: true }).click();
+      await expectClip(page, 'c1', { timelineStart: frameTime(30, rate) });
+    }
+    await clip(page).focus();
+    await page.keyboard.press('ArrowRight');
+    await expectClip(page, 'c1', { timelineStart: frameTime(31, rate) });
+    await page
+      .getByRole('button', { name: 'Trim end of c1', exact: true })
+      .focus();
+    await page.keyboard.press('ArrowLeft');
+    await expectClip(page, 'c1', { sourceOut: frameTime(89, rate) });
+    await clip(page).focus();
+    await page.keyboard.press('ArrowDown');
+    await expectClip(page, 'c1', { trackId: 'v2' });
+    const scrollTop = await page
+      .locator('.timeline-scroll')
+      .evaluate((element) => element.scrollTop);
+    // The partly visible lower lane must not jump when an edge receives focus.
+    await startDrag(page, 'c1', -80, 0, 'right');
+    await release(page);
+    await expectClip(page, 'c1', { sourceOut: frameTime(74, rate) });
+    expect(
+      await page
+        .locator('.timeline-scroll')
+        .evaluate((element) => element.scrollTop),
+    ).toBe(scrollTop);
+    // Default-sized window keeps editing and zoom controls inside the viewport.
+    for (const control of ['Split at playhead', 'Delete clip', 'Zoom in']) {
+      const bounds = (await page
+        .getByRole('button', { name: control, exact: true })
+        .boundingBox())!;
+      expect(bounds.x).toBeGreaterThanOrEqual(0);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(1080);
+    }
+  } finally {
+    await application.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('undo/redo of CLI media removal refreshes library availability and survives save/reopen', async () => {
+  const { directory, path } = await fixture();
+  await updateProjectFile(path, async (project) => ({
+    project: {
+      ...project,
+      assets: [
+        ...project.assets,
+        { ...project.assets[0]!, id: 'unused', name: 'Unused video' },
+      ],
+    },
+    result: null,
+  }));
+  cli('media', 'remove', path, 'unused');
+  const saved = await readFile(path, 'utf8');
+  const { application, page } = await launchDesktop();
+  try {
+    await open(application, page, path);
+    const library = page.getByRole('complementary', { name: 'Media library' });
+    const unused = library.getByRole('button', { name: /Unused video/ });
+    await expect(unused).toHaveCount(0);
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect(unused).toContainText('Available');
+    await expect(
+      library.getByText('Media file is readable.', { exact: true }),
+    ).toHaveCount(3);
+    expect(await readFile(path, 'utf8')).toBe(saved);
+    await page.getByRole('button', { name: 'Redo', exact: true }).click();
+    await expect(unused).toHaveCount(0);
+    const reply = await page.evaluate(() => window.opencut.getProject());
+    expect(reply).toMatchObject({
+      ok: true,
+      state: {
+        media: expect.not.arrayContaining([
+          expect.objectContaining({ assetId: 'unused' }),
+        ]),
+      },
+    });
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect(unused).toContainText('Available');
+    await page
+      .getByRole('button', { name: 'Save project', exact: true })
+      .click();
+    await expect(
+      page.getByText('Project saved.', { exact: true }),
+    ).toBeVisible();
+    await open(application, page, path);
+    await expect(unused).toContainText('Available');
+    expect((await current(page)).assets).toContainEqual(
+      expect.objectContaining({ id: 'unused' }),
+    );
+  } finally {
+    await application.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

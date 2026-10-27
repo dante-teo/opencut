@@ -15,6 +15,9 @@ test('built desktop displays React through the sandboxed bridge', async () => {
       'OpenCut is running · v0.1.0',
     );
     expect(await page.evaluate(() => Object.keys(window.opencut))).toEqual([
+      'editTimeline',
+      'undoProject',
+      'redoProject',
       'getProject',
       'createProject',
       'openProject',

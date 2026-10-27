@@ -230,9 +230,13 @@ test('shows offline assets and exact track/clip data; failed opens preserve the 
     });
     const music = page.getByRole('button', { name: 'Inspect clip clip-music' });
     expect(
-      Number(await camera.locator(':scope > rect').getAttribute('width')),
+      Number(
+        await camera.locator(':scope > rect').first().getAttribute('width'),
+      ),
     ).toBeLessThan(
-      Number(await music.locator(':scope > rect').getAttribute('width')),
+      Number(
+        await music.locator(':scope > rect').first().getAttribute('width'),
+      ),
     );
     await camera.focus();
     await page.keyboard.press('Enter');
@@ -377,7 +381,7 @@ test('project IPC rejects untrusted windows and malformed creation requests', as
         try {
           await other.loadURL('opencut://app/index.html');
           return (await other.webContents
-            .executeJavaScript(`Promise.all(['getProject', 'createProject', 'openProject', 'saveProject', 'closeProject'].map(async method => {
+            .executeJavaScript(`Promise.all(['getProject', 'createProject', 'openProject', 'saveProject', 'closeProject', 'editTimeline', 'undoProject', 'redoProject'].map(async method => {
           try { await window.opencut[method]({ name: 'Untrusted' }); return 'allowed'; }
           catch (error) { return error.message; }
         }))`)) as string[];
@@ -387,7 +391,7 @@ test('project IPC rejects untrusted windows and malformed creation requests', as
       },
       resolve('apps/desktop/dist/preload/index.cjs'),
     );
-    expect(rejected).toHaveLength(5);
+    expect(rejected).toHaveLength(8);
     for (const message of rejected)
       expect(message).toContain('Untrusted IPC sender');
   } finally {

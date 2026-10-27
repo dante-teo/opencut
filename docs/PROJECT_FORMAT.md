@@ -526,6 +526,9 @@ commands or event replay; no automatic pruning or event-sourcing system exists.
 The filesystem-free main core exports:
 
 - `parseEditTransaction(unknown)`: strict batch validation and typed `EditTransaction`.
+- `previewTransaction(project, transaction)`: returns `{ project, results }` after
+  validating the expected revision and applying the same T08 operations against
+  evolving temporary state. It does not record history or advance revision.
 - `executeTransaction(project, transaction)`: returns `{ project, results }` and
   commits all T08 operations once, validating the evolving state after each.
   Requires `expectedRevision`; optional `label` defaults to `edit apply`.
@@ -535,6 +538,14 @@ The filesystem-free main core exports:
 - `projectRevision(project)`, `checkProjectRevision(project, expectedRevision?)`,
   `projectSnapshot(project)` and `getEditHistory(project)`: revision checks,
   independent content snapshots and compact history summaries.
+
+Preview results are transient. Primitive operations can refresh their
+`metadata.updatedAt`; this does not make the preview a committed edit. History
+continuity is checked when committing, undoing or redoing, so a successful preview
+is not proof that a later commit will succeed. Submit the commands against the
+authoritative project with its current revision through `executeTransaction`.
+Desktop previews reuse a validated content-only snapshot to avoid repeatedly
+copying historical snapshots; see [the desktop architecture](ARCHITECTURE.md#desktop-trust-boundary).
 
 These APIs copy validated inputs and leave callers' projects untouched on failure.
 Primitive T08 functions remain pure transformations; use `executeTransaction` or
@@ -554,17 +565,30 @@ operation and the expected revision are still validated. History-chain validatio
 and undo/redo snapshots continue to compare and preserve exact timestamps.
 
 `updateProjectFile(path, callback, options?)` accepts optional `expectedRevision`,
-`dryRun`, `label` and `history`. The default `history: 'record'` adds one snapshot
-transaction. For callbacks returning the result of `executeTransaction`, `undoEdit`
-or `redoEdit`, pass `history: 'restore'` to persist their already managed history
-without creating a second entry. Changed managed results must advance the current
-revision by exactly one and have consistent history. Pass the revision from the caller's earlier read
-as `expectedRevision` to reject stale work before invoking the callback. Batch
-execution also checks its own required expected revision. Dry-run plans and
-validates the same update but discards it before publication; the callback result
-can describe the projected revision/history. Callbacks must not perform external
-side effects. A temporary writer lock is acquired and cleaned even for dry-run.
-The adapter publishes content, revision and history in one synced atomic rename.
+`dryRun`, `label` and `history`:
+
+- `history: 'record'` (default) records the callback's content change as one
+  transaction.
+- `history: 'restore'` persists one already managed transaction from
+  `executeTransaction`, `undoEdit` or `redoEdit`, without adding a second entry.
+  Changed results must advance the on-disk revision by exactly one.
+- `history: 'preserve'` persists several already committed in-memory edits and
+  undo/redo steps together, retaining their separate entries. Changed results
+  must have a revision strictly greater than the on-disk revision.
+
+Both managed-history modes require unchanged project identity and consistent
+history. An unchanged result preserves the existing file bytes and mtime.
+For `expectedRevision`, pass the revision last read from disk, rather than the
+new in-memory session revision. The desktop also compares its serialized disk
+baseline inside the callback to refuse external changes at the same revision.
+Batch execution independently checks its required expected revision against the
+project being edited.
+
+Dry-run plans and validates the same update but discards it before publication;
+the callback result can describe the projected revision/history. Callbacks must
+not perform external side effects. A temporary writer lock is acquired and
+cleaned even for dry-run. The adapter publishes content, revision and history
+in one synced atomic rename.
 
 `importMediaAsset` and `removeMediaAsset` also accept a final options object with
 `expectedRevision` and `dryRun`, and record `media import` / `media remove` entries.

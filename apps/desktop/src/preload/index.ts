@@ -10,6 +10,9 @@ import {
 } from '../bridge.js';
 
 const api: DesktopAPI = {
+  editTimeline: (input) => ipcRenderer.invoke(PROJECT_CHANNELS.edit, input),
+  undoProject: (input) => ipcRenderer.invoke(PROJECT_CHANNELS.undo, input),
+  redoProject: (input) => ipcRenderer.invoke(PROJECT_CHANNELS.redo, input),
   getProject: () => ipcRenderer.invoke(PROJECT_CHANNELS.current),
   createProject: (input) => ipcRenderer.invoke(PROJECT_CHANNELS.create, input),
   openProject: () => ipcRenderer.invoke(PROJECT_CHANNELS.open),

@@ -8,6 +8,7 @@ import {
 import {
   commitEdit,
   executeTransaction,
+  previewTransaction,
   getEditHistory,
   parseEditTransaction,
   projectRevision,
@@ -274,4 +275,28 @@ describe('headless editing transactions', () => {
     first.editing!.undo[0]!.before.metadata.id = 'different-project';
     expect(validateProject(first).success).toBe(false);
   });
+});
+
+it('previews the same commands without committing revision/history or mutating the input', () => {
+  const original = project();
+  const before = serializeProject(original);
+  const preview = previewTransaction(original, {
+    expectedRevision: 0,
+    operations,
+  });
+  const committed = executeTransaction(original, {
+    expectedRevision: 0,
+    operations,
+  });
+  expect(preview.project.clips).toEqual(committed.project.clips);
+  expect(preview.project.tracks).toEqual(committed.project.tracks);
+  expect(preview.project.editing).toBeUndefined();
+  expect(serializeProject(original)).toBe(before);
+  expect(() =>
+    previewTransaction(original, {
+      expectedRevision: 0,
+      operations: [...operations, { type: 'clip.move', id: 'missing', at: 10 }],
+    }),
+  ).toThrow('does not exist');
+  expect(serializeProject(original)).toBe(before);
 });

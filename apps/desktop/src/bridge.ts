@@ -1,4 +1,9 @@
-import type { ApplicationInfo, Project, ProjectSettings } from '@opencut/core';
+import type {
+  ApplicationInfo,
+  Project,
+  ProjectSettings,
+  EditOperation,
+} from '@opencut/core';
 
 export const APP_INFO_CHANNEL = 'app:get-info';
 export const OPEN_PREVIEW_CHANNEL = 'preview:open';
@@ -28,6 +33,9 @@ export const PROJECT_CHANNELS = {
   open: 'project:open',
   save: 'project:save',
   close: 'project:close',
+  edit: 'project:edit',
+  undo: 'project:undo',
+  redo: 'project:redo',
 } as const;
 
 export interface NewProjectInput {
@@ -46,7 +54,25 @@ export type ProjectReply =
   | { ok: true; state: DesktopProject | null; canceled: boolean }
   | { ok: false; error: string };
 
+export interface HistoryInput {
+  projectId: string;
+  expectedRevision: number;
+}
+export type TimelineOperation = Extract<
+  EditOperation,
+  {
+    type: 'clip.move' | 'clip.trim' | 'clip.split' | 'clip.remove';
+  }
+>;
+export interface TimelineEditInput extends HistoryInput {
+  operations: TimelineOperation[];
+  label: string;
+}
+
 export interface DesktopAPI {
+  editTimeline(input: TimelineEditInput): Promise<ProjectReply>;
+  undoProject(input: HistoryInput): Promise<ProjectReply>;
+  redoProject(input: HistoryInput): Promise<ProjectReply>;
   getProject(): Promise<ProjectReply>;
   createProject(input: NewProjectInput): Promise<ProjectReply>;
   openProject(): Promise<ProjectReply>;

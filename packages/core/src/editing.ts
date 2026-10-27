@@ -216,7 +216,7 @@ export function commitEdit(
 }
 
 /** Reuse T08 primitives, validating each operation against the evolving transaction state. */
-export function executeTransaction(project: Project, input: EditTransaction) {
+export function previewTransaction(project: Project, input: EditTransaction) {
   const transaction = parseEditTransaction(input);
   const before = checked(project);
   checkProjectRevision(before, transaction.expectedRevision);
@@ -312,8 +312,22 @@ export function executeTransaction(project: Project, input: EditTransaction) {
     }
   }
   return {
-    project: commitEdit(before, next, transaction.label ?? 'edit apply'),
+    project: next,
     results,
+  };
+}
+
+/** Commit the same validated commands used for transient previews as one history entry. */
+export function executeTransaction(project: Project, input: EditTransaction) {
+  const transaction = parseEditTransaction(input);
+  const preview = previewTransaction(project, transaction);
+  return {
+    ...preview,
+    project: commitEdit(
+      project,
+      preview.project,
+      transaction.label ?? 'edit apply',
+    ),
   };
 }
 

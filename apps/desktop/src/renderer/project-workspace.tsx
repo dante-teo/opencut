@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import type { DesktopProject, ProjectReply } from '../bridge.js';
+import type {
+  DesktopProject,
+  ProjectReply,
+  TimelineOperation,
+} from '../bridge.js';
 import { Preview } from './video-preview.js';
-import type { RationalTime } from '@opencut/core';
+import { projectRevision, type RationalTime } from '@opencut/core';
 import {
   sourceToTimeline,
   timelineToSource,
@@ -52,7 +56,11 @@ export function ProjectWorkspace() {
     id: string;
   } | null>(null);
 
-  async function run(label: string, operation: () => Promise<ProjectReply>) {
+  async function run(
+    label: string,
+    operation: () => Promise<ProjectReply>,
+    editing = false,
+  ) {
     if (pending.current) return;
     pending.current = true;
     setBusy(label);
@@ -65,13 +73,26 @@ export function ProjectWorkspace() {
         setState(reply.state);
         if (!reply.canceled) {
           setCreating(false);
-          if (label !== 'Saving project…') {
+          if (label !== 'Saving project…' && !editing) {
             setSelection(null);
             setPlayhead(ZERO);
             setLinkedClipId(null);
             setPreviewPosition(undefined);
             setPreviewAssetId(null);
             setPreviewSession((value) => value + 1);
+          }
+          if (editing) {
+            const next = reply.state?.project;
+            if (
+              selection?.kind === 'clip' &&
+              !next?.clips.some((clip) => clip.id === selection.id)
+            )
+              setSelection(null);
+            // Pause/unlink the source on edits so its old clock cannot overwrite
+            // the project playhead after moving, trimming, deleting or restoring.
+            setLinkedClipId(null);
+            setPreviewPosition(undefined);
+            setViewer('project');
           }
           setNotice(label === 'Saving project…' ? 'Project saved.' : '');
         }
@@ -98,6 +119,58 @@ export function ProjectWorkspace() {
     else if (!creating && dialog?.open) dialog.close();
   }, [creating]);
   const project = state?.project;
+  function edit(operations: TimelineOperation[], label: string) {
+    if (!project) return Promise.resolve();
+    return run(
+      label,
+      () =>
+        window.opencut.editTimeline({
+          projectId: project.metadata.id,
+          expectedRevision: projectRevision(project),
+          operations,
+          label,
+        }),
+      true,
+    );
+  }
+  function history(direction: 'undo' | 'redo') {
+    if (!project) return;
+    const input = {
+      projectId: project.metadata.id,
+      expectedRevision: projectRevision(project),
+    };
+    void run(
+      direction === 'undo' ? 'Undoing edit…' : 'Redoing edit…',
+      () =>
+        direction === 'undo'
+          ? window.opencut.undoProject(input)
+          : window.opencut.redoProject(input),
+      true,
+    );
+  }
+  useEffect(() => {
+    function shortcut(event: KeyboardEvent) {
+      if (
+        !(event.metaKey || event.ctrlKey) ||
+        event.altKey ||
+        event.key.toLowerCase() !== 'z'
+      )
+        return;
+      const target = event.target;
+      if (
+        (target instanceof Element &&
+          target.closest(
+            'input, select, textarea, [contenteditable="true"]',
+          )) ||
+        creating
+      )
+        return;
+      event.preventDefault();
+      if (!busy) history(event.shiftKey ? 'redo' : 'undo');
+    }
+    window.addEventListener('keydown', shortcut);
+    return () => window.removeEventListener('keydown', shortcut);
+  }, [project, busy, creating]);
   return (
     <div
       className="workspace"
@@ -120,6 +193,18 @@ export function ProjectWorkspace() {
           </span>
         </div>
         <div className="project-actions">
+          <button
+            disabled={!!busy || !project?.editing?.undo.length}
+            onClick={() => history('undo')}
+          >
+            Undo
+          </button>
+          <button
+            disabled={!!busy || !project?.editing?.redo.length}
+            onClick={() => history('redo')}
+          >
+            Redo
+          </button>
           <button disabled={!!busy} onClick={() => setCreating(true)}>
             New project
           </button>
@@ -335,6 +420,8 @@ export function ProjectWorkspace() {
       <ProjectTimeline
         key={previewSession}
         project={project}
+        disabled={!!busy}
+        onEdit={edit}
         position={playhead}
         onSeek={seekTimeline}
         linkedClipId={linkedClipId}

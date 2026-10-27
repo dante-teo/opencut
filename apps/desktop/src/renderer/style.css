@@ -479,6 +479,7 @@ dd {
 }
 .timeline-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
@@ -582,7 +583,8 @@ dd {
   touch-action: none;
 }
 .timeline-clip {
-  cursor: pointer;
+  touch-action: none;
+  cursor: grab;
 }
 .timeline-clip > rect {
   fill: var(--video-clip);
@@ -863,4 +865,45 @@ pre {
   dd {
     margin-bottom: 8px;
   }
+}
+
+.timeline-controls input[type='number'] {
+  width: 42px;
+  color: var(--text);
+  background: var(--panel-alt);
+  border: 1px solid var(--line);
+}
+.timeline-clip > .trim-handle {
+  fill: var(--accent);
+  fill-opacity: 0.25;
+  stroke: none;
+  cursor: ew-resize;
+}
+.timeline-clip > .trim-handle:hover,
+.timeline-clip > .trim-handle:focus-visible {
+  fill-opacity: 0.8;
+}
+.edit-preview {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+.edit-preview rect {
+  fill: var(--accent);
+  fill-opacity: 0.3;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 5 3;
+}
+.edit-preview.invalid rect {
+  fill: #d85656;
+  stroke: #d85656;
+}
+.snap-guide {
+  stroke: #e8ba50;
+  stroke-width: 1;
+}
+.timeline-footer [role='alert'] {
+  color: #d85656;
 }

@@ -20,6 +20,7 @@ T16 connects imported video selection to a reusable source player with keyboard
 transport, project-rate timecode and explicit playback cleanup.
 T17 adds a zoomable, scrollable read-only timeline with an independent playhead
 and explicit links to source preview.
+T18 adds shared-core timeline move, edge trim, split, delete, snapping and persistent undo/redo.
 
 ## Quick start (macOS)
 
@@ -56,16 +57,16 @@ Project metadata/settings, imported assets (including missing-media warnings),
 and video/audio tracks and clips appear in a docked editor workspace: media
 library on the left, viewer in the center, inspector on the right, and a timeline
 below. Select an asset or clip to inspect its stored details. Timeline blocks
-show relative positions and durations; this view is read only. Source ranges
-and timeline starts retain exact rational seconds. Use the CLI for imports and
-edits, then reopen the project to refresh; there is no automatic file watching.
+show relative positions and durations. Source ranges and timeline starts retain
+exact rational seconds. Use the CLI for imports, then reopen the project to
+refresh; there is no automatic file watching.
 Project management needs no FFmpeg or ffprobe. Closing, quitting, creating or
 opening another project offers **Save**, **Discard**, and **Cancel** when the
 current project is unsaved. Canceled dialogs and failed saves preserve it; failed
 opens leave the current project displayed. Operations run one at a time, with
-loading indicators and errors shown in the workspace. Only newly created projects
-can be dirty in T15 because loaded settings, assets and timelines are read only.
-There is no Save As, project playback, GUI import/editing or render control.
+loading indicators and errors shown in the workspace. New projects and edited
+timelines can be unsaved. There is no Save As, project playback, GUI media import
+or render control.
 
 The timeline preserves project track order, with separate video/audio styling.
 Gaps and overlaps across tracks follow stored rational timing. Select a clip for
@@ -81,6 +82,38 @@ integer limits. In that case, playhead seeks and preview positions use a bounded
 rational approximation; extreme rates or positions can skip frame labels.
 See the [exact-time contract](PROJECT_FORMAT.md#exact-time) for the distinction
 between transient UI positions and persisted project timing.
+
+Drag a clip body to move it; drag vertically to another compatible track. Drag
+an edge to trim the source range, keeping the opposite timeline edge fixed.
+The core enforces source limits, track compatibility and no same-track overlaps.
+A translucent outline shows the core-validated proposal; invalid proposals mark
+the original clip red and show an error. Release commits one undoable transaction.
+Escape, pointer cancellation, lost capture or window blur cancel a gesture. Pointer
+movement never writes the project file. **Save project** persists all completed edits
+and their history atomically; errors retain the last valid session.
+
+**Snap** aligns either moving edge or the trimmed edge to other clips' boundaries,
+sequence zero or the playhead. **Snap px** configures the screen-pixel radius
+(default 8), independent of zoom; disable Snap for frame-only positioning. Edited
+boundaries use integer project frames. Edge trimming requires frame-aligned clip
+start and source-in; off-grid legacy clips must be aligned through the CLI first.
+**Split at playhead** (S) splits the selected clip; **Delete clip**
+(Delete/Backspace) removes it. **Undo** / **Redo** and Ctrl/Command+Z / Shift+Z
+restore shared CLI/GUI history, including after save/reopen.
+Shared history can also restore or remove imported asset entries. When undo/redo
+changes assets or their references, the library refreshes availability before
+accepting the restored state; a failed refresh retains the previous session.
+This checks source readability without re-probing codecs or changing source files.
+Clip-only edits keep the existing availability snapshot. Reopen the project to
+refresh availability after external file changes.
+
+Focus a clip and use Left/Right to move one frame (Shift: ten); Up/Down moves it
+to the next compatible track. Focus an edge handle and use Left/Right to trim.
+Keyboard edits use frame stepping without proximity snapping. Scroll to reach
+other tracks/times; there is no automatic edge scrolling during a drag. Zoom is
+locked while dragging. Successful edits and undo/redo pause and unlink source preview,
+retaining the project playhead. GUI editing does not add media import, transitions,
+keyframes, project playback or rendering controls.
 
 Select a video clip and click **Preview selected clip** to link source playback.
 This explicit action sets the playhead to the clip start and opens its source-in.

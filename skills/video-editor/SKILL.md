@@ -44,8 +44,8 @@ then **Save project** to a new file; existing creation destinations are refused.
 the left, viewer in the center, inspector on the right and timeline tracks below.
 Select assets to inspect metadata, or clips to inspect exact stored timing.
 Unsaved projects prompt Save/Discard/Cancel before switching, closing or quitting.
-Reopen after CLI edits; stale saves are refused. GUI media import, timeline
-editing, project playback and rendering controls remain unavailable.
+Reopen after CLI edits; stale saves are refused. GUI media import, project
+playback and rendering controls remain unavailable.
 
 T17 adds read-only timeline navigation: video/audio tracks retain project order;
 clip positions, gaps and cross-track overlaps follow exact stored timing. Use the
@@ -68,8 +68,33 @@ Known limitation: repeated ruler seeks followed by **Play** can leave the linked
 source paused. Confirm that the source clock advances when checking playback.
 Zoom/scroll persist during selection/playback/save, and reset on project replacement.
 The timeline culls offscreen clips/tracks and caps the physical scrollbar for long
-sequences; extreme-duration scrollbar navigation is coarser. No timeline edits,
-waveforms or rendering controls are added. Reopen after CLI edits.
+sequences; extreme-duration scrollbar navigation is coarser. No waveforms or
+rendering controls are added. Reopen after CLI edits.
+
+T18 adds GUI clip editing through the same core transactions as the CLI. Drag
+clip bodies to move or change compatible tracks, and drag edges to trim while
+pinning the opposite edge. Core validation rejects overlaps, incompatible tracks
+and source-bound violations. A translucent preview shows valid proposed edits;
+invalid proposals mark the original clip red and show an error. Release commits
+one undoable operation; Escape/cancel/lost capture/blur discard the preview.
+**Snap** uses a configurable **Snap px** radius (default 8 screen pixels) at any
+zoom, aligning either moving edge or the trimmed edge to other boundaries, zero
+and the playhead. GUI-edited boundaries use project frames. Edge trimming requires
+frame-aligned clip start and source-in; use the CLI to align off-grid clips first.
+**Split at playhead**
+(S) and **Delete clip** (Delete/Backspace) act on the selection. **Undo** / **Redo**
+(Ctrl/Command+Z / Shift+Z) restore shared CLI/GUI history, including media
+imports/removals. When undo/redo changes assets or their references, availability
+is refreshed before accepting the restored state; a failed refresh retains the
+previous session. Clip-only edits retain the availability snapshot. These checks
+verify readability without refreshing stored probe metadata or modifying media.
+Focused clips support Left/Right frame moves (Shift: ten) and Up/Down compatible
+tracks; focused edge handles
+support Left/Right trims, without proximity snapping. Save persists completed
+edits and history; reopen and inspect with `timeline list` to verify. Successful
+edits pause/unlink source preview and retain the project playhead. Zoom is locked
+during gestures; scroll manually to reach offscreen targets. Media import,
+transitions, keyframes, project playback and rendering controls are not added.
 
 T05 adds a versioned project data model, exact rational time, JSON save/load,
 validation and media availability checks as headless core APIs. See

@@ -268,8 +268,8 @@ export interface ProjectUpdateOptions {
   expectedRevision?: number;
   dryRun?: boolean;
   label?: string;
-  /** For callbacks using executeTransaction, undoEdit or redoEdit, which manage history themselves. */
-  history?: 'record' | 'restore';
+  /** Restore one transaction, or preserve multiple validated in-memory session transactions. */
+  history?: 'record' | 'restore' | 'preserve';
 }
 
 /** Serialize cooperating writers and publish a complete, synced JSON file by rename. */
@@ -308,12 +308,21 @@ export async function updateProjectFile<T>(
     const changed = await update(project, path);
     const baseline = deserializeProject(snapshot);
     const updated =
-      options.history === 'restore'
+      options.history === 'restore' || options.history === 'preserve'
         ? changed.project
         : commitEdit(baseline, changed.project, options.label);
     const json = serializeProject(updated);
-    if (options.history === 'restore' && json !== snapshot) {
-      checkProjectRevision(updated, projectRevision(baseline) + 1);
+    if (
+      (options.history === 'restore' || options.history === 'preserve') &&
+      json !== snapshot
+    ) {
+      if (options.history === 'restore')
+        checkProjectRevision(updated, projectRevision(baseline) + 1);
+      else if (projectRevision(updated) <= projectRevision(baseline))
+        throw new EditError(
+          'REVISION_CONFLICT',
+          'Saved session must advance the project revision.',
+        );
       if (updated.metadata.id !== baseline.metadata.id)
         throw new EditError(
           'INVALID_TRANSACTION',

@@ -292,7 +292,10 @@ app
     for (const [action, channel] of Object.entries(PROJECT_CHANNELS)) {
       ipcMain.handle(channel, async (event, ...args: unknown[]) => {
         assertSender(event);
-        if (args.length !== (action === 'create' ? 1 : 0))
+        if (
+          args.length !==
+          (['create', 'edit', 'undo', 'redo'].includes(action) ? 1 : 0)
+        )
           return { ok: false, error: 'Invalid project request arguments.' };
         const reply = await projectSession.run(
           action as ProjectAction,

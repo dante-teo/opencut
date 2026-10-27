@@ -327,7 +327,7 @@ T15's main-process `ProjectSession` owns the current project, path, baseline and
 unsaved status. React uses local hooks for snapshots, inspection selection, viewer
 tabs and operation feedback. The creation dialog keeps field values in HTML
 form controls and reads them with `FormData` on submit. React cannot submit a
-path or replacement document. The desktop uses a three-pane editor workspace (media library, viewer, inspector) above a read-only
+path or replacement document. The desktop uses a three-pane editor workspace (media library, viewer, inspector) above an interactive
 track timeline. Selecting video assets also opens source preview. Playback,
 selection, scroll, zoom and timecode state are never saved in the project. The
 project viewer is an explicit placeholder, with source preview in a separate tab.
@@ -389,14 +389,51 @@ IPC validates request arity as well as sender identity, and returns discriminate
 success/cancellation/error results. Project operations are serialized across IPC
 and native window-close/quit requests. Unsaved new projects require a native
 Save/Discard/Cancel choice before switching or closing; cancellation or a failed
-save retains the session. Clean loaded documents are read only, so saving is a
-core-guarded no-op. A serialized baseline check plus the core revision guard
+save retains the session. Saving clean loaded documents is a core-guarded no-op.
+A serialized baseline check plus the core revision guard
 refuses stale writes, including external same-revision changes. Directory aliases
 are canonicalized, and existing creation destinations and project symlink/hard-link
 updates follow the CLI's refusal rules. History and schema version are unchanged.
-Media availability is a snapshot refreshed on open, not a file watcher or probe.
-Future GUI imports, timeline edits, project playback and render controls need
-separate capabilities.
+Media availability is refreshed on open and when undo/redo changes the asset
+inventory or references; clip-only edits retain the availability snapshot. It is
+not a file watcher or probe.
+Future GUI imports, project playback and render controls need separate capabilities.
+
+T18 adds narrow `editTimeline`, `undoProject` and `redoProject` preload methods.
+Main checks sender, arity, project identity, revision and request shape, allows only
+clip move/trim/split/remove commands, and uses T09 transactions/history. React
+never sends replacement documents or paths. The core's `previewTransaction`
+executes the same validated primitives without recording history; `executeTransaction`
+commits that result. React memoizes a validated content-only snapshot per project
+state and reuses it throughout a gesture, keeping undo/redo snapshots out of
+pointer-move validation. `createTimelinePreview` removes `editing` before calling
+core `projectSnapshot`, so snapshot preparation also avoids historical validation.
+Accepted project changes invalidate the cache; each gesture retains its original
+preview snapshot. Main still validates the complete project/history and revision
+at commit. The UI adapter translates pointer coordinates into frame
+commands and chooses snap targets; no editing validation is duplicated in React.
+Left trims combine move and trim, ordering shrink/extension to keep intermediate
+states valid, and commit as a single transaction. Proposal state remains local and
+separate from the session. Rejected proposals display the unchanged clip with an
+error; IPC errors discard the overlay and retain the last accepted UI state.
+
+Pointer capture belongs to the stable scroll surface, avoiding capture loss when
+clips move between culled lanes. A movement threshold distinguishes selection
+from dragging. Escape/cancel/lost capture/blur cancel; release recomputes the final
+coordinate and submits once. Native scrolling contributes its logical offset to
+pointer deltas; zoom is locked during gestures. Snap distance is measured in
+screen pixels against project-frame-aligned clip boundaries, zero and playhead.
+The configurable default is 8 pixels. Keyboard frame edits omit proximity snapping.
+Successful edits unlink/pause source playback so stale source clocks do not move
+the retained playhead. Existing React/SVG and Pointer Events suffice; a gesture
+or editor library would add a second model without replacing core validation.
+
+Desktop Save uses the revision last saved/read from disk, rather than the edited
+session revision. `updateProjectFile`'s `history: 'preserve'` mode retains several
+already committed in-memory transactions without recording a duplicate entry.
+Changed sessions must advance revision, retain project identity and have consistent
+history. The serialized disk baseline, writer lock, external-change detection and
+atomic rename still guard publication. Undo/redo remain available after reopening.
 
 ## Tooling and build
 

@@ -234,3 +234,53 @@ describe('atomic editing persistence', () => {
     expect(await fs.readdir(directory)).toEqual(['project.json']);
   });
 });
+
+it('preserves multiple session transactions atomically and rejects regressed revisions, identity changes and broken history', async () => {
+  const baseline = await readProjectFile(path);
+  const first = executeTransaction(baseline, {
+    expectedRevision: 0,
+    operations: [
+      { type: 'track.add', id: 'v1', name: 'Video', mediaType: 'video' },
+    ],
+  }).project;
+  const second = executeTransaction(first, {
+    expectedRevision: 1,
+    operations: [
+      { type: 'track.add', id: 'a1', name: 'Audio', mediaType: 'audio' },
+    ],
+  }).project;
+  const bytes = await fs.readFile(path, 'utf8');
+  const regressed = structuredClone(second);
+  regressed.editing!.revision = 0;
+  const changedId = structuredClone(second);
+  changedId.metadata.id = 'other-project';
+  const broken = structuredClone(second);
+  broken.editing!.undo[1]!.before.metadata.name = 'Broken chain';
+  for (const project of [regressed, changedId, broken]) {
+    await expect(
+      updateProjectFile(path, async () => ({ project, result: null }), {
+        expectedRevision: 0,
+        history: 'preserve',
+      }),
+    ).rejects.toThrow();
+    expect(await fs.readFile(path, 'utf8')).toBe(bytes);
+  }
+  vi.mocked(fs.rename).mockRejectedValueOnce(
+    new Error('Synthetic save failure'),
+  );
+  await expect(
+    updateProjectFile(path, async () => ({ project: second, result: null }), {
+      expectedRevision: 0,
+      history: 'preserve',
+    }),
+  ).rejects.toThrow('Synthetic save failure');
+  expect(await fs.readFile(path, 'utf8')).toBe(bytes);
+  await updateProjectFile(
+    path,
+    async () => ({ project: second, result: null }),
+    { expectedRevision: 0, history: 'preserve' },
+  );
+  expect(await readProjectFile(path)).toEqual(second);
+  expect(getEditHistory(await readProjectFile(path)).undo).toHaveLength(2);
+  expect(await fs.readdir(directory)).toEqual(['project.json']);
+});

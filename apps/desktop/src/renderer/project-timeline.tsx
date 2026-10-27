@@ -1,6 +1,19 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent } from 'react';
-import type { Project, RationalTime } from '@opencut/core';
+import {
+  compareTimes,
+  clipTimelineEnd,
+  type Project,
+  type RationalTime,
+  type TimelineClip,
+} from '@opencut/core';
+import type { TimelineOperation } from '../bridge.js';
+import {
+  proposeEdit,
+  createTimelinePreview,
+  type EditProposal,
+  type GestureKind,
+} from './timeline-editing.js';
 import {
   clampTime,
   frameIndex,
@@ -32,6 +45,8 @@ export function ProjectTimeline({
   onSeek,
   onPreviewClip,
   linkedClipId,
+  disabled = false,
+  onEdit,
 }: {
   project: Project | undefined;
   selected: string | null;
@@ -40,8 +55,29 @@ export function ProjectTimeline({
   onSeek?: (time: RationalTime) => void;
   onPreviewClip?: (id: string) => void;
   linkedClipId?: string | null;
+  disabled?: boolean;
+  onEdit?: (operations: TimelineOperation[], label: string) => Promise<void>;
 }) {
+  const gesture = useRef<{
+    pointer: number;
+    x: number;
+    y: number;
+    scroll: number;
+    project: Project;
+    preview: Project;
+    clip: TimelineClip;
+    kind: GestureKind;
+    moved: boolean;
+  } | null>(null);
+  const [proposal, setProposal] = useState<EditProposal | null>(null);
+  const [editError, setEditError] = useState('');
+  const [snapPixels, setSnapPixels] = useState(8);
+  const [snapping, setSnapping] = useState(true);
   const index = useMemo(() => indexTimeline(project), [project]);
+  const previewProject = useMemo(
+    () => project && createTimelinePreview(project),
+    [project],
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(80);
   const [viewport, setViewport] = useState({
@@ -68,6 +104,141 @@ export function ProjectTimeline({
       'video' &&
     index.assets.get(selectedClip.assetId)?.metadata?.kind !== 'image';
 
+  const canSplit =
+    selectedClip &&
+    compareTimes(position, selectedClip.timelineStart) > 0 &&
+    compareTimes(position, clipTimelineEnd(selectedClip)) < 0;
+  function commit(operations: TimelineOperation[], label: string) {
+    if (!disabled && !gesture.current && onEdit) void onEdit(operations, label);
+  }
+  function splitSelected() {
+    if (selectedClip && canSplit)
+      commit(
+        [
+          {
+            type: 'clip.split',
+            id: selectedClip.id,
+            at: Number(frameIndex(position, rate, true)),
+          },
+        ],
+        'Split clip',
+      );
+  }
+  function deleteSelected() {
+    if (selectedClip)
+      commit([{ type: 'clip.remove', id: selectedClip.id }], 'Delete clip');
+  }
+  function cancelGesture() {
+    const current = gesture.current;
+    gesture.current = null;
+    setProposal(null);
+    if (current && scrollRef.current?.hasPointerCapture(current.pointer))
+      scrollRef.current.releasePointerCapture(current.pointer);
+  }
+  useEffect(() => {
+    cancelGesture();
+  }, [project, disabled]);
+  useEffect(() => {
+    window.addEventListener('blur', cancelGesture);
+    return () => window.removeEventListener('blur', cancelGesture);
+  }, []);
+  function beginEdit(
+    event: PointerEvent<SVGGElement | SVGRectElement>,
+    clip: TimelineClip,
+    kind: GestureKind,
+  ) {
+    if (
+      event.button !== 0 ||
+      disabled ||
+      !onEdit ||
+      !project ||
+      !previewProject ||
+      gesture.current
+    )
+      return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.focus({ preventScroll: true });
+    onSelect(clip.id);
+    setEditError('');
+    gesture.current = {
+      pointer: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      scroll,
+      project,
+      preview: previewProject,
+      clip,
+      kind,
+      moved: false,
+    };
+    scrollRef.current!.setPointerCapture(event.pointerId);
+  }
+  function updateGesture(event: PointerEvent<HTMLDivElement>) {
+    const current = gesture.current;
+    if (!current || current.pointer !== event.pointerId) return null;
+    const element = scrollRef.current!;
+    const offset =
+      event.clientX -
+      current.x +
+      element.scrollLeft * geometry.ratio -
+      current.scroll;
+    if (
+      !current.moved &&
+      Math.hypot(event.clientX - current.x, event.clientY - current.y) < 3
+    )
+      return null;
+    current.moved = true;
+    const frames =
+      frameIndex(pixelTime(Math.abs(offset), zoom), rate, true) *
+      (offset < 0 ? -1n : 1n);
+    const row = Math.floor(
+      (event.clientY -
+        element.getBoundingClientRect().top -
+        RULER_HEIGHT +
+        element.scrollTop) /
+        TRACK_HEIGHT,
+    );
+    const track =
+      current.kind === 'move'
+        ? (current.project.tracks[row]?.id ?? '')
+        : current.clip.trackId;
+    const next = proposeEdit(
+      current.preview,
+      current.clip,
+      current.kind,
+      frames,
+      track,
+      position,
+      zoom,
+      snapping ? snapPixels : 0,
+    );
+    if (current.project !== project)
+      next.error = 'Project changed during the interaction. Try again.';
+    setProposal(next);
+    return next;
+  }
+  function keyboardEdit(
+    clip: TimelineClip,
+    kind: GestureKind,
+    direction: bigint,
+    trackId = clip.trackId,
+  ) {
+    if (!previewProject || disabled || gesture.current) return;
+    const next = proposeEdit(
+      previewProject,
+      clip,
+      kind,
+      direction,
+      trackId,
+      position,
+      zoom,
+      0,
+    );
+    setEditError(next.error ?? '');
+    if (!next.error)
+      commit(next.operations, kind === 'move' ? 'Move clip' : 'Trim clip');
+  }
   function measure() {
     const element = scrollRef.current;
     if (element)
@@ -106,6 +277,7 @@ export function ProjectTimeline({
     function wheel(event: WheelEvent) {
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
+      if (gesture.current) return;
       const anchor = Math.max(
         0,
         Math.min(
@@ -150,12 +322,76 @@ export function ProjectTimeline({
   );
   const trackCount = project?.tracks.length ?? 0;
   return (
-    <section className="timeline-panel" aria-label="Timeline">
+    <section
+      className="timeline-panel"
+      aria-label="Timeline"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          cancelGesture();
+          setEditError('');
+          return;
+        }
+        const target = event.target as Element;
+        if (
+          target.closest('input, select, textarea') ||
+          disabled ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.altKey
+        )
+          return;
+        if (event.key === 'Delete' || event.key === 'Backspace') {
+          event.preventDefault();
+          deleteSelected();
+        } else if (event.key.toLowerCase() === 's') {
+          event.preventDefault();
+          splitSelected();
+        }
+      }}
+    >
       <div className="panel-heading timeline-heading">
         <h2>
           Timeline ({trackCount} tracks · {project?.clips.length ?? 0} clips)
         </h2>
         <div className="timeline-controls">
+          <button
+            disabled={disabled || !canSplit || !!proposal}
+            onClick={splitSelected}
+          >
+            Split at playhead
+          </button>
+          <button
+            disabled={disabled || !selectedClip || !!proposal}
+            onClick={deleteSelected}
+          >
+            Delete clip
+          </button>
+          <label>
+            <input
+              type="checkbox"
+              checked={snapping}
+              disabled={!!proposal}
+              onChange={(event) => setSnapping(event.currentTarget.checked)}
+            />{' '}
+            Snap
+          </label>
+          <label>
+            Snap px{' '}
+            <input
+              aria-label="Snap threshold pixels"
+              type="number"
+              min="0"
+              max="40"
+              step="1"
+              value={snapPixels}
+              disabled={!!proposal}
+              onChange={(event) =>
+                setSnapPixels(
+                  Math.max(0, Math.min(40, Number(event.currentTarget.value))),
+                )
+              }
+            />
+          </label>
           <output
             role="timer"
             aria-live="off"
@@ -172,7 +408,7 @@ export function ProjectTimeline({
           </button>
           <button
             aria-label="Zoom out"
-            disabled={zoom === ZOOM_LEVELS[0]}
+            disabled={!!proposal || zoom === ZOOM_LEVELS[0]}
             onClick={() =>
               changeZoom(ZOOM_LEVELS[ZOOM_LEVELS.indexOf(zoom) - 1]!, width / 2)
             }
@@ -184,6 +420,7 @@ export function ProjectTimeline({
             <select
               aria-label="Timeline zoom"
               value={zoom}
+              disabled={!!proposal}
               onChange={(event) =>
                 changeZoom(Number(event.currentTarget.value), width / 2)
               }
@@ -197,7 +434,7 @@ export function ProjectTimeline({
           </label>
           <button
             aria-label="Zoom in"
-            disabled={zoom === ZOOM_LEVELS.at(-1)}
+            disabled={!!proposal || zoom === ZOOM_LEVELS.at(-1)}
             onClick={() =>
               changeZoom(ZOOM_LEVELS[ZOOM_LEVELS.indexOf(zoom) + 1]!, width / 2)
             }
@@ -210,6 +447,24 @@ export function ProjectTimeline({
         className="timeline-scroll"
         ref={scrollRef}
         onScroll={measure}
+        onPointerMove={updateGesture}
+        onPointerUp={(event) => {
+          if (gesture.current?.pointer !== event.pointerId) return;
+          const current = gesture.current;
+          const next = updateGesture(event);
+          cancelGesture();
+          if (!next) return;
+          setEditError(next.error ?? '');
+          if (!next.error)
+            commit(
+              next.operations,
+              current.kind === 'move' ? 'Move clip' : 'Trim clip',
+            );
+        }}
+        onPointerCancel={cancelGesture}
+        onLostPointerCapture={(event) => {
+          if (gesture.current?.pointer === event.pointerId) cancelGesture();
+        }}
         tabIndex={0}
         aria-label="Scrollable timeline"
       >
@@ -241,7 +496,7 @@ export function ProjectTimeline({
               aria-valuenow={Number(frameIndex(position, rate))}
               aria-valuetext={timelineTimecode(position, rate)}
               onPointerDown={(event) => {
-                if (event.button !== 0) return;
+                if (event.button !== 0 || gesture.current) return;
                 event.preventDefault();
                 event.currentTarget.focus();
                 dragPointer.current = event.pointerId;
@@ -373,7 +628,56 @@ export function ProjectTimeline({
                           aria-pressed={selected === clip.id}
                           className={`timeline-clip ${track.type}`}
                           onClick={() => onSelect(clip.id)}
+                          onPointerDown={(event) =>
+                            beginEdit(event, clip, 'move')
+                          }
                           onKeyDown={(event) => {
+                            if (event.target !== event.currentTarget) return;
+                            if (
+                              [
+                                'ArrowLeft',
+                                'ArrowRight',
+                                'ArrowUp',
+                                'ArrowDown',
+                              ].includes(event.key)
+                            ) {
+                              event.preventDefault();
+                              if (
+                                event.key === 'ArrowLeft' ||
+                                event.key === 'ArrowRight'
+                              )
+                                keyboardEdit(
+                                  clip,
+                                  'move',
+                                  (event.key === 'ArrowLeft' ? -1n : 1n) *
+                                    (event.shiftKey ? 10n : 1n),
+                                );
+                              else {
+                                const asset = index.assets.get(clip.assetId);
+                                const direction =
+                                  event.key === 'ArrowUp' ? -1 : 1;
+                                for (
+                                  let i = trackIndex + direction;
+                                  project &&
+                                  i >= 0 &&
+                                  i < project.tracks.length;
+                                  i += direction
+                                ) {
+                                  const destination = project.tracks[i]!;
+                                  if (
+                                    asset?.mediaTypes.includes(destination.type)
+                                  ) {
+                                    keyboardEdit(
+                                      clip,
+                                      'move',
+                                      0n,
+                                      destination.id,
+                                    );
+                                    break;
+                                  }
+                                }
+                              }
+                            }
                             if (event.key === 'Enter' || event.key === ' ') {
                               event.preventDefault();
                               onSelect(clip.id);
@@ -407,6 +711,52 @@ export function ProjectTimeline({
                               {clip.id}
                             </text>
                           </svg>
+                          {(['left', 'right'] as const).map((edge) => {
+                            const boundaryX = relativePixels(
+                              edge === 'left' ? clip.timelineStart : end,
+                              origin,
+                              zoom,
+                            );
+                            if (boundaryX < 0 || boundaryX > width) return null;
+                            const handleWidth = Math.min(8, clipWidth / 3);
+                            return (
+                              <rect
+                                key={edge}
+                                className="trim-handle"
+                                data-trim={edge}
+                                role="button"
+                                tabIndex={0}
+                                aria-label={`Trim ${edge === 'left' ? 'start' : 'end'} of ${clip.id}`}
+                                x={
+                                  edge === 'left'
+                                    ? boundaryX
+                                    : boundaryX - handleWidth
+                                }
+                                y="6"
+                                width={handleWidth}
+                                height="52"
+                                onPointerDown={(event) =>
+                                  beginEdit(event, clip, edge)
+                                }
+                                onKeyDown={(event) => {
+                                  if (
+                                    event.key !== 'ArrowLeft' &&
+                                    event.key !== 'ArrowRight'
+                                  )
+                                    return;
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  onSelect(clip.id);
+                                  keyboardEdit(
+                                    clip,
+                                    edge,
+                                    (event.key === 'ArrowLeft' ? -1n : 1n) *
+                                      (event.shiftKey ? 10n : 1n),
+                                  );
+                                }}
+                              />
+                            );
+                          })}
                         </g>
                       );
                     },
@@ -415,6 +765,52 @@ export function ProjectTimeline({
               </div>
             );
           })}
+          {proposal &&
+            (() => {
+              const row =
+                project?.tracks.findIndex(
+                  (track) => track.id === proposal.clip.trackId,
+                ) ?? -1;
+              const x = Math.max(
+                0,
+                relativePixels(proposal.clip.timelineStart, origin, zoom),
+              );
+              const right = Math.min(
+                width,
+                relativePixels(clipTimelineEnd(proposal.clip), origin, zoom),
+              );
+              return (
+                <svg
+                  className={`edit-preview ${proposal.error ? 'invalid' : ''}`}
+                  data-testid="edit-preview"
+                  width={viewport.width}
+                  height={viewport.height}
+                >
+                  <rect
+                    x={LABEL_WIDTH + x}
+                    y={RULER_HEIGHT + row * TRACK_HEIGHT - viewport.top + 5}
+                    width={Math.max(0, right - x)}
+                    height="54"
+                    rx="4"
+                  />
+                  {proposal.snap && (
+                    <line
+                      className="snap-guide"
+                      x1={
+                        LABEL_WIDTH +
+                        relativePixels(proposal.snap, origin, zoom)
+                      }
+                      x2={
+                        LABEL_WIDTH +
+                        relativePixels(proposal.snap, origin, zoom)
+                      }
+                      y1="0"
+                      y2={viewport.height}
+                    />
+                  )}
+                </svg>
+              );
+            })()}
           {playheadX >= 0 && playheadX <= width && (
             <div
               className="timeline-playhead"
@@ -427,7 +823,21 @@ export function ProjectTimeline({
         </div>
       </div>
       <div className="timeline-footer">
-        Read only · Click/drag ruler to seek · Ctrl/⌘ + wheel to zoom ·{' '}
+        {(proposal?.error || editError) && (
+          <span role="alert">{proposal?.error || editError} </span>
+        )}
+        {proposal && !proposal.error && (
+          <span role="status">
+            {gesture.current?.kind === 'move' ? 'Move' : 'Trim'} ·{' '}
+            {exactTime(proposal.clip.timelineStart)} →{' '}
+            {exactTime(clipTimelineEnd(proposal.clip))}
+            {proposal.snap ? ' · Snapped' : ''} · Release to commit · Esc to
+            cancel.{' '}
+          </span>
+        )}
+        Drag clips or edges · S split · Delete remove · Arrows move focused
+        clips/edges · Ctrl/⌘ Z undo · Click/drag ruler to seek · Ctrl/⌘ + wheel
+        to zoom ·{' '}
         {linkedClipId
           ? `Source linked to ${linkedClipId}; playhead clamps to its range.`
           : 'Select a video clip, then Preview selected clip to link source playback.'}{' '}

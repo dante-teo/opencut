@@ -65,6 +65,7 @@ export {
   checkProjectRevision,
   commitEdit,
   executeTransaction,
+  previewTransaction,
   undoEdit,
   redoEdit,
   getEditHistory,

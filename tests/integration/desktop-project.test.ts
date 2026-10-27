@@ -9,12 +9,23 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { createProject, serializeProject, addTrack } from '@opencut/core';
+import {
+  createProject,
+  serializeProject,
+  addTrack,
+  frameTime,
+  projectRevision,
+  executeTransaction,
+  getEditHistory,
+  commitEdit,
+} from '@opencut/core';
 import {
   readProjectFile,
   writeProjectFile,
   updateProjectFile,
+  removeMediaAsset,
 } from '@opencut/core/node';
+import * as projectFiles from '@opencut/core/node';
 import { ProjectSession } from '../../apps/desktop/src/main/project-session.js';
 
 let directory: string;
@@ -291,5 +302,312 @@ it('serializes native dialogs and protects work while a save is pending', async 
   expect(await pending).toMatchObject({ canceled: true });
   expect(await session.run('current')).toMatchObject({
     state: { dirty: true },
+  });
+});
+
+it('commits GUI transactions once, rejects stale/malformed edits, and saves multiple revisions with their history', async () => {
+  const { session, dialogs } = setup();
+  const path = join(directory, 'edited.json');
+  let project = createProject({ name: 'Interactive' });
+  project.assets = [
+    {
+      id: 'asset',
+      name: 'Offline',
+      mediaTypes: ['video'],
+      file: { type: 'relative', path: 'missing.mp4' },
+    },
+  ];
+  project = executeTransaction(project, {
+    expectedRevision: 0,
+    operations: [
+      { type: 'track.add', id: 'v1', name: 'Video', mediaType: 'video' },
+      {
+        type: 'clip.add',
+        id: 'c1',
+        assetId: 'asset',
+        trackId: 'v1',
+        at: 0,
+        in: 0,
+        out: 90,
+      },
+    ],
+  }).project;
+  await writeProjectFile(project, path);
+  dialogs.open.mockResolvedValue(path);
+  await session.run('open');
+  const request = {
+    projectId: project.metadata.id,
+    expectedRevision: projectRevision(project),
+    label: 'Move clip',
+    operations: [{ type: 'clip.move', id: 'c1', at: 30 }],
+  };
+  const original = await session.run('current');
+  for (const invalid of [
+    null,
+    [],
+    {},
+    { ...request, projectId: 'old-project' },
+    { ...request, path },
+    { ...request, expectedRevision: -1 },
+    { ...request, operations: [{ type: 'track.remove', id: 'v1' }] },
+    { ...request, operations: [{ type: 'clip.move', id: 'missing', at: 0 }] },
+  ]) {
+    expect(await session.run('edit', invalid)).toMatchObject({ ok: false });
+    expect(await session.run('current')).toEqual(original);
+  }
+  expect(await session.run('edit', request)).toMatchObject({
+    ok: true,
+    state: { dirty: true, project: { editing: { revision: 2 } } },
+  });
+  const moved = await session.run('current');
+  expect(await session.run('edit', request)).toMatchObject({
+    ok: false,
+    error: expect.stringContaining('revision conflict'),
+  });
+  expect(
+    await session.run('undo', { projectId: project.metadata.id }),
+  ).toMatchObject({ ok: false });
+  expect(await session.run('current')).toEqual(moved);
+  expect(await readProjectFile(path)).toEqual(project);
+  expect(
+    await session.run('edit', {
+      ...request,
+      expectedRevision: 2,
+      operations: [{ type: 'clip.split', id: 'c1', at: 60 }],
+    }),
+  ).toMatchObject({ ok: true });
+  expect(await session.run('save')).toMatchObject({
+    ok: true,
+    state: { dirty: false },
+  });
+  const saved = await readProjectFile(path);
+  expect(projectRevision(saved)).toBe(3);
+  expect(getEditHistory(saved).undo).toHaveLength(3);
+  expect(saved.clips).toHaveLength(2);
+  expect(saved.clips[0]!.timelineStart).toEqual(
+    frameTime(30, saved.settings.frameRate),
+  );
+  await session.run('close');
+  await session.run('open');
+  const historyRequest = {
+    projectId: project.metadata.id,
+    expectedRevision: 3,
+  };
+  expect(await session.run('undo', historyRequest)).toMatchObject({
+    ok: true,
+    state: {
+      project: {
+        clips: [expect.objectContaining({ id: 'c1' })],
+        editing: { revision: 4 },
+      },
+    },
+  });
+  expect(
+    await session.run('redo', { ...historyRequest, expectedRevision: 4 }),
+  ).toMatchObject({
+    ok: true,
+    state: { project: { editing: { revision: 5 } } },
+  });
+  expect(await session.run('save')).toMatchObject({ ok: true });
+  expect((await readProjectFile(path)).clips).toEqual(saved.clips);
+  // An unsaved GUI edit still cannot overwrite an external edit at the saved revision.
+  expect(
+    await session.run('edit', {
+      ...request,
+      expectedRevision: 5,
+      operations: [{ type: 'clip.remove', id: 'c1' }],
+    }),
+  ).toMatchObject({ ok: true });
+  const external = await readProjectFile(path);
+  external.metadata.name = 'External';
+  await writeFile(path, serializeProject(external));
+  expect(await session.run('save')).toMatchObject({
+    ok: false,
+    error: expect.stringContaining('changed on disk'),
+  });
+  expect((await readProjectFile(path)).metadata.name).toBe('External');
+  expect(await session.run('current')).toMatchObject({
+    state: { dirty: true, project: { editing: { revision: 6 } } },
+  });
+});
+
+it('refreshes available and missing media when undo/redo restores CLI removals', async () => {
+  const { session, dialogs } = setup();
+  const path = join(directory, 'media-history.json');
+  const project = createProject(input);
+  project.assets = ['available', 'missing'].map((id) => ({
+    id,
+    name: id,
+    mediaTypes: ['video'],
+    file: { type: 'relative', path: `${id}.mp4` },
+  }));
+  await writeFile(
+    join(directory, 'available.mp4'),
+    'Synthetic readable source',
+  );
+  await writeProjectFile(project, path);
+  await removeMediaAsset(path, 'available');
+  await removeMediaAsset(path, 'missing');
+  dialogs.open.mockResolvedValue(path);
+  expect(await session.run('open')).toMatchObject({
+    state: { media: [], project: { assets: [] } },
+  });
+  const request = { projectId: project.metadata.id };
+  expect(
+    await session.run('undo', { ...request, expectedRevision: 2 }),
+  ).toMatchObject({
+    ok: true,
+    state: {
+      project: { assets: [{ id: 'missing' }] },
+      media: [{ assetId: 'missing', status: 'missing' }],
+    },
+  });
+  expect(
+    await session.run('undo', { ...request, expectedRevision: 3 }),
+  ).toMatchObject({
+    ok: true,
+    state: {
+      media: [
+        { assetId: 'available', status: 'available' },
+        { assetId: 'missing', status: 'missing' },
+      ],
+    },
+  });
+  expect(
+    await session.run('redo', { ...request, expectedRevision: 4 }),
+  ).toMatchObject({
+    ok: true,
+    state: { media: [{ assetId: 'missing', status: 'missing' }] },
+  });
+  expect(
+    await session.run('redo', { ...request, expectedRevision: 5 }),
+  ).toMatchObject({
+    ok: true,
+    state: { project: { assets: [] }, media: [] },
+  });
+});
+
+it('refreshes changed source references but retains availability snapshots for clip-only edits', async () => {
+  const { session, dialogs } = setup();
+  const path = join(directory, 'reference-history.json');
+  const original = createProject(input);
+  original.assets = [
+    {
+      id: 'asset',
+      name: 'Video',
+      mediaTypes: ['video'],
+      file: { type: 'relative', path: 'available.mp4' },
+    },
+  ];
+  original.tracks = [{ id: 'v1', name: 'Video', type: 'video' }];
+  original.clips = [
+    {
+      id: 'c1',
+      assetId: 'asset',
+      trackId: 'v1',
+      timelineStart: frameTime(0, input.settings.frameRate),
+      sourceIn: frameTime(0, input.settings.frameRate),
+      sourceOut: frameTime(30, input.settings.frameRate),
+    },
+  ];
+  const changed = commitEdit(
+    original,
+    {
+      ...original,
+      assets: [
+        {
+          ...original.assets[0]!,
+          file: { type: 'relative', path: 'missing.mp4' },
+        },
+      ],
+    },
+    'Change reference',
+  );
+  await writeFile(
+    join(directory, 'available.mp4'),
+    'Synthetic readable source',
+  );
+  await writeProjectFile(changed, path);
+  dialogs.open.mockResolvedValue(path);
+  expect(await session.run('open')).toMatchObject({
+    state: { media: [{ status: 'missing' }] },
+  });
+  const request = { projectId: original.metadata.id };
+  expect(
+    await session.run('undo', { ...request, expectedRevision: 1 }),
+  ).toMatchObject({
+    ok: true,
+    state: {
+      media: [{ path: join(directory, 'available.mp4'), status: 'available' }],
+    },
+  });
+  expect(
+    await session.run('redo', { ...request, expectedRevision: 2 }),
+  ).toMatchObject({
+    ok: true,
+    state: {
+      media: [{ path: join(directory, 'missing.mp4'), status: 'missing' }],
+    },
+  });
+  await session.run('undo', { ...request, expectedRevision: 3 });
+  await rm(join(directory, 'available.mp4'));
+  expect(
+    await session.run('edit', {
+      ...request,
+      expectedRevision: 4,
+      label: 'Move',
+      operations: [{ type: 'clip.move', id: 'c1', at: 30 }],
+    }),
+  ).toMatchObject({
+    ok: true,
+    state: { media: [{ status: 'available' }] },
+  });
+  expect(
+    await session.run('undo', { ...request, expectedRevision: 5 }),
+  ).toMatchObject({
+    ok: true,
+    state: { media: [{ status: 'available' }] },
+  });
+});
+
+it('retains the accepted session if a history-triggered media refresh fails', async () => {
+  const { session, dialogs } = setup();
+  const path = join(directory, 'refresh-failure.json');
+  const project = createProject(input);
+  project.assets = [
+    {
+      id: 'asset',
+      name: 'Video',
+      mediaTypes: ['video'],
+      file: { type: 'relative', path: 'missing.mp4' },
+    },
+  ];
+  await writeProjectFile(project, path);
+  await removeMediaAsset(path, 'asset');
+  dialogs.open.mockResolvedValue(path);
+  await session.run('open');
+  const before = await session.run('current');
+  const refresh = vi
+    .spyOn(projectFiles, 'checkProjectMedia')
+    .mockRejectedValueOnce(new Error('Synthetic availability failure'));
+  try {
+    expect(
+      await session.run('undo', {
+        projectId: project.metadata.id,
+        expectedRevision: 1,
+      }),
+    ).toMatchObject({ ok: false, error: 'Synthetic availability failure' });
+    expect(await session.run('current')).toEqual(before);
+  } finally {
+    refresh.mockRestore();
+  }
+  expect(
+    await session.run('undo', {
+      projectId: project.metadata.id,
+      expectedRevision: 1,
+    }),
+  ).toMatchObject({
+    ok: true,
+    state: { media: [{ assetId: 'asset', status: 'missing' }] },
   });
 });

@@ -41,6 +41,19 @@ Extend prerelease schema version 1 with optional `editing` rather than introduci
 a migration framework. Its absence means revision 0 and empty history. Files
 without it retain their previous representation until the first changed edit.
 
+## T18 desktop integration
+
+Desktop gestures preview the same core commands against cached, validated project
+content without history. Commit still checks the authoritative revision and full
+history. This keeps preview cost independent of the number of stored snapshots
+without weakening commit validation.
+
+A desktop session can accumulate several completed transactions before Save.
+Persist them with `history: 'preserve'`, retaining each undo step and guarding
+against the revision and serialized content last read from disk. Saving does not
+add another history entry. See the [persistence contract](../PROJECT_FORMAT.md#transactions-and-history-api)
+for the distinction from single-transaction `history: 'restore'`.
+
 ## Consequences and alternatives
 
 - Full snapshots favor reliable restoration over storage efficiency. History is
@@ -54,7 +67,6 @@ without it retain their previous representation until the first changed edit.
 - Older strict binaries reject the optional `editing` field. Use a T09-capable
   reader for projects containing history. No silent upgrade or downgrade occurs.
 - Source media stays unchanged; undo/redo restores references and metadata only.
-  Project rendering and desktop project integration remain deferred.
 
 The [CLI contract](../CLI.md#transactions-undo-and-redo) defines batch operations,
 results and exit codes. The [core API contract](../PROJECT_FORMAT.md#transactions-and-history-api)

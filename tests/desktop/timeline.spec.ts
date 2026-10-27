@@ -109,9 +109,11 @@ test('CLI-created tracks, gaps, cross-track overlaps, ruler, zoom anchor and per
         exact: true,
       });
     const rect = async (n: number) => ({
-      x: Number(await clip(n).locator(':scope > rect').getAttribute('x')),
+      x: Number(
+        await clip(n).locator(':scope > rect').first().getAttribute('x'),
+      ),
       width: Number(
-        await clip(n).locator(':scope > rect').getAttribute('width'),
+        await clip(n).locator(':scope > rect').first().getAttribute('width'),
       ),
     });
     expect((await rect(0)).width).toBeCloseTo(120.12, 3);

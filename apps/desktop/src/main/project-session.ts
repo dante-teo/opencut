@@ -2,6 +2,11 @@ import {
   createProject,
   serializeProject,
   projectRevision,
+  parseEditTransaction,
+  checkProjectRevision,
+  executeTransaction,
+  undoEdit,
+  redoEdit,
 } from '@opencut/core';
 import {
   canonicalProjectFilePath,
@@ -23,13 +28,15 @@ export interface ProjectDialogs {
   save(): Promise<string | null>;
   unsaved(): Promise<'save' | 'discard' | 'cancel'>;
 }
-export type ProjectAction = 'current' | 'create' | 'open' | 'save' | 'close';
+export type ProjectAction =
+  'current' | 'create' | 'open' | 'save' | 'close' | 'edit' | 'undo' | 'redo';
 
 /** Main-process session. React never submits a path or a replacement document. */
 export class ProjectSession {
   private state: DesktopProject | null = null;
   private baseline: string | null = null;
   private busy = false;
+  private savedRevision = 0;
 
   constructor(private readonly dialogs: ProjectDialogs) {}
 
@@ -112,6 +119,64 @@ export class ProjectSession {
           }
           this.state = { project, path, dirty: false, media };
           this.baseline = serializeProject(project);
+          this.savedRevision = projectRevision(project);
+          break;
+        }
+        case 'edit':
+        case 'undo':
+        case 'redo': {
+          if (!this.state) throw new Error('Open a project before editing.');
+          const allowed =
+            action === 'edit'
+              ? ['projectId', 'expectedRevision', 'label', 'operations']
+              : ['projectId', 'expectedRevision'];
+          if (
+            !input ||
+            typeof input !== 'object' ||
+            Array.isArray(input) ||
+            Object.keys(input).some((key) => !allowed.includes(key))
+          )
+            throw new Error('Invalid editing request.');
+          const { projectId, ...command } = input as Record<string, unknown>;
+          if (projectId !== this.state.project.metadata.id)
+            throw new Error('Project changed. Retry in the current project.');
+          const before = this.state.project;
+          if (typeof command.expectedRevision !== 'number')
+            throw new Error('Expected a project revision.');
+          checkProjectRevision(before, command.expectedRevision);
+          let project;
+          if (action === 'edit') {
+            const transaction = parseEditTransaction(command);
+            if (
+              transaction.operations.some(
+                (operation) =>
+                  ![
+                    'clip.move',
+                    'clip.trim',
+                    'clip.split',
+                    'clip.remove',
+                  ].includes(operation.type),
+              )
+            )
+              throw new Error('Only timeline clip editing is available.');
+            project = executeTransaction(before, transaction).project;
+          } else {
+            project =
+              action === 'undo'
+                ? undoEdit(before, command.expectedRevision)
+                : redoEdit(before, command.expectedRevision);
+          }
+          const media =
+            this.state.path &&
+            JSON.stringify(before.assets) !== JSON.stringify(project.assets)
+              ? await checkProjectMedia(project, this.state.path)
+              : this.state.media;
+          this.state = {
+            ...this.state,
+            project,
+            media,
+            dirty: serializeProject(project) !== this.baseline,
+          };
           break;
         }
         case 'save':
@@ -157,7 +222,7 @@ export class ProjectSession {
             );
           return { project: state.project, result: undefined };
         },
-        { expectedRevision: projectRevision(state.project) },
+        { expectedRevision: this.savedRevision, history: 'preserve' },
       );
     } else {
       const selected = await this.dialogs.save();
@@ -168,6 +233,7 @@ export class ProjectSession {
     }
     state.dirty = false;
     this.baseline = serializeProject(state.project);
+    this.savedRevision = projectRevision(state.project);
     return true;
   }
 }
