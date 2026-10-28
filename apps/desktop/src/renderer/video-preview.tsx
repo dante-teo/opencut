@@ -1,9 +1,11 @@
 import {
   useEffect,
+  useImperativeHandle,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type Ref,
 } from 'react';
 import type { FrameRate } from '@opencut/core';
 import type { PreviewSource } from '../bridge.js';
@@ -17,6 +19,11 @@ import {
   type PreviewBenchmark,
 } from './preview.js';
 
+export interface PreviewTransport {
+  toggle(): void;
+  step(direction: -1 | 1): void;
+}
+
 /** Source-local transport. Position props/callbacks are transient, in seconds. */
 export function VideoPreview({
   source,
@@ -27,6 +34,7 @@ export function VideoPreview({
   positionRequestKey = 0,
   onPositionChange,
   onBusyChange,
+  transportRef,
 }: {
   source: PreviewSource;
   opening?: boolean;
@@ -36,6 +44,7 @@ export function VideoPreview({
   positionRequestKey?: number;
   onPositionChange?: ((seconds: number) => void) | undefined;
   onBusyChange?: (busy: boolean) => void;
+  transportRef?: Ref<PreviewTransport> | undefined;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
   const latestPresented = useRef<number | null>(null);
@@ -268,6 +277,15 @@ export function VideoPreview({
     if (video.paused) await video.play();
     else video.pause();
   };
+  useImperativeHandle(transportRef, () => ({
+    toggle() {
+      if (!transportDisabled) void perform(toggle);
+    },
+    step(direction) {
+      if (!transportDisabled && fps)
+        void perform((video) => step(video, direction));
+    },
+  }));
   function keyboard(event: ReactKeyboardEvent<HTMLDivElement>) {
     const target = event.target as HTMLElement;
     if (
@@ -275,6 +293,7 @@ export function VideoPreview({
       event.ctrlKey ||
       event.metaKey ||
       event.repeat ||
+      event.nativeEvent.isComposing ||
       target.closest(
         'input, button, select, textarea, [contenteditable="true"]',
       )
@@ -505,12 +524,24 @@ export function VideoPreview({
 function SimpleSourcePreview({
   source,
   active,
+  transportRef,
 }: {
   source: PreviewSource;
   active: boolean;
+  transportRef?: Ref<PreviewTransport> | undefined;
 }) {
   const audio = useRef<HTMLAudioElement>(null);
   const [error, setError] = useState('');
+  useImperativeHandle(transportRef, () => ({
+    toggle() {
+      const player = audio.current;
+      if (!active || !player) return;
+      if (player.paused)
+        void player.play().catch((error: unknown) => setError(String(error)));
+      else player.pause();
+    },
+    step() {},
+  }));
   useEffect(() => {
     if (!active) audio.current?.pause();
   }, [active]);
@@ -562,6 +593,7 @@ export function Preview({
   positionRequestKey = 0,
   onPositionChange,
   onOpenLocal,
+  transportRef,
 }: {
   assetId?: string | null;
   requestKey?: number;
@@ -571,6 +603,7 @@ export function Preview({
   positionRequestKey?: number;
   onPositionChange?: ((seconds: number) => void) | undefined;
   onOpenLocal?: () => void;
+  transportRef?: Ref<PreviewTransport> | undefined;
 }) {
   const [source, setSource] = useState<PreviewSource | null>(null);
   const [opening, setOpening] = useState(false);
@@ -635,12 +668,14 @@ export function Preview({
       {source &&
         (source.kind === 'image' || source.kind === 'audio' ? (
           <SimpleSourcePreview
+            transportRef={transportRef}
             key={source.url}
             source={source}
             active={active}
           />
         ) : (
           <VideoPreview
+            transportRef={transportRef}
             key={source.url}
             source={source}
             opening={opening}

@@ -538,6 +538,30 @@ including diagnostics from tools that exit successfully. The expected metadata,
 tolerances and regeneration rules live in the [fixture contract](../tests/fixtures/README.md).
 Fixture validation is independent of the application media APIs.
 
+T20 extends the existing strictly parsed clip-edit IPC allowlist with `clip.audio`
+and `clip.visual`; React sends only core operations with project identity/revision.
+Numeric timing uses exact project-frame counts and hides editable fields for
+off-grid/unrepresentable values rather than rounding them. Field drafts remain
+local until Enter/blur; unrelated commits preserve field drafts, while changes to
+a field's accepted value synchronize it. Range adjustments commit once on
+pointer/key release.
+The existing T09 core validates and records each accepted adjustment. A renderer
+operation queue orders a property's blur commit before a clicked Save/history
+action. Edits, history and media imports resolve revisions from the latest accepted
+session when their queued operation executes. Imports retain the requesting
+project's identity so a project replacement cannot redirect the request into
+another project. Selection IDs survive temporary absence during history so
+restored clips become selected again.
+
+Workspace shortcut mapping chooses Command on macOS and Control elsewhere and
+excludes native editing/control keys, composition, repeats and already handled
+events. Existing player and timeline handlers retain their scoped keys. A small
+transport ref reuses the active source player's serialized playback/seeking path;
+it adds no timeline playback or effects engine. Clip transforms/audio remain
+export properties, explicitly identified as unavailable in live project preview.
+Native numeric/range inputs and React suffice here without a dependency or second
+editing/history model.
+
 ## Open decisions for subsequent tasks
 
 - Validate FFmpeg/MLT capabilities, licensing, distribution and process isolation.

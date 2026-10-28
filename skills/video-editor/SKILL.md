@@ -116,6 +116,28 @@ Select an unused asset, then **Remove asset**; referenced assets are protected.
 Save/reopen and use CLI `media list` / `timeline list` to inspect saved GUI edits.
 No waveforms, advanced organization, transitions or rendering controls are added.
 
+T20 adds contextual clip properties in the inspector. Timing uses whole project
+frames (timeline position, duration, source in/out); audio uses linear volume 0–1
+and mute; video transforms use pixel X/Y, scale 0.01–4 and opacity 0–1. Enter or
+leave a field to apply, Escape discards a numeric draft, and sliders apply once
+on release. Core constraints reject invalid edits atomically. Off-grid or unsafe
+timing remains read-only rather than being rounded. Metadata remains read-only.
+An unrelated edit finishing does not discard another field's draft; a change to
+that field's stored value, including undo/redo, synchronizes it. Picker imports
+and file drops queued behind property edits use the resulting revision and retain
+their own undo step.
+Property edits share T09 history with imports and timeline gestures. Undo restores
+a deleted clip's selection; Save/reopen retains properties and history. Use CLI
+`timeline list` to inspect the saved result. Clip audio/transforms apply to CLI
+exports; source preview plays original media and live project preview is unavailable.
+
+Workspace shortcuts outside typing/native controls: Space toggles the active
+source; Command+S saves; Command+Z / Command+Shift+Z undo/redo; S splits the
+selection at the playhead; Delete/Backspace deletes it. Control replaces Command
+on Windows/Linux. Left/Right step the active video source or the Project viewer's
+playhead. Focused clips/handles retain arrow-key move/trim; form controls retain
+native keys. Existing player-local K, comma/period and Home/End remain available.
+
 T05 adds a versioned project data model, exact rational time, JSON save/load,
 validation and media availability checks as headless core APIs. See
 [the project format](../../docs/PROJECT_FORMAT.md) when using those APIs directly.

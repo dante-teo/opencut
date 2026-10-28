@@ -7,23 +7,37 @@ import type {
   TimelineOperation,
 } from '../bridge.js';
 import { Preview } from './video-preview.js';
-import { projectRevision, type RationalTime } from '@opencut/core';
+import {
+  clipTimelineEnd,
+  compareTimes,
+  projectRevision,
+  type RationalTime,
+} from '@opencut/core';
 import {
   sourceToTimeline,
   timelineToSource,
   ZERO,
+  frameIndex,
+  framePosition,
+  clampTime,
 } from './timeline-geometry.js';
 import { ProjectTimeline } from './project-timeline.js';
 import { MediaLibrary } from './media-library.js';
 import { ProjectInspector } from './project-inspector.js';
+import { shortcutAction, shortcutOwnsKeys } from './shortcuts.js';
+import type { PreviewTransport } from './video-preview.js';
 
 export function ProjectWorkspace() {
   const [state, setState] = useState<DesktopProject | null>(null);
   const [busy, setBusy] = useState('Loading project…');
+  const [propertyBusy, setPropertyBusy] = useState(false);
+  const blocking = !!busy && !propertyBusy;
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [creating, setCreating] = useState(false);
-  const pending = useRef(false);
+  const operationTail = useRef(Promise.resolve());
+  const stateRef = useRef(state);
+  const transport = useRef<PreviewTransport | null>(null);
   const formDialog = useRef<HTMLDialogElement>(null);
   const [viewer, setViewer] = useState<'project' | 'source'>('project');
   const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
@@ -59,14 +73,24 @@ export function ProjectWorkspace() {
     id: string;
   } | null>(null);
 
-  async function run(
+  function run(
     label: string,
     operation: () => Promise<ProjectReply>,
-    editing = false,
+    editing: boolean | 'properties' = false,
   ) {
-    if (pending.current) return;
-    pending.current = true;
+    const next = operationTail.current.then(() =>
+      perform(label, operation, editing),
+    );
+    operationTail.current = next;
+    return next;
+  }
+  async function perform(
+    label: string,
+    operation: () => Promise<ProjectReply>,
+    editing: boolean | 'properties' = false,
+  ) {
     setBusy(label);
+    setPropertyBusy(editing === 'properties');
     setError('');
     setNotice('');
     try {
@@ -74,6 +98,7 @@ export function ProjectWorkspace() {
       if (!reply.ok) setError(reply.error);
       else {
         setState(reply.state);
+        stateRef.current = reply.state;
         if (!reply.canceled) {
           setCreating(false);
           if (label !== 'Saving project…' && !editing) {
@@ -86,13 +111,7 @@ export function ProjectWorkspace() {
           }
           if (editing) {
             const next = reply.state?.project;
-            if (
-              selection &&
-              !(selection.kind === 'clip' ? next?.clips : next?.assets)?.some(
-                (entry) => entry.id === selection.id,
-              )
-            )
-              setSelection(null);
+            // Retain the selection ID while absent so undo restores selection too.
             if (
               previewAssetId &&
               !next?.assets.some((asset) => asset.id === previewAssetId)
@@ -115,8 +134,8 @@ export function ProjectWorkspace() {
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
     } finally {
-      pending.current = false;
       setBusy('');
+      setPropertyBusy(false);
     }
   }
 
@@ -156,71 +175,124 @@ export function ProjectWorkspace() {
   const project = state?.project;
   function importMedia(files?: File[]) {
     if (!project) return;
-    const input = {
-      projectId: project.metadata.id,
-      expectedRevision: projectRevision(project),
-    };
     void run(
       'Importing media…',
-      () =>
-        files
+      () => {
+        const input = {
+          projectId: project.metadata.id,
+          expectedRevision: projectRevision(stateRef.current!.project),
+        };
+        return files
           ? window.opencut.importDroppedMedia(input, files)
-          : window.opencut.importMedia(input),
+          : window.opencut.importMedia(input);
+      },
       true,
     );
   }
-  function edit(operations: TimelineOperation[], label: string) {
+  function edit(
+    operations: TimelineOperation[],
+    label: string,
+    properties = false,
+  ) {
     if (!project) return Promise.resolve();
+    let rejected = true;
     return run(
       label,
-      () =>
-        window.opencut.editTimeline({
+      async () => {
+        const reply = await window.opencut.editTimeline({
           projectId: project.metadata.id,
-          expectedRevision: projectRevision(project),
+          expectedRevision: projectRevision(stateRef.current!.project),
           operations,
           label,
-        }),
-      true,
-    );
+        });
+        rejected = !reply.ok;
+        return reply;
+      },
+      properties ? 'properties' : true,
+    ).then(() => {
+      if (properties && rejected) throw new Error('Property edit rejected.');
+    });
   }
   function history(direction: 'undo' | 'redo') {
     if (!project) return;
-    const input = {
-      projectId: project.metadata.id,
-      expectedRevision: projectRevision(project),
-    };
     void run(
       direction === 'undo' ? 'Undoing edit…' : 'Redoing edit…',
-      () =>
-        direction === 'undo'
+      () => {
+        const input = {
+          projectId: project.metadata.id,
+          expectedRevision: projectRevision(stateRef.current!.project),
+        };
+        return direction === 'undo'
           ? window.opencut.undoProject(input)
-          : window.opencut.redoProject(input),
+          : window.opencut.redoProject(input);
+      },
       true,
     );
   }
   useEffect(() => {
     function shortcut(event: KeyboardEvent) {
       if (
-        !(event.metaKey || event.ctrlKey) ||
-        event.altKey ||
-        event.key.toLowerCase() !== 'z'
+        event.defaultPrevented ||
+        creating ||
+        shortcutOwnsKeys(event.target, event.key)
       )
         return;
-      const target = event.target;
-      if (
-        (target instanceof Element &&
-          target.closest(
-            'input, select, textarea, [contenteditable="true"]',
-          )) ||
-        creating
-      )
-        return;
+      const action = shortcutAction(event);
+      if (!action) return;
       event.preventDefault();
-      if (!busy) history(event.shiftKey ? 'redo' : 'undo');
+      if (busy && action !== 'save' && action !== 'undo' && action !== 'redo')
+        return;
+      if (action === 'undo' || action === 'redo') {
+        if (project?.editing?.[action].length) history(action);
+      } else if (action === 'save' && project)
+        void run('Saving project…', () => window.opencut.saveProject());
+      else if (action === 'play') {
+        if (viewer === 'source') transport.current?.toggle();
+      } else if (action === 'previousFrame' || action === 'nextFrame') {
+        const direction = action === 'previousFrame' ? -1 : 1;
+        if (viewer === 'source') transport.current?.step(direction);
+        else if (project) {
+          const frame = frameIndex(playhead, project.settings.frameRate);
+          const next =
+            direction < 0 ? (frame > 0n ? frame - 1n : 0n) : frame + 1n;
+          const end = project.clips.reduce(
+            (end, clip) =>
+              compareTimes(clipTimelineEnd(clip), end) > 0
+                ? clipTimelineEnd(clip)
+                : end,
+            ZERO,
+          );
+          seekTimeline(
+            clampTime(framePosition(next, project.settings.frameRate), end),
+          );
+        }
+      } else if (selection?.kind === 'clip' && project) {
+        const clip = project.clips.find((clip) => clip.id === selection.id);
+        if (!clip) return;
+        if (action === 'delete')
+          void edit([{ type: 'clip.remove', id: clip.id }], 'Delete clip');
+        else if (
+          action === 'split' &&
+          compareTimes(playhead, clip.timelineStart) > 0 &&
+          compareTimes(playhead, clipTimelineEnd(clip)) < 0
+        )
+          void edit(
+            [
+              {
+                type: 'clip.split',
+                id: clip.id,
+                at: Number(
+                  frameIndex(playhead, project.settings.frameRate, true),
+                ),
+              },
+            ],
+            'Split clip',
+          );
+      }
     }
     window.addEventListener('keydown', shortcut);
     return () => window.removeEventListener('keydown', shortcut);
-  }, [project, busy, creating]);
+  }, [project, busy, creating, selection, viewer, playhead, linkedClip]);
   return (
     <div
       className="workspace"
@@ -240,22 +312,22 @@ export function ProjectWorkspace() {
         </div>
         <div className="project-actions">
           <button
-            disabled={!!busy || !project?.editing?.undo.length}
+            disabled={blocking || !project?.editing?.undo.length}
             onClick={() => history('undo')}
           >
             <Undo2 aria-hidden="true" focusable="false" /> Undo
           </button>
           <button
-            disabled={!!busy || !project?.editing?.redo.length}
+            disabled={blocking || !project?.editing?.redo.length}
             onClick={() => history('redo')}
           >
             <Redo2 aria-hidden="true" focusable="false" /> Redo
           </button>
-          <button disabled={!!busy} onClick={() => setCreating(true)}>
+          <button disabled={blocking} onClick={() => setCreating(true)}>
             <Plus aria-hidden="true" focusable="false" /> New project
           </button>
           <button
-            disabled={!!busy}
+            disabled={blocking}
             onClick={() =>
               void run('Opening project…', () => window.opencut.openProject())
             }
@@ -264,7 +336,7 @@ export function ProjectWorkspace() {
           </button>
           <button
             className="primary-button"
-            disabled={!!busy || !project}
+            disabled={blocking || !project}
             onClick={() =>
               void run('Saving project…', () => window.opencut.saveProject())
             }
@@ -272,7 +344,7 @@ export function ProjectWorkspace() {
             <Save aria-hidden="true" focusable="false" /> Save project
           </button>
           <button
-            disabled={!!busy || !project}
+            disabled={blocking || !project}
             onClick={() =>
               void run('Closing project…', () => window.opencut.closeProject())
             }
@@ -292,7 +364,7 @@ export function ProjectWorkspace() {
         <MediaLibrary
           key={project?.metadata.id ?? 'empty'}
           state={state}
-          busy={!!busy}
+          busy={blocking}
           selection={selection}
           revision={project ? projectRevision(project) : 0}
           onImport={() => importMedia()}
@@ -395,6 +467,7 @@ export function ProjectWorkspace() {
             ref={sourceViewer}
           >
             <Preview
+              transportRef={transport}
               key={previewSession}
               assetId={previewAssetId}
               requestKey={previewRequest}
@@ -422,6 +495,8 @@ export function ProjectWorkspace() {
         <ProjectInspector
           state={state}
           selection={selection}
+          disabled={blocking}
+          onEdit={(operations, label) => edit(operations, label, true)}
           onClear={() => setSelection(null)}
         />
       </div>

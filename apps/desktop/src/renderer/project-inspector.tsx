@@ -1,16 +1,21 @@
 import { SlidersHorizontal } from 'lucide-react';
 import { CanvasArtwork } from './studio-graphics.js';
-import type { DesktopProject } from '../bridge.js';
+import type { DesktopProject, TimelineOperation } from '../bridge.js';
 import { exactTime } from './project-timeline.js';
+import { ClipProperties } from './clip-properties.js';
 
 export function ProjectInspector({
   state,
   selection,
   onClear,
+  disabled,
+  onEdit,
 }: {
   state: DesktopProject | null;
   selection: { kind: 'asset' | 'clip'; id: string } | null;
   onClear: () => void;
+  disabled: boolean;
+  onEdit: (operations: TimelineOperation[], label: string) => Promise<void>;
 }) {
   const project = state?.project;
   const clip =
@@ -18,15 +23,12 @@ export function ProjectInspector({
       ? project?.clips.find((clip) => clip.id === selection.id)
       : undefined;
   const asset = project?.assets.find(
-    (asset) => asset.id === (clip?.assetId ?? selection?.id),
+    (asset) =>
+      asset.id === (selection?.kind === 'asset' ? selection.id : clip?.assetId),
   );
   const availability = state?.media.find((item) => item.assetId === asset?.id);
   return (
-    <aside
-      className="inspector-panel"
-      aria-label="Inspector"
-      title="Read-only properties"
-    >
+    <aside className="inspector-panel" aria-label="Inspector">
       <div className="panel-heading">
         <h2>
           <SlidersHorizontal aria-hidden="true" focusable="false" /> Inspector
@@ -41,6 +43,13 @@ export function ProjectInspector({
             {clip && (
               <>
                 <h3>Clip details</h3>
+                <ClipProperties
+                  key={`${project!.metadata.id}:${clip.id}`}
+                  project={project!}
+                  clip={clip}
+                  disabled={disabled}
+                  onEdit={onEdit}
+                />
                 <dl>
                   <dt>Clip ID</dt>
                   <dd>{clip.id}</dd>
@@ -57,18 +66,6 @@ export function ProjectInspector({
                   <dd>
                     {exactTime(clip.sourceIn)} → {exactTime(clip.sourceOut)}
                   </dd>
-                  <dt>Volume</dt>
-                  <dd>{clip.volume ?? 1}</dd>
-                  <dt>Muted</dt>
-                  <dd>{clip.muted ? 'Yes' : 'No'}</dd>
-                  {clip.visual && (
-                    <>
-                      <dt>Visual settings</dt>
-                      <dd>
-                        <pre>{JSON.stringify(clip.visual, null, 2)}</pre>
-                      </dd>
-                    </>
-                  )}
                 </dl>
               </>
             )}

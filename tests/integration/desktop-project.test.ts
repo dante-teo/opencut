@@ -431,6 +431,116 @@ it('commits GUI transactions once, rejects stale/malformed edits, and saves mult
   });
 });
 
+it('validates clip properties atomically, shares timeline history and preserves them on save/reopen', async () => {
+  const { session, dialogs } = setup();
+  const path = join(directory, 'properties.json');
+  const project = createProject(input);
+  project.assets = [
+    {
+      id: 'asset',
+      name: 'Offline',
+      mediaTypes: ['video'],
+      file: { type: 'relative', path: 'missing.mp4' },
+      duration: frameTime(300, input.settings.frameRate),
+    },
+  ];
+  project.tracks = [{ id: 'v1', name: 'Video', type: 'video' }];
+  project.clips = [
+    {
+      id: 'c1',
+      assetId: 'asset',
+      trackId: 'v1',
+      timelineStart: frameTime(0, input.settings.frameRate),
+      sourceIn: frameTime(0, input.settings.frameRate),
+      sourceOut: frameTime(90, input.settings.frameRate),
+    },
+  ];
+  await writeProjectFile(project, path);
+  dialogs.open.mockResolvedValue(path);
+  await session.run('open');
+  const request = { projectId: project.metadata.id, expectedRevision: 0 };
+  const before = await session.run('current');
+  for (const operations of [
+    [{ type: 'clip.audio', id: 'c1', volume: 1.01 }],
+    [{ type: 'clip.audio', id: 'c1', muted: 'yes' }],
+    [{ type: 'clip.visual', id: 'c1', scale: 0 }],
+    [{ type: 'clip.visual', id: 'c1', opacity: Number.NaN }],
+    [{ type: 'clip.visual', id: 'c1', x: Number.POSITIVE_INFINITY }],
+    [{ type: 'clip.trim', id: 'c1', out: 301 }],
+    [{ type: 'clip.trim', id: 'c1', in: 90 }],
+    [
+      { type: 'clip.audio', id: 'c1', volume: 0.5 },
+      { type: 'clip.visual', id: 'c1', opacity: -1 },
+    ],
+  ]) {
+    expect(await session.run('edit', { ...request, operations })).toMatchObject(
+      { ok: false },
+    );
+    expect(await session.run('current')).toEqual(before);
+  }
+  expect(
+    await session.run('edit', {
+      ...request,
+      operations: [
+        { type: 'clip.move', id: 'c1', at: 30 },
+        { type: 'clip.trim', id: 'c1', in: 15, out: 75 },
+        { type: 'clip.audio', id: 'c1', volume: 0.4, muted: true },
+        {
+          type: 'clip.visual',
+          id: 'c1',
+          x: -12.5,
+          y: 24,
+          scale: 1.5,
+          opacity: 0.6,
+        },
+      ],
+    }),
+  ).toMatchObject({
+    ok: true,
+    state: {
+      dirty: true,
+      project: { editing: { revision: 1, undo: [expect.anything()] } },
+    },
+  });
+  expect(
+    await session.run('undo', { ...request, expectedRevision: 1 }),
+  ).toMatchObject({ ok: true, state: { project: { clips: project.clips } } });
+  expect(
+    await session.run('redo', { ...request, expectedRevision: 2 }),
+  ).toMatchObject({
+    ok: true,
+    state: {
+      project: {
+        clips: [
+          expect.objectContaining({
+            volume: 0.4,
+            muted: true,
+            visual: { x: -12.5, y: 24, scale: 1.5, opacity: 0.6 },
+          }),
+        ],
+      },
+    },
+  });
+  await session.run('save');
+  const saved = await readProjectFile(path);
+  expect(saved.clips[0]).toMatchObject({
+    timelineStart: frameTime(30, input.settings.frameRate),
+    sourceIn: frameTime(15, input.settings.frameRate),
+    sourceOut: frameTime(75, input.settings.frameRate),
+    volume: 0.4,
+    muted: true,
+    visual: { x: -12.5, y: 24, scale: 1.5, opacity: 0.6 },
+  });
+  await session.run('close');
+  expect(await session.run('open')).toMatchObject({
+    ok: true,
+    state: { dirty: false, project: { clips: saved.clips } },
+  });
+  expect(
+    await session.run('undo', { ...request, expectedRevision: 3 }),
+  ).toMatchObject({ ok: true, state: { project: { clips: project.clips } } });
+});
+
 it('refreshes available and missing media when undo/redo restores CLI removals', async () => {
   const { session, dialogs } = setup();
   const path = join(directory, 'media-history.json');

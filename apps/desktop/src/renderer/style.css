@@ -1120,6 +1120,53 @@ button {
 .inspector-content dd {
   font-variant-numeric: tabular-nums;
 }
+.clip-properties {
+  border: 0;
+  padding: 0;
+  margin: 0 0 20px;
+  min-width: 0;
+}
+.clip-properties legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.clip-property {
+  margin-bottom: 10px;
+}
+.clip-property label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 94px;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.clip-property input[type='number'] {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  font-variant-numeric: tabular-nums;
+}
+.clip-property input[type='range'] {
+  width: 100%;
+  margin: 8px 0 0;
+  accent-color: var(--accent);
+}
+.clip-mute {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+}
+.clip-property [role='alert'],
+.property-preview-note,
+.clip-properties p {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
 .timeline-heading {
   gap: 8px;
   padding: 10px 14px;

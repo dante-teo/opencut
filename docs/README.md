@@ -23,6 +23,29 @@ and explicit links to source preview.
 T18 adds shared-core timeline move, edge trim, split, delete, snapping and persistent undo/redo.
 T19 adds multi-file media import, Finder drops, library thumbnails, source selection,
 unused-asset removal and dragging assets onto the timeline.
+T20 adds contextual clip properties, frame-based numeric timing, audio and visual
+controls, workspace shortcuts and shared undo/redo selection restoration.
+
+Select a clip to edit **Timeline position**, **Duration**, **Source in/out** in
+whole project frames, **Volume** (linear 0–1), **Mute**, and video **Position X/Y**
+(pixels), **Scale** (0.01–4), and **Opacity** (0–1). Enter or leave a numeric field
+to apply; Escape discards its draft. Sliders apply on release as one undo entry.
+Typing in another field while an edit finishes preserves that field's draft.
+Changes to its stored value, including undo/redo, synchronize the field.
+Core validation rejects overlaps, invalid source ranges and invalid values without
+changing the project. Off-grid or unrepresentable timing remains visible as exact
+stored times but cannot be silently rounded through the numeric editor.
+Source preview plays original media: clip volume/mute and transforms persist for
+CLI export, while live project mixing/compositing remains unavailable.
+
+Outside text fields and native controls, **Space** toggles the active source,
+**Command+Z / Command+Shift+Z** undo/redo, **Command+S** saves, **S** splits at the
+playhead, and **Delete/Backspace** removes the selected clip. Windows/Linux use
+Control as the command modifier. Left/Right step the active video source, or the
+project playhead in Project viewer. Focused clips and edge handles retain their
+existing arrow-key move/trim behavior; controls retain their native keys.
+Undo/redo spans library imports, timeline gestures and properties, restores a
+deleted clip's selection when it returns, and remains available after save/reopen.
 
 ## Quick start (macOS)
 
@@ -74,6 +97,9 @@ from Finder into the media library. Import requires ffprobe on PATH; original
 files are referenced in place. Each batch is one undoable edit and commits only
 if every source succeeds. Existing file identities (including aliases) reuse the
 existing asset. Progress identifies the current file; errors preserve the session.
+Picker imports and file drops queued while a property edit is applying run after
+that edit, using the resulting project revision. The property change and import
+remain separate undo steps.
 Unsaved projects can import before their first save, using absolute references.
 Saving preserves those absolute references; it does not relocate the media or
 convert them to project-relative paths.
@@ -289,6 +315,12 @@ IPC rejection from another window. They exercise the production preload and main
 handlers with native dialog results stubbed; real native dialog interaction is a
 separate manual check. T19 regressions cover unsaved import/remove/undo/redo,
 readable and missing source availability, and dragging restored library assets.
+T20 regressions cover numeric properties and rejected values, slider history,
+keyboard focus, restored clip selection, and save/reopen against CLI inspection.
+They hold a real edit IPC request pending to verify that another field's draft
+survives its response and that queued picker/file-drop imports use the accepted
+revision with separate undo entries. These checks use explicit release events,
+not timing delays; the import cases require the generated video fixture and ffprobe.
 The audio regression additionally runs the development renderer with StrictMode
 replay and verifies playback, pausing when hidden, unloading on replacement, and
 reselection. It needs port 5173 free and cleans its Vite cache from an owned

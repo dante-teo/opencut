@@ -305,6 +305,8 @@ export class ProjectSession {
                     'clip.trim',
                     'clip.split',
                     'clip.remove',
+                    'clip.audio',
+                    'clip.visual',
                   ].includes(operation.type),
               )
             )

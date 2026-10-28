@@ -3,9 +3,9 @@
 OpenCut will be a lightweight, local desktop video editor for YouTubers,
 TikTok and Instagram creators, vloggers, and streamers. A clear conventional
 interface should make everyday editing accessible without code. The desktop now
-provides project management, a media library and a read-only timeline. Interactive
-timeline editing remains future work; single-source preview can link to an
-individual video clip.
+provides project management, a media library, timeline editing, clip properties
+and shared undo/redo. Single-source preview can link to an individual video clip;
+live project mixing/compositing remains unavailable.
 
 ## Two equally important workflows
 
@@ -22,7 +22,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 (probing, decoding, playback and encoding) are separate concerns. Detailed editing
 contracts and the playback/render backend require later technical validation.
 
-## Current scope: T17
+## Current scope: T20
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -155,11 +155,38 @@ stay viewport-sized; at extreme durations scrollbar navigation is correspondingl
 coarser. No waveforms, thumbnails, trimming, moving, splitting or rendering controls
 are introduced.
 
+T18 adds GUI timeline editing through the shared core: move clips, change
+compatible tracks, trim either edge, split, delete and snap to nearby boundaries.
+Pointer proposals remain transient; release commits one undoable transaction,
+while cancellation and invalid edits retain the accepted project. Toolbar and
+keyboard undo/redo use the persistent CLI/GUI history. Saving retains completed
+edits and history; successful edits pause and unlink source preview.
+
+T19 adds multi-file media import and Finder drops into the library, native
+thumbnails where available, video/audio/image source preview, and dragging assets
+onto compatible timeline tracks or new-track targets. Imports reference original
+files, deduplicate source identities and commit atomically as one history entry.
+Referenced assets cannot be removed. Import requires manually installed ffprobe;
+source media is never modified.
+
+T20 adds contextual clip properties: whole-project-frame timeline position,
+duration and source in/out; volume/mute; and video position, scale and opacity.
+Metadata remains read-only. Numeric fields apply on Enter/blur and sliders commit
+once on release, using the same core validation and history as timeline edits.
+Unrelated pending edits preserve drafts; changes to a field's accepted value
+synchronize it. Imports queued behind property edits use the resulting revision
+and remain separate undo steps. Workspace shortcuts cover active-source
+play/pause, save, undo/redo, split/delete and frame stepping while native controls
+retain their keys. Save/reopen preserves edited properties and history. Clip
+audio/transforms apply to CLI exports; source preview plays original media.
+See [desktop usage](README.md) for property ranges, shortcuts and preview limits.
+
 ## Excluded
 
-T17 does not implement transitions, audio effects,
-keyframes, fades, or desktop media import/timeline editing. No FFmpeg or
-MLT runtime is bundled; media commands require manually installed external tools.
+Through T20, live project playback/mixing/compositing and desktop render controls
+remain unavailable. Transitions, keyframes, fades and new audio/visual effects
+are outside this scope. No FFmpeg or MLT runtime is bundled; media commands require
+manually installed external tools.
 Fixture generation remains an optional development utility.
 
 The product is not an AI-native editor. An embedded assistant, LLM APIs and an
@@ -169,5 +196,5 @@ User media must never be silently changed or overwritten.
 
 macOS is the initial required platform. Package boundaries should stay portable;
 Windows/Linux support requires explicit validation later. No distribution,
-installer, updater, signing or notarization work is included in T15. Render jobs
+installer, updater, signing or notarization work is included through T20. Render jobs
 run in the invoking process, without a persistent queue, background service or database.

@@ -424,7 +424,12 @@ export function ProjectTimeline({
         }
         const target = event.target as Element;
         if (
-          target.closest('input, select, textarea') ||
+          event.defaultPrevented ||
+          event.repeat ||
+          event.nativeEvent.isComposing ||
+          target.closest(
+            'input, select, textarea, [contenteditable]:not([contenteditable="false"])',
+          ) ||
           disabled ||
           event.ctrlKey ||
           event.metaKey ||

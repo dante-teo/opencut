@@ -70,7 +70,13 @@ export interface HistoryInput {
 export type TimelineOperation = Extract<
   EditOperation,
   {
-    type: 'clip.move' | 'clip.trim' | 'clip.split' | 'clip.remove';
+    type:
+      | 'clip.move'
+      | 'clip.trim'
+      | 'clip.split'
+      | 'clip.remove'
+      | 'clip.audio'
+      | 'clip.visual';
   }
 >;
 export interface TimelineEditInput extends HistoryInput {

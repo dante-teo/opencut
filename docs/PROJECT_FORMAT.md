@@ -195,6 +195,12 @@ fields. Rendering uses frame-aligned audio boundaries, rounds absolute positions
 to 48 kHz samples, fills gaps with silence and ends at the longest clip across
 all tracks. Same-track overlap validation remains unchanged.
 
+T20 exposes these existing clip audio/visual fields and project-frame timing in
+the desktop inspector. It adds no schema fields or version changes. GUI property
+changes use the same transactions/history as CLI edits and persist with Save;
+source preview does not apply clip audio/visual settings. Numeric timing editors
+require exact, safely representable project-frame boundaries.
+
 ## Media references and portability
 
 `file` is `{ "type": "relative" | "absolute", "path": "..." }`.
