@@ -175,6 +175,8 @@ test('reproducible HTML video preview measurements', async () => {
         expect(report.playback.totalFrames).toBeGreaterThan(0);
         // Check reported frame PTS against the known CFR fixture clock, not currentTime.
         expect(report.seek.nominalFrameMismatches).toBe(0);
+        // The diagnostics popover covers the video; expose pixels before sampling.
+        await page.locator('.preview-details > summary').click();
         if (path.startsWith(owned)) {
           const stream = (
             metadata as {

@@ -573,3 +573,10 @@ editing/history model.
 - Choose distribution tooling and signing, then validate other operating systems.
 
 These are decisions to investigate, not APIs promised or implemented by T05.
+
+## T21 audit and performance boundary
+
+The [T21 architecture audit](T21_ARCHITECTURE_AUDIT.md) records the verified
+capability matrix, reproducible source/export benchmarks, explicit fallback
+behavior and recommended T22–T27 gates. Live edited-timeline playback remains
+unavailable; source and exported-file performance are separate measurements.

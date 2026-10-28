@@ -334,3 +334,16 @@ standard filters. It is not the final rendering architecture.
 Do not invent additional project, media, edit, render or MCP commands. Explain
 the current limitation when a workflow needs them. Probing reads metadata;
 it does not validate full-file decodability.
+
+For the T21 capability boundary and reproducible playback baseline, read
+[the architecture audit](../../docs/T21_ARCHITECTURE_AUDIT.md). From a development
+checkout, `pnpm audit:t21` creates isolated synthetic projects and measurements;
+`pnpm audit:t21 --headless` explicitly skips desktop measurements. These commands
+never benchmark user media. Source playback with a multi-track project loaded and
+playback of a rendered MP4 are not live timeline composition. Missing benchmarks
+must be reported as unavailable, with the recorded reason; do not substitute export
+success or old measurements for a real-time preview claim.
+Retained baseline files are historical observations. Check their revision, working
+tree state and harness hashes before citing them as current evidence. Refresh
+playback evidence with a new full `pnpm audit:t21` run; do not relabel an older
+report or substitute a headless run for desktop measurements.

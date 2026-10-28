@@ -386,3 +386,11 @@ Read [PRODUCT.md](PRODUCT.md), [ARCHITECTURE.md](ARCHITECTURE.md),
 The official [Agent Skill](../skills/video-editor/SKILL.md) documents working CLI
 capabilities and links to the core API contract. It is distinct from repository
 coding instructions.
+
+## T21 architecture and playback baseline
+
+See the [capability audit and benchmark protocol](T21_ARCHITECTURE_AUDIT.md).
+`pnpm audit:t21` creates isolated synthetic projects and records actual source
+playback, decoder-cold/warm seeking, process metrics and offline export measurements.
+`pnpm audit:t21 --headless` retains project/export checks when desktop measurement
+is unavailable. Neither mode claims live edited-timeline playback.

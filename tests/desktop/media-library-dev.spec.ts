@@ -44,6 +44,10 @@ test('development StrictMode preserves audio playback and cleans up replaced sou
     });
     application = desktop.application;
     const { page } = desktop;
+    // Wait for the initial development navigation before requesting a reload.
+    await expect(
+      page.getByRole('button', { name: 'New project', exact: true }),
+    ).toBeVisible();
     // Observe actual StrictMode effect cleanup without replaying hooks in the test.
     await page.addInitScript(() => {
       const removeAttribute = Element.prototype.removeAttribute;

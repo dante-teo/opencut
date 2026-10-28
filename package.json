@@ -27,7 +27,8 @@
     "test:fixtures": "node --import tsx --test tests/fixtures/validation.native.spec.ts",
     "test:media": "pnpm build:packages && pnpm --filter @opencut/cli build && node --import tsx --test tests/integration/*.native.spec.ts",
     "e2e": "pnpm build:packages && pnpm --filter @opencut/cli build && tsx scripts/cli-e2e.ts",
-    "test:e2e": "pnpm build:packages && pnpm --filter @opencut/cli build && node --import tsx --test tests/e2e/*.native.spec.ts"
+    "test:e2e": "pnpm build:packages && pnpm --filter @opencut/cli build && node --import tsx --test tests/e2e/*.native.spec.ts",
+    "audit:t21": "pnpm build && tsx scripts/t21.ts"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

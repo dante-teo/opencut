@@ -198,3 +198,9 @@ macOS is the initial required platform. Package boundaries should stay portable;
 Windows/Linux support requires explicit validation later. No distribution,
 installer, updater, signing or notarization work is included through T20. Render jobs
 run in the invoking process, without a persistent queue, background service or database.
+
+T21 establishes an [architecture audit and playback baseline](T21_ARCHITECTURE_AUDIT.md)
+with representative generated projects, cold/warm source seeks, playback/resource
+measurements, offline exports and explicit unavailable-benchmark fallbacks. It does
+not add timeline playback or change the media engine. T22–T27 recommendations in
+that audit remain future work.
