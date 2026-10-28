@@ -47,7 +47,7 @@ changing project assets. Filters combine and reset when switching to a different
 project. **Clear filters** shows the full library when a search has no matches.
 Select assets to inspect metadata, or clips to inspect exact stored timing.
 Unsaved projects prompt Save/Discard/Cancel before switching, closing or quitting.
-Reopen after CLI edits; stale saves are refused. Project playback and rendering controls remain unavailable.
+T22 synchronizes CLI edits immediately with the open GUI session; named projects save each accepted edit. Project playback and rendering controls remain unavailable.
 
 T17 adds read-only timeline navigation: video/audio tracks retain project order;
 clip positions, gaps and cross-track overlaps follow exact stored timing. Use the
@@ -71,7 +71,7 @@ source paused. Confirm that the source clock advances when checking playback.
 Zoom/scroll persist during selection/playback/save, and reset on project replacement.
 The timeline culls offscreen clips/tracks and caps the physical scrollbar for long
 sequences; extreme-duration scrollbar navigation is coarser. No waveforms or
-rendering controls are added. Reopen after CLI edits.
+rendering controls are added. CLI edits synchronize automatically.
 
 T18 adds GUI clip editing through the same core transactions as the CLI. Drag
 clip bodies to move or change compatible tracks, and drag edges to trim while
@@ -92,8 +92,8 @@ previous session. Clip-only edits retain the availability snapshot. These checks
 verify readability without refreshing stored probe metadata or modifying media.
 Focused clips support Left/Right frame moves (Shift: ten) and Up/Down compatible
 tracks; focused edge handles
-support Left/Right trims, without proximity snapping. Save persists completed
-edits and history; reopen and inspect with `timeline list` to verify. Successful
+support Left/Right trims, without proximity snapping. Named projects automatically persist completed
+edits and history; inspect with `timeline list` to verify. Save gives untitled projects a path. Successful
 edits pause/unlink source preview and retain the project playhead. Zoom is locked
 during gestures; scroll manually to reach offscreen targets. Transitions, keyframes, project playback and rendering controls are not added.
 
@@ -209,8 +209,9 @@ succeed for offline sources; use project validate to require readable sources.
 Removal deletes only the project entry and refuses any asset referenced by clips.
 No force-delete, relink or refresh command exists. Read back list/info after
 successful mutations. Project updates refuse project-file symlinks/hard links, use an atomic
-rename and serialize cooperating writers with a `.lock`; retry when busy.
-Remove a stale lock only after checking that no writer is active. See
+rename and serialize cooperating writers with an OS-backed `.opencut-lock`; retry when busy.
+Never delete that permanent sidecar: crashes release ownership automatically.
+Legacy `.lock` files require confirming old writers have stopped before removal. See
 [the asset reference](references/cli.md#project-media-assets) for results and limits.
 
 For timeline edits, read [the editing reference](references/cli.md#timeline-editing)
@@ -225,7 +226,7 @@ an empty track. Unknown-duration assets/images require explicit ranges without
 an inferred finite bound; known durations are enforced. Offline editing needs
 no media tools and does not refresh metadata or verify decodability.
 Read back `timeline list` after each successful mutation. Inspect exit status
-before parsing JSON; errors remain text on stderr. Timeline updates reuse the
+before parsing JSON; errors are structured on stderr with `--json`. Timeline updates reuse the
 atomic-save and lock rules above. Pre-T08 overlapping documents fail validation;
 correct them explicitly before editing.
 
@@ -316,8 +317,8 @@ A seek beyond the last available frame can still fail. Unknown metadata is
 
 Choose an explicit new `.png` output in an existing directory. Extraction never
 overwrites existing files or symlinks and does not modify the source. Read back
-the result and inspect the saved PNG before claiming delivery. Errors are text
-on stderr even with `--json`; check exit status before parsing stdout.
+the result and inspect the saved PNG before claiming delivery. Errors are structured
+on stderr with `--json`; check exit status before parsing stdout.
 
 For composition arguments, timing, gains and result fields, read
 [the composition reference](references/cli.md#composition). Provide 2–16 timed
@@ -347,3 +348,27 @@ Retained baseline files are historical observations. Check their revision, worki
 tree state and harness hashes before citing them as current evidence. Refresh
 playback evidence with a new full `pnpm audit:t21` run; do not relabel an older
 report or substitute a headless run for desktop measurements.
+
+## Shared GUI/CLI sessions (T22)
+
+On macOS/Linux, use the same CLI commands while Electron has the project open.
+All reads and edits route transparently through the authoritative session, with
+one revision and undo/redo history. Named GUI projects save on every accepted edit;
+untitled projects require Save first. Inspect `edit history`, then use
+`--expected-revision` for edits based on that observation. Concurrent proposals
+can fail with `REVISION_CONFLICT`, `SESSION_BUSY` or `PROJECT_LOCKED`; reload and
+reconsider rather than blindly retrying.
+
+CLI edits and undo/redo preserve timeline zoom, horizontal/vertical scroll, Snap
+and its threshold. Explicit Open/reopen resets timeline view settings and can
+select an older backup with the same project ID, including at the same path.
+After reopening, inspect `edit history` again before choosing an expected revision.
+
+A disconnect or timeout can leave the commit outcome unknown. Query history and
+content before retrying; the CLI never silently falls back to disk after sending
+a mutation. After normal exit or a crash, standalone CLI edits resume against
+the last complete saved state. Do not delete `.opencut-lock`, mix old-version
+writers with T22, or use network filesystems. Transport is private to the current
+OS account, limited to 64 MiB per message, and is not implemented for Windows.
+No timeline playback or T23 feature is included. See
+[the shared-session contract](../../docs/CLI.md#shared-projects-in-electron-t22).

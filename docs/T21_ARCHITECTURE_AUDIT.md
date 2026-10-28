@@ -4,6 +4,11 @@ This is the durable capability boundary and benchmark protocol for completed
 T01–T20, audited in T21. It is not a new playback engine. T22–T27 below are
 recommendations, not implemented features or commitments.
 
+T22 subsequently implements shared GUI/CLI project sessions instead of the
+playback task suggested below. This document retains the historical T21 findings;
+see [the T22 session decision](adr/0011-shared-project-session.md) for the current
+writer, synchronization and recovery contract. T23 has not been implemented.
+
 ## Deliverables and acceptance boundaries
 
 1. This capability matrix, source map, correctness risks and prioritized roadmap.

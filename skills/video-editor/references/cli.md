@@ -38,7 +38,9 @@ Exit codes: 0 success, 2 invalid arguments, 1 project validation/data,
 media/filesystem/prerequisite or execution failure. Render cancellation exits 130
 for SIGINT or 143 for SIGTERM. Unknown options/commands,
 extra arguments and inapplicable options fail. Repeated options use the last value.
-Errors remain text on stderr with `--json`. Help and version also accept `--json`, returning
+Errors are structured on stderr with `--json`:
+`{ "ok": false, "error": { "code": "...", "message": "..." } }`.
+Help and version also accept `--json`, returning
 `{ "help": "..." }` and `{ "name": "OpenCut", "version": "0.1.0" }` respectively.
 The application version and project `schemaVersion` identify different contracts;
 use `schemaVersion` when checking project-format compatibility.
@@ -135,11 +137,11 @@ files are never deleted; there is no force flag.
 Imports/removals validate data, update `updatedAt`, sync temporary JSON and replace
 the existing project atomically by same-directory rename. Updates require a
 writable directory and a regular project file with one hard link; project
-symlinks/hard links are refused. A per-project `.lock` rejects competing writers;
+symlinks/hard links are refused. A permanent `.opencut-lock` sidecar provides OS-backed ownership; competing writers are rejected;
 detected outside changes also fail. Handled failures preserve the prior JSON
-and clean owned temporary files/locks. Forced termination may leave
-`.opencut-update-*` and `<project-file>.lock`; remove stale artifacts only when
-no writer is running. Power-loss durability and arbitrary outside writers are
+and clean owned temporary files. Forced termination may leave unused
+`.opencut-update-*` directories, but releases OS ownership automatically.
+Never delete the permanent `.opencut-lock` sidecar. Power-loss durability and arbitrary outside writers are
 not covered by the atomicity guarantee.
 
 Only import needs ffprobe; list/info/remove need no media tools. All support
@@ -251,7 +253,7 @@ when acting on prior inspection. Stale revisions fail; reload and reassess befor
 retrying. Without the flag, these commands use the locked current state. Apply
 always requires the batch revision. All these mutations accept `--dry-run`.
 Dry-run previews without modifying project bytes/mtime or history; its temporary
-writer lock is cleaned. Import dry-run still needs ffprobe. Generated preview IDs
+OS writer lock is released; its permanent sidecar remains. Import dry-run still needs ffprobe. Generated preview IDs
 and timestamps are provisional. Individual commands retain their original JSON
 shapes and show proposed results during dry-run.
 
@@ -262,7 +264,7 @@ History lives inside the atomic project JSON and survives reloads. It retains tw
 full content snapshots per changed edit without automatic pruning. Do not hand-edit
 content behind history; mismatches are refused instead of restoring over it.
 Check exit status before parsing stdout: 0 success, 1 data/runtime/file/conflict,
-2 invalid CLI arguments. Errors remain text on stderr and produce no success JSON.
+2 invalid CLI arguments. Errors are structured on stderr with `--json` and produce no success JSON.
 After real apply/undo/redo, read back history and timeline/media state.
 
 ## Media inspection and frame extraction
@@ -498,8 +500,8 @@ The terminal `completed` event contains `projectPath`, `path` (absolute), output
 `durationSeconds`, selected `quality`/`resolution`, and measured `metadata` in the
 probe schema. Runtime/preflight failures emit `{"event":"failed","message":"..."}`;
 cancellation emits `{"event":"cancelled","message":"Render cancelled."}`.
-Invalid arguments emit no events. Diagnostics, including meaningful FFmpeg stderr,
-remain text on stderr. No `completed` event is emitted for failed/cancelled jobs.
+Invalid arguments emit no events. With `--json`, stderr errors contain a structured
+code/message, including useful FFmpeg diagnostics. No `completed` event is emitted for failed/cancelled jobs.
 
 Choose a `.mp4` in an existing writable directory. Existing outputs (including
 publication races) are refused by default. `--overwrite` explicitly permits
@@ -573,7 +575,7 @@ transforms and expected output timing, see the
 `probe` requires external `ffprobe` on PATH; extraction also requires `ffmpeg`
 with PNG support. Install prerequisites manually. Probe/extraction subprocesses have a 60-second
 limit and bounded output (4 MiB for probe; 64 MiB for extraction). Runtime failures
-produce no JSON on stdout; errors remain text on stderr. These probe/extraction commands provide
+produce no JSON on stdout; errors are structured on stderr with `--json`. These probe/extraction commands provide
 human-readable output when `--json` is omitted.
 
 For filenames starting with `-`, place options before `--` and the filename,
@@ -581,3 +583,12 @@ or use an absolute path. For an output name starting with `-`, use
 `--output=-frame.png` or an absolute path. Quote paths in the calling shell.
 The complete [CLI/API contract](../../../docs/CLI.md) describes all fields and
 limits. Desktop project integration remains deferred.
+
+## Shared project sessions (T22)
+
+Existing commands transparently use the active Electron session on macOS/Linux.
+GUI edits and CLI edits share durable history and revision checks, and the open
+timeline updates without reopening. After a session disconnect, query history
+and content before retrying: an acknowledged response may have been lost after
+commit. Do not delete the permanent ownership sidecar. See
+[the complete session and recovery contract](../../../docs/CLI.md#shared-projects-in-electron-t22).

@@ -1,4 +1,4 @@
-# CLI reference (T14)
+# CLI reference (T22)
 
 Build from the checkout root with `pnpm build`. The `opencut` executable is
 workspace-local. Use the direct Node form for machine-readable stdout; pnpm
@@ -70,7 +70,50 @@ containing spaces in the calling shell.
 All commands print readable output by default. `--json` prints one JSON
 object followed by a newline, except `project render`, which streams JSONL progress
 and terminal events. Diagnostics never go to stdout.
-Errors always go to stderr as text, including with `--json`.
+Errors go to stderr. With `--json`, the error is
+`{"ok":false,"error":{"code":"REVISION_CONFLICT","message":"..."}}`;
+argument errors also include `error.hint`. Without `--json`, errors remain text.
+
+## Shared projects in Electron (T22)
+
+On macOS/Linux, existing editing commands automatically route through Electron
+when it owns the project. Timeline, media, project and history queries see that
+same session. CLI edits update the open window through events without reopening;
+GUI edits are immediately available to CLI queries. Both use one revision and
+undo/redo history. A named project's edits are saved before success is returned.
+Untitled GUI projects still require their first Save before CLI access.
+
+CLI edits and undo/redo preserve the open timeline's zoom, horizontal/vertical
+scroll, Snap toggle and snap threshold. Explicitly opening or reopening a project
+resets timeline view settings. Source preview is invalidated independently when
+CLI changes arrive.
+
+Use **Open project** to select an older backup, including a copy with the same
+project ID or a backup restored at the same path. Its lower revision and stored
+history become current in both interfaces. Query `edit history` again before
+issuing revision-guarded edits; do not reuse a revision observed before reopening.
+
+Use `edit history` and `--expected-revision` when acting on a prior query. Batch
+apply still requires `expectedRevision`. Even without that flag, a proposal
+prepared against an active session is rejected if another edit wins first.
+`REVISION_CONFLICT`, `SESSION_BUSY` and `PROJECT_LOCKED` mean reload/reconsider
+and retry after the competing operation finishes. A second GUI cannot acquire
+the same project. Dry-run validates against the same authority without changing
+project bytes, history or the visible timeline.
+
+After `SESSION_DISCONNECTED`, `SESSION_CHANGED` or a timeout, query history and
+content before retrying: a lost response may follow a successful commit. The CLI
+never silently retries a session mutation on disk. After Electron exits/crashes,
+new CLI invocations resume independent work on the last complete saved project.
+
+The permanent `<project-file>.opencut-lock` sidecar holds an OS-backed SQLite
+lock, not project data. **Do not delete this sidecar:** a crash automatically
+releases ownership. A stale socket is replaced by the next session owner.
+Legacy `.lock` files still block updates; remove those only after confirming all
+old writers have stopped. Do not mix old and T22 writer versions. Local filesystems
+are required; Windows session transport and network filesystems are unsupported.
+Messages are limited to 64 MiB, with a 30-second idle timeout. The security boundary
+is the current OS account. See [the session decision](adr/0011-shared-project-session.md).
 
 Exit codes: **0** success, **2** invalid command/arguments, **1** failed project
 validation, invalid project data, media, filesystem, prerequisite or execution failure.
@@ -313,10 +356,10 @@ backwards; exact no-op moves/trims preserve bytes and timestamps. Read back
 [asset atomic-save guarantees](#project-media-assets): writer lock, validation
 before publishing, synced temporary JSON and same-directory rename, refusal of
 project-file symlinks/hard links, and outside-change detection. Invalid edits
-leave original project bytes intact and clean owned locks/temporaries.
+leave original project bytes intact and clean owned temporaries; the ownership sidecar remains.
 
-Errors preserve the existing CLI contract: text diagnostics on stderr even with
-`--json`, no success JSON on failed commands, exit 1 for invalid edits/data/I/O,
+Errors use structured diagnostics on stderr with `--json`, no success JSON on
+failed commands, exit 1 for invalid edits/data/I/O,
 and exit 2 for malformed or inapplicable arguments. Check exit status before
 parsing stdout. Diagnostics identify IDs or JSON-pointer fields, source bounds
 and colliding clips. Core errors expose machine-readable codes and validation
@@ -451,8 +494,8 @@ The existing lock, symlink/hard-link refusal, outside-change detection and atomi
 save guarantees apply. Cooperating writers serialize by rejection while busy;
 retry after reloading. Detected outside replacements during an operation fail.
 Arbitrary noncooperating writes in the final check/rename window and power-loss
-durability remain outside the filesystem guarantee. Errors are text on stderr,
-including with `--json`; exit 0 means success, 1 means data/runtime/file/conflict
+durability remain outside the filesystem guarantee. Errors are structured on stderr
+with `--json`; exit 0 means success, 1 means data/runtime/file/conflict
 failure, and 2 means invalid CLI arguments. Failed commands emit no success JSON.
 
 ## Composition prototype
@@ -585,12 +628,12 @@ flag or original-file deletion exists.
 
 Import and removal validate project data, update `updatedAt`, and publish complete
 JSON by a same-directory atomic rename after syncing the temporary file. A
-per-project exclusive `.lock` serializes cooperating writers; competing updates
+per-project OS-backed `.opencut-lock` serializes cooperating writers; competing updates
 fail with a retry message. Updates refuse project symlinks and hard-linked project
 files and check for outside changes before publication. Handled failures preserve
-the previous project and clean owned temporary files/locks. Forced termination
-can leave `.opencut-update-*` and `<project-file>.lock`; remove a stale lock only
-after confirming no writer is running. The rename prevents partial JSON visibility;
+the previous project and clean owned temporary files. Forced termination
+can leave unused `.opencut-update-*` directories; OS ownership is released
+automatically. Keep the permanent `.opencut-lock` sidecar. The rename prevents partial JSON visibility;
 power-loss durability and coordination with arbitrary external writers are not
 guaranteed. The containing directory must be writable.
 
@@ -768,8 +811,8 @@ The terminal `completed` event contains `projectPath`, `path` (absolute), output
 `durationSeconds`, selected `quality`/`resolution`, and measured `metadata` in the
 probe schema. Runtime/preflight failures emit `{"event":"failed","message":"..."}`;
 cancellation emits `{"event":"cancelled","message":"Render cancelled."}`.
-Invalid arguments emit no events. Diagnostics, including meaningful FFmpeg stderr,
-remain text on stderr. No `completed` event is emitted for failed/cancelled jobs.
+Invalid arguments emit no events. With `--json`, stderr errors contain a structured
+code/message, including useful FFmpeg diagnostics. No `completed` event is emitted for failed/cancelled jobs.
 
 Choose a `.mp4` in an existing writable directory. Existing outputs (including
 publication races) are refused by default. `--overwrite` explicitly permits

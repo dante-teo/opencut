@@ -17,10 +17,12 @@ import {
   removeAssetFromProject,
   checkProjectMedia,
   readProjectFile,
-  updateProjectFile,
   writeProjectFile,
   inspectMediaFile,
   resolveMediaReference,
+  acquireProjectWriter,
+  SessionError,
+  type ProjectWriter,
 } from '@opencut/core/node';
 import type {
   DesktopProject,
@@ -52,14 +54,79 @@ export type ProjectAction =
 /** Main-process session. React never submits a path or a replacement document. */
 export class ProjectSession {
   private state: DesktopProject | null = null;
+  // Readers see the last accepted state while a mutation is being persisted.
+  private publishedState: DesktopProject | null = null;
   private baseline: string | null = null;
   private busy = false;
   private savedRevision = 0;
+  private writer: ProjectWriter | null = null;
 
   constructor(
     private readonly dialogs: ProjectDialogs,
     private readonly onProgress: (progress: ImportProgress) => void = () => {},
+    private readonly onChange: (
+      state: DesktopProject | null,
+    ) => void = () => {},
   ) {}
+
+  /** Also used on shutdown; OS ownership is released automatically after a crash. */
+  async dispose() {
+    await this.writer?.close();
+    this.writer = null;
+  }
+
+  private async serve(writer: ProjectWriter) {
+    await writer.serve(async ({ update, options }) => {
+      if (!update && this.writer === writer && this.publishedState)
+        return this.publishedState.project;
+      if (this.busy)
+        throw new SessionError(
+          'SESSION_BUSY',
+          'A project operation is in progress. Retry when it finishes.',
+        );
+      const state = this.state;
+      if (!state || this.writer !== writer)
+        throw new SessionError('SESSION_CHANGED', 'Project session changed.');
+      if (!update) return state.project;
+      this.busy = true;
+      try {
+        let next = state.project;
+        let media = state.media;
+        await writer.update(
+          async (disk) => {
+            if (serializeProject(disk) !== this.baseline)
+              throw new SessionError(
+                'REVISION_CONFLICT',
+                'Project changed on disk. Reopen it before editing.',
+              );
+            const changed = update(state.project);
+            next =
+              options?.history === 'restore'
+                ? changed
+                : commitEdit(state.project, changed, options?.label);
+            if (
+              JSON.stringify(state.project.assets) !==
+              JSON.stringify(next.assets)
+            )
+              media = await checkProjectMedia(next, writer.path);
+            return { project: next, result: undefined };
+          },
+          { ...options, history: 'restore' },
+        );
+        const json = serializeProject(next);
+        if (!options?.dryRun && json !== this.baseline) {
+          this.state = { ...state, project: next, media, dirty: false };
+          this.publishedState = this.state;
+          this.baseline = json;
+          this.savedRevision = projectRevision(next);
+          this.onChange(structuredClone(this.state));
+        }
+        return this.state!.project;
+      } finally {
+        this.busy = false;
+      }
+    });
+  }
 
   async libraryAsset(id: unknown) {
     const state = this.state;
@@ -104,18 +171,23 @@ export class ProjectSession {
   }
 
   async run(action: ProjectAction, input?: unknown): Promise<ProjectReply> {
+    if (action === 'current')
+      return {
+        ok: true,
+        state: structuredClone(this.publishedState),
+        canceled: false,
+      };
     if (this.busy)
       return {
         ok: false,
         error: 'A project operation is already in progress. Please wait.',
       };
     this.busy = true;
+    const priorState = this.state;
     try {
       let canceled = false;
       let notice: string | undefined;
       switch (action) {
-        case 'current':
-          break;
         case 'create': {
           // Reject unknown fields, then use the core schema for all model validation.
           if (
@@ -136,6 +208,7 @@ export class ProjectSession {
             canceled = true;
             break;
           }
+          await this.dispose();
           this.state = { project, path: null, dirty: true, media: [] };
           this.baseline = null;
           break;
@@ -147,15 +220,33 @@ export class ProjectSession {
             break;
           }
           const path = await canonicalProjectFilePath(selected);
-          const project = await readProjectFile(path);
-          const media = await checkProjectMedia(project, path);
-          if (!(await this.confirmDiscard())) {
-            canceled = true;
-            break;
+          // Validate before prompting, then reread under ownership to close the
+          // CLI-write/open race. A second Electron window must not become a writer.
+          if (this.writer?.path !== path) await readProjectFile(path);
+          const writer =
+            this.writer?.path === path
+              ? this.writer
+              : await acquireProjectWriter(path);
+          try {
+            const project = await writer.read();
+            const media = await checkProjectMedia(project, path);
+            if (!(await this.confirmDiscard())) {
+              canceled = true;
+              if (writer !== this.writer) await writer.close();
+              break;
+            }
+            if (writer !== this.writer) {
+              await this.serve(writer);
+              await this.dispose();
+              this.writer = writer;
+            }
+            this.state = { project, path, dirty: false, media };
+            this.baseline = serializeProject(project);
+            this.savedRevision = projectRevision(project);
+          } catch (error) {
+            if (writer !== this.writer) await writer.close();
+            throw error;
           }
-          this.state = { project, path, dirty: false, media };
-          this.baseline = serializeProject(project);
-          this.savedRevision = projectRevision(project);
           break;
         }
         case 'import':
@@ -343,7 +434,10 @@ export class ProjectSession {
           }
           this.state = null;
           this.baseline = null;
+          await this.dispose();
       }
+      if (this.state?.path && this.state.dirty) await this.save();
+      this.publishedState = this.state;
       return {
         ok: true,
         state: structuredClone(this.state),
@@ -351,6 +445,17 @@ export class ProjectSession {
         ...(notice ? { notice } : {}),
       };
     } catch (error) {
+      if (
+        [
+          'edit',
+          'undo',
+          'redo',
+          'import',
+          'removeAsset',
+          'addAssetClip',
+        ].includes(action)
+      )
+        this.state = priorState;
       return {
         ok: false,
         error: error instanceof Error ? error.message : String(error),
@@ -372,8 +477,9 @@ export class ProjectSession {
     if (!state) throw new Error('Create or open a project before saving.');
     if (state.path) {
       // Even a no-op save must not overwrite a newer CLI/external document.
-      await updateProjectFile(
-        state.path,
+      if (!this.writer)
+        throw new Error('Project writer is unavailable. Reopen the project.');
+      await this.writer.update(
         async (current) => {
           if (serializeProject(current) !== this.baseline)
             throw new Error(
@@ -387,7 +493,15 @@ export class ProjectSession {
       const selected = await this.dialogs.save();
       if (!selected) return false;
       const path = await canonicalProjectFilePath(selected);
-      await writeProjectFile(state.project, path);
+      const writer = await acquireProjectWriter(path);
+      try {
+        await writeProjectFile(state.project, path);
+        await this.serve(writer);
+      } catch (error) {
+        await writer.close();
+        throw error;
+      }
+      this.writer = writer;
       state.path = path;
     }
     state.dirty = false;

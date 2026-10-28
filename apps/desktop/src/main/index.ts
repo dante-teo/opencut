@@ -18,6 +18,7 @@ import { getApplicationInfo } from '@opencut/core';
 import { probeMedia } from '@opencut/media';
 import {
   APP_INFO_CHANNEL,
+  PROJECT_CHANGED_CHANNEL,
   IMPORT_PROGRESS_CHANNEL,
   THUMBNAIL_CHANNEL,
   PROJECT_CHANNELS,
@@ -131,6 +132,11 @@ const projectSession = new ProjectSession(
   },
   (progress) => {
     mainWindow?.webContents.send(IMPORT_PROGRESS_CHANNEL, progress);
+  },
+  (state) => {
+    previewGeneration++;
+    previewFile = null;
+    mainWindow?.webContents.send(PROJECT_CHANGED_CHANNEL, state);
   },
 );
 

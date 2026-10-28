@@ -377,6 +377,7 @@ describe('built timeline CLI without Electron or media tools', () => {
     expect(json('timeline', 'list', path).duration).toEqual(at(0));
     expect((await readdir(directory)).sort()).toEqual([
       'project.json',
+      'project.json.opencut-lock',
       'sentinel.wav',
     ]);
     expect(await readFile(join(directory, 'sentinel.wav'), 'utf8')).toBe(
@@ -528,10 +529,14 @@ describe('built timeline CLI without Electron or media tools', () => {
       const result = run(...args, '--json');
       expect(result.status, `${args.join(' ')}: ${result.stderr}`).toBe(1);
       expect(result.stdout).toBe('');
-      expect(result.stderr).toContain('opencut:');
+      expect(JSON.parse(result.stderr)).toMatchObject({
+        ok: false,
+        error: { message: expect.any(String) },
+      });
       expect(await readFile(path, 'utf8')).toBe(before);
       expect((await readdir(directory)).sort()).toEqual([
         'project.json',
+        'project.json.opencut-lock',
         'sentinel.wav',
       ]);
     }
@@ -593,6 +598,7 @@ describe('built timeline CLI without Electron or media tools', () => {
       expect(await readFile(path, 'utf8')).toBe(document);
       expect((await readdir(directory)).sort()).toEqual([
         'project.json',
+        'project.json.opencut-lock',
         'sentinel.wav',
       ]);
     },

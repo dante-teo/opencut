@@ -337,8 +337,9 @@ the returned project, syncs a temporary file and atomically renames it over the
 destination. A no-op preserves bytes and timestamps; failed publication preserves
 the prior file. The parent must be writable; project symlinks/hard links are
 refused. Outside changes detected before rename cause a retry error. Handled
-failures clean temporary data and locks. Forced termination may leave a stale
-`<project-file>.lock` or `.opencut-update-*` directory. Power-loss durability and
+failures clean temporary data and release OS ownership. Forced termination may
+leave unused `.opencut-update-*` directories. The permanent `.opencut-lock`
+sidecar must remain; process death releases its lock automatically. Power-loss durability and
 arbitrary noncooperating writers are outside the guarantee.
 I/O failures throw `ProjectFileError` with `READ_FAILED`, `WRITE_FAILED` or
 `UPDATE_FAILED`, `path` and the underlying
@@ -644,3 +645,7 @@ Structural validation and inferred TypeScript types share the maintained
 cover the remaining domain and I/O needs without another dependency.
 See [ADR 0004](adr/0004-versioned-project-model.md) for the timing, validation and
 filesystem-boundary rationale.
+
+T22 routes these Node reads/updates through an active Electron session when present;
+otherwise updates acquire standalone ownership. The JSON schema and history remain
+unchanged. See [the session decision](adr/0011-shared-project-session.md).

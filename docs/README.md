@@ -83,8 +83,8 @@ and video/audio tracks and clips appear in a docked editor workspace: media
 library on the left, viewer in the center, inspector on the right, and a timeline
 below. Select an asset or clip to inspect its stored details. Timeline blocks
 show relative positions and durations. Source ranges and timeline starts retain
-exact rational seconds. Reopen after external CLI edits to
-refresh; there is no automatic file watching.
+exact rational seconds. T22 synchronizes CLI edits through the active session
+and pushes updates immediately; there is no file-watching loop.
 Project management needs no FFmpeg or ffprobe. Closing, quitting, creating or
 opening another project offers **Save**, **Discard**, and **Cancel** when the
 current project is unsaved. Canceled dialogs and failed saves preserve it; failed
@@ -121,7 +121,7 @@ count. A video with audio may also be placed on an audio track. Core validation
 rejects overlaps and incompatible tracks without partial changes. External files
 must enter through the library first; scroll manually to reach distant lanes.
 Select an unused asset and click **Remove asset**; used assets are protected.
-Save and reopen to persist library changes, clips and shared undo/redo history;
+Named projects automatically persist library changes, clips and shared undo/redo history;
 `media list` and `timeline list` expose the same saved data in the CLI.
 
 The timeline preserves project track order, with separate video/audio styling.
@@ -131,8 +131,11 @@ or focus it and use Left/Right (one project frame) and Home/End. The timeline cl
 uses exact project-frame non-drop labels, including `30000/1001`. Choose **Zoom**
 or use +/− to zoom around the viewport center. Ctrl/Command + wheel zooms around
 the pointer. Use horizontal/vertical scrolling to reach distant clips and tracks.
-Zoom and scroll survive selection, playback and saving; replacing/reopening the
-project resets view state. Clips and tracks outside the viewport are culled.
+Zoom, both scroll axes, and snapping preferences survive synchronized CLI edits
+and undo/redo. Zoom and scroll also survive selection, playback and saving;
+replacing/reopening the project resets view state. Older backups can be opened
+even when they retain the same project ID and have a lower revision.
+Clips and tracks outside the viewport are culled.
 Ruler ticks support valid rational rates even when their frame times exceed JSON
 integer limits. In that case, playhead seeks and preview positions use a bounded
 rational approximation; extreme rates or positions can skip frame labels.
@@ -145,8 +148,9 @@ The core enforces source limits, track compatibility and no same-track overlaps.
 A translucent outline shows the core-validated proposal; invalid proposals mark
 the original clip red and show an error. Release commits one undoable transaction.
 Escape, pointer cancellation, lost capture or window blur cancel a gesture. Pointer
-movement never writes the project file. **Save project** persists all completed edits
-and their history atomically; errors retain the last valid session.
+movement never writes the project file. Completed edits and history are saved
+atomically for named projects; errors retain the last valid session.
+**Save project** gives an untitled project its first path or checks a named project's consistency.
 
 **Snap** aligns either moving edge or the trimmed edge to other clips' boundaries,
 sequence zero or the playhead. **Snap px** configures the screen-pixel radius
@@ -191,8 +195,8 @@ remaining fixed.
 
 The **Project viewer** tab shows the canvas placeholder. Select an imported video
 in the media library to open **Source preview** automatically, or use **Open video**
-for a local file. Import assets with the CLI and reopen the project to refresh the
-library. Play/Pause, the Seek slider and Previous/Next frame operate on one source.
+for a local file. CLI imports update the open library immediately.
+Play/Pause, the Seek slider and Previous/Next frame operate on one source.
 Imported video preview reuses the metadata saved at import and needs no new
 ffprobe call. Selecting an asset checks that its file is still readable; reopening
 a project refreshes availability, without refreshing stored codec/FPS metadata.
@@ -321,6 +325,10 @@ They hold a real edit IPC request pending to verify that another field's draft
 survives its response and that queued picker/file-drop imports use the accepted
 revision with separate undo entries. These checks use explicit release events,
 not timing delays; the import cases require the generated video fixture and ffprobe.
+T22's `tests/desktop/shared-session.spec.ts` covers older backups opened from a
+different file or restored at the same path, subsequent GUI undo, and timeline
+navigation/snapping preservation after CLI edits and undo. A gated Save reply
+checks that a delayed response cannot replace a newer pushed CLI revision.
 The audio regression additionally runs the development renderer with StrictMode
 replay and verifies playback, pausing when hidden, unloading on replacement, and
 reselection. It needs port 5173 free and cleans its Vite cache from an owned
@@ -388,6 +396,12 @@ capabilities and links to the core API contract. It is distinct from repository
 coding instructions.
 
 ## T21 architecture and playback baseline
+
+T22's current [shared-session contract](CLI.md#shared-projects-in-electron-t22)
+adds single-writer ownership, shared GUI/CLI revisions and history, and crash
+recovery. Named projects save accepted edits automatically. Unix sessions use a
+private local socket and an OS-backed lock; Windows transport is not implemented.
+Never delete the permanent `.opencut-lock` sidecar. See [ADR 0011](adr/0011-shared-project-session.md).
 
 See the [capability audit and benchmark protocol](T21_ARCHITECTURE_AUDIT.md).
 `pnpm audit:t21` creates isolated synthetic projects and records actual source

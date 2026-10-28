@@ -1,5 +1,13 @@
 /** Optional Node adapter. The main core entry point remains free of filesystem imports. */
 import { constants } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import { lockProject } from './project-writer.js';
+import {
+  requestSession,
+  serveSession,
+  SessionError,
+} from './session-transport.js';
 import {
   access,
   lstat,
@@ -204,6 +212,14 @@ export class ProjectFileError extends Error {
 export async function readProjectFile(
   projectFilePath: string,
 ): Promise<Project> {
+  const path = await canonicalProjectFilePath(nativePath(projectFilePath));
+  const response = await requestSession(path, { version: 1, type: 'read' });
+  if (response !== undefined)
+    return deserializeProject(sessionSnapshot.parse(response).json);
+  return readProjectDisk(path);
+}
+
+async function readProjectDisk(projectFilePath: string): Promise<Project> {
   const path = nativePath(projectFilePath);
   let json: string;
   try {
@@ -265,37 +281,160 @@ export async function writeProjectFile(
 }
 
 export interface ProjectUpdateOptions {
-  expectedRevision?: number;
-  dryRun?: boolean;
-  label?: string;
+  expectedRevision?: number | undefined;
+  dryRun?: boolean | undefined;
+  label?: string | undefined;
   /** Restore one transaction, or preserve multiple validated in-memory session transactions. */
-  history?: 'record' | 'restore' | 'preserve';
+  history?: 'record' | 'restore' | 'preserve' | undefined;
 }
 
-/** Serialize cooperating writers and publish a complete, synced JSON file by rename. */
+const sessionSnapshot = z.object({ json: z.string(), sessionId: z.string() });
+const sessionRequest = z.discriminatedUnion('type', [
+  z.strictObject({ version: z.literal(1), type: z.literal('read') }),
+  z.strictObject({
+    version: z.literal(1),
+    type: z.literal('update'),
+    sessionId: z.string(),
+    base: z.string(),
+    json: z.string(),
+    options: z.strictObject({
+      expectedRevision: z.number().int().nonnegative().optional(),
+      dryRun: z.boolean().optional(),
+      label: z.string().optional(),
+      history: z.enum(['record', 'restore']).optional(),
+    }),
+  }),
+]);
+const fingerprint = (json: string) =>
+  createHash('sha256').update(json).digest('hex');
+type Update<T> = (
+  project: Project,
+  path: string,
+) => Promise<{ project: Project; result: T }>;
+
+/** Existing CLI and asset commands transparently use the active writer. */
 export async function updateProjectFile<T>(
+  path: string,
+  update: Update<T>,
+  options: ProjectUpdateOptions = {},
+): Promise<T> {
+  path = await canonicalProjectFilePath(nativePath(path));
+  const response = await requestSession(path, { version: 1, type: 'read' });
+  if (response !== undefined) {
+    const snapshot = sessionSnapshot.parse(response);
+    const project = deserializeProject(snapshot.json);
+    checkProjectRevision(project, options.expectedRevision);
+    const changed = await update(project, path);
+    const reply = await requestSession(path, {
+      version: 1,
+      type: 'update',
+      sessionId: snapshot.sessionId,
+      base: fingerprint(snapshot.json),
+      json: serializeProject(changed.project),
+      options,
+    });
+    if (reply === undefined)
+      throw new SessionError(
+        'SESSION_DISCONNECTED',
+        'Session ended before commit. Reload and retry; no offline fallback was attempted.',
+      );
+    return changed.result;
+  }
+  const writer = await acquireProjectWriter(path);
+  try {
+    return await writer.update(update, options);
+  } finally {
+    await writer.close();
+  }
+}
+
+/** Capability held by one authoritative writer. Never expose it to the renderer. */
+export async function acquireProjectWriter(projectFilePath: string) {
+  const path = await canonicalProjectFilePath(nativePath(projectFilePath));
+  const release = await lockProject(path);
+  let closed = false;
+  let activeUpdate: Promise<unknown> | undefined;
+  let stop: (() => Promise<void>) | undefined;
+  return {
+    path,
+    read: () => readProjectDisk(path),
+    update: async <T>(
+      update: Update<T>,
+      options: ProjectUpdateOptions = {},
+    ) => {
+      if (closed)
+        throw new SessionError('SESSION_CLOSED', 'Project writer is closed.');
+      if (activeUpdate)
+        throw new SessionError(
+          'PROJECT_LOCKED',
+          'A writer operation is in progress.',
+        );
+      try {
+        const pending = updateProjectDisk(path, update, options);
+        activeUpdate = pending;
+        return await pending;
+      } finally {
+        activeUpdate = undefined;
+      }
+    },
+    async serve(
+      handle: (request: {
+        update?: (project: Project) => Project;
+        options?: ProjectUpdateOptions;
+      }) => Promise<Project>,
+    ) {
+      const sessionId = randomUUID();
+      stop = await serveSession(path, async (value) => {
+        const request = sessionRequest.parse(value);
+        if (request.type === 'read')
+          return { json: serializeProject(await handle({})), sessionId };
+        if (request.sessionId !== sessionId)
+          throw new SessionError(
+            'SESSION_CHANGED',
+            'Project session changed. Reload before retrying.',
+          );
+        await handle({
+          options: request.options,
+          update: (project) => {
+            if (fingerprint(serializeProject(project)) !== request.base)
+              throw new EditError(
+                'REVISION_CONFLICT',
+                'Project revision conflict: session changed while preparing the edit. Reload and retry.',
+              );
+            return deserializeProject(request.json);
+          },
+        });
+        return { committed: true };
+      });
+    },
+    async close() {
+      if (closed) return;
+      closed = true;
+      try {
+        await stop?.();
+        // Never release ownership while an already accepted publication is running.
+        await activeUpdate?.catch(() => {});
+      } finally {
+        release();
+      }
+    },
+  };
+}
+export type ProjectWriter = Awaited<ReturnType<typeof acquireProjectWriter>>;
+export { SessionError };
+
+/** Serialize cooperating writers and publish a complete, synced JSON file by rename. */
+async function updateProjectDisk<T>(
   projectFilePath: string,
-  update: (
-    project: Project,
-    path: string,
-  ) => Promise<{ project: Project; result: T }>,
+  update: Update<T>,
   options: ProjectUpdateOptions = {},
 ): Promise<T> {
   const requested = nativePath(projectFilePath);
   let path = requested;
-  let lock: Awaited<ReturnType<typeof open>> | undefined;
   let temporary: string | undefined;
   try {
     // Canonicalize the parent so directory aliases use the same writer lock.
     path = await canonicalProjectFilePath(requested);
-    try {
-      lock = await open(`${path}.lock`, 'wx', 0o600);
-    } catch (cause) {
-      throw new Error(
-        'Project is locked or its directory is not writable. Retry after other writers finish; remove a stale .lock only when no writer is running.',
-        { cause },
-      );
-    }
     const before = await lstat(path);
     if (!before.isFile() || before.nlink !== 1)
       throw new Error(
@@ -354,6 +493,12 @@ export async function updateProjectFile<T>(
         'Project changed during the operation; reload and retry.',
       );
     await rename(pending, path);
+    const directory = await open(dirname(path), 'r');
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
     return changed.result;
   } catch (cause) {
     if (
@@ -366,14 +511,7 @@ export async function updateProjectFile<T>(
       throw cause;
     throw new ProjectFileError('UPDATE_FAILED', path, { cause });
   } finally {
-    try {
-      if (temporary) await rm(temporary, { recursive: true, force: true });
-    } finally {
-      if (lock) {
-        await lock.close();
-        await rm(`${path}.lock`, { force: true });
-      }
-    }
+    if (temporary) await rm(temporary, { recursive: true, force: true });
   }
 }
 

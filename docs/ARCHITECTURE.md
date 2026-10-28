@@ -111,7 +111,7 @@ references and never unlinks media. Saves use an exclusive writer lock and a
 synced temporary file followed by same-directory rename; failed saves leave the
 old JSON usable. Updates refuse project symlinks and hard links, check outside
 changes, and clean owned artifacts on handled failures. Forced termination can
-leave stale locks/temporary directories. Atomicity does not promise power-loss
+leave unused temporary directories; T22 OS ownership is released on process death. Atomicity does not promise power-loss
 durability or locking of arbitrary external tools. Existing Zod, Node file APIs
 and the media package cover validation, guarded replacement and probing;
 an atomic-write wrapper would still require these identity and writer checks,
@@ -580,3 +580,16 @@ The [T21 architecture audit](T21_ARCHITECTURE_AUDIT.md) records the verified
 capability matrix, reproducible source/export benchmarks, explicit fallback
 behavior and recommended T22–T27 gates. Live edited-timeline playback remains
 unavailable; source and exported-file performance are separate measurements.
+
+## Shared project sessions (T22)
+
+The Node persistence adapter discovers the active session through a private Unix
+socket. SQLite OS locks in a permanent `.opencut-lock` sidecar give one writer
+exclusive ownership across Electron and standalone CLI processes. Existing CLI
+commands prepare proposals with the headless core; the session compares base
+snapshots, validates history/revisions and atomically saves before notifying the
+renderer through a narrow preload subscription. Named GUI projects automatically
+save each edit; untitled projects retain their first-save flow. There is no polling.
+
+See [ADR 0011](adr/0011-shared-project-session.md) for ownership, crash recovery,
+security, disconnect semantics, transport limits and platform boundaries.

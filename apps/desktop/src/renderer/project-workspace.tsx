@@ -43,6 +43,7 @@ export function ProjectWorkspace() {
   const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
   const [previewRequest, setPreviewRequest] = useState(0);
   const [previewSession, setPreviewSession] = useState(0);
+  const [timelineSession, setTimelineSession] = useState(0);
   const [playhead, setPlayhead] = useState<RationalTime>(ZERO);
   const [linkedClipId, setLinkedClipId] = useState<string | null>(null);
   const [previewPosition, setPreviewPosition] = useState<number | undefined>();
@@ -94,11 +95,24 @@ export function ProjectWorkspace() {
     setError('');
     setNotice('');
     try {
+      const before = stateRef.current;
       const reply = await operation();
       if (!reply.ok) setError(reply.error);
       else {
-        setState(reply.state);
-        stateRef.current = reply.state;
+        // Only a snapshot pushed during this request can supersede its reply.
+        // Opening an older backup may legitimately reduce the revision.
+        const latest = stateRef.current;
+        if (!(
+          latest &&
+          latest !== before &&
+          reply.state &&
+          latest.path === reply.state.path &&
+          latest.project.metadata.id === reply.state.project.metadata.id &&
+          projectRevision(latest.project) > projectRevision(reply.state.project)
+        )) {
+          setState(reply.state);
+          stateRef.current = reply.state;
+        }
         if (!reply.canceled) {
           setCreating(false);
           if (label !== 'Saving project…' && !editing) {
@@ -108,6 +122,7 @@ export function ProjectWorkspace() {
             setPreviewPosition(undefined);
             setPreviewAssetId(null);
             setPreviewSession((value) => value + 1);
+            setTimelineSession((value) => value + 1);
           }
           if (editing) {
             const next = reply.state?.project;
@@ -158,6 +173,26 @@ export function ProjectWorkspace() {
       window.removeEventListener('dragover', prevent);
       window.removeEventListener('drop', prevent);
     };
+  }, []);
+  useEffect(() => {
+    return window.opencut.onProjectChanged((next) => {
+      const current = stateRef.current;
+      if (
+        current &&
+        next &&
+        current.path === next.path &&
+        current.project.metadata.id === next.project.metadata.id &&
+        projectRevision(current.project) > projectRevision(next.project)
+      )
+        return;
+      stateRef.current = next;
+      setState(next);
+      setLinkedClipId(null);
+      setPreviewPosition(undefined);
+      setPreviewAssetId(null);
+      setPreviewSession((value) => value + 1);
+      setViewer('project');
+    });
   }, []);
   useEffect(() => {
     void run('Loading project…', () => window.opencut.getProject());
@@ -501,7 +536,7 @@ export function ProjectWorkspace() {
         />
       </div>
       <ProjectTimeline
-        key={previewSession}
+        key={timelineSession}
         project={project}
         disabled={!!busy}
         onEdit={edit}

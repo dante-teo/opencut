@@ -73,7 +73,7 @@ Known source durations are enforced. Unknown durations/images require explicit r
 Offline editing needs no media tools; stored metadata is not refreshed or decoded.
 Mutations create undo/redo history; --dry-run previews; --expected-revision <n> guards stale edits.
 Mutations use guarded atomic updates; project-file symlinks/hard links are refused.
-Errors remain text on stderr with --json. Exit codes: 0 success, 1 invalid edit/data/file, 2 invalid arguments.
+Errors are structured JSON on stderr with --json. Exit codes: 0 success, 1 invalid edit/data/file, 2 invalid arguments.
 `;
 
 const optionsForCommand: Record<string, readonly string[]> = {

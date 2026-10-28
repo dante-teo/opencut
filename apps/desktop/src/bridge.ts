@@ -85,6 +85,7 @@ export interface TimelineEditInput extends HistoryInput {
 }
 
 export const IMPORT_PROGRESS_CHANNEL = 'media:import-progress';
+export const PROJECT_CHANGED_CHANNEL = 'project:changed';
 export const THUMBNAIL_CHANNEL = 'media:thumbnail';
 export interface ImportProgress {
   completed: number;
@@ -100,6 +101,9 @@ export interface AssetClipInput extends AssetRemoveInput {
   at: number;
 }
 export interface DesktopAPI {
+  onProjectChanged(
+    callback: (state: DesktopProject | null) => void,
+  ): () => void;
   importMedia(input: HistoryInput): Promise<ProjectReply>;
   importDroppedMedia(input: HistoryInput, files: File[]): Promise<ProjectReply>;
   onImportProgress(callback: (progress: ImportProgress) => void): () => void;

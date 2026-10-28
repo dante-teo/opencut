@@ -54,7 +54,10 @@ describe('standalone project render command', () => {
     const result = run(...args, '--json');
     expect(result.status).toBe(2);
     expect(result.stdout).toBe('');
-    expect(result.stderr).toContain('opencut:');
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      error: { message: expect.any(String) },
+    });
   });
 
   it.each([

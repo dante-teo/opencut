@@ -140,7 +140,10 @@ describe('standalone media asset CLI without media tools', () => {
       expect(result.stdout).toBe('');
       expect(result.stderr).toContain('does not exist');
     }
-    expect(await readdir(directory)).toEqual(['project.json']);
+    expect(await readdir(directory)).toEqual([
+      'project.json',
+      'project.json.opencut-lock',
+    ]);
   });
 
   it('refuses referenced assets before saving or consulting media tools', async () => {
@@ -199,7 +202,10 @@ describe('standalone media asset CLI without media tools', () => {
     const result = run(...args, '--json');
     expect(result.status).toBe(2);
     expect(result.stdout).toBe('');
-    expect(result.stderr).toContain('opencut:');
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      error: { message: expect.any(String) },
+    });
   });
 
   it.each(['import', 'list', 'info', 'remove'])(

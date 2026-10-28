@@ -80,7 +80,10 @@ describe('atomic editing persistence', () => {
     expect(projectSnapshot(await readProjectFile(path))).toEqual(
       projectSnapshot(first),
     );
-    expect(await fs.readdir(directory)).toEqual(['project.json']);
+    expect(await fs.readdir(directory)).toEqual([
+      'project.json',
+      'project.json.opencut-lock',
+    ]);
   });
 
   it('leaves bytes, timestamps, history and owned artifacts unchanged on dry-run or validation failure', async () => {
@@ -91,7 +94,10 @@ describe('atomic editing persistence', () => {
     await expect(apply(0, true, true)).rejects.toThrow('Operation 2');
     expect(await fs.readFile(path, 'utf8')).toBe(before);
     expect((await fs.stat(path)).mtimeMs).toBe(modified);
-    expect(await fs.readdir(directory)).toEqual(['project.json']);
+    expect(await fs.readdir(directory)).toEqual([
+      'project.json',
+      'project.json.opencut-lock',
+    ]);
   });
 
   it('records individual adapter mutations, including callbacks that mutate the input', async () => {
@@ -197,7 +203,10 @@ describe('atomic editing persistence', () => {
     expect(
       (await readProjectFile(path)).tracks.map((track) => track.id),
     ).toEqual(['first']);
-    expect(await fs.readdir(directory)).toEqual(['project.json']);
+    expect(await fs.readdir(directory)).toEqual([
+      'project.json',
+      'project.json.opencut-lock',
+    ]);
   });
 
   it('detects an outside replacement during an edit and retains the newer file', async () => {
@@ -214,7 +223,10 @@ describe('atomic editing persistence', () => {
       }),
     ).rejects.toMatchObject({ code: 'REVISION_CONFLICT' });
     expect(await fs.readFile(path, 'utf8')).toBe(bytes);
-    expect(await fs.readdir(directory)).toEqual(['project.json']);
+    expect(await fs.readdir(directory)).toEqual([
+      'project.json',
+      'project.json.opencut-lock',
+    ]);
   });
 
   it('retains both state and history and cleans artifacts when atomic publication fails', async () => {
@@ -231,7 +243,10 @@ describe('atomic editing persistence', () => {
       ),
     ).rejects.toThrow('Injected rename failure');
     expect(await fs.readFile(path, 'utf8')).toBe(bytes);
-    expect(await fs.readdir(directory)).toEqual(['project.json']);
+    expect(await fs.readdir(directory)).toEqual([
+      'project.json',
+      'project.json.opencut-lock',
+    ]);
   });
 });
 
@@ -282,5 +297,8 @@ it('preserves multiple session transactions atomically and rejects regressed rev
   );
   expect(await readProjectFile(path)).toEqual(second);
   expect(getEditHistory(await readProjectFile(path)).undo).toHaveLength(2);
-  expect(await fs.readdir(directory)).toEqual(['project.json']);
+  expect(await fs.readdir(directory)).toEqual([
+    'project.json',
+    'project.json.opencut-lock',
+  ]);
 });

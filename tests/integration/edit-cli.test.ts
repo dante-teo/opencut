@@ -123,6 +123,7 @@ describe('built transaction CLI without media tools or Electron', () => {
     expect((await readdir(directory)).sort()).toEqual([
       'batch.json',
       'project.json',
+      'project.json.opencut-lock',
       'source.mp4',
     ]);
   });
@@ -283,7 +284,10 @@ describe('built transaction CLI without media tools or Electron', () => {
     const result = run('edit', 'apply', path, 'batch.json', '--json');
     expect(result.status).toBe(1);
     expect(result.stdout).toBe('');
-    expect(result.stderr).toContain('opencut:');
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      error: { message: expect.any(String) },
+    });
     expect(await readFile(path, 'utf8')).toBe(before);
   });
 
@@ -299,7 +303,10 @@ describe('built transaction CLI without media tools or Electron', () => {
       const result = run(...args, '--json');
       expect(result.status).toBe(1);
       expect(result.stdout).toBe('');
-      expect(result.stderr).toContain('opencut:');
+      expect(JSON.parse(result.stderr)).toMatchObject({
+        ok: false,
+        error: { message: expect.any(String) },
+      });
     }
     expect(await readFile(path, 'utf8')).toBe(before);
   });

@@ -321,11 +321,13 @@ test('rejects overlap and incompatible tracks, cancels gestures and handles reje
     await expect(page.getByRole('alert')).toContainText('revision conflict');
     await expect(page.getByTestId('edit-preview')).toHaveCount(0);
     await expect(clip(page)).toHaveAttribute('aria-pressed', 'true');
-    // The rejected operation preserved the last displayed clip and never wrote disk.
+    // The rejected operation preserved c1; only the competing accepted edit was saved.
     expect(
       (await current(page)).clips.find((entry) => entry.id === 'c1'),
     ).toEqual(project.clips[0]);
-    expect(deserializeProject(await readFile(path, 'utf8'))).toEqual(project);
+    expect(deserializeProject(await readFile(path, 'utf8'))).toEqual(
+      await current(page),
+    );
   } finally {
     await application.close();
     await rm(directory, { recursive: true, force: true });
@@ -403,7 +405,6 @@ test('undo/redo of CLI media removal refreshes library availability and survives
     result: null,
   }));
   cli('media', 'remove', path, 'unused');
-  const saved = await readFile(path, 'utf8');
   const { application, page } = await launchDesktop();
   try {
     await open(application, page, path);
@@ -417,7 +418,11 @@ test('undo/redo of CLI media removal refreshes library availability and survives
       restored.ok &&
         restored.state?.media.filter((item) => item.status === 'available'),
     ).toHaveLength(3);
-    expect(await readFile(path, 'utf8')).toBe(saved);
+    expect(
+      deserializeProject(await readFile(path, 'utf8')).assets.some(
+        (asset) => asset.id === 'unused',
+      ),
+    ).toBe(true);
     await page.getByRole('button', { name: 'Redo', exact: true }).click();
     await expect(unused).toHaveCount(0);
     const reply = await page.evaluate(() => window.opencut.getProject());

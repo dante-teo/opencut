@@ -29,6 +29,7 @@ import * as projectFiles from '@opencut/core/node';
 import { ProjectSession } from '../../apps/desktop/src/main/project-session.js';
 
 let directory: string;
+const sessions: ProjectSession[] = [];
 const input = {
   name: 'Desktop project',
   settings: {
@@ -45,7 +46,9 @@ function setup() {
       .fn<() => Promise<'save' | 'discard' | 'cancel'>>()
       .mockResolvedValue('cancel'),
   };
-  return { session: new ProjectSession(dialogs), dialogs };
+  const session = new ProjectSession(dialogs);
+  sessions.push(session);
+  return { session, dialogs };
 }
 beforeEach(async () => {
   directory = await realpath(
@@ -53,6 +56,7 @@ beforeEach(async () => {
   );
 });
 afterEach(async () => {
+  for (const session of sessions.splice(0)) await session.dispose();
   await rm(directory, { recursive: true, force: true });
 });
 
@@ -215,7 +219,7 @@ it('keeps the current document after canceled, missing, malformed or unsupported
   expect(dialogs.unsaved).not.toHaveBeenCalled();
 });
 
-it('opens offline assets and preserves history; refuses stale saves after CLI changes', async () => {
+it('opens offline assets, rejects out-of-band writes and synchronizes CLI changes', async () => {
   const { session, dialogs } = setup();
   const path = join(directory, 'cli.json');
   const project = createProject({ name: 'CLI project' });
@@ -249,7 +253,7 @@ it('opens offline assets and preserves history; refuses stale saves after CLI ch
     ok: false,
     error: expect.stringContaining('changed on disk'),
   });
-  expect((await readProjectFile(path)).metadata.name).toBe(
+  expect(JSON.parse(await readFile(path, 'utf8')).metadata.name).toBe(
     'External same-revision edit',
   );
   await writeFile(path, original);
@@ -259,7 +263,7 @@ it('opens offline assets and preserves history; refuses stale saves after CLI ch
       .project,
     result: null,
   }));
-  expect(await session.run('save')).toMatchObject({ ok: false });
+  expect(await session.run('save')).toMatchObject({ ok: true });
   expect((await readProjectFile(path)).tracks).toHaveLength(2);
 });
 
@@ -305,7 +309,7 @@ it('serializes native dialogs and protects work while a save is pending', async 
   });
 });
 
-it('commits GUI transactions once, rejects stale/malformed edits, and saves multiple revisions with their history', async () => {
+it('durably commits GUI transactions once and rejects stale or malformed edits', async () => {
   const { session, dialogs } = setup();
   const path = join(directory, 'edited.json');
   let project = createProject({ name: 'Interactive' });
@@ -357,7 +361,7 @@ it('commits GUI transactions once, rejects stale/malformed edits, and saves mult
   }
   expect(await session.run('edit', request)).toMatchObject({
     ok: true,
-    state: { dirty: true, project: { editing: { revision: 2 } } },
+    state: { dirty: false, project: { editing: { revision: 2 } } },
   });
   const moved = await session.run('current');
   expect(await session.run('edit', request)).toMatchObject({
@@ -368,7 +372,7 @@ it('commits GUI transactions once, rejects stale/malformed edits, and saves mult
     await session.run('undo', { projectId: project.metadata.id }),
   ).toMatchObject({ ok: false });
   expect(await session.run('current')).toEqual(moved);
-  expect(await readProjectFile(path)).toEqual(project);
+  expect(projectRevision(await readProjectFile(path))).toBe(2);
   expect(
     await session.run('edit', {
       ...request,
@@ -410,7 +414,7 @@ it('commits GUI transactions once, rejects stale/malformed edits, and saves mult
   });
   expect(await session.run('save')).toMatchObject({ ok: true });
   expect((await readProjectFile(path)).clips).toEqual(saved.clips);
-  // An unsaved GUI edit still cannot overwrite an external edit at the saved revision.
+  // An out-of-band edit still cannot be overwritten by the authoritative session.
   expect(
     await session.run('edit', {
       ...request,
@@ -425,9 +429,11 @@ it('commits GUI transactions once, rejects stale/malformed edits, and saves mult
     ok: false,
     error: expect.stringContaining('changed on disk'),
   });
-  expect((await readProjectFile(path)).metadata.name).toBe('External');
+  expect(JSON.parse(await readFile(path, 'utf8')).metadata.name).toBe(
+    'External',
+  );
   expect(await session.run('current')).toMatchObject({
-    state: { dirty: true, project: { editing: { revision: 6 } } },
+    state: { dirty: false, project: { editing: { revision: 6 } } },
   });
 });
 
@@ -498,7 +504,7 @@ it('validates clip properties atomically, shares timeline history and preserves 
   ).toMatchObject({
     ok: true,
     state: {
-      dirty: true,
+      dirty: false,
       project: { editing: { revision: 1, undo: [expect.anything()] } },
     },
   });

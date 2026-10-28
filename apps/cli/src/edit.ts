@@ -31,7 +31,7 @@ Individual timeline and media mutations also create history transactions.
 Undo/redo restore exact content, including IDs and timestamps; revisions always increase.
 New edits clear redo. No-op edits retain history. Dry-run validates and previews without saving.
 History persists in the project JSON; no media files are changed.
-JSON errors remain text on stderr. Exit codes: 0 success, 1 data/file/conflict, 2 arguments.
+With --json, errors are structured JSON on stderr. Exit codes: 0 success, 1 data/file/conflict, 2 arguments.
 See docs/CLI.md for the complete batch schema and result fields.
 `;
 

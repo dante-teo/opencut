@@ -683,6 +683,20 @@ async function runCli(args: string[]): Promise<void> {
   );
 }
 
+// SQLite is bundled with the pinned runtime. Its one-time experimental notice
+// must not contaminate machine-readable stderr; preserve all other diagnostics.
+const warningListeners = process.listeners('warning');
+process.removeAllListeners('warning');
+process.on('warning', (warning) => {
+  if (
+    warning.name === 'ExperimentalWarning' &&
+    warning.message ===
+      'SQLite is an experimental feature and might change at any time'
+  )
+    return;
+  for (const listener of warningListeners) listener.call(process, warning);
+});
+
 try {
   await runCli(process.argv.slice(2));
 } catch (error) {
@@ -690,9 +704,21 @@ try {
     error instanceof Error && 'code' in error ? String(error.code) : '';
   const usageError =
     error instanceof UsageError || code.startsWith('ERR_PARSE_ARGS_');
+  const message = error instanceof Error ? error.message : String(error);
+  const json = process.argv.slice(2).includes('--json');
   process.stderr.write(
-    `opencut: ${error instanceof Error ? error.message : String(error)}\n`,
+    json
+      ? JSON.stringify({
+          ok: false,
+          error: {
+            code: code || (usageError ? 'INVALID_ARGUMENTS' : 'COMMAND_FAILED'),
+            message,
+            ...(usageError ? { hint: 'Run opencut --help for usage.' } : {}),
+          },
+        }) + '\n'
+      : `opencut: ${message}\n`,
   );
-  if (usageError) process.stderr.write('Run opencut --help for usage.\n');
+  if (usageError && !json)
+    process.stderr.write('Run opencut --help for usage.\n');
   process.exitCode ??= usageError ? 2 : 1;
 }

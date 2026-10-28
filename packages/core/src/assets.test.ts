@@ -245,6 +245,7 @@ describe('headless asset management', () => {
       );
       expect((await fs.readdir(directory)).sort()).toEqual([
         'project.json',
+        'project.json.opencut-lock',
         '日本語 #1%.txt',
       ]);
     },
@@ -456,6 +457,7 @@ describe('atomic project updates', () => {
     expect(probeMedia).not.toHaveBeenCalled();
     expect((await fs.readdir(directory)).sort()).toEqual([
       'project.json',
+      'project.json.opencut-lock',
       '日本語 #1%.txt',
     ]);
   });
@@ -469,6 +471,7 @@ describe('atomic project updates', () => {
     expect(await fs.readFile(path, 'utf8')).toBe(before);
     expect((await fs.readdir(directory)).sort()).toEqual([
       'project.json',
+      'project.json.opencut-lock',
       '日本語 #1%.txt',
     ]);
   });
