@@ -593,3 +593,8 @@ save each edit; untitled projects retain their first-save flow. There is no poll
 
 See [ADR 0011](adr/0011-shared-project-session.md) for ownership, crash recovery,
 security, disconnect semantics, transport limits and platform boundaries.
+
+## Timeline evaluation
+
+T23 shares exact clip timing, ordering and defaults between headless point queries
+and export planning. See [evaluation semantics and limitations](TIMELINE_EVALUATION.md).

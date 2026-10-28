@@ -7,7 +7,8 @@ recommendations, not implemented features or commitments.
 T22 subsequently implements shared GUI/CLI project sessions instead of the
 playback task suggested below. This document retains the historical T21 findings;
 see [the T22 session decision](adr/0011-shared-project-session.md) for the current
-writer, synchronization and recovery contract. T23 has not been implemented.
+writer, synchronization and recovery contract. T23 adds the [headless timeline evaluator](TIMELINE_EVALUATION.md); live timeline
+playback remains unavailable.
 
 ## Deliverables and acceptance boundaries
 

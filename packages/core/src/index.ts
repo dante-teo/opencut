@@ -81,3 +81,10 @@ export type {
 } from './render-plan.js';
 
 export { addAssetClip } from './library.js';
+
+export { evaluateTimeline, evaluateTimelineFrame } from './evaluation.js';
+export type {
+  TimelineEvaluation,
+  EvaluatedTimelineClip,
+  ResolvedTimelineClip,
+} from './evaluation.js';

@@ -370,5 +370,14 @@ a mutation. After normal exit or a crash, standalone CLI edits resume against
 the last complete saved state. Do not delete `.opencut-lock`, mix old-version
 writers with T22, or use network filesystems. Transport is private to the current
 OS account, limited to 64 MiB per message, and is not implemented for Windows.
-No timeline playback or T23 feature is included. See
+T22 does not add timeline playback. See
 [the shared-session contract](../../docs/CLI.md#shared-projects-in-electron-t22).
+
+## Headless timeline evaluation (T23)
+
+Core APIs `evaluateTimeline(project, rationalTime)` and
+`evaluateTimelineFrame(project, frameIndex)` inspect active layers, exact source
+times and audio mixing candidates without media tools. Export planning shares
+their timing/order/property resolution. There is no new CLI command or live
+project playback. Read [evaluation semantics](../../docs/TIMELINE_EVALUATION.md)
+for half-open boundaries, metadata uncertainty and export-specific limits.

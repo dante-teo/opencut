@@ -12,6 +12,9 @@ T13 adds per-export quality/resolution presets, progress and cancellation withou
 changing schema version 1. Render controls, progress events and job state are not
 serialized into project settings or editing history. Exporting with a resolution
 preset leaves the saved canvas dimensions and clip coordinates unchanged.
+T23 [timeline evaluation](TIMELINE_EVALUATION.md) derives active media and source
+times from these same fields. Evaluation results are transient and do not change
+schema version 1, project content or history.
 
 ## Example
 

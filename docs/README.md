@@ -25,6 +25,9 @@ T19 adds multi-file media import, Finder drops, library thumbnails, source selec
 unused-asset removal and dragging assets onto the timeline.
 T20 adds contextual clip properties, frame-based numeric timing, audio and visual
 controls, workspace shortcuts and shared undo/redo selection restoration.
+T23 adds [headless timeline evaluation](TIMELINE_EVALUATION.md): exact source times,
+ordered layers, audio mixing candidates and gap/boundary queries. Export planning
+shares its timing and property resolution; live project playback remains unavailable.
 
 Select a clip to edit **Timeline position**, **Duration**, **Source in/out** in
 whole project frames, **Volume** (linear 0–1), **Mute**, and video **Position X/Y**
@@ -389,7 +392,7 @@ docs/                  Product, architecture and architectural decisions (adr/)
 ```
 
 Read [PRODUCT.md](PRODUCT.md), [ARCHITECTURE.md](ARCHITECTURE.md),
-[PROJECT_FORMAT.md](PROJECT_FORMAT.md),
+[PROJECT_FORMAT.md](PROJECT_FORMAT.md), [TIMELINE_EVALUATION.md](TIMELINE_EVALUATION.md),
 [AGENTS.md](../AGENTS.md), and the [fixture contract](../tests/fixtures/README.md).
 The official [Agent Skill](../skills/video-editor/SKILL.md) documents working CLI
 capabilities and links to the core API contract. It is distinct from repository

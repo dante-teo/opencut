@@ -202,5 +202,12 @@ run in the invoking process, without a persistent queue, background service or d
 T21 establishes an [architecture audit and playback baseline](T21_ARCHITECTURE_AUDIT.md)
 with representative generated projects, cold/warm source seeks, playback/resource
 measurements, offline exports and explicit unavailable-benchmark fallbacks. It does
-not add timeline playback or change the media engine. T22–T27 recommendations in
-that audit remain future work.
+not add timeline playback or change the media engine. Its task ordering is historical:
+T22 implements [shared GUI/CLI sessions](adr/0011-shared-project-session.md), and
+T23 implements [headless timeline evaluation](TIMELINE_EVALUATION.md).
+
+The T23 evaluator resolves active clips, exact source times, visual layer order,
+transforms, opacity, audio gain/mute and timeline gaps/boundaries from the existing
+project. Export planning shares timing and property defaults with these queries.
+Decoding, compositing, audio playback and live project transport remain separate
+work; evaluator results alone do not establish preview/export playback parity.

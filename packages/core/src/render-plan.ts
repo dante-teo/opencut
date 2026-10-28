@@ -1,5 +1,5 @@
 import type { Project } from './project.js';
-import { listTimeline } from './timeline.js';
+import { resolveTimeline } from './evaluation.js';
 import type { FrameRate, RationalTime } from './time.js';
 
 export class RenderError extends Error {
@@ -62,9 +62,8 @@ function exactFrame(
 
 /** Pure compilation from saved-model semantics to ordered, integer-frame segments. */
 export function planProjectRender(project: Project): ProjectRenderPlan {
-  const timeline = listTimeline(project);
-  const videoTracks = timeline.tracks.filter((track) => track.type === 'video');
-  if (!videoTracks.some((track) => track.clips.length > 0))
+  const timeline = resolveTimeline(project);
+  if (!timeline.clips.some((clip) => clip.trackType === 'video'))
     throw new RenderError(
       'Video tracks are empty. Add a video or image clip before rendering.',
     );
@@ -104,64 +103,56 @@ export function planProjectRender(project: Project): ProjectRenderPlan {
   const visualClips: VisualRenderClip[] = [];
   const audioClips: AudioRenderClip[] = [];
   let totalFrames = 0;
-  for (const track of timeline.tracks) {
-    for (const clip of track.clips) {
-      const start = exactFrame(
-        clip.timelineStart,
-        frameRate,
-        `Clip '${clip.id}' timeline start`,
+  for (const clip of timeline.clips) {
+    const start = exactFrame(
+      clip.timelineStart,
+      frameRate,
+      `Clip '${clip.id}' timeline start`,
+    );
+    const sourceStart = exactFrame(
+      clip.sourceIn,
+      frameRate,
+      `Clip '${clip.id}' source in`,
+    );
+    const sourceEnd = exactFrame(
+      clip.sourceOut,
+      frameRate,
+      `Clip '${clip.id}' source out`,
+    );
+    const count = sourceEnd - sourceStart;
+    const end = start + count;
+    if (
+      !Number.isSafeInteger(end) ||
+      BigInt(end) * BigInt(denominator) > 600n * BigInt(numerator)
+    )
+      throw new RenderError(
+        'Rendering supports at most 600 seconds. Shorten the timeline.',
       );
-      const sourceStart = exactFrame(
-        clip.sourceIn,
-        frameRate,
-        `Clip '${clip.id}' source in`,
-      );
-      const sourceEnd = exactFrame(
-        clip.sourceOut,
-        frameRate,
-        `Clip '${clip.id}' source out`,
-      );
-      const count = sourceEnd - sourceStart;
-      const end = start + count;
-      if (
-        !Number.isSafeInteger(end) ||
-        BigInt(end) * BigInt(denominator) > 600n * BigInt(numerator)
-      )
+    totalFrames = Math.max(totalFrames, end);
+    audioClips.push({
+      clipId: clip.id,
+      assetId: clip.assetId,
+      timelineStartFrame: start,
+      sourceStartFrame: sourceStart,
+      frameCount: count,
+      volume: clip.volume,
+      muted: clip.muted,
+      required: clip.trackType === 'audio',
+    });
+    if (clip.trackType === 'video') {
+      const visual = clip.visual;
+      if (width * visual.scale > 8192 || height * visual.scale > 8192)
         throw new RenderError(
-          'Rendering supports at most 600 seconds. Shorten the timeline.',
+          `Clip '${clip.id}' scaled canvas exceeds 8192 pixels per side. Reduce scale.`,
         );
-      totalFrames = Math.max(totalFrames, end);
-      audioClips.push({
+      visualClips.push({
         clipId: clip.id,
         assetId: clip.assetId,
         timelineStartFrame: start,
         sourceStartFrame: sourceStart,
         frameCount: count,
-        volume: clip.volume ?? 1,
-        muted: clip.muted ?? false,
-        required: track.type === 'audio',
+        ...visual,
       });
-      if (track.type === 'video') {
-        const visual = {
-          x: clip.visual?.x ?? 0,
-          y: clip.visual?.y ?? 0,
-          scale: clip.visual?.scale ?? 1,
-          opacity: clip.visual?.opacity ?? 1,
-          fit: clip.visual?.fit ?? 'contain',
-        };
-        if (width * visual.scale > 8192 || height * visual.scale > 8192)
-          throw new RenderError(
-            `Clip '${clip.id}' scaled canvas exceeds 8192 pixels per side. Reduce scale.`,
-          );
-        visualClips.push({
-          clipId: clip.id,
-          assetId: clip.assetId,
-          timelineStartFrame: start,
-          sourceStartFrame: sourceStart,
-          frameCount: count,
-          ...visual,
-        });
-      }
     }
   }
   return {
