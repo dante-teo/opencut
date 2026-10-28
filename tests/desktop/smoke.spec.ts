@@ -33,6 +33,7 @@ test('built desktop displays React through the sandboxed bridge', async () => {
       'getApplicationInfo',
       'openPreview',
       'previewAsset',
+      'timelinePreview',
       'releasePreview',
       'getPreviewMetrics',
     ]);

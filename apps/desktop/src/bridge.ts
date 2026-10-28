@@ -9,6 +9,7 @@ export const APP_INFO_CHANNEL = 'app:get-info';
 export const OPEN_PREVIEW_CHANNEL = 'preview:open';
 export const PREVIEW_METRICS_CHANNEL = 'preview:metrics';
 export const ASSET_PREVIEW_CHANNEL = 'preview:asset';
+export const TIMELINE_PREVIEW_CHANNEL = 'preview:timeline';
 export const RELEASE_PREVIEW_CHANNEL = 'preview:release';
 
 export interface PreviewSource {
@@ -121,6 +122,9 @@ export interface DesktopAPI {
   getApplicationInfo(): Promise<ApplicationInfo>;
   openPreview(): Promise<PreviewSource | null>;
   previewAsset(assetId: string): Promise<PreviewSource>;
+  timelinePreview(
+    input: HistoryInput & { assetId: string },
+  ): Promise<PreviewSource>;
   releasePreview(url: string): Promise<void>;
   getPreviewMetrics(): Promise<PreviewMetrics>;
 }

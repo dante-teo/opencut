@@ -15,7 +15,15 @@ video to open **Source preview**, or use **Open video** for a local source.
 Imported video preview reuses stored import metadata and rechecks readability,
 without running ffprobe again. Reopening refreshes availability, not stored FPS
 or codec metadata.
-The **Project viewer** tab currently shows a canvas placeholder. With a project
+T24 **Project viewer** plays the edited timeline: cuts, trims/splits, gaps and
+background, original audio and overlapping tracks with clip volume/mute. It uses
+T23 evaluation and one Web Audio clock. Ruler/slider seeking pauses; Space toggles
+the active viewer and arrows step the timeline. Toggling playback or seeking during
+startup cancels that start. Press Play again to resume healthy media without
+switching viewers or reopening the project. Expand **Playback diagnostics**
+for drop/late-frame, skew, wait and error counters. Only the top eligible visual
+is displayed; transforms and full layered compositing await T26. See the
+[playback contract and supported-media limits](../../docs/TIMELINE_PLAYBACK.md). With a project
 open, steps/frame positions and nominal non-drop timecode use project FPS;
 otherwise steps/frame numbers use average FPS from optional ffprobe. These are
 best-effort HTML video seeks, not a frame-accurate editing guarantee. VFR and
@@ -129,10 +137,11 @@ their own undo step.
 Property edits share T09 history with imports and timeline gestures. Undo restores
 a deleted clip's selection; Save/reopen retains properties and history. Use CLI
 `timeline list` to inspect the saved result. Clip audio/transforms apply to CLI
-exports; source preview plays original media and live project preview is unavailable.
+exports. Project viewer also applies clip audio; Source preview plays original
+media. Visual transforms/compositing remain export-only.
 
 Workspace shortcuts outside typing/native controls: Space toggles the active
-source; Command+S saves; Command+Z / Command+Shift+Z undo/redo; S splits the
+viewer; Command+S saves; Command+Z / Command+Shift+Z undo/redo; S splits the
 selection at the playhead; Delete/Backspace deletes it. Control replaces Command
 on Windows/Linux. Left/Right step the active video source or the Project viewer's
 playhead. Focused clips/handles retain arrow-key move/trim; form controls retain

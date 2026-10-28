@@ -353,7 +353,7 @@ form controls and reads them with `FormData` on submit. React cannot submit a
 path or replacement document. The desktop uses a three-pane editor workspace (media library, viewer, inspector) above an interactive
 track timeline. Selecting video assets also opens source preview. Playback,
 selection, scroll, zoom and timecode state are never saved in the project. The
-project viewer is an explicit placeholder, with source preview in a separate tab.
+project viewer uses T24 edited-timeline playback, with source preview in a separate tab.
 
 T17's React/SVG timeline consumes `Project` directly. A memoized per-track search
 index references existing clips, sorts by exact starts and caches core-derived
@@ -399,8 +399,8 @@ repeat request for the same target can be applied again. Known limitation:
 repeated ruler seeks followed by Play can leave the linked source paused.
 Inspection selection is independent of playhead/link state. Seeking
 outside the linked range pauses/hides and unlinks the source; library/local source
-selection also unlinks. The source transport still spans the full source; there
-is no timeline playback engine, clip switching, compositing or audio mixing.
+selection also unlinks. The source transport still spans the full source; that linked source does not switch clips or apply timeline mixing. T24 playback
+in Project viewer has a separate clock, decoder lifecycle and mixer.
 T16's codec, VFR, stream-offset and approximate HTML seek limitations remain.
 Creation accepts only name/settings and reuses core validation. Main's native file dialogs select paths;
 core `readProjectFile`, `writeProjectFile`, `checkProjectMedia` and
@@ -557,8 +557,8 @@ Workspace shortcut mapping chooses Command on macOS and Control elsewhere and
 excludes native editing/control keys, composition, repeats and already handled
 events. Existing player and timeline handlers retain their scoped keys. A small
 transport ref reuses the active source player's serialized playback/seeking path;
-it adds no timeline playback or effects engine. Clip transforms/audio remain
-export properties, explicitly identified as unavailable in live project preview.
+T24 also routes that transport to Project viewer. Clip audio is previewed there;
+visual transforms remain export properties pending T26.
 Native numeric/range inputs and React suffice here without a dependency or second
 editing/history model.
 
@@ -578,8 +578,8 @@ These are decisions to investigate, not APIs promised or implemented by T05.
 
 The [T21 architecture audit](T21_ARCHITECTURE_AUDIT.md) records the verified
 capability matrix, reproducible source/export benchmarks, explicit fallback
-behavior and recommended T22–T27 gates. Live edited-timeline playback remains
-unavailable; source and exported-file performance are separate measurements.
+behavior and recommended T22–T27 gates. That historical baseline predates T24; source and exported-file measurements
+remain distinct from the edited-timeline tests.
 
 ## Shared project sessions (T22)
 
@@ -598,3 +598,12 @@ security, disconnect semantics, transport limits and platform boundaries.
 
 T23 shares exact clip timing, ordering and defaults between headless point queries
 and export planning. See [evaluation semantics and limitations](TIMELINE_EVALUATION.md).
+
+## Edited timeline playback (T24)
+
+The [playback contract](TIMELINE_PLAYBACK.md) describes the single AudioContext
+clock, prepared T23 queries, media-element lookahead and synchronization, gain
+routing, canvas painting and disposal. This remains a desktop adapter: core, CLI,
+media inspection and offline rendering have no Electron/Web Audio dependency.
+Timeline media capabilities are revision-scoped and independent of source-preview
+selection. Full multi-layer visual compositing is deferred to T26.

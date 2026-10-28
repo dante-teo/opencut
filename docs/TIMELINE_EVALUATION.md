@@ -103,10 +103,14 @@ than round. Existing FFmpeg project-rate sampling before trimming, still looping
 stream origins and 48 kHz sample rounding are unchanged. No intentional export
 semantic change is introduced.
 
-Each query validates the full project and its history and derives the ordered
-clips again. There is no prepared evaluator or measured real-time performance
-guarantee.
+`evaluateTimeline` and `evaluateTimelineFrame` validate and resolve a fresh snapshot
+on each call. `createTimelineEvaluator(project)` instead validates/resolves once
+and returns a timestamp-query function with identical results. It binary-searches
+nonoverlapping clips per track and returns detached values. Recreate it after
+edits; mutating the original project or an earlier result does not update it.
+`resolveTimeline(project)` also exposes validated ordered clip ranges/defaults
+without a point query for adapters that need lookahead.
 
-This is the shared headless semantic foundation for future preview and CLI
-inspection. The existing source player has not been replaced; no live timeline
-clock, compositor, mixer, decoder, playback parity or T24 feature is implemented.
+The desktop [T24 playback adapter](TIMELINE_PLAYBACK.md) uses this prepared
+T23 evaluator as its authoritative mapping. Decoding, clock and audio routing
+stay in desktop; evaluation itself remains headless and does no I/O or playback.

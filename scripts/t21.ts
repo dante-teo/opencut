@@ -25,9 +25,9 @@ const results: Record<string, unknown> = {
     totalMemoryGiB: totalmem() / 2 ** 30,
   },
   liveTimelinePlayback: {
-    status: 'unavailable',
+    status: 'not-measured',
     reason:
-      'Project viewer is a placeholder; source and exported-file metrics are not live timeline metrics.',
+      'This source/export baseline does not measure T24 playback; use the timeline-playback desktop tests.',
   },
 };
 let failed = false;

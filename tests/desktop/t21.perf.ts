@@ -53,20 +53,16 @@ test('T21 source playback with representative timelines loaded', async () => {
       await page
         .getByRole('tab', { name: 'Project viewer', exact: true })
         .click();
-      await expect(
-        page.getByText('Project preview is not available yet.', {
-          exact: true,
-        }),
-      ).toBeVisible();
-      await expect(page.locator('#project-viewer video')).toHaveCount(0);
+      await expect(page.getByLabel('Edited timeline canvas')).toBeVisible();
       const projectBefore = await readFile(
         join(directory, `${name}.opencut.json`),
         'utf8',
       );
       cases[name] = {
         liveTimeline: {
-          status: 'unavailable',
-          verified: 'Placeholder visible, no video in Project viewer',
+          status: 'not-measured',
+          reason:
+            'Dedicated T24 desktop tests measure edited timeline playback.',
         },
         clips: project.clips.length,
         tracks: project.tracks.length,

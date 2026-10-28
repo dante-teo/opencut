@@ -5,7 +5,8 @@ TikTok and Instagram creators, vloggers, and streamers. A clear conventional
 interface should make everyday editing accessible without code. The desktop now
 provides project management, a media library, timeline editing, clip properties
 and shared undo/redo. Single-source preview can link to an individual video clip;
-live project mixing/compositing remains unavailable.
+Project viewer plays edited cuts, gaps and synchronized multi-track audio.
+Full visual compositing remains unavailable.
 
 ## Two equally important workflows
 
@@ -183,8 +184,7 @@ See [desktop usage](README.md) for property ranges, shortcuts and preview limits
 
 ## Excluded
 
-Through T20, live project playback/mixing/compositing and desktop render controls
-remain unavailable. Transitions, keyframes, fades and new audio/visual effects
+Full live visual compositing and desktop render controls remain unavailable. Transitions, keyframes, fades and new audio/visual effects
 are outside this scope. No FFmpeg or MLT runtime is bundled; media commands require
 manually installed external tools.
 Fixture generation remains an optional development utility.
@@ -211,3 +211,10 @@ transforms, opacity, audio gain/mute and timeline gaps/boundaries from the exist
 project. Export planning shares timing and property defaults with these queries.
 Decoding, compositing, audio playback and live project transport remain separate
 work; evaluator results alone do not establish preview/export playback parity.
+
+T24 adds [edited timeline playback](TIMELINE_PLAYBACK.md), using T23 evaluation,
+a single Web Audio clock and Chromium decoders. It supports cuts, trims/splits,
+gaps/background, overlapping original/independent audio, volume/mute, transport,
+seek/step, interruption cleanup and measurable diagnostics. The top eligible visual
+is shown without T26 transforms/layer compositing. Browser codec, seek and output
+latency limitations apply; this is not an export-parity guarantee. No T25 work is included.

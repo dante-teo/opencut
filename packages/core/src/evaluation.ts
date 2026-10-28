@@ -95,16 +95,37 @@ export function evaluateTimeline(
   project: Project,
   time: RationalTime,
 ): TimelineEvaluation {
-  timeSchema.parse(time);
+  return createTimelineEvaluator(project)(time);
+}
+
+/** Validate and resolve one snapshot once; recreate after edits. Results stay detached. */
+export function createTimelineEvaluator(project: Project) {
   const timeline = resolveTimeline(project);
-  const activeClips = timeline.clips
-    .filter(
-      (clip) =>
-        compareTimes(time, clip.timelineStart) >= 0 &&
-        compareTimes(time, clip.timelineEnd) < 0,
-    )
-    .map((clip): EvaluatedTimelineClip => ({
-      ...clip,
+  const backgroundColor = project.settings.backgroundColor ?? '#000000';
+  const tracks = new Map<string, ResolvedTimelineClip[]>();
+  for (const clip of timeline.clips) {
+    const entries = tracks.get(clip.trackId) ?? [];
+    entries.push(clip);
+    tracks.set(clip.trackId, entries);
+  }
+  return (time: RationalTime): TimelineEvaluation => {
+    timeSchema.parse(time);
+    const candidates: ResolvedTimelineClip[] = [];
+    for (const entries of tracks.values()) {
+      let low = 0,
+        high = entries.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (compareTimes(entries[middle]!.timelineEnd, time) <= 0)
+          low = middle + 1;
+        else high = middle;
+      }
+      const clip = entries[low];
+      if (clip && compareTimes(clip.timelineStart, time) <= 0)
+        candidates.push(clip);
+    }
+    const activeClips = candidates.map((clip): EvaluatedTimelineClip => ({
+      ...structuredClone(clip),
       sourceTime: addTimes(
         clip.sourceIn,
         subtractTimes(time, clip.timelineStart),
@@ -113,23 +134,26 @@ export function evaluateTimeline(
       effectiveVolume:
         clip.muted || clip.audioPresence === 'absent' ? 0 : clip.volume,
     }));
-  const visualClips = activeClips.filter((clip) => clip.trackType === 'video');
-  const audioClips = activeClips.filter(
-    (clip) => clip.audioPresence !== 'absent',
-  );
-  const endComparison = compareTimes(time, timeline.duration);
-  return {
-    time: { ...time },
-    duration: timeline.duration,
-    boundary:
-      endComparison < 0 ? 'inside' : endComparison === 0 ? 'end' : 'after',
-    activeClips,
-    visualClips,
-    audioClips,
-    mixingSources: audioClips.filter((clip) => clip.effectiveVolume > 0),
-    gap: activeClips.length === 0,
-    visualGap: !visualClips.some((clip) => clip.visible),
-    backgroundColor: project.settings.backgroundColor ?? '#000000',
+    const visualClips = activeClips.filter(
+      (clip) => clip.trackType === 'video',
+    );
+    const audioClips = activeClips.filter(
+      (clip) => clip.audioPresence !== 'absent',
+    );
+    const endComparison = compareTimes(time, timeline.duration);
+    return {
+      time: { ...time },
+      duration: { ...timeline.duration },
+      boundary:
+        endComparison < 0 ? 'inside' : endComparison === 0 ? 'end' : 'after',
+      activeClips,
+      visualClips,
+      audioClips,
+      mixingSources: audioClips.filter((clip) => clip.effectiveVolume > 0),
+      gap: activeClips.length === 0,
+      visualGap: !visualClips.some((clip) => clip.visible),
+      backgroundColor,
+    };
   };
 }
 

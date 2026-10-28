@@ -9,6 +9,7 @@ import {
   PREVIEW_METRICS_CHANNEL,
   ASSET_PREVIEW_CHANNEL,
   RELEASE_PREVIEW_CHANNEL,
+  TIMELINE_PREVIEW_CHANNEL,
   type DesktopAPI,
 } from '../bridge.js';
 
@@ -60,6 +61,8 @@ const api: DesktopAPI = {
   getApplicationInfo: () => ipcRenderer.invoke(APP_INFO_CHANNEL),
   openPreview: () => ipcRenderer.invoke(OPEN_PREVIEW_CHANNEL),
   previewAsset: (assetId) => ipcRenderer.invoke(ASSET_PREVIEW_CHANNEL, assetId),
+  timelinePreview: (input) =>
+    ipcRenderer.invoke(TIMELINE_PREVIEW_CHANNEL, input),
   releasePreview: (url) => ipcRenderer.invoke(RELEASE_PREVIEW_CHANNEL, url),
   getPreviewMetrics: () => ipcRenderer.invoke(PREVIEW_METRICS_CHANNEL),
 };

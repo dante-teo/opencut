@@ -243,7 +243,7 @@ test('linked trimmed video source follows ruler seeks and playback independently
     await expect
       .poll(() =>
         page
-          .locator('video')
+          .locator('#source-viewer video')
           .evaluate((video: HTMLVideoElement) => video.currentTime),
       )
       .toBeCloseTo(0.5005, 3);
@@ -261,7 +261,7 @@ test('linked trimmed video source follows ruler seeks and playback independently
     await expect
       .poll(() =>
         page
-          .locator('video')
+          .locator('#source-viewer video')
           .evaluate((video: HTMLVideoElement) => video.currentTime),
       )
       .toBeCloseTo(1.001, 3);
@@ -281,7 +281,7 @@ test('linked trimmed video source follows ruler seeks and playback independently
     await expect
       .poll(() =>
         page
-          .locator('video')
+          .locator('#source-viewer video')
           .evaluate((video: HTMLVideoElement) => video.currentTime),
       )
       .toBeCloseTo(1.001, 3);
@@ -298,7 +298,7 @@ test('linked trimmed video source follows ruler seeks and playback independently
     await expect
       .poll(() =>
         page
-          .locator('video')
+          .locator('#source-viewer video')
           .evaluate((video: HTMLVideoElement) => video.paused),
       )
       .toBe(true);

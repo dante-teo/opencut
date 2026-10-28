@@ -82,7 +82,12 @@ export type {
 
 export { addAssetClip } from './library.js';
 
-export { evaluateTimeline, evaluateTimelineFrame } from './evaluation.js';
+export {
+  evaluateTimeline,
+  evaluateTimelineFrame,
+  createTimelineEvaluator,
+  resolveTimeline,
+} from './evaluation.js';
 export type {
   TimelineEvaluation,
   EvaluatedTimelineClip,

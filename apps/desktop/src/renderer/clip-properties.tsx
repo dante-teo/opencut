@@ -301,8 +301,9 @@ export function ClipProperties({
         </>
       )}
       <p className="property-preview-note">
-        Source preview plays original media. Clip audio and transforms are saved
-        for export; live project preview is unavailable.
+        Project preview applies clip volume and mute. Source preview plays
+        original media. Visual transforms apply to export; layered compositing
+        is not yet available in Project viewer.
       </p>
     </fieldset>
   );

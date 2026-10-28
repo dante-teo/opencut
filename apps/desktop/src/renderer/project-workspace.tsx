@@ -7,6 +7,7 @@ import type {
   TimelineOperation,
 } from '../bridge.js';
 import { Preview } from './video-preview.js';
+import { TimelinePreview, type TimelineTransport } from './timeline-preview.js';
 import {
   clipTimelineEnd,
   compareTimes,
@@ -18,8 +19,6 @@ import {
   timelineToSource,
   ZERO,
   frameIndex,
-  framePosition,
-  clampTime,
 } from './timeline-geometry.js';
 import { ProjectTimeline } from './project-timeline.js';
 import { MediaLibrary } from './media-library.js';
@@ -38,6 +37,7 @@ export function ProjectWorkspace() {
   const operationTail = useRef(Promise.resolve());
   const stateRef = useRef(state);
   const transport = useRef<PreviewTransport | null>(null);
+  const projectTransport = useRef<TimelineTransport | null>(null);
   const formDialog = useRef<HTMLDialogElement>(null);
   const [viewer, setViewer] = useState<'project' | 'source'>('project');
   const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
@@ -52,6 +52,8 @@ export function ProjectWorkspace() {
     (clip) => clip.id === linkedClipId,
   );
   function seekTimeline(time: RationalTime) {
+    // Update the clock synchronously, before an animation callback can echo an old position.
+    projectTransport.current?.seek(time);
     setPlayhead(time);
     if (!linkedClip) return;
     const sourceTime = timelineToSource(linkedClip, time);
@@ -283,24 +285,11 @@ export function ProjectWorkspace() {
         void run('Saving project…', () => window.opencut.saveProject());
       else if (action === 'play') {
         if (viewer === 'source') transport.current?.toggle();
+        else projectTransport.current?.toggle();
       } else if (action === 'previousFrame' || action === 'nextFrame') {
         const direction = action === 'previousFrame' ? -1 : 1;
         if (viewer === 'source') transport.current?.step(direction);
-        else if (project) {
-          const frame = frameIndex(playhead, project.settings.frameRate);
-          const next =
-            direction < 0 ? (frame > 0n ? frame - 1n : 0n) : frame + 1n;
-          const end = project.clips.reduce(
-            (end, clip) =>
-              compareTimes(clipTimelineEnd(clip), end) > 0
-                ? clipTimelineEnd(clip)
-                : end,
-            ZERO,
-          );
-          seekTimeline(
-            clampTime(framePosition(next, project.settings.frameRate), end),
-          );
-        }
+        else projectTransport.current?.step(direction);
       } else if (selection?.kind === 'clip' && project) {
         const clip = project.clips.find((clip) => clip.id === selection.id);
         if (!clip) return;
@@ -456,22 +445,21 @@ export function ProjectWorkspace() {
             hidden={viewer !== 'project'}
             className="project-viewer"
           >
-            <div className="viewer-stage">
-              <svg
-                className="project-canvas"
-                viewBox={`0 0 ${project?.settings.width ?? 1920} ${project?.settings.height ?? 1080}`}
-                aria-label="Project canvas placeholder"
-              >
-                <rect
-                  width="100%"
-                  height="100%"
-                  fill={project?.settings.backgroundColor ?? '#000000'}
-                />
-              </svg>
-              <div className="viewer-placeholder">
-                <StudioArtwork />
-                {project && <p>Project preview is not available yet.</p>}
-                {!project && (
+            {project ? (
+              <TimelinePreview
+                project={project}
+                active={viewer === 'project'}
+                interrupted={!!busy || creating}
+                position={playhead}
+                onPositionChange={(time) => {
+                  if (viewer === 'project') setPlayhead(time);
+                }}
+                transportRef={projectTransport}
+              />
+            ) : (
+              <div className="viewer-stage">
+                <div className="viewer-placeholder">
+                  <StudioArtwork />
                   <button
                     className="primary-button"
                     disabled={!!busy}
@@ -479,9 +467,9 @@ export function ProjectWorkspace() {
                   >
                     Start creating <span aria-hidden="true">↗</span>
                   </button>
-                )}
+                </div>
               </div>
-            </div>
+            )}
             {project && (
               <div className="viewer-caption">
                 <span>

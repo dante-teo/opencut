@@ -27,7 +27,8 @@ T20 adds contextual clip properties, frame-based numeric timing, audio and visua
 controls, workspace shortcuts and shared undo/redo selection restoration.
 T23 adds [headless timeline evaluation](TIMELINE_EVALUATION.md): exact source times,
 ordered layers, audio mixing candidates and gap/boundary queries. Export planning
-shares its timing and property resolution; live project playback remains unavailable.
+shares its timing and property resolution. T24 adds [edited timeline playback](TIMELINE_PLAYBACK.md)
+with cuts, gaps, trims/splits, overlapping audio, clip gain/mute and diagnostics.
 
 Select a clip to edit **Timeline position**, **Duration**, **Source in/out** in
 whole project frames, **Volume** (linear 0–1), **Mute**, and video **Position X/Y**
@@ -38,10 +39,10 @@ Changes to its stored value, including undo/redo, synchronize the field.
 Core validation rejects overlaps, invalid source ranges and invalid values without
 changing the project. Off-grid or unrepresentable timing remains visible as exact
 stored times but cannot be silently rounded through the numeric editor.
-Source preview plays original media: clip volume/mute and transforms persist for
-CLI export, while live project mixing/compositing remains unavailable.
+Source preview plays original media. Project viewer applies clip volume/mute and
+mixes overlapping audio; visual transforms and full compositing remain export-only.
 
-Outside text fields and native controls, **Space** toggles the active source,
+Outside text fields and native controls, **Space** toggles the active viewer,
 **Command+Z / Command+Shift+Z** undo/redo, **Command+S** saves, **S** splits at the
 playhead, and **Delete/Backspace** removes the selected clip. Windows/Linux use
 Control as the command modifier. Left/Right step the active video source, or the
@@ -93,7 +94,7 @@ opening another project offers **Save**, **Discard**, and **Cancel** when the
 current project is unsaved. Canceled dialogs and failed saves preserve it; failed
 opens leave the current project displayed. Operations run one at a time, with
 loading indicators and errors shown in the workspace. New projects and edited
-timelines can be unsaved. There is no Save As, project playback or render control.
+timelines can be unsaved. There is no Save As or desktop render control.
 
 Use **Import media** to choose several video, audio or image files, or drop files
 from Finder into the media library. Import requires ffprobe on PATH; original
@@ -178,7 +179,7 @@ Keyboard edits use frame stepping without proximity snapping. Scroll to reach
 other tracks/times; there is no automatic edge scrolling during a drag. Zoom is
 locked while dragging. Successful edits and undo/redo pause and unlink source preview,
 retaining the project playhead. GUI editing does not add transitions,
-keyframes, project playback or rendering controls.
+keyframes or rendering controls.
 
 Select a video clip and click **Preview selected clip** to link source playback.
 This explicit action sets the playhead to the clip start and opens its source-in.
@@ -188,7 +189,8 @@ its full-source bounds. Selecting another clip only changes the inspector; the
 source link stays with the explicitly previewed clip. Seeking outside the linked
 range switches to Project viewer and pauses/unlinks the source. Library selection
 and **Open video** also unlink. Audio/image clips have no linked source preview;
-there is no automatic playback across clips, timeline mixing or compositing.
+linked source playback stays within that source. Project viewer provides edited
+timeline cuts/gaps and audio mixing; full compositing remains unavailable.
 Very long timelines use a proportional scrollbar to stay within browser layout
 limits; scrollbar precision becomes coarser at extreme durations.
 
@@ -196,10 +198,10 @@ Known limitation: after repeated ruler seeks, pressing **Play** can intermittent
 leave the linked source paused, with its source clock and the timeline playhead
 remaining fixed.
 
-The **Project viewer** tab shows the canvas placeholder. Select an imported video
+The **Project viewer** tab plays the edited timeline; see [controls and limits](TIMELINE_PLAYBACK.md). Select an imported video
 in the media library to open **Source preview** automatically, or use **Open video**
 for a local file. CLI imports update the open library immediately.
-Play/Pause, the Seek slider and Previous/Next frame operate on one source.
+In Source preview, Play/Pause, the Seek slider and Previous/Next frame operate on one source.
 Imported video preview reuses the metadata saved at import and needs no new
 ffprobe call. Selecting an asset checks that its file is still readable; reopening
 a project refreshes availability, without refreshing stored codec/FPS metadata.

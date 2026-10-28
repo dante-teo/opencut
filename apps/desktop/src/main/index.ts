@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { getApplicationInfo } from '@opencut/core';
+import { getApplicationInfo, projectRevision } from '@opencut/core';
 import { probeMedia } from '@opencut/media';
 import {
   APP_INFO_CHANNEL,
@@ -26,6 +26,7 @@ import {
   PREVIEW_METRICS_CHANNEL,
   ASSET_PREVIEW_CHANNEL,
   RELEASE_PREVIEW_CHANNEL,
+  TIMELINE_PREVIEW_CHANNEL,
   type PreviewSource,
 } from '../bridge.js';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -39,6 +40,7 @@ protocol.registerSchemesAsPrivileged([
       standard: true,
       secure: true,
       supportFetchAPI: true,
+      corsEnabled: true,
       stream: true,
     },
   },
@@ -53,6 +55,12 @@ if (devURL && new URL(devURL).origin !== 'http://127.0.0.1:5173') {
 const rendererURL = new URL(devURL ?? 'opencut://app/index.html').href;
 let mainWindow: BrowserWindow | null = null;
 let previewFile: { url: string; path: string } | null = null;
+const timelineFiles = new Map<string, string>();
+let timelineGeneration = 0;
+function revokeTimeline() {
+  timelineGeneration++;
+  timelineFiles.clear();
+}
 let openingPreview = false;
 let closingProject = false;
 let previewGeneration = 0;
@@ -136,6 +144,7 @@ const projectSession = new ProjectSession(
   (state) => {
     previewGeneration++;
     previewFile = null;
+    revokeTimeline();
     mainWindow?.webContents.send(PROJECT_CHANGED_CHANNEL, state);
   },
 );
@@ -294,6 +303,7 @@ async function createWindow(): Promise<void> {
     if (mainWindow === window) {
       mainWindow = null;
       previewFile = null;
+      revokeTimeline();
     }
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -322,9 +332,13 @@ app
       try {
         const url = new URL(request.url);
         if (url.host === 'media') {
-          if (request.method !== 'GET' || request.url !== previewFile?.url)
+          const path =
+            request.url === previewFile?.url
+              ? previewFile.path
+              : timelineFiles.get(request.url);
+          if (request.method !== 'GET' || !path)
             return new Response(null, { status: 403 });
-          return await servePreviewFile(previewFile.path, request);
+          return await servePreviewFile(path, request);
         }
         if (url.host !== 'app' || request.method !== 'GET')
           return new Response(null, { status: 403 });
@@ -366,6 +380,13 @@ app
           action as ProjectAction,
           args[0],
         );
+        if (
+          reply.ok &&
+          !reply.canceled &&
+          action !== 'current' &&
+          action !== 'save'
+        )
+          revokeTimeline();
         assertSender(event);
         if (
           reply.ok &&
@@ -429,11 +450,57 @@ app
         warning: null,
       } satisfies PreviewSource;
     });
+    ipcMain.handle(
+      TIMELINE_PREVIEW_CHANNEL,
+      async (event, ...args: unknown[]) => {
+        assertSender(event);
+        if (args.length !== 1 || !args[0] || typeof args[0] !== 'object')
+          throw new Error('Expected a timeline media request.');
+        const input = args[0] as Record<string, unknown>;
+        if (
+          Object.keys(input).sort().join(',') !==
+          'assetId,expectedRevision,projectId'
+        )
+          throw new Error('Invalid timeline media request.');
+        const generation = timelineGeneration;
+        const current = await projectSession.run('current');
+        if (
+          !current.ok ||
+          !current.state ||
+          input.projectId !== current.state.project.metadata.id ||
+          input.expectedRevision !== projectRevision(current.state.project)
+        )
+          throw new Error('Timeline project changed.');
+        const { asset, path } = await projectSession.previewAsset(
+          input.assetId,
+        );
+        assertSender(event);
+        if (generation !== timelineGeneration)
+          throw new Error('Timeline project changed.');
+        if (timelineFiles.size >= 128)
+          throw new Error('Too many timeline media grants.');
+        const url = `opencut://media/${randomUUID()}`;
+        timelineFiles.set(url, path);
+        return {
+          url,
+          name: asset.name,
+          kind:
+            asset.metadata?.kind ??
+            (asset.mediaTypes.includes('video') ? 'video' : 'audio'),
+          frameRate: asset.metadata?.frameRate ?? null,
+          videoEndSeconds: null,
+          width: asset.metadata?.width ?? null,
+          height: asset.metadata?.height ?? null,
+          warning: null,
+        } satisfies PreviewSource;
+      },
+    );
     ipcMain.handle(RELEASE_PREVIEW_CHANNEL, (event, ...args: unknown[]) => {
       assertSender(event);
       if (args.length !== 1 || typeof args[0] !== 'string')
         throw new Error('Expected one preview URL.');
       if (previewFile?.url === args[0]) previewFile = null;
+      timelineFiles.delete(args[0]);
     });
     ipcMain.handle(PREVIEW_METRICS_CHANNEL, (event) => {
       assertSender(event);

@@ -35,6 +35,7 @@ export async function servePreviewFile(
     if (!info.isFile()) throw new Error('Preview input is not a file.');
     const headers = new Headers({
       'Accept-Ranges': 'bytes',
+      'Access-Control-Allow-Origin': '*',
       'Content-Type':
         contentTypes[extname(path).toLowerCase()] ?? 'application/octet-stream',
       'Cache-Control': 'no-store',
