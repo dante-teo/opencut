@@ -1,3 +1,4 @@
+import type { CacheLimits, CacheStatus, RenderProgress } from '@opencut/media';
 import type {
   ApplicationInfo,
   Project,
@@ -10,9 +11,32 @@ export const OPEN_PREVIEW_CHANNEL = 'preview:open';
 export const PREVIEW_METRICS_CHANNEL = 'preview:metrics';
 export const ASSET_PREVIEW_CHANNEL = 'preview:asset';
 export const TIMELINE_PREVIEW_CHANNEL = 'preview:timeline';
+export const MEDIA_CACHE_CHANNEL = 'media:cache';
+export const TIMELINE_FRAME_CHANNEL = 'media:frame';
+export type MediaCacheAction =
+  | { action: 'status' | 'cancel' | 'clear' | 'cleanup' }
+  | { action: 'configure'; limits: CacheLimits }
+  | { action: 'enable'; enabled: boolean }
+  | {
+      action: 'generate';
+      assetId: string;
+      projectId: string;
+      expectedRevision: number;
+    };
+export interface DesktopCacheStatus extends CacheStatus {
+  enabled: boolean;
+  revision: number;
+  jobs: {
+    name: string;
+    state: string;
+    progress: RenderProgress | null;
+    error: string;
+  }[];
+}
 export const RELEASE_PREVIEW_CHANNEL = 'preview:release';
 
 export interface PreviewSource {
+  proxy?: boolean;
   kind?: 'video' | 'audio' | 'image';
   url: string;
   name: string;
@@ -123,8 +147,12 @@ export interface DesktopAPI {
   openPreview(): Promise<PreviewSource | null>;
   previewAsset(assetId: string): Promise<PreviewSource>;
   timelinePreview(
-    input: HistoryInput & { assetId: string },
+    input: HistoryInput & { assetId: string; originalOnly?: boolean },
   ): Promise<PreviewSource>;
+  mediaCache(input: MediaCacheAction): Promise<DesktopCacheStatus | null>;
+  timelineFrame(
+    input: HistoryInput & { assetId: string; timestamp: number },
+  ): Promise<string | null>;
   releasePreview(url: string): Promise<void>;
   getPreviewMetrics(): Promise<PreviewMetrics>;
 }

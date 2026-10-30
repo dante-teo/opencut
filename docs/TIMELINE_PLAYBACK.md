@@ -1,4 +1,4 @@
-# Edited timeline playback (T24)
+# Edited timeline playback (T24–T25)
 
 **Project viewer** plays the edited timeline. **Source preview** plays original media
 independently; **Preview selected clip** still links that source transport to one
@@ -18,7 +18,7 @@ protects the summed output; it is not the offline FFmpeg limiter.
 ## Clock, scheduling and lifetime
 
 `TimelinePlayback` stays in the desktop renderer. Chromium performs asynchronous
-media decoding; no decoding subprocess or synchronous main-process work is added.
+media decoding. T25 proxy and paused-frame subprocesses run through the headless media worker; main and renderer perform no synchronous cache or transcode work.
 Native media APIs supply decoders, transport, Web Audio routing and counters, so a
 player framework or native decoder dependency is unnecessary for this scope.
 
@@ -30,7 +30,11 @@ half-open interval queries. No timeline/source arithmetic is duplicated in playb
 The UI reports at most 20 times per second; painting follows animation frames.
 
 Each nearby source run gets a media element routed through its own GainNode.
-Two seconds of upcoming clips are loaded and pre-seeked. Contiguous source ranges
+Two seconds of upcoming clips are loaded and pre-seeked. T25 caps this at four
+speculative runs within an estimated frame-memory allowance, and 16 total decoders;
+excess active runs produce a diagnostic instead of unbounded allocation. Persisted
+limits apply on the first cache-status response. Subsequent budget changes adjust
+lookahead while playing without restarting active clips. Contiguous source ranges
 on one track share a decoder across splits. Noncontiguous cuts switch between
 preloaded decoders. Media positions are compared with the audio clock: errors over
 15 ms use 0.98/1.02 rate correction; errors over 120 ms seek to the authoritative
@@ -49,9 +53,16 @@ playback action. A rejected play promise marks media unavailable only while that
 action is still current, so a canceled request's `AbortError` cannot disable a
 healthy decoder. Failures belonging to the current action still surface normally.
 
-Only the current evaluation can paint; seeking frames are withheld. New snapshots
-(including synchronized CLI edits), viewer changes and component cleanup dispose
-decoders, frame callbacks and URL grants.
+Only the current evaluation can paint; seeking media frames are withheld. A cached
+PNG for the paused asset/source-time may bridge that seek. It represents the frame
+whose presentation interval covers the requested instant, including mixed-rate and
+VFR sources. A ready native decoder takes precedence over the cached image. One
+adjacent frame is prefetched; old asynchronous completions cannot paint after a
+new seek. New snapshots (including synchronized CLI edits), viewer changes and
+component cleanup dispose decoders, frame callbacks and URL grants. Project
+invalidation cancels obsolete proxy work but permits fresh valid selections to
+restart it; explicit user cancellation retains the cancelled job until retry or
+job-record reset. See [cache management](MEDIA_CACHE.md#management-and-measurement).
 Hidden documents and suspended audio devices pause playback. Transport state is
 transient and creates no edits or history. Re-enter Project viewer or reopen the
 project to retry a repaired media file.
@@ -60,7 +71,7 @@ Timeline grants are separate from the single source-preview grant. The typed
 preload accepts only an asset ID, project ID and revision; main checks sender,
 revision, file readability and project generation. Opaque range-serving URLs are
 released when unused and revoked after edits/project replacement. There are at
-most 128 simultaneous timeline grants. CORS is enabled only to allow these media
+most 128 simultaneous timeline grants. T25 also accepts an original-only retry flag and separately validates bounded cached-frame requests. Missing or failed proxies retry original media through a new grant, never by mixing different file bytes in one response. CORS is enabled only to allow these media
 capabilities into Web Audio; renderer fetch and filesystem privileges stay blocked
 by CSP and the sandbox.
 
@@ -104,9 +115,9 @@ Extreme rational anchors whose clock arithmetic exceeds safe JSON integers pause
 with a diagnostic rather than rounding timeline mapping. Lookahead comparisons
 use bigint and do not limit valid paused navigation.
 
-Long recordings, sustained heavy overlap, 4K/HDR, unusual stream offsets, and
-speaker/display loopback are not validated by the short synthetic suite. Canvas
-preview is capped at 1920 pixels wide, while decoding still uses the source.
+Long recordings, sustained heavy overlap, HDR, unusual stream offsets, and
+speaker/display loopback are not validated by the short synthetic suite. T25 adds a separate synthetic 1080p/4K benchmark. Canvas
+preview is capped at 1920 pixels wide; decoding uses an available verified proxy or the source.
 Startup and cut latency depend on browser readiness and scheduling. Full visual
-compositing is T26; proxy generation, advanced caches, effects, transitions,
-export UI and T25 are outside T24.
+compositing remains T26. Effects, transitions and export UI are outside this scope.
+See [the T25 cache contract](MEDIA_CACHE.md) for supported proxy timing, native memory limits, cancellation and resource accounting.

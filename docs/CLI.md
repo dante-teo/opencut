@@ -1,4 +1,4 @@
-# CLI reference (T22)
+# CLI reference (T25)
 
 Build from the checkout root with `pnpm build`. The `opencut` executable is
 workspace-local. Use the direct Node form for machine-readable stdout; pnpm
@@ -68,8 +68,8 @@ name starting with `-`, use `--output=-frame.png` or an absolute path. Quote pat
 containing spaces in the calling shell.
 
 All commands print readable output by default. `--json` prints one JSON
-object followed by a newline, except `project render`, which streams JSONL progress
-and terminal events. Diagnostics never go to stdout.
+object followed by a newline, except `project render` and `cache proxy`, which stream JSONL progress
+and terminal events. Cache management prints a terminal `{event:"result",result:...}` object. Diagnostics never go to stdout.
 Errors go to stderr. With `--json`, the error is
 `{"ok":false,"error":{"code":"REVISION_CONFLICT","message":"..."}}`;
 argument errors also include `error.hint`. Without `--json`, errors remain text.
@@ -1138,3 +1138,31 @@ and never overwritten. The [official Agent Skill workflow](../skills/video-edito
 contains the complete public command recipe, timing and verification contract.
 It also covers [20-second portrait photo stories and collages](../skills/video-editor/references/workflow.md#photo-slideshows-and-vertical-edits),
 including static transforms, imported caption/music assets and cleanup boundaries.
+
+## Preview proxies and cache management (T25)
+
+```sh
+node apps/cli/dist/index.js cache status --json
+node apps/cli/dist/index.js cache proxy /path/source.mp4 --json
+node apps/cli/dist/index.js cache proxy /path/source.mp4 --regenerate --json
+node apps/cli/dist/index.js cache frame /path/source.mp4 --timestamp 1.5 --json
+node apps/cli/dist/index.js cache configure --disk-mib 2048 --memory-mib 64 --json
+node apps/cli/dist/index.js cache cleanup --json
+node apps/cli/dist/index.js cache clear --json
+```
+
+Every cache command accepts `--directory <dedicated-cache-directory>`;
+`OPENCUT_MEDIA_CACHE` overrides the shared default `~/.cache/opencut/media-v1`.
+Use `cache --help` for arguments. Status lists derivative identity, source hashes,
+limits, encoded PNG memory and actual derivative/staging disk bytes. `frame` returns
+a PNG data URL for the frame covering the requested source instant, without writing
+a user-selected output. It uses presentation timestamps for CFR/VFR media, rather
+than rounding to average FPS or choosing the next frame. Unresolvable timing or
+extraction failure exits 1. `proxy` streams existing render-progress events then
+`{event:"result",result:{path,proxy,key,reason?}}`.
+Unsupported timing returns `proxy:false` and the original path with a reason;
+encode/validation failures exit 1. SIGINT/SIGTERM cancel proxy/frame generation
+with exit 130/143 after child cleanup. Configure persists limits and evicts old
+entries; cleanup removes stale/corrupt/orphaned entries, and clear removes all owned
+derivatives. These commands never change project JSON or source media. A missing
+source cannot be made available by a proxy. See [the cache contract](MEDIA_CACHE.md).

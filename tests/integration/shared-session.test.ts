@@ -207,10 +207,13 @@ it('does not silently fall back when the session dies after preparing an edit', 
 });
 
 it('reports a lost commit reply without replaying a durably accepted edit', async () => {
-  await launch('crash-after-commit');
+  const child = await launch('crash-after-commit');
+  const exited = once(child, 'exit');
   await expect(add('Accepted before lost reply', 0)).rejects.toMatchObject({
     code: 'SESSION_DISCONNECTED',
   });
+  // Socket closure can precede process exit and release of the OS writer lock.
+  await exited;
   const current = await readProjectFile(path);
   expect(projectRevision(current)).toBe(1);
   expect(current.tracks.map((track) => track.name)).toEqual([

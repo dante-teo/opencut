@@ -2,13 +2,13 @@
 
 ## Workspace boundaries
 
-| Package            | Owns                                                                                      | Actual dependencies                                       |
-| ------------------ | ----------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| `@opencut/desktop` | Electron lifecycle, project session, restricted IPC, React workspace and source preview   | core, media, Electron, React, Lucide, range-parser        |
-| `@opencut/cli`     | Argument parsing, stdout/stderr and exit codes                                            | core, media, Node built-ins                               |
-| `@opencut/core`    | Headless identity, project model, persistence, assets, timeline edits and render planning | Zod; media and Node built-ins in optional `/node` adapter |
-| `@opencut/media`   | Probing, frame extraction, composition and timeline encoding through external tools       | Node built-ins                                            |
-| `@opencut/shared`  | Reserved location for utilities/types used by multiple packages                           | none                                                      |
+| Package            | Owns                                                                                              | Actual dependencies                                       |
+| ------------------ | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `@opencut/desktop` | Electron lifecycle, project session, restricted IPC, React workspace and source preview           | core, media, Electron, React, Lucide, range-parser        |
+| `@opencut/cli`     | Argument parsing, stdout/stderr and exit codes                                                    | core, media, Node built-ins                               |
+| `@opencut/core`    | Headless identity, project model, persistence, assets, timeline edits and render planning         | Zod; media and Node built-ins in optional `/node` adapter |
+| `@opencut/media`   | Probing, extraction, proxy/frame caches, composition and timeline encoding through external tools | Node built-ins, lru-cache, proper-lockfile                |
+| `@opencut/shared`  | Reserved location for utilities/types used by multiple packages                                   | none                                                      |
 
 Actual runtime dependency direction is `desktop → core ← cli`, with desktop main,
 CLI and the core Node adapter depending on media. The rationale is
@@ -479,10 +479,11 @@ listener. Library drags have a distinct MIME type with project ID, revision and
 asset ID, while external Files are accepted only in the library. Timeline drop
 coordinates reuse the virtual scrollbar, track geometry and exact frame helpers.
 
-Thumbnails use Electron's asynchronous native thumbnail service at 96 by 64,
-serialized in main; unavailable platforms/formats fall back to icons. The renderer
-requests IDs, receives data URLs and ignores stale results; it never decodes a
-full video for a thumbnail. Audio/image source previews reuse the revocable
+Video thumbnails use the headless bounded PNG cache through the media worker.
+Still-image thumbnails retain Electron's asynchronous native thumbnail service
+(macOS/Windows), with icon fallback on unavailable tools/formats/platforms.
+No video element is mounted solely for library thumbnails.
+Audio/image source previews reuse the revocable
 single-source media protocol, with native audio controls or an image element;
 source previews remain separate from project compositing/playback. Hiding source
 preview pauses audio; replacing it unloads the previous media element. Audio
@@ -607,3 +608,21 @@ routing, canvas painting and disposal. This remains a desktop adapter: core, CLI
 media inspection and offline rendering have no Electron/Web Audio dependency.
 Timeline media capabilities are revision-scoped and independent of source-preview
 selection. Full multi-layer visual compositing is deferred to T26.
+
+## Proxy and cache ownership (T25)
+
+`@opencut/media` owns `MediaCache`, source fingerprinting, verified FFmpeg proxies,
+PNG extraction, byte budgets, invalidation and disk eviction. Electron main forwards
+authorized asset IDs to a separate Node worker; it performs no cache hashing,
+transcoding or frame extraction. The CLI calls the same headless layer. Native
+Chromium decoding stays asynchronous in the existing player. No native bindings
+or new timeline operations are introduced. `lru-cache` supplies bounded PNG/source
+metadata caches; `proper-lockfile` coordinates disk writers, heartbeats and crash
+recovery across GUI and CLI. Disk eviction sorts persistent last-access times.
+
+Only timeline preview requests can select proxies. Project JSON retains original
+references, source preview remains original, and the render adapter resolves those
+original references directly without consulting cache state. A proxy is published
+only after metadata, all decoded video timestamps and source identity checks pass.
+See [proxy/cache behavior and bounds](MEDIA_CACHE.md) for formats, cancellation,
+resource accounting, GUI/CLI management and benchmark reproduction.

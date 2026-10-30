@@ -1,6 +1,6 @@
 ---
 name: video-editor
-description: Use the OpenCut CLI to create, inspect and validate video projects, manage media assets and timeline tracks/clips, apply atomic batches, undo/redo edits, inspect media, extract PNG frames, render a saved timeline with video/image layers, canvas transforms and mixed audio to H.264/AAC MP4, or compose video clips with background music.
+description: Use the OpenCut CLI to create, inspect and validate video projects, manage media assets and timeline tracks/clips, apply atomic batches, undo/redo edits, inspect media, extract PNG frames, render a saved timeline with video/image layers, canvas transforms and mixed audio to H.264/AAC MP4, compose video clips with background music, or manage preview proxies and bounded caches.
 ---
 
 # OpenCut CLI
@@ -45,6 +45,26 @@ The local picker, seeking and performance validation are serialized; keep the wi
 while measuring. See [desktop usage](../../docs/README.md) for optional-tool
 prerequisites and the separate correctness/performance test commands.
 
+T25 automatically prepares 960×540-or-smaller preview proxies for demanding video
+(1080p+, over 60 fps, HEVC/AV1/ProRes), when its timing/audio pass verification.
+Expand **Proxy & cache** in Project viewer to toggle use, inspect jobs/progress,
+regenerate/cancel, set disk and PNG-memory limits, clean stale entries or clear.
+New proxy availability is applied while paused at the same project position;
+a playing decoder continues until the next paused refresh. Project edits cancel
+obsolete proxy jobs, and fresh valid selections can restart them. Use **Regenerate
+proxies** to retry deliberately cancelled or failed jobs. The first cache status
+applies persisted memory limits; later changes adjust lookahead while playing.
+Cached seek images show the frame covering the requested source instant, including
+VFR intervals, and give way to a ready decoder. Source preview and final rendering
+always use originals. Zero-origin videos up to 600 seconds with optional
+zero-origin AAC audio are eligible; VFR timestamps are preserved and
+checked. Unsupported inputs remain on originals. The default cache is
+`~/.cache/opencut/media-v1` (override with `OPENCUT_MEDIA_CACHE`), 2048 MiB disk and
+64 MiB encoded PNG memory; this is not a process RSS limit. CLI `cache` commands
+share the same headless cache; see [cache behavior](../../docs/MEDIA_CACHE.md) and
+[the CLI reference](references/cli.md). `pnpm benchmark:t25` compares actual
+Electron timeline seeking/playback on generated 1080p/4K media.
+
 T15 adds desktop project creation, open/save and read-only inspection through the
 shared core. Use **New project**, configure dimensions and integer/rational FPS,
 then **Save project** to a new file; existing creation destinations are refused.
@@ -55,7 +75,7 @@ changing project assets. Filters combine and reset when switching to a different
 project. **Clear filters** shows the full library when a search has no matches.
 Select assets to inspect metadata, or clips to inspect exact stored timing.
 Unsaved projects prompt Save/Discard/Cancel before switching, closing or quitting.
-T22 synchronizes CLI edits immediately with the open GUI session; named projects save each accepted edit. Project playback and rendering controls remain unavailable.
+T22 synchronizes CLI edits immediately with the open GUI session; named projects save each accepted edit. Project playback is available through T24; desktop export controls remain unavailable.
 
 T17 adds read-only timeline navigation: video/audio tracks retain project order;
 clip positions, gaps and cross-track overlaps follow exact stored timing. Use the
@@ -112,7 +132,7 @@ any failed file leaves the batch unchanged. Unsaved projects can import before
 saving; these assets use absolute paths that remain absolute after saving.
 Undo/redo refreshes changed asset availability even before the first save;
 restored readable assets can be dragged again, while missing sources remain offline.
-The library shows type, duration and native thumbnails where available (macOS/Windows; icon fallback otherwise).
+The library shows type, duration and cached video thumbnails with FFmpeg; stills use the native thumbnail service where available, with icon fallback.
 Select video/audio/image assets for source preview; browser codec support applies.
 Switching to Project viewer pauses audio, and replacing a source unloads the old
 media element. Drag library assets to compatible timeline lanes or **+ Video track** / **+ Audio

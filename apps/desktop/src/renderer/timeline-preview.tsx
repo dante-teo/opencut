@@ -1,5 +1,8 @@
+import type { DesktopCacheStatus } from '../bridge.js';
+import { MediaCacheControls } from './media-cache.js';
 import {
   useEffect,
+  useCallback,
   useImperativeHandle,
   useRef,
   useState,
@@ -46,6 +49,33 @@ export function TimelinePreview({
   const [diagnostics, setDiagnostics] = useState<TimelineDiagnostics | null>(
     null,
   );
+  const [cacheEpoch, setCacheEpoch] = useState(0);
+  const cacheSignature = useRef('');
+  const memoryBudget = useRef(64 * 1024 ** 2);
+  const onCacheStatus = useCallback((status: DesktopCacheStatus) => {
+    memoryBudget.current = status.limits.memoryBytes;
+    player.current?.setMemoryBudget(status.limits.memoryBytes);
+    const signature = JSON.stringify([
+      status.enabled,
+      status.revision,
+      status.limits.memoryBytes,
+      status.entries
+        .filter((entry) => entry.kind === 'proxy')
+        .map((entry) => entry.key)
+        .sort(),
+    ]);
+    if (!cacheSignature.current) {
+      cacheSignature.current = signature;
+      return;
+    }
+    if (
+      cacheSignature.current !== signature &&
+      !player.current?.clock.playing
+    ) {
+      cacheSignature.current = signature;
+      setCacheEpoch((epoch) => epoch + 1);
+    }
+  }, []);
   useEffect(() => {
     if (!active) return;
     const playback = new TimelinePlayback(
@@ -56,6 +86,7 @@ export function TimelinePreview({
         setDiagnostics(report);
         callback.current(time);
       },
+      memoryBudget.current,
     );
     player.current = playback;
     playback.seek(initial.current);
@@ -63,7 +94,7 @@ export function TimelinePreview({
       playback.dispose();
       player.current = null;
     };
-  }, [project, active]);
+  }, [project, active, cacheEpoch]);
   useEffect(() => {
     if (!active || interrupted) player.current?.pause();
   }, [active, interrupted, project]);
@@ -135,6 +166,7 @@ export function TimelinePreview({
           {diagnostics.unavailable.join('\n')}
         </p>
       )}
+      <MediaCacheControls project={project} onStatus={onCacheStatus} />
       <details className="timeline-diagnostics">
         <summary>Playback diagnostics</summary>
         <p>

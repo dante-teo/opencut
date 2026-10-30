@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
+import { runCacheCommand } from './cache.js';
 import { editHelp, runEditCommand } from './edit.js';
 import {
   editOptions,
@@ -59,6 +60,7 @@ Commands:
   canvas set <project-file>            Configure dimensions and background (canvas --help)
   edit apply <project-file> <batch.json> Apply an atomic transaction
   edit undo|redo|history <project-file>  Restore or inspect persistent editing history
+  cache status|proxy|frame|configure|cleanup|clear  Manage preview derivatives (cache --help)
   probe <file>                         Inspect local media metadata
   extract-frame <file> --timestamp <s> --output <file.png>
                                        Extract one PNG frame, without overwriting
@@ -231,6 +233,17 @@ function formatProbe(media: MediaMetadata): string {
 }
 
 async function runCli(args: string[]): Promise<void> {
+  const cachePosition = args.indexOf('cache');
+  if (
+    cachePosition >= 0 &&
+    args
+      .slice(0, cachePosition)
+      .every((arg) => ['--json', '--help', '-h'].includes(arg))
+  )
+    return runCacheCommand([
+      ...args.slice(0, cachePosition),
+      ...args.slice(cachePosition + 1),
+    ]);
   const { values, positionals } = parseArgs({
     args,
     options: {

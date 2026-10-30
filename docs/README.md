@@ -29,6 +29,8 @@ T23 adds [headless timeline evaluation](TIMELINE_EVALUATION.md): exact source ti
 ordered layers, audio mixing candidates and gap/boundary queries. Export planning
 shares its timing and property resolution. T24 adds [edited timeline playback](TIMELINE_PLAYBACK.md)
 with cuts, gaps, trims/splits, overlapping audio, clip gain/mute and diagnostics.
+T25 adds [verified preview proxies and bounded caches](MEDIA_CACHE.md), GUI/CLI cache controls,
+and `pnpm benchmark:t25` for reproducible 1080p/4K comparisons.
 
 Select a clip to edit **Timeline position**, **Duration**, **Source in/out** in
 whole project frames, **Volume** (linear 0–1), **Mute**, and video **Position X/Y**
@@ -113,8 +115,8 @@ audio or images. Filters combine, affect only the library view, and reset when
 switching to a different project. **Clear filters** shows the full library when a
 search has no matches.
 
-The library shows type, duration and native thumbnails where available (macOS and
-Windows; icons elsewhere or for unsupported sources). Select media for source
+The library shows type, duration and cached video thumbnails when FFmpeg is available;
+still thumbnails use the native service where supported, with icon fallback. Select media for source
 preview: video uses the existing transport, audio uses native playback controls,
 and images show a still. Browser codec support limits source playback.
 Drag a library asset onto a compatible track, or onto **+ Video track** / **+ Audio

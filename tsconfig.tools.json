@@ -13,6 +13,7 @@
     "apps/desktop/src/renderer/env.d.ts",
     "packages/**/*.test.ts",
     "apps/**/*.test.ts",
-    "playwright.t21.config.ts"
+    "playwright.t21.config.ts",
+    "playwright.t25.config.ts"
   ]
 }

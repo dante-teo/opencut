@@ -2,7 +2,17 @@ import { resolve } from 'node:path';
 import { defineConfig } from 'electron-vite';
 
 export default defineConfig(({ command }) => ({
-  main: { build: { outDir: 'dist/main' } },
+  main: {
+    build: {
+      outDir: 'dist/main',
+      rollupOptions: {
+        input: {
+          index: resolve('src/main/index.ts'),
+          'media-worker': resolve('src/main/media-worker.ts'),
+        },
+      },
+    },
+  },
   // CommonJS is required for Electron's sandboxed preload environment.
   preload: {
     build: {

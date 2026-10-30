@@ -289,7 +289,8 @@ test('rejects overlap and incompatible tracks, cancels gestures and handles reje
     await release(page);
     await expect(page.getByRole('alert')).toContainText('overlap');
     expect(await current(page)).toEqual(project);
-    await startDrag(page, 'music', 0, -128);
+    await clip(page, 'music').scrollIntoViewIfNeeded();
+    await startDrag(page, 'music', 0, -64);
     await release(page);
     await expect(page.getByRole('alert')).toBeVisible();
     expect(await current(page)).toEqual(project);
@@ -340,6 +341,8 @@ test('snaps at different zooms and supports focused keyboard movement and trimmi
   try {
     await open(application, page, path);
     await page.getByLabel('Snap threshold pixels', { exact: true }).fill('8');
+    // Snapping starts with a selected clip; selection/inspector mounting is covered separately.
+    await clip(page).click();
     for (const zoom of [80, 160]) {
       await page
         .getByLabel('Timeline zoom', { exact: true })

@@ -19,3 +19,16 @@ export type {
   RenderResolution,
 } from './render.js';
 export type { RenderProgress } from './render-progress.js';
+export {
+  MediaCache,
+  defaultCacheLimits,
+  defaultMediaCacheDirectory,
+  demandingMedia,
+  validateCacheLimits,
+} from './cache.js';
+export type {
+  CacheLimits,
+  CacheStatus,
+  CacheControls,
+  ProxyResult,
+} from './cache.js';

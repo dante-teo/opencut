@@ -91,6 +91,9 @@ export interface TimelineDiagnostics {
   position: RationalTime;
   playing: boolean;
   outputLatencyMs: number;
+  proxyDecoders: number;
+  decoders: number;
+  cachedFrames: number;
 }
 interface Entry {
   key: string;
@@ -121,12 +124,21 @@ export class TimelinePlayback {
   private readonly runs = new Map<string, ResolvedTimelineClip[]>();
   private readonly upcoming: ResolvedTimelineClip[];
   private readonly grants = new Map<string, Promise<PreviewSource>>();
+  private readonly originalGrants = new Map<string, Promise<PreviewSource>>();
+  private readonly retiredGrants = new Map<
+    string,
+    Set<Promise<PreviewSource>>
+  >();
   private disposed = false;
   private action = 0;
   private animation = 0;
   private lastTick = 0;
   private lastReport = 0;
   private starting = false;
+  private frameRequest = false;
+  private wantedFrame = '';
+  private cachedFrame: { key: string; image: HTMLImageElement } | null = null;
+  private frameGeneration = 0;
   private readonly onVisibility = () => {
     if (document.hidden) this.pause();
   };
@@ -138,6 +150,7 @@ export class TimelinePlayback {
       time: RationalTime,
       diagnostics: TimelineDiagnostics,
     ) => void,
+    private memoryBudget = 64 * 1024 ** 2,
   ) {
     this.evaluate = createTimelineEvaluator(project);
     // Resolve lookahead through T23 too; point queries remain the source-time authority.
@@ -188,6 +201,9 @@ export class TimelinePlayback {
       () => this.context.currentTime,
     );
     this.diagnostics = {
+      proxyDecoders: 0,
+      decoders: 0,
+      cachedFrames: 0,
       presentedFrames: 0,
       droppedFrames: 0,
       decoderDroppedFrames: 0,
@@ -275,6 +291,7 @@ export class TimelinePlayback {
         const media = document.createElement('video');
         item.media = media;
         media.dataset.timelineClip = key;
+        media.dataset.proxy = String(!!source.proxy);
         media.crossOrigin = 'anonymous';
         media.preload = 'auto';
         media.playsInline = true;
@@ -305,12 +322,45 @@ export class TimelinePlayback {
         media.addEventListener('waiting', () => {
           if (this.clock.playing) this.diagnostics.waitingEvents++;
         });
-        media.addEventListener('error', () =>
-          this.unavailable(
-            item,
-            media.error?.message || 'Unsupported or unavailable media.',
-          ),
-        );
+        media.addEventListener('error', () => {
+          if (media.dataset.proxy === 'true' && !item.disposed) {
+            media.dataset.proxy = 'false';
+            item.ready = false;
+            // Retry the original at the evaluator's current source time, never splice bytes from different files.
+            let replacement = this.originalGrants.get(clip.assetId);
+            if (!replacement) {
+              replacement = window.opencut.timelinePreview({
+                projectId: this.project.metadata.id,
+                expectedRevision: projectRevision(this.project),
+                assetId: clip.assetId,
+                originalOnly: true,
+              });
+              this.originalGrants.set(clip.assetId, replacement);
+              const previous = this.grants.get(clip.assetId);
+              if (previous) {
+                const retired =
+                  this.retiredGrants.get(clip.assetId) ?? new Set();
+                retired.add(previous);
+                this.retiredGrants.set(clip.assetId, retired);
+              }
+              this.grants.set(clip.assetId, replacement);
+            }
+            void replacement
+              .then((grant) => {
+                if (this.disposed || item.disposed) {
+                  void window.opencut.releasePreview(grant.url);
+                  return;
+                }
+                media.src = grant.url;
+                media.load();
+              })
+              .catch((error) => this.unavailable(item, String(error)));
+          } else
+            this.unavailable(
+              item,
+              media.error?.message || 'Unsupported or unavailable media.',
+            );
+        });
         const observe: VideoFrameRequestCallback = (now, metadata) => {
           if (item.disposed || this.disposed) return;
           const active = this.evaluate(this.clock.read())
@@ -365,11 +415,77 @@ export class TimelinePlayback {
       )
     ) {
       const grant = this.grants.get(entry.clip.assetId);
+      const retired = this.retiredGrants.get(entry.clip.assetId) ?? new Set();
+      if (grant) retired.add(grant);
       this.grants.delete(entry.clip.assetId);
-      void grant
-        ?.then((source) => window.opencut.releasePreview(source.url))
-        .catch(() => {});
+      this.originalGrants.delete(entry.clip.assetId);
+      this.retiredGrants.delete(entry.clip.assetId);
+      for (const request of retired)
+        void request
+          .then((source) => window.opencut.releasePreview(source.url))
+          .catch(() => {});
     }
+  }
+  setMemoryBudget(memoryBytes: number) {
+    this.memoryBudget = memoryBytes;
+  }
+  private requestFrame() {
+    if (this.frameRequest || this.clock.playing || this.disposed) return;
+    const visual = this.evaluate(this.clock.position)
+      .visualClips.filter((clip) => clip.visible)
+      .at(-1);
+    if (!visual || visual.kind === 'image') return;
+    const key = `${visual.assetId}:${seconds(visual.sourceTime).toFixed(6)}`;
+    if (key === this.wantedFrame) return;
+    this.wantedFrame = key;
+    const generation = this.frameGeneration;
+    this.frameRequest = true;
+    const input = {
+      projectId: this.project.metadata.id,
+      expectedRevision: projectRevision(this.project),
+      assetId: visual.assetId,
+      timestamp: seconds(visual.sourceTime),
+    };
+    void window.opencut
+      .timelineFrame(input)
+      .then(async (url) => {
+        if (
+          !url ||
+          this.disposed ||
+          generation !== this.frameGeneration ||
+          this.clock.playing
+        )
+          return;
+        const image = new Image();
+        image.src = url;
+        await image.decode();
+        if (
+          this.disposed ||
+          generation !== this.frameGeneration ||
+          this.clock.playing
+        ) {
+          image.src = '';
+          return;
+        }
+        if (this.cachedFrame) this.cachedFrame.image.src = '';
+        this.cachedFrame = { key, image };
+        this.diagnostics.cachedFrames++;
+        // Only one adjacent paused frame is prefetched; no JS decoded-frame sequence.
+        void window.opencut
+          .timelineFrame({
+            ...input,
+            timestamp:
+              input.timestamp +
+              this.project.settings.frameRate.denominator /
+                this.project.settings.frameRate.numerator,
+          })
+          .catch(() => {});
+      })
+      .catch(() => {})
+      .finally(() => {
+        this.frameRequest = false;
+        if (generation !== this.frameGeneration) this.requestFrame();
+      });
   }
   private silence() {
     this.master.gain.value = 0;
@@ -389,6 +505,11 @@ export class TimelinePlayback {
   seek(time: RationalTime) {
     this.pause();
     this.clock.seek(time);
+    this.frameGeneration++;
+    this.wantedFrame = '';
+    if (this.cachedFrame) this.cachedFrame.image.src = '';
+    this.cachedFrame = null;
+    this.requestFrame();
     for (const entry of this.entries.values()) {
       const clip = this.evaluate(this.clock.position).activeClips.find(
         (c) => this.keys.get(c.id) === entry.key,
@@ -430,8 +551,8 @@ export class TimelinePlayback {
       const deadline = performance.now() + 8000;
       while (
         this.evaluate(this.clock.position).activeClips.some((c) => {
-          const e = this.entry(c);
-          return !e.ready && !e.failed;
+          const e = this.entries.get(this.keys.get(c.id)!);
+          return e && !e.ready && !e.failed;
         })
       ) {
         await new Promise((resolve) => setTimeout(resolve, 16));
@@ -442,8 +563,8 @@ export class TimelinePlayback {
       const active = this.evaluate(this.clock.position).activeClips;
       await Promise.all(
         active.map(async (clip) => {
-          const entry = this.entry(clip);
-          if (!entry.media || entry.failed) return;
+          const entry = this.entries.get(this.keys.get(clip.id)!);
+          if (!entry?.media || entry.failed) return;
           entry.media.currentTime = seconds(clip.sourceTime);
           entry.settleUntil = performance.now() + 250;
           try {
@@ -501,7 +622,26 @@ export class TimelinePlayback {
       evaluation.activeClips.map((c) => [this.keys.get(c.id)!, c]),
     );
     const keep = new Set(active.keys());
-    // Two-second lookahead, one decoder per contiguous source run. No full-file PCM cache.
+    // Release distant runs before creating current decoders; cap all owned decoders.
+    for (const entry of this.entries.values()) {
+      if (
+        !keep.has(entry.key) &&
+        !inPlaybackLookahead(entry.clip.timelineStart, time)
+      )
+        this.remove(entry);
+    }
+    for (const clip of evaluation.activeClips) {
+      if (this.entries.has(this.keys.get(clip.id)!) || this.entries.size < 16)
+        this.entry(clip);
+      else {
+        const warning = 'Preview decoder limit (16) reached.';
+        if (!this.diagnostics.unavailable.includes(warning))
+          this.diagnostics.unavailable.push(warning);
+      }
+    }
+    let speculative = 0;
+    let speculativeBytes = 0;
+    // Chromium owns native decode buffers. Budget estimates bound speculative work, not process RSS.
     let low = 0,
       high = this.upcoming.length;
     while (low < high) {
@@ -513,10 +653,28 @@ export class TimelinePlayback {
     for (let i = low; i < this.upcoming.length; i++) {
       const clip = this.upcoming[i]!;
       if (!inPlaybackLookahead(clip.timelineStart, time)) break;
+      const asset = this.project.assets.find(
+        (asset) => asset.id === clip.assetId,
+      );
+      const bytes =
+        (asset?.metadata?.width ?? 1920) *
+        (asset?.metadata?.height ?? 1080) *
+        4 *
+        3;
+      if (
+        !keep.has(this.keys.get(clip.id)!) &&
+        (speculative >= 4 ||
+          this.entries.size >= 16 ||
+          speculativeBytes + bytes > this.memoryBudget)
+      )
+        continue;
       keep.add(this.keys.get(clip.id)!);
+      if (!active.has(this.keys.get(clip.id)!)) {
+        speculative++;
+        speculativeBytes += bytes;
+      }
       if (!this.entries.has(this.keys.get(clip.id)!)) this.entry(clip);
     }
-    for (const clip of evaluation.activeClips) this.entry(clip);
     this.diagnostics.activeAudio = evaluation.mixingSources.filter((c) => {
       const e = this.entries.get(this.keys.get(c.id)!);
       return e?.ready && !e.failed;
@@ -616,6 +774,10 @@ export class TimelinePlayback {
         this.diagnostics.droppedFrames += dropped;
       entry.lastQuality = quality.droppedVideoFrames;
     }
+    this.diagnostics.decoders = this.entries.size;
+    this.diagnostics.proxyDecoders = [...this.entries.values()].filter(
+      (entry) => entry.media?.dataset.proxy === 'true',
+    ).length;
     const ctx = this.canvas.getContext('2d')!;
     ctx.fillStyle = evaluation.backgroundColor;
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
@@ -623,20 +785,35 @@ export class TimelinePlayback {
     let painted = false;
     if (visual) {
       const entry = this.entries.get(this.keys.get(visual.id)!);
-      const drawable = entry?.image ?? entry?.media;
-      const valid =
+      const nativeReady =
         entry &&
         !entry.failed &&
         entry.ready &&
-        drawable &&
-        (!entry.media ||
-          (!entry.media.seeking &&
+        (entry.image ||
+          (entry.media &&
+            !entry.media.seeking &&
             Math.abs(entry.media.currentTime - seconds(visual.sourceTime)) <
               0.15));
+      // Cached PNGs bridge seeking; a ready decoder restores its full preview quality.
+      const cached =
+        !nativeReady &&
+        !this.clock.playing &&
+        this.cachedFrame?.key ===
+          `${visual.assetId}:${seconds(visual.sourceTime).toFixed(6)}`
+          ? this.cachedFrame.image
+          : null;
+      const drawable = cached ?? entry?.image ?? entry?.media;
+      const valid = !!cached || !!nativeReady;
       if (valid) {
-        const width = entry.image?.naturalWidth ?? entry.media!.videoWidth;
-        const height = entry.image?.naturalHeight ?? entry.media!.videoHeight;
-        if (width && height) {
+        const width =
+          cached?.naturalWidth ??
+          entry?.image?.naturalWidth ??
+          entry?.media?.videoWidth;
+        const height =
+          cached?.naturalHeight ??
+          entry?.image?.naturalHeight ??
+          entry?.media?.videoHeight;
+        if (width && height && drawable) {
           const scale = Math.min(
             this.canvas.width / width,
             this.canvas.height / height,
@@ -681,6 +858,9 @@ export class TimelinePlayback {
   dispose() {
     this.pause();
     this.disposed = true;
+    this.frameGeneration++;
+    if (this.cachedFrame) this.cachedFrame.image.src = '';
+    this.cachedFrame = null;
     cancelAnimationFrame(this.animation);
     document.removeEventListener('visibilitychange', this.onVisibility);
     for (const entry of this.entries.values()) this.remove(entry);

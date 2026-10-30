@@ -592,3 +592,25 @@ timeline updates without reopening. After a session disconnect, query history
 and content before retrying: an acknowledged response may have been lost after
 commit. Do not delete the permanent ownership sidecar. See
 [the complete session and recovery contract](../../../docs/CLI.md#shared-projects-in-electron-t22).
+
+## Preview proxies and cache (T25)
+
+```sh
+node apps/cli/dist/index.js cache status --json
+node apps/cli/dist/index.js cache proxy /path/source.mp4 --json
+node apps/cli/dist/index.js cache proxy /path/source.mp4 --regenerate --json
+node apps/cli/dist/index.js cache frame /path/source.mp4 --timestamp 1.5 --json
+node apps/cli/dist/index.js cache configure --disk-mib 2048 --memory-mib 64 --json
+node apps/cli/dist/index.js cache cleanup --json
+node apps/cli/dist/index.js cache clear --json
+```
+
+Use `--directory <dedicated-cache-dir>` or `OPENCUT_MEDIA_CACHE` to select a cache;
+the default is `~/.cache/opencut/media-v1`. Proxy generation reports JSONL progress
+and a terminal result. `proxy:false` with a reason means verification policy kept
+the original. SIGINT/SIGTERM cancellation exits 130/143 after cleanup. `cache frame`
+returns a PNG data URL for the presentation interval covering the requested instant,
+including CFR/VFR media. Unresolvable timing or extraction failure exits 1.
+Limits apply to derivative disk bytes and encoded PNG memory,
+not native Chromium memory. Exports always use original project references.
+See [supported timing, budgets and management](../../../docs/MEDIA_CACHE.md).

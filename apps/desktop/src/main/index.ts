@@ -15,7 +15,13 @@ import { stat } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getApplicationInfo, projectRevision } from '@opencut/core';
-import { probeMedia } from '@opencut/media';
+import {
+  probeMedia,
+  demandingMedia,
+  validateCacheLimits,
+  type ProxyResult,
+} from '@opencut/media';
+import { MediaClient } from './media-client.js';
 import {
   APP_INFO_CHANNEL,
   PROJECT_CHANGED_CHANNEL,
@@ -27,6 +33,8 @@ import {
   ASSET_PREVIEW_CHANNEL,
   RELEASE_PREVIEW_CHANNEL,
   TIMELINE_PREVIEW_CHANNEL,
+  MEDIA_CACHE_CHANNEL,
+  TIMELINE_FRAME_CHANNEL,
   type PreviewSource,
 } from '../bridge.js';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -54,11 +62,13 @@ if (devURL && new URL(devURL).origin !== 'http://127.0.0.1:5173') {
 }
 const rendererURL = new URL(devURL ?? 'opencut://app/index.html').href;
 let mainWindow: BrowserWindow | null = null;
+let mediaClient: MediaClient | null = null;
 let previewFile: { url: string; path: string } | null = null;
 const timelineFiles = new Map<string, string>();
 let timelineGeneration = 0;
 function revokeTimeline() {
   timelineGeneration++;
+  void mediaClient?.request('invalidate').catch(() => {});
   timelineFiles.clear();
 }
 let openingPreview = false;
@@ -318,6 +328,7 @@ async function createWindow(): Promise<void> {
 app
   .whenReady()
   .then(async () => {
+    mediaClient = new MediaClient();
     nativeTheme.themeSource = 'system';
     nativeTheme.on('updated', () => {
       for (const window of BrowserWindow.getAllWindows()) {
@@ -408,8 +419,22 @@ app
       const work = thumbnailQueue.then(async () => {
         assertSender(event);
         const { asset, path } = await projectSession.libraryAsset(args[0]);
-        if (!asset.mediaTypes.includes('video') || process.platform === 'linux')
-          return null;
+        if (!asset.mediaTypes.includes('video')) return null;
+        if (asset.metadata?.kind === 'video') {
+          try {
+            const result = await mediaClient!.request<string>('frame', {
+              path,
+              timestamp: 0,
+            });
+            if ((await projectSession.libraryAsset(args[0])).path !== path)
+              return null;
+            assertSender(event);
+            return result;
+          } catch {
+            return null;
+          }
+        }
+        if (process.platform === 'linux') return null;
         try {
           const image = await nativeImage.createThumbnailFromPath(path, {
             width: 96,
@@ -458,8 +483,12 @@ app
           throw new Error('Expected a timeline media request.');
         const input = args[0] as Record<string, unknown>;
         if (
-          Object.keys(input).sort().join(',') !==
-          'assetId,expectedRevision,projectId'
+          Object.keys(input)
+            .filter((key) => key !== 'originalOnly')
+            .sort()
+            .join(',') !== 'assetId,expectedRevision,projectId' ||
+          (input.originalOnly !== undefined &&
+            typeof input.originalOnly !== 'boolean')
         )
           throw new Error('Invalid timeline media request.');
         const generation = timelineGeneration;
@@ -474,15 +503,27 @@ app
         const { asset, path } = await projectSession.previewAsset(
           input.assetId,
         );
+        const selected = input.originalOnly
+          ? { path, proxy: false }
+          : await mediaClient!
+              .request<ProxyResult>('select', {
+                path,
+                auto:
+                  !!asset.metadata &&
+                  asset.metadata.kind === 'video' &&
+                  demandingMedia(asset.metadata),
+              })
+              .catch(() => ({ path, proxy: false }));
         assertSender(event);
         if (generation !== timelineGeneration)
           throw new Error('Timeline project changed.');
         if (timelineFiles.size >= 128)
           throw new Error('Too many timeline media grants.');
         const url = `opencut://media/${randomUUID()}`;
-        timelineFiles.set(url, path);
+        timelineFiles.set(url, selected.path);
         return {
           url,
+          proxy: selected.proxy,
           name: asset.name,
           kind:
             asset.metadata?.kind ??
@@ -495,6 +536,91 @@ app
         } satisfies PreviewSource;
       },
     );
+    ipcMain.handle(MEDIA_CACHE_CHANNEL, async (event, input: unknown) => {
+      assertSender(event);
+      if (!input || typeof input !== 'object')
+        throw new Error('Invalid cache request.');
+      const value = input as Record<string, unknown>;
+      const keys = Object.keys(value).sort().join(',');
+      if (
+        ['status', 'cancel', 'clear', 'cleanup'].includes(
+          String(value.action),
+        ) &&
+        keys === 'action'
+      )
+        return mediaClient!.request(String(value.action));
+      if (value.action === 'configure' && keys === 'action,limits') {
+        validateCacheLimits(
+          value.limits as Parameters<typeof validateCacheLimits>[0],
+        );
+        return mediaClient!.request('configure', { limits: value.limits });
+      }
+      if (
+        value.action === 'enable' &&
+        keys === 'action,enabled' &&
+        typeof value.enabled === 'boolean'
+      )
+        return mediaClient!.request('enable', { auto: value.enabled });
+      if (
+        value.action === 'generate' &&
+        keys === 'action,assetId,expectedRevision,projectId'
+      ) {
+        const generation = timelineGeneration;
+        const current = await projectSession.run('current');
+        if (
+          !current.ok ||
+          !current.state ||
+          value.projectId !== current.state.project.metadata.id ||
+          value.expectedRevision !== projectRevision(current.state.project)
+        )
+          throw new Error('Timeline project changed.');
+        const { path } = await projectSession.previewAsset(value.assetId);
+        assertSender(event);
+        if (generation !== timelineGeneration)
+          throw new Error('Timeline project changed.');
+        return mediaClient!.request('generate', { path });
+      }
+      throw new Error('Invalid cache request.');
+    });
+    let pendingFrames = 0;
+    ipcMain.handle(TIMELINE_FRAME_CHANNEL, async (event, input: unknown) => {
+      assertSender(event);
+      if (!input || typeof input !== 'object' || pendingFrames >= 2)
+        return null;
+      const value = input as Record<string, unknown>;
+      if (
+        Object.keys(value).sort().join(',') !==
+          'assetId,expectedRevision,projectId,timestamp' ||
+        typeof value.timestamp !== 'number' ||
+        !Number.isFinite(value.timestamp) ||
+        value.timestamp < 0
+      )
+        throw new Error('Invalid frame request.');
+      const generation = timelineGeneration;
+      const current = await projectSession.run('current');
+      if (
+        !current.ok ||
+        !current.state ||
+        value.projectId !== current.state.project.metadata.id ||
+        value.expectedRevision !== projectRevision(current.state.project)
+      )
+        return null;
+      const { path } = await projectSession.previewAsset(value.assetId);
+      if (pendingFrames >= 2 || generation !== timelineGeneration) return null;
+      pendingFrames++;
+      try {
+        const result = await mediaClient!.request<string>('frame', {
+          path,
+          timestamp: value.timestamp,
+        });
+        assertSender(event);
+        return generation === timelineGeneration ? result : null;
+      } catch {
+        return null;
+      } finally {
+        pendingFrames--;
+      }
+    });
     ipcMain.handle(RELEASE_PREVIEW_CHANNEL, (event, ...args: unknown[]) => {
       assertSender(event);
       if (args.length !== 1 || typeof args[0] !== 'string')
@@ -530,9 +656,14 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
+let mediaClosed = false;
 app.on('before-quit', (event) => {
   if (mainWindow && projectSession.needsCloseGuard) {
     event.preventDefault();
     void closeProjectWindow(mainWindow, true);
+  } else if (!mediaClosed && mediaClient) {
+    event.preventDefault();
+    mediaClosed = true;
+    void mediaClient.close().finally(() => app.quit());
   }
 });
