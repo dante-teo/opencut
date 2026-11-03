@@ -21,8 +21,7 @@ T23 evaluation and one Web Audio clock. Ruler/slider seeking pauses; Space toggl
 the active viewer and arrows step the timeline. Toggling playback or seeking during
 startup cancels that start. Press Play again to resume healthy media without
 switching viewers or reopening the project. Expand **Playback diagnostics**
-for drop/late-frame, skew, wait and error counters. Only the top eligible visual
-is displayed; transforms and full layered compositing await T26. See the
+for drop/late-frame, skew, wait and error counters. T26 composites all eligible video/image layers in track order with position, scale, opacity, fitting and canvas alpha. See the
 [playback contract and supported-media limits](../../docs/TIMELINE_PLAYBACK.md). With a project
 open, steps/frame positions and nominal non-drop timecode use project FPS;
 otherwise steps/frame numbers use average FPS from optional ffprobe. These are
@@ -53,11 +52,12 @@ New proxy availability is applied while paused at the same project position;
 a playing decoder continues until the next paused refresh. Project edits cancel
 obsolete proxy jobs, and fresh valid selections can restart them. Use **Regenerate
 proxies** to retry deliberately cancelled or failed jobs. The first cache status
-applies persisted memory limits; later changes adjust lookahead while playing.
+applies persisted memory limits; later changes trim decoded PNGs immediately and
+adjust lookahead while playing.
 Cached seek images show the frame covering the requested source instant, including
 VFR intervals, and give way to a ready decoder. Source preview and final rendering
 always use originals. Zero-origin videos up to 600 seconds with optional
-zero-origin AAC audio are eligible; VFR timestamps are preserved and
+zero-origin AAC audio are eligible; alpha-bearing videos stay original to preserve transparency; VFR timestamps are preserved and
 checked. Unsupported inputs remain on originals. The default cache is
 `~/.cache/opencut/media-v1` (override with `OPENCUT_MEDIA_CACHE`), 2048 MiB disk and
 64 MiB encoded PNG memory; this is not a process RSS limit. CLI `cache` commands
@@ -92,8 +92,7 @@ for the distinction between transient UI positions and persisted timing.
 source-in. Ruler seeks within it map to source time; source playback updates the
 playhead clamped to the clip range while transport remains full-source. Seeking
 outside the clip pauses/hides and unlinks the source. Library selection or
-**Open video** also unlinks. No automatic clip switching, image/audio timeline
-preview, mixing or compositing is available; T16 precision limitations still apply.
+**Open video** also unlinks. Source preview does not switch clips automatically; select Project viewer for T24 audio mixing and T26 video/image compositing. T16 source-seek precision limitations still apply.
 Known limitation: repeated ruler seeks followed by **Play** can leave the linked
 source paused. Confirm that the source clock advances when checking playback.
 Zoom/scroll persist during selection/playback/save, and reset on project replacement.
@@ -157,8 +156,7 @@ their own undo step.
 Property edits share T09 history with imports and timeline gestures. Undo restores
 a deleted clip's selection; Save/reopen retains properties and history. Use CLI
 `timeline list` to inspect the saved result. Clip audio/transforms apply to CLI
-exports. Project viewer also applies clip audio; Source preview plays original
-media. Visual transforms/compositing remain export-only.
+exports. Project viewer applies clip audio and T26 visual transforms/compositing; Source preview plays original media.
 
 Workspace shortcuts outside typing/native controls: Space toggles the active
 viewer; Command+S saves; Command+Z / Command+Shift+Z undo/redo; S splits the
@@ -407,6 +405,20 @@ T22 does not add timeline playback. See
 Core APIs `evaluateTimeline(project, rationalTime)` and
 `evaluateTimelineFrame(project, frameIndex)` inspect active layers, exact source
 times and audio mixing candidates without media tools. Export planning shares
-their timing/order/property resolution. There is no new CLI command or live
-project playback. Read [evaluation semantics](../../docs/TIMELINE_EVALUATION.md)
+their timing/order/property resolution. These headless queries add no CLI command
+and perform no playback themselves; Project viewer uses them for live T24–T26 playback. Read [evaluation semantics](../../docs/TIMELINE_EVALUATION.md)
 for half-open boundaries, metadata uncertainty and export-specific limits.
+
+T26 uses the same headless geometry and RGB source-over composition rules in
+Project viewer and final rendering. Canvas colors accept `#RRGGBB`, `#RRGGBBAA`
+or `transparent`; H.264 flattens canvas alpha over black. Transparent source pixels
+and clip opacity reveal lower layers. Paused frame-cache requests are bounded
+across visible layers and stale completions cannot paint after seeking/editing.
+The player owns at most 16 source-run entries, including still images. The worker
+encoded-PNG and renderer decoded-PNG caches each apply the configured memory
+limit independently; native decoder/GPU memory is outside those bounds.
+For source-aspect/coordinate rules, SDR tolerances and limitations read the
+[composition contract](../../docs/TIMELINE_PLAYBACK.md#composition-and-export-agreement-t26).
+`pnpm benchmark:t26` measures real Electron multi-layer FPS, drops, seek latency,
+CPU and memory on generated fixtures. Report actual results and remaining limits;
+never substitute a source player or exported MP4 for live multi-layer evidence.

@@ -1,3 +1,4 @@
+import { sourceColorMatrix } from '@opencut/shared';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import {
@@ -61,6 +62,8 @@ export interface ProxyResult {
   path: string;
   proxy: boolean;
   key: string;
+  /** Original display aspect, invariant under proxy rounding. */
+  displayAspectRatio?: number;
   reason?: string;
 }
 export interface CacheControls {
@@ -69,7 +72,7 @@ export interface CacheControls {
   force?: boolean;
 }
 const settings = {
-  version: 1,
+  version: 2,
   width: 960,
   height: 540,
   codec: 'libx264',
@@ -458,7 +461,22 @@ export class MediaCache {
     const source = await this.source(file, signal);
     const key = digest(JSON.stringify([source.hash, source.media, settings]));
     const path = await this.lookup(key, 'proxy', signal);
-    return { path: path ?? source.path, proxy: !!path, key };
+    const video = source.media.video;
+    const aspect =
+      video?.width && video.height
+        ? (video.width * (video.sampleAspectRatio ?? 1)) / video.height
+        : undefined;
+    return {
+      path: path ?? source.path,
+      proxy: !!path,
+      key,
+      ...(aspect
+        ? {
+            displayAspectRatio:
+              Math.abs(video?.rotation ?? 0) % 180 === 90 ? 1 / aspect : aspect,
+          }
+        : {}),
+    };
   }
   async generateProxy(
     file: string,
@@ -479,6 +497,7 @@ export class MediaCache {
         !media.durationSeconds ||
         media.durationSeconds > 600 ||
         !video.frameRate ||
+        video.hasAlpha ||
         Math.abs(media.startTimeSeconds ?? 0) > 0.002 ||
         Math.abs(video.startTimeSeconds ?? 0) > 0.002 ||
         (media.audio &&
@@ -490,7 +509,7 @@ export class MediaCache {
           proxy: false,
           key,
           reason:
-            'Proxy requires a zero-origin video up to 600 seconds with optional zero-origin AAC audio; original retained.',
+            'Proxy requires an opaque zero-origin video up to 600 seconds with optional zero-origin AAC audio; original retained.',
         };
       await this.evict(0);
       const temporary = join(this.directory, `partial-${randomUUID()}.mp4`);
@@ -523,7 +542,13 @@ export class MediaCache {
             `0:${video.index}`,
             ...(media.audio ? ['-map', `0:${media.audio.index}`] : []),
             '-vf',
-            "scale=w='min(960,iw)':h='min(540,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
+            `scale=w='min(960,iw)':h='min(540,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:in_color_matrix=${sourceColorMatrix(video.colorSpace, video.width ?? 0, video.height ?? 0)}:out_color_matrix=bt709`,
+            '-colorspace',
+            'bt709',
+            '-color_primaries',
+            'bt709',
+            '-color_trc',
+            'bt709',
             '-c:v',
             'libx264',
             '-preset',
@@ -645,7 +670,7 @@ export class MediaCache {
         JSON.stringify([
           source.hash,
           source.media,
-          'frame-v2-covering-640x360',
+          'frame-v3-covering-sdr-640x360',
           timestamp,
         ]),
       );
@@ -728,7 +753,7 @@ export class MediaCache {
           '-map',
           `0:${video.index}`,
           '-vf',
-          'scale=640:360:force_original_aspect_ratio=decrease',
+          `scale=640:360:force_original_aspect_ratio=decrease:force_divisible_by=2:reset_sar=1:in_color_matrix=${sourceColorMatrix(video.colorSpace, video.width ?? 0, video.height ?? 0)}`,
           '-frames:v',
           '1',
           '-threads',

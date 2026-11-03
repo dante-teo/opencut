@@ -1,3 +1,9 @@
+import {
+  canvasColorPattern,
+  opaqueCanvasColor,
+  visualGeometry,
+  sourceColorMatrix,
+} from '@opencut/shared';
 import { link, lstat, mkdtemp, rename, rm, stat } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import { probeMedia } from './probe.js';
@@ -100,7 +106,7 @@ function validateOptions(options: VideoTimelineOptions): void {
     numerator > 120 * denominator ||
     BigInt(frameCount) * BigInt(denominator) > 600n * BigInt(numerator) ||
     (options.backgroundColor !== undefined &&
-      !/^#[0-9a-fA-F]{6}$/.test(options.backgroundColor)) ||
+      !canvasColorPattern.test(options.backgroundColor)) ||
     (options.visualClips !== undefined && options.segments !== undefined) ||
     (options.visualClips === undefined &&
       (segments.length === 0 ||
@@ -163,7 +169,7 @@ function validateOptions(options: VideoTimelineOptions): void {
     )
   )
     throw new MediaError(
-      'Invalid video render plan: use positive integer frame counts, even sides up to 3840 (at most 3840x2160 pixels), 1–120 fps, at most 64 visual/audio clips (or 128 legacy segments), valid transforms and #RRGGBB background, and 600 seconds.',
+      'Invalid video render plan: use positive integer frame counts, even sides up to 3840 (at most 3840x2160 pixels), 1–120 fps, at most 64 visual/audio clips (or 128 legacy segments), valid transforms and #RRGGBB[AA]/transparent background, and 600 seconds.',
     );
 }
 
@@ -302,8 +308,8 @@ export async function renderVideoTimeline(
   };
   let input = 0;
   filters.push(
-    `color=c=${options.backgroundColor ?? '#000000'}:s=${width}x${height}:r=${rate},` +
-      `trim=end_frame=${frameCount},settb=1/${numerator},setpts=N*${denominator}[canvas0]`,
+    `color=c=${opaqueCanvasColor(options.backgroundColor ?? '#000000')}:s=${width}x${height}:r=${rate},` +
+      `format=rgba,trim=end_frame=${frameCount},settb=1/${numerator},setpts=N*${denominator}[canvas0]`,
   );
   for (const [index, clip] of visualClips.entries()) {
     const source = await readSource(clip);
@@ -318,6 +324,24 @@ export async function renderVideoTimeline(
       throw new MediaError(
         `Clip '${clip.clipId}' requires timed video or a still image on the video track.`,
       );
+    const rotated = Math.abs(video.rotation ?? 0) % 180 === 90;
+    const displayWidth =
+      (video.width ?? width) * (video.sampleAspectRatio ?? 1);
+    const displayHeight = video.height ?? height;
+    // Chromium treats untagged HD as BT.709 and SD as BT.601. Compose in RGB,
+    // so sources with different YUV matrices and PNG alpha blend like Canvas.
+    const matrix = sourceColorMatrix(
+      video.colorSpace,
+      video.width ?? 0,
+      video.height ?? 0,
+    );
+    const geometry = visualGeometry(
+      width,
+      height,
+      rotated ? displayHeight : displayWidth,
+      rotated ? displayWidth : displayHeight,
+      clip,
+    );
     const offset =
       (video.startTimeSeconds ?? source.startTimeSeconds ?? 0) -
       (source.startTimeSeconds ?? 0);
@@ -345,17 +369,17 @@ export async function renderVideoTimeline(
         `trim=start_frame=${clip.sourceStartFrame}:end_frame=${sourceEnd}`;
     filters.push(
       `[${input++}:${video.index}]${sampling},` +
-        `${fitVisual(width, height, clip.scale ?? 1, clip.fit ?? 'contain')},format=yuva420p,` +
+        `${fitVisual(geometry, matrix)},format=rgba,` +
         ((clip.opacity ?? 1) === 1 ? '' : `lut=a=val*${clip.opacity},`) +
         `settb=1/${numerator},setpts=(N+${clip.timelineStartFrame})*${denominator}[layer${index}]`,
     );
     filters.push(
-      `[canvas${index}][layer${index}]overlay=x='(W-w)/2+(${clip.x ?? 0})':y='(H-h)/2+(${clip.y ?? 0})':` +
-        `eof_action=pass:repeatlast=0:alpha=straight:enable='gte(n,${clip.timelineStartFrame})*lt(n,${clip.timelineStartFrame + clip.frameCount})'[canvas${index + 1}]`,
+      `[canvas${index}][layer${index}]overlay=x=${geometry.x}:y=${geometry.y}:` +
+        `eof_action=pass:repeatlast=0:format=rgb:alpha=straight:enable='gte(n,${clip.timelineStartFrame})*lt(n,${clip.timelineStartFrame + clip.frameCount})'[canvas${index + 1}]`,
     );
   }
   filters.push(
-    `[canvas${visualClips.length}]settb=1/${numerator},setpts=N*${denominator},${outputWidth === width && outputHeight === height ? '' : `scale=${outputWidth}:${outputHeight},setsar=1,`}format=yuv420p[video]`,
+    `[canvas${visualClips.length}]settb=1/${numerator},setpts=N*${denominator},scale=${outputWidth}:${outputHeight}:out_color_matrix=bt709,setsar=1,format=yuv420p[video]`,
   );
   // Round absolute project boundaries to the nearest 48 kHz sample. Never sum
   // independently rounded durations: fractional frame rates must not accumulate drift.
@@ -460,6 +484,12 @@ export async function renderVideoTimeline(
       'passthrough',
       '-enc_time_base:v',
       `1/${numerator}`,
+      '-colorspace',
+      'bt709',
+      '-color_primaries',
+      'bt709',
+      '-color_trc',
+      'bt709',
       '-video_track_timescale',
       String(numerator),
       '-c:a',

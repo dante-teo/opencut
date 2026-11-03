@@ -170,12 +170,14 @@ export function TimelinePreview({
       <details className="timeline-diagnostics">
         <summary>Playback diagnostics</summary>
         <p>
-          Single visual layer · Chromium decoding · Media skew is observed
+          Ordered visual layers · Chromium decoding · Media skew is observed
           timing, not speaker loopback.
         </p>
         {diagnostics && (
           <>
             <output>
+              {diagnostics.paintedLayers}/{diagnostics.visibleLayers} layers ·{' '}
+              {diagnostics.compositeFps.toFixed(1)} fps ·{' '}
               {diagnostics.droppedFrames} dropped · {diagnostics.lateFrames}{' '}
               late · {diagnostics.maxMediaSkewMs.toFixed(1)} ms maximum media
               skew · {diagnostics.waitingEvents} waits

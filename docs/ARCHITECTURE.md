@@ -2,19 +2,18 @@
 
 ## Workspace boundaries
 
-| Package            | Owns                                                                                              | Actual dependencies                                       |
-| ------------------ | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| `@opencut/desktop` | Electron lifecycle, project session, restricted IPC, React workspace and source preview           | core, media, Electron, React, Lucide, range-parser        |
-| `@opencut/cli`     | Argument parsing, stdout/stderr and exit codes                                                    | core, media, Node built-ins                               |
-| `@opencut/core`    | Headless identity, project model, persistence, assets, timeline edits and render planning         | Zod; media and Node built-ins in optional `/node` adapter |
-| `@opencut/media`   | Probing, extraction, proxy/frame caches, composition and timeline encoding through external tools | Node built-ins, lru-cache, proper-lockfile                |
-| `@opencut/shared`  | Reserved location for utilities/types used by multiple packages                                   | none                                                      |
+| Package            | Owns                                                                                              | Actual dependencies                                               |
+| ------------------ | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `@opencut/desktop` | Electron lifecycle, project session, restricted IPC, React workspace and source/project preview   | core, media, shared, Electron, React, Lucide, range-parser        |
+| `@opencut/cli`     | Argument parsing, stdout/stderr and exit codes                                                    | core, media, shared, Node built-ins                               |
+| `@opencut/core`    | Headless identity, project model, persistence, assets, timeline edits and render planning         | shared, Zod; media and Node built-ins in optional `/node` adapter |
+| `@opencut/media`   | Probing, extraction, proxy/frame caches, composition and timeline encoding through external tools | shared, Node built-ins, lru-cache, proper-lockfile                |
+| `@opencut/shared`  | Pure composition geometry, canvas colors and SDR source matrix rules                              | none                                                              |
 
 Actual runtime dependency direction is `desktop → core ← cli`, with desktop main,
 CLI and the core Node adapter depending on media. The rationale is
 recorded in [ADR 0001](adr/0001-shared-headless-core.md). Core never
-imports Electron, React, CLI or desktop code. Media is headless and shared
-remains reserved: add APIs and dependencies only when a real task needs them.
+imports Electron, React, CLI or desktop code. Media stays headless. Shared composition rules have no runtime dependencies and are used by media, core, CLI and desktop.
 The root uses core as a development dependency to test built workspace imports.
 All workspace dependencies use `workspace:*`; package exports point to built
 JavaScript and declarations rather than TypeScript path aliases.
@@ -38,8 +37,8 @@ media as a technical spike, called directly by the CLI alongside inspection and
 extraction. T04 adds isolated HTML video playback in desktop. The T05 model stores
 intent without executing edits or connecting to these media/preview prototypes.
 T12 coordinates saved-project export through a pure visual/audio plan and the existing
-FFmpeg media backend. Broader engine hosting and desktop playback ownership remain
-open decisions.
+FFmpeg media backend. T24 owns browser playback in the renderer, T25 hosts cache
+work in a Node worker, and T26 shares composition geometry with the export backend.
 The scoped tool choice and subprocess boundary are recorded in
 [ADR 0002](adr/0002-external-ffmpeg-media-tools.md).
 
@@ -260,7 +259,9 @@ counted before atomic publication; no project mutation occurs. New outputs use a
 exclusive hard link; explicit replacement uses a same-filesystem rename only after
 verification.
 [ADR 0007](adr/0007-integer-frame-timeline-rendering.md) records timing/publication;
-[ADR 0009](adr/0009-video-compositing-and-canvas.md) records visual semantics.
+[ADR 0009](adr/0009-video-compositing-and-canvas.md) records the initial visual semantics;
+[ADR 0012](adr/0012-realtime-layer-composition.md) extends them to shared RGB
+preview/export composition and transparent canvas colors.
 The [CLI contract](CLI.md#project-rendering) defines prerequisites and limits.
 
 T11 adds optional linear clip gain/mute fields without inserting defaults into
@@ -559,7 +560,7 @@ excludes native editing/control keys, composition, repeats and already handled
 events. Existing player and timeline handlers retain their scoped keys. A small
 transport ref reuses the active source player's serialized playback/seeking path;
 T24 also routes that transport to Project viewer. Clip audio is previewed there;
-visual transforms remain export properties pending T26.
+T26 also applies visual transforms in Project viewer.
 Native numeric/range inputs and React suffice here without a dependency or second
 editing/history model.
 
@@ -600,16 +601,16 @@ security, disconnect semantics, transport limits and platform boundaries.
 T23 shares exact clip timing, ordering and defaults between headless point queries
 and export planning. See [evaluation semantics and limitations](TIMELINE_EVALUATION.md).
 
-## Edited timeline playback (T24)
+## Edited timeline playback and compositing (T24–T26)
 
 The [playback contract](TIMELINE_PLAYBACK.md) describes the single AudioContext
 clock, prepared T23 queries, media-element lookahead and synchronization, gain
 routing, canvas painting and disposal. This remains a desktop adapter: core, CLI,
 media inspection and offline rendering have no Electron/Web Audio dependency.
 Timeline media capabilities are revision-scoped and independent of source-preview
-selection. Full multi-layer visual compositing is deferred to T26.
+selection. T26 adds ordered Canvas video/image compositing using the shared headless geometry/color contract. FFmpeg exports reuse that contract and blend in RGB; see the [composition rules](TIMELINE_PLAYBACK.md#composition-and-export-agreement-t26).
 
-## Proxy and cache ownership (T25)
+## Proxy and cache ownership (T25–T26)
 
 `@opencut/media` owns `MediaCache`, source fingerprinting, verified FFmpeg proxies,
 PNG extraction, byte budgets, invalidation and disk eviction. Electron main forwards

@@ -554,6 +554,10 @@ test('Space and frame shortcuts operate the active source outside the player wit
           .evaluate((video: HTMLVideoElement) => video.currentTime),
       )
       .toBeLessThan(frame);
+    // currentTime changes before seek presentation settles; disabled controls cannot take focus.
+    await expect(
+      page.getByRole('button', { name: 'Play', exact: true }),
+    ).toBeEnabled();
     await page.getByRole('button', { name: 'Play', exact: true }).focus();
     await page.keyboard.press('Space');
     await expect(

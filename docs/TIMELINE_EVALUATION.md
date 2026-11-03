@@ -101,7 +101,8 @@ clip-count limits. Evaluation itself has none of those export-specific limits.
 Off-grid source/timeline boundaries evaluate exactly but still fail export rather
 than round. Existing FFmpeg project-rate sampling before trimming, still looping,
 stream origins and 48 kHz sample rounding are unchanged. No intentional export
-semantic change is introduced.
+semantic change was introduced by T23. T26 shares geometry and RGB composition
+between preview and export; see [the composition contract](TIMELINE_PLAYBACK.md#composition-and-export-agreement-t26).
 
 `evaluateTimeline` and `evaluateTimelineFrame` validate and resolve a fresh snapshot
 on each call. `createTimelineEvaluator(project)` instead validates/resolves once
@@ -111,6 +112,6 @@ edits; mutating the original project or an earlier result does not update it.
 `resolveTimeline(project)` also exposes validated ordered clip ranges/defaults
 without a point query for adapters that need lookahead.
 
-The desktop [T24 playback adapter](TIMELINE_PLAYBACK.md) uses this prepared
+The desktop [T24–T26 playback/composition adapter](TIMELINE_PLAYBACK.md) uses this prepared
 T23 evaluator as its authoritative mapping. Decoding, clock and audio routing
 stay in desktop; evaluation itself remains headless and does no I/O or playback.

@@ -1,4 +1,4 @@
-# Preview proxies and bounded cache (T25)
+# Preview proxies and bounded cache (T25–T26)
 
 Project viewer automatically selects a validated proxy when one exists. A missing
 proxy leaves original preview usable while generation runs asynchronously. The
@@ -17,11 +17,15 @@ requires equal frame counts and each timestamp within 2 ms, then checks duration
 audio presence/start and unchanged source identity before publication.
 
 Eligibility is deliberately conservative: known positive duration up to 600 seconds,
-known video frame rate, container/video origins within 2 ms of zero, and either no
-audio or AAC starting within 2 ms of zero. Other timing/audio returns the original
+known video frame rate, container/video origins within 2 ms of zero, opaque video,
+and either no audio or AAC starting within 2 ms of zero. Alpha-bearing video stays
+on the original because H.264 proxies cannot preserve its alpha. Other unsupported
+timing/audio returns the original
 with a reason; tool, encode and verification errors leave original preview available.
-The proxy does not solve arbitrary Chromium codec, HDR/color, rotation or stream-origin
-parity; that broader conformance work remains outside T25. Audio sample preservation
+T26 shares SDR YUV matrix selection with export and paused PNG extraction, and
+proxy grants carry the original display aspect independently of rounded proxy
+dimensions. Arbitrary Chromium codecs, HDR/wide-gamut color and unusual stream
+origins remain outside the validated parity contract. Audio sample preservation
 and VFR intervals have independent native regression tests. Physical speaker/display
 latency is not measured by those tests.
 
@@ -39,7 +43,9 @@ metadata LRU avoids rehashing unchanged identities during one process lifetime.
 Keys include source content, media metadata and versioned derivative settings;
 frame keys additionally include the exact requested source time so opposite sides
 of a presentation boundary cannot alias through microsecond rounding. Paths
-alone never establish validity. Source replacement, including the same path/size
+alone never establish validity. T26 uses proxy settings version 2 and frame settings
+`frame-v3-covering-sdr-640x360`; older derivative interpretations are cache misses
+and can be regenerated without changing originals. Source replacement, including the same path/size
 and restored mtime, invalidates the identity through ctime/inode and content hashing.
 
 Each entry has a digest-named file and manifest with its content hash. Lookups check
@@ -86,21 +92,25 @@ If timing cannot be resolved, the renderer keeps its ordinary decoder path; the 
 reports an error. Versioned frame keys bypass older seek images, and exact requested
 times keep opposite sides of a frame boundary distinct.
 
-A paused seek prefetches one adjacent project frame. Main allows at most two
-timeline frame requests in flight; the player coalesces changing seeks and discards stale
-completions. A cached image can bridge a paused seek, but a ready decoder takes
-precedence and restores its preview quality. Renderer retains one decoded cached
-image and releases it on seek or disposal. No unbounded decoded video frames or
-full-file PCM live in JavaScript.
+Paused extraction serves the current source times of visible video layers, with
+at most two requests in flight in both the player and main process. No adjacent
+frame sequence is prefetched. Seek/playback generations discard stale completions.
+Cached images bridge paused seeks; ready native decoders take precedence. The
+renderer retains decoded PNGs within the configured memory allowance and releases
+them on seek, playback start or disposal. Lowering the limit trims them immediately.
+The worker encoded-PNG cache and renderer decoded-PNG cache each apply that limit
+independently; it is not a combined memory pool. No unbounded decoded video-frame
+sequence or full-file PCM lives in JavaScript.
 
 Chromium owns native decoder buffers, so the PNG budget is **not a process RSS or
-GPU-memory guarantee**. The player caps total media decoders at 16 and speculative
+GPU-memory guarantee**. The player caps owned source-run entries at 16, including
+still images as well as media-element decoders, and speculative
 lookahead runs at four/two seconds, with estimated three RGBA frames per source
 constrained by the configured memory allowance. The first cache status applies
 persisted budgets directly to the current player. Later budget updates apply to
 lookahead on the next playback tick. While playing, they adjust speculative work
 without interrupting active clips; proxy-selection changes still wait until paused.
-Active clips take priority;
+Active clips take priority over speculative runs;
 exceeding 16 active runs reports a diagnostic and omits excess runs. Contiguous
 splits share one decoder. Leaving a run/viewer or changing a project unloads media,
 disconnects audio nodes and releases grants. Cache work stays in a Node worker;
@@ -148,3 +158,7 @@ performance pass threshold. Order is original then proxy; OS caches, thermal sta
 power mode and other system load are uncontrolled. Aggregate working set can count
 shared pages twice and CPU excludes FFmpeg generation. These short synthetic runs
 do not prove long-session, heavy-overlap, HDR or cross-platform performance.
+
+`pnpm benchmark:t26` separately measures overlapping videos and an alpha image in
+original/proxy modes. See [composition semantics and benchmark definitions](TIMELINE_PLAYBACK.md#composition-and-export-agreement-t26)
+for layer ordering, SDR tolerances, all-layer seek completion and resource limits.

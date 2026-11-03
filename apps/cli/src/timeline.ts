@@ -1,3 +1,4 @@
+import { canvasColorPattern } from '@opencut/shared';
 import { resolve } from 'node:path';
 import {
   addClip,
@@ -50,7 +51,7 @@ export const timelineHelp = `Usage: opencut timeline list <project-file> [--json
        opencut clip add <project-file> <asset-id> --track <track-id> --at <frame> --in <frame> --out <frame> [--json]
        opencut clip move <project-file> <clip-id> [--track <track-id>] [--at <frame>] [--json]
        opencut clip trim <project-file> <clip-id> [--in <frame>] [--out <frame>] [--json]
-       opencut canvas set <project-file> [--width <px>] [--height <px>] [--background-color <#RRGGBB>] [--json]
+       opencut canvas set <project-file> [--width <px>] [--height <px>] [--background-color <#RRGGBB|#RRGGBBAA|transparent>] [--json]
        opencut clip visual <project-file> <clip-id> [--x <px>] [--y <px>] [--scale <n>] [--opacity <0..1>] [--fit <contain|cover|stretch>] [--json]
        opencut clip audio <project-file> <clip-id> [--volume <0..1>] [--muted <true|false>] [--json]
        opencut clip split <project-file> <clip-id> --at <frame> [--json]
@@ -66,7 +67,7 @@ Later video tracks draw above earlier tracks; new tracks append on top.
 Visual defaults: x/y 0 (pixel offsets from centered fitted rectangle), scale 1, opacity 1, fit contain.
 Scale multiplies the canvas fitting rectangle (0.01–4); contain preserves aspect, cover crops centrally, stretch fills.
 Clip add accepts the same visual flags. Use --x=-20 or --y=-20 for negative offsets.
-Canvas defaults to black; color uses #RRGGBB. Gaps and transparent margins reveal lower layers/background.
+Canvas defaults to black; color uses #RRGGBB, #RRGGBBAA or transparent. Gaps and transparent margins reveal lower layers/background.
 Clip add also accepts --volume <0..1> and --muted <true|false>. Defaults: 1 and false.
 Volume is linear amplitude (0 = silence, 1 = unchanged); mute overrides volume without changing it.
 Known source durations are enforced. Unknown durations/images require explicit ranges with no inferred bound.
@@ -228,8 +229,10 @@ export async function runTimelineCommand(
   }
   if (values['background-color'] !== undefined) {
     const value = required('background-color');
-    if (!/^#[0-9a-fA-F]{6}$/.test(value))
-      throw new UsageError('--background-color requires #RRGGBB.');
+    if (!canvasColorPattern.test(value))
+      throw new UsageError(
+        '--background-color requires #RRGGBB, #RRGGBBAA or transparent.',
+      );
     canvas.backgroundColor = value;
   }
   if (command === 'canvas set' && Object.keys(canvas).length === 0)

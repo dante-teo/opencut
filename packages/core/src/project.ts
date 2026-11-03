@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { canvasColorPattern } from '@opencut/shared';
 import {
   addTimes,
   compareTimes,
@@ -94,10 +95,7 @@ export const clipVisualSchema = z.strictObject({
 export const canvasShape = {
   width: z.int().positive().optional(),
   height: z.int().positive().optional(),
-  backgroundColor: z
-    .string()
-    .regex(/^#[0-9a-fA-F]{6}$/)
-    .optional(),
+  backgroundColor: z.string().regex(canvasColorPattern).optional(),
 };
 const clipSchema = z.strictObject({
   id,

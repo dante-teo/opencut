@@ -109,7 +109,9 @@ function close(actual: Buffer, expected: Buffer, label: string): void {
   for (let i = 0; i < actual.length; i++)
     error += Math.abs(actual[i]! - expected[i]!);
   assert.ok(
-    error / actual.length < 5,
+    // T26 composes in RGB before tagged BT.709 H.264. The additional chroma
+    // conversion allows <6/255 versus the directly decoded source reference.
+    error / actual.length < 6,
     `${label}: mean pixel error ${error / actual.length}`,
   );
 }

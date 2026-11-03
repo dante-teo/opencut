@@ -141,6 +141,16 @@ async function startDrag(
   dy = 0,
   edge?: 'left' | 'right',
 ) {
+  // Let selection/inspector layout and zoom/scroll observers settle before
+  // capturing physical pointer coordinates; otherwise a drag can target a stale lane.
+  if ((await clip(page, id).getAttribute('aria-pressed')) !== 'true')
+    await clip(page, id).locator(':scope > rect').first().click();
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+  );
   const target = edge
     ? clip(page, id).locator(`[data-trim="${edge}"]`)
     : clip(page, id).locator(':scope > rect').first();

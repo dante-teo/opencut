@@ -37,6 +37,7 @@ export const RELEASE_PREVIEW_CHANNEL = 'preview:release';
 
 export interface PreviewSource {
   proxy?: boolean;
+  displayAspectRatio?: number;
   kind?: 'video' | 'audio' | 'image';
   url: string;
   name: string;

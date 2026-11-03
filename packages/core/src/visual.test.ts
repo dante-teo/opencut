@@ -55,6 +55,23 @@ describe('T12 visual model and headless editing', () => {
     });
     expect(planProjectRender(project).backgroundColor).toBe('#000000');
   });
+  it('round-trips transparent canvases through existing edit/history and render plans', () => {
+    const original = example();
+    for (const backgroundColor of ['transparent', '#18304880']) {
+      const edited = executeTransaction(original, {
+        expectedRevision: 0,
+        operations: [{ type: 'canvas.set', backgroundColor }],
+      });
+      expect(
+        deserializeProject(serializeProject(edited.project)).settings
+          .backgroundColor,
+      ).toBe(backgroundColor);
+      expect(planProjectRender(edited.project).backgroundColor).toBe(
+        backgroundColor,
+      );
+      expect(undoEdit(edited.project).settings).toEqual(original.settings);
+    }
+  });
   it('merges properties, keeps omission unchanged, copies transforms on split and rejects visual audio clips', () => {
     const project = example();
     const changed = setClipVisual(project, 'clip', {

@@ -31,6 +31,9 @@ shares its timing and property resolution. T24 adds [edited timeline playback](T
 with cuts, gaps, trims/splits, overlapping audio, clip gain/mute and diagnostics.
 T25 adds [verified preview proxies and bounded caches](MEDIA_CACHE.md), GUI/CLI cache controls,
 and `pnpm benchmark:t25` for reproducible 1080p/4K comparisons.
+T26 composites overlapping video/image layers in Project viewer with shared
+preview/export transforms, fitting, ordering, alpha and background rules.
+`pnpm benchmark:t26` measures mixed-resolution multi-layer playback.
 
 Select a clip to edit **Timeline position**, **Duration**, **Source in/out** in
 whole project frames, **Volume** (linear 0–1), **Mute**, and video **Position X/Y**
@@ -42,7 +45,7 @@ Core validation rejects overlaps, invalid source ranges and invalid values witho
 changing the project. Off-grid or unrepresentable timing remains visible as exact
 stored times but cannot be silently rounded through the numeric editor.
 Source preview plays original media. Project viewer applies clip volume/mute and
-mixes overlapping audio; visual transforms and full compositing remain export-only.
+mixes overlapping audio and composites ordered video/image layers with clip transforms.
 
 Outside text fields and native controls, **Space** toggles the active viewer,
 **Command+Z / Command+Shift+Z** undo/redo, **Command+S** saves, **S** splits at the
@@ -192,7 +195,7 @@ source link stays with the explicitly previewed clip. Seeking outside the linked
 range switches to Project viewer and pauses/unlinks the source. Library selection
 and **Open video** also unlink. Audio/image clips have no linked source preview;
 linked source playback stays within that source. Project viewer provides edited
-timeline cuts/gaps and audio mixing; full compositing remains unavailable.
+timeline cuts/gaps, audio mixing and ordered video/image compositing.
 Very long timelines use a proportional scrollbar to stay within browser layout
 limits; scrollbar precision becomes coarser at extreme durations.
 
@@ -311,6 +314,8 @@ and standard filters. Existing output files are refused. See
 | `pnpm test`                              | Build prerequisites and run headless unit + CLI/fixture-contract tests                       |
 | `pnpm test:desktop`                      | Build and check projects, IPC security, appearance, reopening and available fixture playback |
 | `pnpm test:preview`                      | Build and measure real Electron playback/seek performance (FFmpeg + ffprobe + fixtures)      |
+| `pnpm benchmark:t25`                     | Compare original/proxy 1080p and 4K playback on generated media                              |
+| `pnpm benchmark:t26`                     | Measure overlapping video/image playback, seeks, CPU and memory in Electron                  |
 | `pnpm test:fixtures`                     | Run the optional native intact/truncated-media regression (FFmpeg + ffprobe)                 |
 | `pnpm e2e --keep`                        | Build and run the complete 18-second CLI workflow; retain verified MP4 and evidence          |
 | `pnpm test:e2e`                          | Run the CLI-only workflow twice and clean per-run artifacts (FFmpeg + ffprobe)               |
@@ -332,6 +337,10 @@ They hold a real edit IPC request pending to verify that another field's draft
 survives its response and that queued picker/file-drop imports use the accepted
 revision with separate undo entries. These checks use explicit release events,
 not timing delays; the import cases require the generated video fixture and ffprobe.
+T24–T26 checks cover multi-layer preview, proxy fallback/budgets, rapid seeks,
+visual property edits with undo/redo, preview/export frame comparisons and audio
+pulse/flash synchronization. See [the playback contract](TIMELINE_PLAYBACK.md)
+for coverage, tolerances and benchmark definitions.
 T22's `tests/desktop/shared-session.spec.ts` covers older backups opened from a
 different file or restored at the same path, subsequent GUI undo, and timeline
 navigation/snapping preservation after CLI edits and undo. A gated Save reply

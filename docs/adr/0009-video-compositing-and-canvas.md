@@ -1,6 +1,6 @@
 # ADR 0009: Positioned visual layers and canvas fitting
 
-Status: Accepted (T12)
+Status: Accepted (T12); extended by [ADR 0012](0012-realtime-layer-composition.md) in T26
 
 ## Decision
 

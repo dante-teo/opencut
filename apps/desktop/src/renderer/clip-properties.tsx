@@ -301,9 +301,8 @@ export function ClipProperties({
         </>
       )}
       <p className="property-preview-note">
-        Project preview applies clip volume and mute. Source preview plays
-        original media. Visual transforms apply to export; layered compositing
-        is not yet available in Project viewer.
+        Project viewer applies clip transforms, volume and mute. Source preview
+        plays original media.
       </p>
     </fieldset>
   );

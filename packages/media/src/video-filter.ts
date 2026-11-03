@@ -6,20 +6,25 @@ export function fitVideo(width: number, height: number): string {
   );
 }
 
-/** Fit to an even, scaled canvas rectangle; contain leaves transparent margins. */
+/** FFmpeg consumes the same resolved geometry as the browser compositor. */
 export function fitVisual(
-  width: number,
-  height: number,
-  scale: number,
-  fit: 'contain' | 'cover' | 'stretch',
+  geometry: {
+    scaledWidth: number;
+    scaledHeight: number;
+    layerWidth: number;
+    layerHeight: number;
+    cropX: number;
+    cropY: number;
+  },
+  colorMatrix: string,
 ): string {
-  const w = Math.max(2, Math.round((width * scale) / 2) * 2);
-  const h = Math.max(2, Math.round((height * scale) / 2) * 2);
-  if (fit === 'stretch') return `scale=${w}:${h}:reset_sar=1,setsar=1`;
-  const mode = fit === 'cover' ? 'increase' : 'decrease';
+  const { scaledWidth, scaledHeight, layerWidth, layerHeight, cropX, cropY } =
+    geometry;
   return (
-    `scale=${w}:${h}:force_original_aspect_ratio=${mode}:force_divisible_by=2:reset_sar=1,` +
-    (fit === 'cover' ? `crop=${w}:${h},` : '') +
+    `scale=${scaledWidth}:${scaledHeight}:reset_sar=1:in_color_matrix=${colorMatrix},` +
+    (scaledWidth !== layerWidth || scaledHeight !== layerHeight
+      ? `crop=${layerWidth}:${layerHeight}:${cropX}:${cropY},`
+      : '') +
     'setsar=1'
   );
 }

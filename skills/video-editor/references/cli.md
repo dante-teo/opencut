@@ -1,4 +1,4 @@
-# OpenCut CLI at T14
+# OpenCut CLI through T26
 
 For a complete CLI-only edit with tested timing, layers, audio and persistent history,
 see the [T14 workflow](workflow.md).
@@ -340,7 +340,8 @@ with libx264 and standard filters, plus ffprobe on PATH. The project's resolutio
 and exact rational frame rate determine the default output. Original video audio is preserved
 by default. Independent audio clips on any number of audio tracks can overlap
 original audio and each other across tracks. No transitions, audio effects,
-keyframes, fades or GUI project integration are implemented.
+keyframes, fades or desktop export controls are implemented. Project viewer
+composites the same saved layer configuration; source preview plays originals.
 
 T12 accepts multiple video tracks, still images and any audio tracks. At least one
 video/image clip is required; empty tracks are allowed. Same-track overlaps remain
@@ -373,24 +374,24 @@ node apps/cli/dist/index.js clip visual PROJECT CLIP_ID --fit contain --scale 0.
 
 `canvas set` accepts any nonempty subset of width, height and `--background-color`.
 Use 1080×1920 (9:16), 1920×1080 (16:9) or 1080×1080 (1:1), or other supported
-even dimensions. `backgroundColor` is optional `#RRGGBB`, default `#000000`.
-The background is opaque. H.264 output flattens all source transparency onto it.
+even dimensions. `backgroundColor` accepts `#RRGGBB`, `#RRGGBBAA` or `transparent`, default `#000000`.
+Preview retains canvas alpha. H.264 flattens the composition over black.
 `clip visual` accepts any nonempty subset of `--x`, `--y`, `--scale`, `--opacity`
 and `--fit`; `clip add` accepts the same flags. These mutations support dry-run,
 revision guards, atomic save and undo/redo. Omitted properties retain stored values.
 
 Visual defaults are x/y 0, scale 1, opacity 1, fit `contain`. Coordinates are pixel
 offsets from the centered fitted layer: positive x moves right, positive y down.
-Negative offsets use `--x=-120` / `--y=-80`. The fitted layer top left is `(canvas.width - layer.width)/2 + x`,
-`(canvas.height - layer.height)/2 + y`.
+Negative offsets use `--x=-120` / `--y=-80`. Before pixel-grid quantization, the fitted layer top left is
+`(canvas.width - layer.width)/2 + x`, `(canvas.height - layer.height)/2 + y`.
 Offsets are finite decimals in [-32768, 32768]. Scale is uniform in [0.01, 4] and
 multiplies the canvas fitting rectangle before centering/translation. Each rectangle
 side rounds to the nearest even pixel (minimum 2, ties upward), with a render limit
 of 8192 per side. `contain` preserves display aspect ratio inside that rectangle;
 its unused margins are transparent. `cover` preserves display aspect ratio, fills
 the rectangle and crops centrally. `stretch` fills the rectangle independently in
-x/y. All modes normalize sample aspect ratio to square pixels. Positioning is
-quantized to the 2-pixel output chroma grid by FFmpeg. Content outside the canvas
+x/y. All modes normalize sample aspect ratio to square pixels. Shared geometry
+snaps crop and placement to the even 2-pixel grid before both preview and export. Content outside the canvas
 is clipped. Opacity [0, 1] multiplies source alpha; 0 hides visuals while retaining
 audio. Opaque and alpha-bearing videos/images share these rules.
 
@@ -582,7 +583,8 @@ For filenames starting with `-`, place options before `--` and the filename,
 or use an absolute path. For an output name starting with `-`, use
 `--output=-frame.png` or an absolute path. Quote paths in the calling shell.
 The complete [CLI/API contract](../../../docs/CLI.md) describes all fields and
-limits. Desktop project integration remains deferred.
+limits. Electron integrates project management, editing and preview; project
+export remains a CLI operation.
 
 ## Shared project sessions (T22)
 

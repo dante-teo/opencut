@@ -6,7 +6,7 @@ interface should make everyday editing accessible without code. The desktop now
 provides project management, a media library, timeline editing, clip properties
 and shared undo/redo. Single-source preview can link to an individual video clip;
 Project viewer plays edited cuts, gaps and synchronized multi-track audio.
-Full visual compositing remains unavailable.
+Project viewer composites ordered video/image layers with position, scale, opacity, fitting and canvas alpha.
 
 ## Two equally important workflows
 
@@ -20,10 +20,11 @@ core without launching Electron. Neither interface gets a separate editing model
 A maintained official Agent Skill will teach agents the actual CLI as it grows.
 
 The editing model (projects, intent, commands, validation) and the media engine
-(probing, decoding, playback and encoding) are separate concerns. Detailed editing
-contracts and the playback/render backend require later technical validation.
+(probing, decoding, playback and encoding) are separate concerns. The [project format](PROJECT_FORMAT.md), [playback contract](TIMELINE_PLAYBACK.md)
+and [architecture decisions](adr/0012-realtime-layer-composition.md) define their
+current contracts and validation boundaries.
 
-## Current scope: T20
+## Implemented milestones through T26
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -123,7 +124,8 @@ renderer security settings remain intact. Asset/project switches cancel playback
 work and unload the element. Preview state is transient. HTML video seeks and
 project-rate frame positions are approximate, particularly for VFR or differing
 source/project rates; no frame-accurate decoding contract is implied. Timeline
-playback/compositing, desktop imports and editing remain future work.
+playback/compositing, desktop imports and editing were outside T16; later
+milestones below add them.
 
 T17 replaces the static timeline overview with a scrollable, zoomable read-only
 visualization. Video/audio tracks retain project insertion order and distinguish
@@ -184,8 +186,8 @@ See [desktop usage](README.md) for property ranges, shortcuts and preview limits
 
 ## Excluded
 
-Full live visual compositing and desktop render controls remain unavailable. Transitions, keyframes, fades and new audio/visual effects
-are outside this scope. No FFmpeg or MLT runtime is bundled; media commands require
+Desktop export controls, transitions, keyframes, fades and new audio/visual effects
+are outside the current scope. Project export is available through the CLI. No FFmpeg or MLT runtime is bundled; media commands require
 manually installed external tools.
 Fixture generation remains an optional development utility.
 
@@ -196,8 +198,10 @@ User media must never be silently changed or overwritten.
 
 macOS is the initial required platform. Package boundaries should stay portable;
 Windows/Linux support requires explicit validation later. No distribution,
-installer, updater, signing or notarization work is included through T20. Render jobs
+installer, updater, signing or notarization work is included through T26. Render jobs
 run in the invoking process, without a persistent queue, background service or database.
+
+## Playback and compositing milestones
 
 T21 establishes an [architecture audit and playback baseline](T21_ARCHITECTURE_AUDIT.md)
 with representative generated projects, cold/warm source seeks, playback/resource
@@ -209,12 +213,26 @@ T23 implements [headless timeline evaluation](TIMELINE_EVALUATION.md).
 The T23 evaluator resolves active clips, exact source times, visual layer order,
 transforms, opacity, audio gain/mute and timeline gaps/boundaries from the existing
 project. Export planning shares timing and property defaults with these queries.
-Decoding, compositing, audio playback and live project transport remain separate
-work; evaluator results alone do not establish preview/export playback parity.
+Decoding, compositing, audio playback and live transport belong to adapters; the
+evaluator itself stays headless. T24–T26 connect those adapters without making
+evaluator results alone a preview/export parity guarantee.
 
 T24 adds [edited timeline playback](TIMELINE_PLAYBACK.md), using T23 evaluation,
 a single Web Audio clock and Chromium decoders. It supports cuts, trims/splits,
 gaps/background, overlapping original/independent audio, volume/mute, transport,
-seek/step, interruption cleanup and measurable diagnostics. The top eligible visual
-is shown without T26 transforms/layer compositing. Browser codec, seek and output
-latency limitations apply; this is not an export-parity guarantee. No T25 work is included.
+seek/step, interruption cleanup and measurable diagnostics. T24 initially displayed
+the top eligible visual; T26 replaces that restriction with ordered compositing.
+Browser codec, seek and output-latency limitations still apply.
+
+T25 adds [preview proxies and bounded caches](MEDIA_CACHE.md), with worker-backed
+transcoding/frame extraction, original-media fallback and GUI/CLI management.
+Source preview and final export retain original media references.
+
+T26 adds real-time multi-layer visual composition to the existing T24 clock and
+T25 proxy/cache path. Geometry and RGB alpha rules are shared with FFmpeg export;
+SDR frame comparisons, rapid seeks, inspector edits and mixed-resolution playback
+are covered by real Electron tests. [Playback semantics and tolerances](TIMELINE_PLAYBACK.md#composition-and-export-agreement-t26)
+define the supported boundary. `pnpm benchmark:t26` measures original/proxy FPS,
+drops, all-layer seeks, CPU and memory. Browser codec, HDR, source-frame selection,
+16-source-run and short synthetic-workload limitations still apply. No keyframes,
+transitions, new editing operations or T27 work are included.

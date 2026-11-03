@@ -524,6 +524,9 @@ app
         return {
           url,
           proxy: selected.proxy,
+          ...('displayAspectRatio' in selected && selected.displayAspectRatio
+            ? { displayAspectRatio: selected.displayAspectRatio }
+            : {}),
           name: asset.name,
           kind:
             asset.metadata?.kind ??

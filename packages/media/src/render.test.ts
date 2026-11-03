@@ -224,7 +224,7 @@ describe('video timeline executor safety', () => {
       'trim=start_frame=3:end_frame=13',
     );
     expect(args[args.indexOf('-filter_complex') + 1]).toContain(
-      'setpts=N*1001,format=yuv420p[video]',
+      'setpts=N*1001,scale=320:180:out_color_matrix=bt709,setsar=1,format=yuv420p[video]',
     );
   });
 
@@ -430,7 +430,7 @@ describe('video timeline executor safety', () => {
     expect(result).toMatchObject({ width: 720, height: 1280 });
     const args = vi.mocked(runMediaTool).mock.calls[0]![1];
     expect(args[args.indexOf('-filter_complex') + 1]).toContain(
-      'scale=720:1280,setsar=1,format=yuv420p[video]',
+      'scale=720:1280:out_color_matrix=bt709,setsar=1,format=yuv420p[video]',
     );
   });
 

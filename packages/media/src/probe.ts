@@ -21,6 +21,11 @@ export interface MediaStream {
   frameRate: number | null;
   frameRateRatio: string | null;
   pixelFormat: string | null;
+  /** Display geometry; optional for callers supplying legacy metadata. */
+  sampleAspectRatio?: number;
+  colorSpace?: string | null;
+  hasAlpha?: boolean;
+  rotation?: number;
   sampleRate: number | null;
   channels: number | null;
   channelLayout: string | null;
@@ -90,6 +95,24 @@ function parseStream(value: unknown): MediaStream {
     frameRate,
     frameRateRatio: frameRate === null ? null : text(data.avg_frame_rate),
     pixelFormat: text(data.pix_fmt),
+    colorSpace: text(data.color_space),
+    hasAlpha:
+      /^(?:yuva|gbrap|rgba|argb|bgra|abgr|ya|pal8)/.test(
+        text(data.pix_fmt) ?? '',
+      ) || String(record(data.tags).alpha_mode) === '1',
+    sampleAspectRatio:
+      parseFrameRate(text(data.sample_aspect_ratio)?.replace(':', '/')) ?? 1,
+    rotation:
+      finiteNumber(
+        record(
+          Array.isArray(data.side_data_list)
+            ? data.side_data_list.find(
+                (side) => record(side).rotation !== undefined,
+              )
+            : null,
+        ).rotation,
+        -Infinity,
+      ) ?? 0,
     sampleRate: finiteNumber(data.sample_rate, 1),
     channels: finiteNumber(data.channels, 1),
     channelLayout: text(data.channel_layout),

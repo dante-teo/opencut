@@ -14,6 +14,7 @@
     "packages/**/*.test.ts",
     "apps/**/*.test.ts",
     "playwright.t21.config.ts",
-    "playwright.t25.config.ts"
+    "playwright.t25.config.ts",
+    "playwright.t26.config.ts"
   ]
 }

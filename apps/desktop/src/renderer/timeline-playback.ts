@@ -1,3 +1,4 @@
+import { fittingBox, visualGeometry } from '@opencut/shared';
 import {
   addTimes,
   compareTimes,
@@ -94,6 +95,13 @@ export interface TimelineDiagnostics {
   proxyDecoders: number;
   decoders: number;
   cachedFrames: number;
+  visibleLayers: number;
+  paintedLayers: number;
+  compositeFrames: number;
+  compositeFps: number;
+  maxCompositionMs: number;
+  lastSeekLatencyMs: number;
+  maxSeekLatencyMs: number;
 }
 interface Entry {
   key: string;
@@ -120,6 +128,7 @@ export class TimelinePlayback {
   private readonly context: AudioContext;
   private readonly master: GainNode;
   private readonly entries = new Map<string, Entry>();
+  private readonly aspects = new Map<string, number>();
   private readonly keys = new Map<string, string>();
   private readonly runs = new Map<string, ResolvedTimelineClip[]>();
   private readonly upcoming: ResolvedTimelineClip[];
@@ -135,9 +144,12 @@ export class TimelinePlayback {
   private lastTick = 0;
   private lastReport = 0;
   private starting = false;
-  private frameRequest = false;
-  private wantedFrame = '';
-  private cachedFrame: { key: string; image: HTMLImageElement } | null = null;
+  private frameRequests = 0;
+  private readonly wantedFrames = new Set<string>();
+  private readonly cachedFrames = new Map<string, HTMLImageElement>();
+  private compositeFrame = '';
+  private playbackSeconds = 0;
+  private seekStarted: number | null = null;
   private frameGeneration = 0;
   private readonly onVisibility = () => {
     if (document.hidden) this.pause();
@@ -204,6 +216,13 @@ export class TimelinePlayback {
       proxyDecoders: 0,
       decoders: 0,
       cachedFrames: 0,
+      visibleLayers: 0,
+      paintedLayers: 0,
+      compositeFrames: 0,
+      compositeFps: 0,
+      maxCompositionMs: 0,
+      lastSeekLatencyMs: 0,
+      maxSeekLatencyMs: 0,
       presentedFrames: 0,
       droppedFrames: 0,
       decoderDroppedFrames: 0,
@@ -277,11 +296,20 @@ export class TimelinePlayback {
     void this.grant(clip.assetId)
       .then((source) => {
         if (this.disposed || item.disposed) return;
+        if (source.displayAspectRatio)
+          this.aspects.set(clip.assetId, source.displayAspectRatio);
         if (source.kind === 'image') {
           const image = new Image();
+          image.crossOrigin = 'anonymous';
           item.image = image;
           image.onload = () => {
-            if (!item.disposed) item.ready = true;
+            if (!item.disposed) {
+              item.ready = true;
+              this.aspects.set(
+                clip.assetId,
+                image.naturalWidth / image.naturalHeight,
+              );
+            }
           };
           image.onerror = () =>
             this.unavailable(item, 'Image could not be decoded.');
@@ -305,6 +333,15 @@ export class TimelinePlayback {
         item.gain = gain;
         media.addEventListener('loadedmetadata', () => {
           if (item.disposed) return;
+          if (
+            media.dataset.proxy !== 'true' &&
+            media.videoWidth &&
+            media.videoHeight
+          )
+            this.aspects.set(
+              clip.assetId,
+              media.videoWidth / media.videoHeight,
+            );
           const current = this.evaluate(this.clock.read()).activeClips.find(
             (c) => this.keys.get(c.id) === key,
           );
@@ -347,10 +384,8 @@ export class TimelinePlayback {
             }
             void replacement
               .then((grant) => {
-                if (this.disposed || item.disposed) {
-                  void window.opencut.releasePreview(grant.url);
-                  return;
-                }
+                // The shared grant is released by remove() after the last owner.
+                if (this.disposed || item.disposed) return;
                 media.src = grant.url;
                 media.load();
               })
@@ -363,15 +398,10 @@ export class TimelinePlayback {
         });
         const observe: VideoFrameRequestCallback = (now, metadata) => {
           if (item.disposed || this.disposed) return;
-          const active = this.evaluate(this.clock.read())
-            .visualClips.filter((c) => c.visible)
-            .at(-1);
-          if (
-            this.clock.playing &&
-            active &&
-            this.keys.get(active.id) === key &&
-            !media.seeking
-          ) {
+          const active = this.evaluate(this.clock.read()).visualClips.find(
+            (c) => this.visible(c) && this.keys.get(c.id) === key,
+          );
+          if (this.clock.playing && active && !media.seeking) {
             this.diagnostics.presentedFrames++;
             if (now > metadata.expectedDisplayTime + 2)
               this.diagnostics.lateFrames++;
@@ -428,64 +458,103 @@ export class TimelinePlayback {
   }
   setMemoryBudget(memoryBytes: number) {
     this.memoryBudget = memoryBytes;
+    this.trimFrames();
+  }
+  private trimFrames(reservedBytes = 0) {
+    let used = [...this.cachedFrames.values()].reduce(
+      (sum, image) => sum + image.naturalWidth * image.naturalHeight * 4,
+      reservedBytes,
+    );
+    for (const [key, image] of this.cachedFrames) {
+      if (used <= this.memoryBudget) break;
+      used -= image.naturalWidth * image.naturalHeight * 4;
+      image.src = '';
+      this.cachedFrames.delete(key);
+    }
+  }
+  private visible(clip: ResolvedTimelineClip) {
+    if (clip.trackType !== 'video' || clip.visual.opacity === 0) return false;
+    // The fitting box encloses contain/cover/stretch regardless of source aspect.
+    const box = fittingBox(
+      this.project.settings.width,
+      this.project.settings.height,
+      clip.visual.scale,
+    );
+    return visualGeometry(
+      this.project.settings.width,
+      this.project.settings.height,
+      this.aspects.get(clip.assetId) ?? box.width / box.height,
+      1,
+      clip.visual,
+    ).visible;
+  }
+  private frameKey(assetId: string, time: RationalTime) {
+    return `${assetId}:${time.numerator}/${time.denominator}`;
+  }
+  private clearFrames() {
+    for (const image of this.cachedFrames.values()) image.src = '';
+    this.cachedFrames.clear();
+    this.wantedFrames.clear();
   }
   private requestFrame() {
-    if (this.frameRequest || this.clock.playing || this.disposed) return;
-    const visual = this.evaluate(this.clock.position)
-      .visualClips.filter((clip) => clip.visible)
-      .at(-1);
-    if (!visual || visual.kind === 'image') return;
-    const key = `${visual.assetId}:${seconds(visual.sourceTime).toFixed(6)}`;
-    if (key === this.wantedFrame) return;
-    this.wantedFrame = key;
-    const generation = this.frameGeneration;
-    this.frameRequest = true;
-    const input = {
-      projectId: this.project.metadata.id,
-      expectedRevision: projectRevision(this.project),
-      assetId: visual.assetId,
-      timestamp: seconds(visual.sourceTime),
-    };
-    void window.opencut
-      .timelineFrame(input)
-      .then(async (url) => {
-        if (
-          !url ||
-          this.disposed ||
-          generation !== this.frameGeneration ||
-          this.clock.playing
-        )
-          return;
-        const image = new Image();
-        image.src = url;
-        await image.decode();
-        if (
-          this.disposed ||
-          generation !== this.frameGeneration ||
-          this.clock.playing
-        ) {
-          image.src = '';
-          return;
-        }
-        if (this.cachedFrame) this.cachedFrame.image.src = '';
-        this.cachedFrame = { key, image };
-        this.diagnostics.cachedFrames++;
-        // Only one adjacent paused frame is prefetched; no JS decoded-frame sequence.
-        void window.opencut
-          .timelineFrame({
-            ...input,
-            timestamp:
-              input.timestamp +
-              this.project.settings.frameRate.denominator /
-                this.project.settings.frameRate.numerator,
-          })
-          .catch(() => {});
-      })
-      .catch(() => {})
-      .finally(() => {
-        this.frameRequest = false;
-        if (generation !== this.frameGeneration) this.requestFrame();
-      });
+    if (this.clock.playing || this.starting || this.disposed) return;
+    for (const visual of this.evaluate(this.clock.position).visualClips) {
+      if (!this.visible(visual) || visual.kind === 'image') continue;
+      const key = this.frameKey(visual.assetId, visual.sourceTime);
+      if (this.wantedFrames.has(key)) continue;
+      if (this.frameRequests >= 2) break;
+      const entry = this.entries.get(this.keys.get(visual.id)!);
+      // Native frames are preferred; don't launch extraction for settled decoders.
+      if (
+        entry?.ready &&
+        entry.media &&
+        !entry.media.seeking &&
+        Math.abs(entry.media.currentTime - seconds(visual.sourceTime)) < 0.001
+      )
+        continue;
+      this.wantedFrames.add(key);
+      const generation = this.frameGeneration;
+      this.frameRequests++;
+      void window.opencut
+        .timelineFrame({
+          projectId: this.project.metadata.id,
+          expectedRevision: projectRevision(this.project),
+          assetId: visual.assetId,
+          timestamp: seconds(visual.sourceTime),
+        })
+        .then(async (url) => {
+          if (
+            !url ||
+            this.disposed ||
+            generation !== this.frameGeneration ||
+            this.clock.playing
+          )
+            return;
+          const image = new Image();
+          image.src = url;
+          await image.decode();
+          if (
+            this.disposed ||
+            generation !== this.frameGeneration ||
+            this.clock.playing
+          ) {
+            image.src = '';
+            return;
+          }
+          // Bound decoded PNGs too, independently of the worker's encoded-byte cache.
+          const size = image.naturalWidth * image.naturalHeight * 4;
+          this.trimFrames(size);
+          if (size <= this.memoryBudget) {
+            this.cachedFrames.set(key, image);
+            this.diagnostics.cachedFrames++;
+          } else image.src = '';
+        })
+        .catch(() => {})
+        .finally(() => {
+          this.frameRequests--;
+          this.requestFrame();
+        });
+    }
   }
   private silence() {
     this.master.gain.value = 0;
@@ -506,9 +575,8 @@ export class TimelinePlayback {
     this.pause();
     this.clock.seek(time);
     this.frameGeneration++;
-    this.wantedFrame = '';
-    if (this.cachedFrame) this.cachedFrame.image.src = '';
-    this.cachedFrame = null;
+    this.clearFrames();
+    this.seekStarted = performance.now();
     this.requestFrame();
     for (const entry of this.entries.values()) {
       const clip = this.evaluate(this.clock.position).activeClips.find(
@@ -540,6 +608,9 @@ export class TimelinePlayback {
       return;
     }
     this.starting = true;
+    this.seekStarted = null;
+    this.frameGeneration++;
+    this.clearFrames();
     const action = ++this.action;
     try {
       await this.context.resume();
@@ -617,10 +688,14 @@ export class TimelinePlayback {
     const time = this.clock.read();
     const evaluation = this.evaluate(time);
     const now = performance.now();
-    const visual = evaluation.visualClips.filter((c) => c.visible).at(-1);
-    const active = new Map(
-      evaluation.activeClips.map((c) => [this.keys.get(c.id)!, c]),
+    const started = performance.now();
+    const visuals = evaluation.visualClips.filter((c) => this.visible(c));
+    const visualKeys = new Set(visuals.map((c) => this.keys.get(c.id)!));
+    // Transparent, silent clips have neither visual nor audio work to decode.
+    const needed = evaluation.activeClips.filter(
+      (c) => visualKeys.has(this.keys.get(c.id)!) || c.effectiveVolume > 0,
     );
+    const active = new Map(needed.map((c) => [this.keys.get(c.id)!, c]));
     const keep = new Set(active.keys());
     // Release distant runs before creating current decoders; cap all owned decoders.
     for (const entry of this.entries.values()) {
@@ -630,7 +705,14 @@ export class TimelinePlayback {
       )
         this.remove(entry);
     }
-    for (const clip of evaluation.activeClips) {
+    const missing = needed.filter(
+      (c) => !this.entries.has(this.keys.get(c.id)!),
+    ).length;
+    for (const entry of this.entries.values()) {
+      if (this.entries.size + missing <= 16) break;
+      if (!keep.has(entry.key)) this.remove(entry);
+    }
+    for (const clip of needed) {
       if (this.entries.has(this.keys.get(clip.id)!) || this.entries.size < 16)
         this.entry(clip);
       else {
@@ -652,6 +734,11 @@ export class TimelinePlayback {
     }
     for (let i = low; i < this.upcoming.length; i++) {
       const clip = this.upcoming[i]!;
+      if (
+        !this.visible(clip) &&
+        (clip.muted || clip.volume === 0 || clip.audioPresence === 'absent')
+      )
+        continue;
       if (!inPlaybackLookahead(clip.timelineStart, time)) break;
       const asset = this.project.assets.find(
         (asset) => asset.id === clip.assetId,
@@ -770,8 +857,7 @@ export class TimelinePlayback {
         quality.droppedVideoFrames - entry.lastQuality,
       );
       this.diagnostics.decoderDroppedFrames += dropped;
-      if (visual && this.keys.get(visual.id) === entry.key)
-        this.diagnostics.droppedFrames += dropped;
+      if (visualKeys.has(entry.key)) this.diagnostics.droppedFrames += dropped;
       entry.lastQuality = quality.droppedVideoFrames;
     }
     this.diagnostics.decoders = this.entries.size;
@@ -779,11 +865,20 @@ export class TimelinePlayback {
       (entry) => entry.media?.dataset.proxy === 'true',
     ).length;
     const ctx = this.canvas.getContext('2d')!;
+    ctx.resetTransform();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.fillStyle = evaluation.backgroundColor;
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    // T24 displays the top eligible visual only. Layer compositing is T26.
-    let painted = false;
-    if (visual) {
+    const painted: string[] = [];
+    // Geometry is resolved in project pixels before preview downsampling.
+    ctx.save();
+    ctx.scale(
+      this.canvas.width / this.project.settings.width,
+      this.canvas.height / this.project.settings.height,
+    );
+    for (const visual of visuals) {
       const entry = this.entries.get(this.keys.get(visual.id)!);
       const nativeReady =
         entry &&
@@ -793,60 +888,106 @@ export class TimelinePlayback {
           (entry.media &&
             !entry.media.seeking &&
             Math.abs(entry.media.currentTime - seconds(visual.sourceTime)) <
-              0.15));
-      // Cached PNGs bridge seeking; a ready decoder restores its full preview quality.
+              (this.clock.playing ? 0.15 : 0.001)));
       const cached =
-        !nativeReady &&
-        !this.clock.playing &&
-        this.cachedFrame?.key ===
-          `${visual.assetId}:${seconds(visual.sourceTime).toFixed(6)}`
-          ? this.cachedFrame.image
-          : null;
-      const drawable = cached ?? entry?.image ?? entry?.media;
-      const valid = !!cached || !!nativeReady;
-      if (valid) {
-        const width =
-          cached?.naturalWidth ??
-          entry?.image?.naturalWidth ??
-          entry?.media?.videoWidth;
-        const height =
-          cached?.naturalHeight ??
-          entry?.image?.naturalHeight ??
-          entry?.media?.videoHeight;
-        if (width && height && drawable) {
-          const scale = Math.min(
-            this.canvas.width / width,
-            this.canvas.height / height,
-          );
-          painted = true;
-          ctx.drawImage(
-            drawable,
-            (this.canvas.width - width * scale) / 2,
-            (this.canvas.height - height * scale) / 2,
-            width * scale,
-            height * scale,
-          );
-        }
+        !nativeReady && !this.clock.playing
+          ? this.cachedFrames.get(
+              this.frameKey(visual.assetId, visual.sourceTime),
+            )
+          : undefined;
+      const drawable =
+        cached ?? (nativeReady ? (entry?.image ?? entry?.media) : undefined);
+      const width =
+        cached?.naturalWidth ??
+        entry?.image?.naturalWidth ??
+        entry?.media?.videoWidth;
+      const height =
+        cached?.naturalHeight ??
+        entry?.image?.naturalHeight ??
+        entry?.media?.videoHeight;
+      if (!drawable || !width || !height) continue;
+      const geometry = visualGeometry(
+        this.project.settings.width,
+        this.project.settings.height,
+        this.aspects.get(visual.assetId) ?? width / height,
+        1,
+        visual.visual,
+      );
+      if (!geometry.visible) continue;
+      ctx.save();
+      ctx.globalAlpha = geometry.opacity;
+      ctx.beginPath();
+      ctx.rect(
+        geometry.x,
+        geometry.y,
+        geometry.layerWidth,
+        geometry.layerHeight,
+      );
+      ctx.clip();
+      ctx.drawImage(
+        drawable,
+        geometry.x - geometry.cropX,
+        geometry.y - geometry.cropY,
+        geometry.scaledWidth,
+        geometry.scaledHeight,
+      );
+      ctx.restore();
+      painted.push(visual.id);
+    }
+    ctx.restore();
+    const visual = visuals.at(-1);
+    this.canvas.dataset.clipId = visual?.id ?? '';
+    this.canvas.dataset.presentedClip = painted.at(-1) ?? '';
+    this.canvas.dataset.layerIds = JSON.stringify(
+      visuals.map((clip) => clip.id),
+    );
+    this.canvas.dataset.presentedLayers = JSON.stringify(painted);
+    this.canvas.dataset.visualReady = String(
+      visuals.length > 0 && painted.length === visuals.length,
+    );
+    this.canvas.dataset.position = `${time.numerator}/${time.denominator}`;
+    this.diagnostics.visibleLayers = visuals.length;
+    this.diagnostics.paintedLayers = painted.length;
+    this.diagnostics.maxCompositionMs = Math.max(
+      this.diagnostics.maxCompositionMs,
+      performance.now() - started,
+    );
+    if (this.clock.playing) {
+      if (painted.length < visuals.length) this.diagnostics.blankVisualTicks++;
+      const frame = String(frameIndex(time, this.project.settings.frameRate));
+      if (frame !== this.compositeFrame && painted.length === visuals.length) {
+        this.compositeFrame = frame;
+        this.diagnostics.compositeFrames++;
       }
     }
-    this.canvas.dataset.clipId = visual?.id ?? '';
-    this.canvas.dataset.presentedClip = painted ? visual!.id : '';
-    if (visual && !painted && this.clock.playing)
-      this.diagnostics.blankVisualTicks++;
-    this.canvas.dataset.visualReady = String(
-      !!visual && !!this.entries.get(this.keys.get(visual.id)!)?.ready,
-    );
+    if (
+      this.seekStarted !== null &&
+      !this.clock.playing &&
+      painted.length === visuals.length
+    ) {
+      this.diagnostics.lastSeekLatencyMs = performance.now() - this.seekStarted;
+      this.diagnostics.maxSeekLatencyMs = Math.max(
+        this.diagnostics.maxSeekLatencyMs,
+        this.diagnostics.lastSeekLatencyMs,
+      );
+      this.seekStarted = null;
+    }
+    this.requestFrame();
     if (this.clock.playing && compareTimes(time, this.clock.end) >= 0)
       this.pause();
   }
   private tick = () => {
     if (this.disposed) return;
     const now = performance.now();
-    if (this.clock.playing && this.lastTick)
+    if (this.clock.playing && this.lastTick) {
       this.diagnostics.maxTickGapMs = Math.max(
         this.diagnostics.maxTickGapMs,
         now - this.lastTick,
       );
+      this.playbackSeconds += (now - this.lastTick) / 1000;
+      this.diagnostics.compositeFps =
+        this.diagnostics.compositeFrames / this.playbackSeconds;
+    }
     this.lastTick = now;
     this.render();
     if (now - this.lastReport > 50) {
@@ -859,8 +1000,7 @@ export class TimelinePlayback {
     this.pause();
     this.disposed = true;
     this.frameGeneration++;
-    if (this.cachedFrame) this.cachedFrame.image.src = '';
-    this.cachedFrame = null;
+    this.clearFrames();
     cancelAnimationFrame(this.animation);
     document.removeEventListener('visibilitychange', this.onVisibility);
     for (const entry of this.entries.values()) this.remove(entry);

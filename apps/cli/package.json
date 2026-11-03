@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@opencut/core": "workspace:*",
-    "@opencut/media": "workspace:*"
+    "@opencut/media": "workspace:*",
+    "@opencut/shared": "workspace:*"
   }
 }

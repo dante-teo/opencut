@@ -93,7 +93,7 @@ existing assets without recorded metadata remain valid.
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Project  | Required `schemaVersion`, `metadata`, `settings`, `assets`, `tracks`, `clips`. Empty collections are valid.                                                                                                                                                                                       |
 | Metadata | Stable `id`, nonblank `name`, UTC `createdAt` and `updatedAt` timestamps with millisecond precision. `updatedAt` must not precede `createdAt`.                                                                                                                                                    |
-| Settings | Positive safe-integer pixel `width` and `height`; positive rational `frameRate` in frames per second. Optional `backgroundColor` in #RRGGBB. These are project settings, independent of any export codec restrictions.                                                                            |
+| Settings | Positive safe-integer pixel `width` and `height`; positive rational `frameRate` in frames per second. Optional `backgroundColor` in #RRGGBB/#RRGGBBAA or transparent. These are project settings, independent of any export codec restrictions.                                                   |
 | Asset    | Stable `id`, nonblank `name`, `file` reference, nonempty unique `mediaTypes` containing `video`, `audio` or both. Optional positive rational `duration` in seconds and optional probe `metadata`. Omit unknown duration.                                                                          |
 | Track    | Stable `id`, nonblank `name`, `type` of `video` or `audio`.                                                                                                                                                                                                                                       |
 | Clip     | Stable `id`, `assetId`, `trackId`, and rational `timelineStart`, `sourceIn`, `sourceOut` in seconds. The referenced asset must contain the track's media type. Optional `volume` (linear 0–1, default 1) and `muted` (boolean, default false), plus optional `visual` transforms on video tracks. |
@@ -181,12 +181,13 @@ version 1 projects and history snapshots round trip without inserted defaults.
 Muting overrides gain without changing the stored volume. These fields affect
 both original video audio and audio-track clips. Splits copy them; trims/moves
 preserve them. They are included in transaction snapshots and undo/redo.
-T12 adds optional settings `backgroundColor` (`#RRGGBB`, default black) and clip
+T12 adds optional settings `backgroundColor` (default black; `#RRGGBB`,
+`#RRGGBBAA` or `transparent` as of T26) and clip
 `visual: { x?, y?, scale?, opacity?, fit? }` on video tracks. x/y are finite pixel
 offsets [-32768, 32768] from centered placement; scale [0.01, 4] multiplies the
 canvas fitting rectangle; opacity [0, 1] multiplies source alpha. fit is contain
 (default), cover or stretch. Defaults x/y 0 and scale/opacity 1 are applied only
-when rendering. Transparent margins reveal lower tracks/background. Source ranges
+during evaluation, preview and export. Transparent margins reveal lower tracks/background. Source ranges
 on still images specify static display duration. These optional fields preserve
 version 1 compatibility and participate in split, batches and undo/redo. Use
 `setClipVisual`, `setCanvas`, or batch `clip.visual` / `canvas.set` to edit them;
@@ -635,7 +636,12 @@ T09 adds optional editing history. T11 adds optional clip audio properties; T12
 adds optional clip visual properties and canvas background color without
 inserting defaults into existing clips or snapshots; older strict readers reject
 these new fields. See [ADR 0008](adr/0008-positioned-audio-mixing.md) and
-[ADR 0009](adr/0009-video-compositing-and-canvas.md).
+[ADR 0009](adr/0009-video-compositing-and-canvas.md). T26 extends the existing
+`backgroundColor` field to alpha-bearing colors through the same `canvas.set`
+operation and history. Earlier strict readers may reject those color values even
+though the prerelease schema version remains 1. Preview preserves canvas alpha;
+H.264 flattens it over black. [ADR 0012](adr/0012-realtime-layer-composition.md)
+records the shared preview/export geometry and RGB rules.
 Other safe-integer versions are rejected
 with a clear supported-version message; missing, unsafe or malformed versions
 are invalid structures. Future format changes must explicitly decide whether to

@@ -72,7 +72,10 @@ describe('bounded derivative cache', () => {
     const before = await readFile(source);
     const first = await cache.generateProxy(source);
     expect(first.proxy).toBe(true);
-    expect(await cache.select(source)).toEqual(first);
+    expect(await cache.select(source)).toEqual({
+      ...first,
+      displayAspectRatio: 1920 / 1080,
+    });
     expect(await cache.generateProxy(source)).toEqual(first);
     expect(await readFile(source)).toEqual(before);
     expect(
@@ -185,6 +188,14 @@ describe('bounded derivative cache', () => {
     await cache.clear();
     expect((await cache.status()).diskBytes).toBe(0);
     expect(await readFile(source, 'utf8')).toBe('original-media');
+  });
+  it('retains alpha video instead of flattening it into a preview proxy', async () => {
+    vi.mocked(probeMedia).mockResolvedValue({
+      ...media,
+      video: { ...media.video!, hasAlpha: true },
+    });
+    expect((await cache.generateProxy(source)).proxy).toBe(false);
+    expect(runMediaTool).not.toHaveBeenCalled();
   });
   it('retains original for unsupported timing/audio and rejects invalid budgets', async () => {
     vi.mocked(probeMedia).mockResolvedValue({ ...media, startTimeSeconds: 5 });
