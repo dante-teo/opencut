@@ -72,7 +72,7 @@ export interface CacheControls {
   force?: boolean;
 }
 const settings = {
-  version: 2,
+  version: 3,
   width: 960,
   height: 540,
   codec: 'libx264',
@@ -542,7 +542,7 @@ export class MediaCache {
             `0:${video.index}`,
             ...(media.audio ? ['-map', `0:${media.audio.index}`] : []),
             '-vf',
-            `scale=w='min(960,iw)':h='min(540,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:in_color_matrix=${sourceColorMatrix(video.colorSpace, video.width ?? 0, video.height ?? 0)}:out_color_matrix=bt709`,
+            `scale=w='min(960,iw)':h='min(540,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:in_color_matrix=${sourceColorMatrix(video.colorSpace, video.width ?? 0, video.height ?? 0, video.codec)}:out_color_matrix=bt709`,
             '-colorspace',
             'bt709',
             '-color_primaries',
@@ -670,7 +670,7 @@ export class MediaCache {
         JSON.stringify([
           source.hash,
           source.media,
-          'frame-v3-covering-sdr-640x360',
+          'frame-v4-covering-sdr-640x360',
           timestamp,
         ]),
       );
@@ -753,7 +753,7 @@ export class MediaCache {
           '-map',
           `0:${video.index}`,
           '-vf',
-          `scale=640:360:force_original_aspect_ratio=decrease:force_divisible_by=2:reset_sar=1:in_color_matrix=${sourceColorMatrix(video.colorSpace, video.width ?? 0, video.height ?? 0)}`,
+          `scale=640:360:force_original_aspect_ratio=decrease:force_divisible_by=2:reset_sar=1:in_color_matrix=${sourceColorMatrix(video.colorSpace, video.width ?? 0, video.height ?? 0, video.codec)}`,
           '-frames:v',
           '1',
           '-threads',

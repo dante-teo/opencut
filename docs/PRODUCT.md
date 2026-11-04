@@ -24,7 +24,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 and [architecture decisions](adr/0012-realtime-layer-composition.md) define their
 current contracts and validation boundaries.
 
-## Implemented milestones through T26
+## Implemented milestones through T27
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -235,4 +235,10 @@ are covered by real Electron tests. [Playback semantics and tolerances](TIMELINE
 define the supported boundary. `pnpm benchmark:t26` measures original/proxy FPS,
 drops, all-layer seeks, CPU and memory. Browser codec, HDR, source-frame selection,
 16-source-run and short synthetic-workload limitations still apply. No keyframes,
-transitions, new editing operations or T27 work are included.
+transitions or new editing operations are included.
+
+T27 adds an automated [preview/export consistency gate](PREVIEW_EXPORT_CONSISTENCY.md)
+to the desktop test workflow. It checks actual Chromium Canvas draws, decoded
+FFmpeg frames, independent source-frame markers, muxed audio and video
+timestamps, and audio timing and gain. It also aligns mixed-rate sampling, timeline seeks and untagged VP9 color handling
+for the covered cases.

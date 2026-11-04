@@ -422,3 +422,9 @@ For source-aspect/coordinate rules, SDR tolerances and limitations read the
 `pnpm benchmark:t26` measures real Electron multi-layer FPS, drops, seek latency,
 CPU and memory on generated fixtures. Report actual results and remaining limits;
 never substitute a source player or exported MP4 for live multi-layer evidence.
+
+For preview/export investigations, run `pnpm test:consistency` from a development
+checkout. The [T27 consistency gate](../../docs/PREVIEW_EXPORT_CONSISTENCY.md)
+checks Chromium Canvas frames against decoded FFmpeg export frames and records
+independent frame identity, audio timing, gain and mute evidence. It adds no CLI
+editing commands.

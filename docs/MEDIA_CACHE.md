@@ -43,8 +43,8 @@ metadata LRU avoids rehashing unchanged identities during one process lifetime.
 Keys include source content, media metadata and versioned derivative settings;
 frame keys additionally include the exact requested source time so opposite sides
 of a presentation boundary cannot alias through microsecond rounding. Paths
-alone never establish validity. T26 uses proxy settings version 2 and frame settings
-`frame-v3-covering-sdr-640x360`; older derivative interpretations are cache misses
+alone never establish validity. T27 uses proxy settings version 3 and frame settings
+`frame-v4-covering-sdr-640x360`; older derivative interpretations are cache misses
 and can be regenerated without changing originals. Source replacement, including the same path/size
 and restored mtime, invalidates the identity through ctime/inode and content hashing.
 

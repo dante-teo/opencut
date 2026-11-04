@@ -4,7 +4,11 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { cpus, release, totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
 import { planProjectRender, serializeProject } from '@opencut/core';
-import { auditMedia, auditProjects } from './t21-projects.js';
+import {
+  auditMedia,
+  auditProjects,
+  generateAuditMedia,
+} from './t21-projects.js';
 
 const args = process.argv.slice(2);
 if (args.some((arg) => arg !== '--headless'))
@@ -111,7 +115,7 @@ results.tools = tools;
 const mediaAvailable = Object.values(tools).every((tool) => tool.available);
 if (mediaAvailable) {
   await stage('media', async () => {
-    const ffmpeg = (args: string[], file: string) =>
+    generateAuditMedia((args, file) => {
       command('ffmpeg', [
         '-v',
         'error',
@@ -120,91 +124,7 @@ if (mediaAvailable) {
         ...args,
         join(directory, file),
       ]);
-    ffmpeg(
-      [
-        '-f',
-        'lavfi',
-        '-i',
-        'testsrc2=size=1280x720:rate=30',
-        '-f',
-        'lavfi',
-        '-i',
-        'sine=frequency=440:sample_rate=48000',
-        '-t',
-        '8',
-        '-c:v',
-        'libx264',
-        '-preset',
-        'fast',
-        '-crf',
-        '23',
-        '-g',
-        '120',
-        '-keyint_min',
-        '120',
-        '-sc_threshold',
-        '0',
-        '-pix_fmt',
-        'yuv420p',
-        '-threads',
-        '2',
-        '-c:a',
-        'aac',
-        '-movflags',
-        '+faststart',
-      ],
-      'source.mp4',
-    );
-    ffmpeg(
-      [
-        '-f',
-        'lavfi',
-        '-i',
-        'testsrc2=size=640x360:rate=25',
-        '-t',
-        '8',
-        '-c:v',
-        'libvpx-vp9',
-        '-deadline',
-        'realtime',
-        '-cpu-used',
-        '6',
-        '-g',
-        '100',
-        '-threads',
-        '2',
-        '-an',
-      ],
-      'mixed.webm',
-    );
-    ffmpeg(
-      [
-        '-f',
-        'lavfi',
-        '-i',
-        'sine=frequency=880:sample_rate=48000',
-        '-t',
-        '8',
-        '-ac',
-        '2',
-        '-c:a',
-        'pcm_s16le',
-      ],
-      'tone.wav',
-    );
-    ffmpeg(
-      [
-        '-f',
-        'lavfi',
-        '-i',
-        'color=c=red:size=320x180',
-        '-frames:v',
-        '1',
-        '-threads',
-        '1',
-      ],
-      'still.png',
-    );
+    });
     return Promise.all(
       auditMedia.map(async (file) => ({
         file,

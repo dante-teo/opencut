@@ -147,7 +147,7 @@ or native decoder is necessary for the measured short workloads.
 
 Both paths use encoded RGB source-over blending. FFmpeg converts
 sources into RGBA before layering and tags final SDR output BT.709. FFmpeg-supported
-source YUV matrix tags are used. Untagged sources use BT.709 when coded width is
+source YUV matrix tags are used. Untagged sources use BT.709 for VP9 or when coded width is
 at least 1280 or height exceeds 576 pixels, and BT.601 otherwise. Proxy and PNG
 extraction use the same matrix rule. H.264 proxies cannot
 retain source alpha, so alpha-bearing videos stay original. Image alpha is
@@ -169,7 +169,8 @@ track reversal, transparent backgrounds, frame steps, rapid seeks and inspector
 edits. The SDR comparison gate is mean absolute RGB channel error <10/255 and
 95th percentile <30/255 on a 16-pixel sampling grid, allowing H.264 loss, chroma
 subsampling and different resampling kernels. This is not pixel identity: spatial
-edges and mixed-rate/VFR temporal selection can differ by a source frame. Native
+edges and VFR temporal selection can still differ. The [T27 consistency gate](PREVIEW_EXPORT_CONSISTENCY.md)
+adds full-frame comparisons, independent CFR source-frame identities and decoded audio checks. Native
 T12 tests separately gate alpha, SAR, original audio and exact export boundaries. The independent T10 source-frame comparison allows mean channel error <6/255 for RGB composition plus H.264/chroma conversion.
 
 `pnpm benchmark:t26` measures 2/4/6 overlapping videos plus an alpha image, with

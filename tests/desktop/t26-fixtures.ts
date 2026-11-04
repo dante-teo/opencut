@@ -191,6 +191,7 @@ export async function openComposition(
   if (!(await page.locator('.timeline-diagnostics[open]').count()))
     await summary.click();
   await expect(page.getByTestId('timeline-diagnostics')).toBeVisible();
+  return path;
 }
 export async function compositionReport(
   page: Page,

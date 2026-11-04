@@ -340,7 +340,10 @@ not timing delays; the import cases require the generated video fixture and ffpr
 T24–T26 checks cover multi-layer preview, proxy fallback/budgets, rapid seeks,
 visual property edits with undo/redo, preview/export frame comparisons and audio
 pulse/flash synchronization. See [the playback contract](TIMELINE_PLAYBACK.md)
-for coverage, tolerances and benchmark definitions.
+for coverage, tolerances and benchmark definitions. T27 adds the
+[preview/export consistency gate](PREVIEW_EXPORT_CONSISTENCY.md), also runnable
+with `pnpm test:consistency`, with full-frame metrics, diffs and independent
+source-frame and audio checks.
 T22's `tests/desktop/shared-session.spec.ts` covers older backups opened from a
 different file or restored at the same path, subsequent GUI undo, and timeline
 navigation/snapping preservation after CLI edits and undo. A gated Save reply

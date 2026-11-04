@@ -20,6 +20,11 @@ import {
 export const seconds = (time: RationalTime) =>
   time.numerator / time.denominator;
 
+// Chromium's media timestamps are quantized to microseconds. Land just inside
+// the requested frame so conversion of a repeating rational cannot seek to the
+// preceding frame. The evaluator and playback clock retain the exact time.
+const decoderSeekTime = (time: RationalTime) => seconds(time) + 0.000001;
+
 /** Compare without constructing a possibly unrepresentable time + 2 seconds. */
 export function inPlaybackLookahead(start: RationalTime, time: RationalTime) {
   const delta =
@@ -345,7 +350,7 @@ export class TimelinePlayback {
           const current = this.evaluate(this.clock.read()).activeClips.find(
             (c) => this.keys.get(c.id) === key,
           );
-          media.currentTime = seconds(
+          media.currentTime = decoderSeekTime(
             current?.sourceTime ?? item.clip.sourceIn,
           );
         });
@@ -583,7 +588,7 @@ export class TimelinePlayback {
         (c) => this.keys.get(c.id) === entry.key,
       );
       if (clip && entry.media?.readyState) {
-        entry.media.currentTime = seconds(clip.sourceTime);
+        entry.media.currentTime = decoderSeekTime(clip.sourceTime);
         entry.ready = false;
       }
     }
@@ -636,7 +641,7 @@ export class TimelinePlayback {
         active.map(async (clip) => {
           const entry = this.entries.get(this.keys.get(clip.id)!);
           if (!entry?.media || entry.failed) return;
-          entry.media.currentTime = seconds(clip.sourceTime);
+          entry.media.currentTime = decoderSeekTime(clip.sourceTime);
           entry.settleUntil = performance.now() + 250;
           try {
             await entry.media.play();
@@ -792,7 +797,7 @@ export class TimelinePlayback {
             Math.abs(error) * 1000,
           );
         if (Math.abs(error) > 0.12) {
-          media.currentTime = target;
+          media.currentTime = decoderSeekTime(clip.sourceTime);
           entry.settleUntil = now + 250;
           this.diagnostics.clockCorrections++;
         } else
@@ -804,7 +809,7 @@ export class TimelinePlayback {
         !media.seeking &&
         Math.abs(error) > 0.001
       )
-        media.currentTime = target;
+        media.currentTime = decoderSeekTime(clip.sourceTime);
       if (entry.gain) {
         const param = entry.gain.gain;
         const audioNow = this.context.currentTime;
@@ -838,7 +843,8 @@ export class TimelinePlayback {
         entry.playPending = true;
         entry.settleUntil = now + 250;
         // Upcoming decoders were pre-seeked; catch up to the current timeline boundary.
-        if (Math.abs(error) > 0.01) media.currentTime = target;
+        if (Math.abs(error) > 0.01)
+          media.currentTime = decoderSeekTime(clip.sourceTime);
         const action = this.action;
         void media
           .play()

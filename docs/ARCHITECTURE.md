@@ -247,7 +247,10 @@ model, CLI or Electron. Existing FFmpeg process execution supplies scale, crop,
 alpha multiplication and overlay filters without another backend or dependency.
 
 Each source is sampled to the project frame grid before trimming, keeping split
-sampling phase unchanged. Static images loop one frame for the explicit range.
+sampling phase unchanged. The first eligible tick for a source frame is at or
+after its presentation timestamp. Static images loop one frame for the explicit
+range. The [T27 gate](PREVIEW_EXPORT_CONSISTENCY.md) verifies source-frame identity
+independently of the evaluator and compares Chromium Canvas draws against export.
 An opaque canvas source fixes the duration; each layer uses the project time base
 and exclusive frame-index visibility. Layers end without freezing their last frame.
 Contain has transparent margins, cover centrally crops and stretch fills the scaled

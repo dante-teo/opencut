@@ -102,6 +102,7 @@ export function sourceColorMatrix(
   colorSpace: string | null | undefined,
   width: number,
   height: number,
+  codec?: string | null,
 ): string {
   if (
     [
@@ -114,5 +115,6 @@ export function sourceColorMatrix(
     ].includes(colorSpace ?? '')
   )
     return colorSpace!;
-  return width >= 1280 || height > 576 ? 'bt709' : 'bt601';
+  // Untagged VP9 uses BT.709 in Chromium even at SD resolutions.
+  return codec === 'vp9' || width >= 1280 || height > 576 ? 'bt709' : 'bt601';
 }

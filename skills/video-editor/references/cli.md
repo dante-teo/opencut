@@ -1,4 +1,4 @@
-# OpenCut CLI through T26
+# OpenCut CLI through T27
 
 For a complete CLI-only edit with tested timing, layers, audio and persistent history,
 see the [T14 workflow](workflow.md).
@@ -442,9 +442,11 @@ within 1.1 ms. No sample-exact lossless audio guarantee is made for AAC.
 Source time zero is the selected video's first frame, as in T03 composition;
 container/stream start offsets are normalized. Source in/out are positions on the
 project-rate sampling grid, with an exclusive out point. Each source is converted
-to that grid with FFmpeg's `fps` filter (nearest timestamp rounding) before integer
-frame trimming. A split therefore selects exactly the same sampled frames as the
-unsplit clip, even when source and project rates differ. The configured fit/scale/position is applied after sampling, preserving source alpha. At fractional EOF rounding, at most
+to that grid with FFmpeg's `fps` filter before integer frame trimming. A source
+frame can first appear on the project tick at or after its presentation timestamp.
+A split therefore selects exactly the same sampled frames as the unsplit clip,
+even when source and project rates differ. The configured fit, scale and position
+are applied after sampling, preserving source alpha. At fractional EOF rounding, at most
 one cloned frame completes the last frame interval. Global output timestamps are
 regenerated from integer frame indices using the project's rational time base,
 so composition cannot accumulate floating-point timing drift. This is CFR

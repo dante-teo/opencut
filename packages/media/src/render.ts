@@ -334,6 +334,7 @@ export async function renderVideoTimeline(
       video.colorSpace,
       video.width ?? 0,
       video.height ?? 0,
+      video.codec,
     );
     const geometry = visualGeometry(
       width,
@@ -363,9 +364,11 @@ export async function renderVideoTimeline(
     args.push('-threads', '1', '-i', source.path);
     inputs.set(clip.clipId, input);
     // Sample before trimming so source selection is invariant under splitting.
+    // A source frame first covers the project tick at or after its PTS.
+    // Rounding down or to nearest can show a frame before its presentation time.
     const sampling = still
       ? `loop=loop=-1:size=1:start=0,trim=end_frame=${clip.frameCount}`
-      : `setpts=PTS-STARTPTS,fps=${rate}:start_time=0:round=near:eof_action=pass,tpad=stop_mode=clone:stop=1,` +
+      : `setpts=PTS-STARTPTS,fps=${rate}:start_time=0:round=up:eof_action=pass,tpad=stop_mode=clone:stop=1,` +
         `trim=start_frame=${clip.sourceStartFrame}:end_frame=${sourceEnd}`;
     filters.push(
       `[${input++}:${video.index}]${sampling},` +

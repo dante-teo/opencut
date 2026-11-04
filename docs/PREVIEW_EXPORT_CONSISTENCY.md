@@ -1,0 +1,94 @@
+# Preview and export consistency (T27)
+
+Run `pnpm test:consistency` for the focused gate. `pnpm test:desktop` also runs
+it with the rest of the Electron tests. Both require a graphical Electron
+session and FFmpeg/ffprobe on PATH, with lavfi, libx264, libvpx-vp9, PNG and AAC
+support. Missing tools, codecs or frames fail the suite. The T21 generator
+creates fresh synthetic assets for each Playwright worker. No user media,
+checked-in golden frames or existing fixture caches are used.
+
+The suite opens T21 cuts, gaps and overlays through Electron's normal project
+picker and uses the production frame slider and Canvas compositor. It waits
+for the exact rational playhead position, the expected painted layers in order,
+and a Chromium video draw at each requested source time. Proxies are disabled
+for this gate; frames painted with the paused FFmpeg PNG fallback cannot satisfy
+the native draw condition. The CLI renders the whole project through the normal
+FFmpeg backend. FFmpeg then decodes selected export frames by presentation
+ordinal into RGB24. FFprobe independently checks the decoded frame count and
+each frame's muxed presentation timestamp against the exact project grid. The
+check uses the timestamps as stored in the export, without rebasing either
+stream to its first decoded frame. At project end, only the preview is sampled
+because the export ends on the preceding frame.
+
+The gate compares every pixel in the Canvas backing buffer after flattening
+alpha over black to match H.264. The defaults allow mean absolute RGB channel
+error of 8/255, 95th percentile channel error of 25/255, and at most 2.5% of
+pixels with any channel error greater than 48/255. The three measures catch
+widespread color drift, localized seams, and high-contrast edge changes. The
+limits allow SDR matrix rounding, H.264 compression, 4:2:0 chroma subsampling
+and different scaling kernels. Override the limits with `OPENCUT_T27_MEAN`,
+`OPENCUT_T27_P95` and `OPENCUT_T27_LARGE_PIXEL_FRACTION` (0–1 for the fraction).
+
+The timing gate compares explicit half-open boundary and source-time
+expectations with the evaluator and export plan. It also reads source-frame
+numbers encoded as eight grayscale cells in 25 fps VP9 and 30 fps H.264
+fixtures. A frame must match the independent presentation-time oracle even
+when its image metrics pass. The numbered projects have a nonzero source trim,
+an initial gap and a continuous split on the 30 fps timeline.
+
+The T21 mixing variant uses a trimmed and delayed video with simultaneous flash
+and 440 Hz pulses, plus the separately trimmed T21 880 Hz track. It runs with
+the latter track audible and muted. The suite observes Chromium's playing
+Canvas and the Web Audio compressor output. It measures decoded stereo export
+PCM at 48 kHz, checking 5 ms RMS windows for onsets and frequency amplitudes
+for gain and silence. FFprobe verifies that decoded audio starts at time zero
+and advances continuously by the decoded sample count before PCM indices are
+used as timeline positions. Export flash times come from decoded video PTS.
+The export pulse timing tolerance is 10 ms. The 90 ms preview limit allows
+for an FFT window, audio buffering, and display scheduling.
+It applies to absolute onsets and preview A/V skew. The audio comparison uses
+quiet stereo inputs and does not measure latency at a speaker.
+
+The composition and mixing cases write `*-report.json` under the printed
+`tests/fixtures/generated/t27-*` directory. Composition reports include the
+requested rational time, decoded export PTS in seconds, and image metrics for
+each compared frame. Mixing reports include the verified audio start and the
+measured audio and video onsets. Visual and frame identity failures retain the
+preview, decoded export, and amplified absolute RGB difference as PNGs
+alongside the reproducing project and media. Git ignores the generated
+directory.
+
+To exercise the failure paths deliberately:
+
+```sh
+OPENCUT_T27_INJECT=visual pnpm test:consistency --grep 'T21 overlays'
+OPENCUT_T27_INJECT=timing pnpm test:consistency --grep '25 fps source'
+```
+
+Both commands should fail. The first changes only the export's image placement.
+The second moves the right split's source in and out by one project frame,
+keeping its timeline placement and duration.
+
+Run the muxed timestamp regression on its own with
+`pnpm test:consistency --grep 'rejects muxed video and audio timestamp shifts'`.
+It remuxes a baseline export with a 100 ms delay applied to each stream in turn
+and compares the selected decoded images with the baseline. The test passes
+when those images match and the timestamp check rejects each shifted stream.
+
+T27 caught export selecting some 25 fps frames one tick before their
+presentation time, Chromium occasionally landing on the preceding 30 fps frame
+at a repeating rational seek time, and Chromium interpreting untagged SD VP9 as
+BT.709 where export used BT.601. Reproducers are the numbered clip around project
+frame 14, the 30 fps source at times such as 29/30 s, and the T21 WebM cut at
+project frame 90. Export now places each source frame at the first project tick
+at or after its PTS. Timeline decoder seeks add one microsecond without changing
+the exact evaluator time. Export, proxy generation and paused extraction share
+the corrected untagged VP9 color rule; derivative keys changed accordingly.
+
+This gate covers short SDR CFR projects at a 30 fps project rate, including
+mixed source rates and sizes. Deterministic frame comparisons are paused;
+real-time A/V is checked with timed markers. The separate T26 tests exercise
+proxies and the paused fallback. This suite does not establish arbitrary VFR,
+fractional project-rate playback, HDR, rotation/SAR parity, long-run drift,
+heavy-load frame delivery, high-level limiting or multichannel mixing parity.
+The preview compressor and export limiter can behave differently near clipping.

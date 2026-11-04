@@ -11,6 +11,96 @@ export const auditMedia = [
   'tone.wav',
   'still.png',
 ] as const;
+export function generateAuditMedia(
+  ffmpeg: (args: string[], file: string) => void,
+) {
+  ffmpeg(
+    [
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=size=1280x720:rate=30',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=440:sample_rate=48000',
+      '-t',
+      '8',
+      '-c:v',
+      'libx264',
+      '-preset',
+      'fast',
+      '-crf',
+      '23',
+      '-g',
+      '120',
+      '-keyint_min',
+      '120',
+      '-sc_threshold',
+      '0',
+      '-pix_fmt',
+      'yuv420p',
+      '-threads',
+      '2',
+      '-c:a',
+      'aac',
+      '-movflags',
+      '+faststart',
+    ],
+    'source.mp4',
+  );
+  ffmpeg(
+    [
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=size=640x360:rate=25',
+      '-t',
+      '8',
+      '-c:v',
+      'libvpx-vp9',
+      '-deadline',
+      'realtime',
+      '-cpu-used',
+      '6',
+      '-g',
+      '100',
+      '-threads',
+      '2',
+      '-an',
+    ],
+    'mixed.webm',
+  );
+  ffmpeg(
+    [
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=880:sample_rate=48000',
+      '-t',
+      '8',
+      '-ac',
+      '2',
+      '-c:a',
+      'pcm_s16le',
+    ],
+    'tone.wav',
+  );
+  ffmpeg(
+    [
+      '-f',
+      'lavfi',
+      '-i',
+      'color=c=red:size=320x180',
+      '-frames:v',
+      '1',
+      '-threads',
+      '1',
+    ],
+    'still.png',
+  );
+}
+
 /** Deterministic, portable intent; media is generated separately, never user input. */
 export function auditProjects(): Record<string, Project> {
   const make = (name: string): Project => {
