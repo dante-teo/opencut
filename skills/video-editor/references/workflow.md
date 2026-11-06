@@ -177,6 +177,36 @@ owned files and the deliverables the user wants discarded; never remove imported
 originals as a consequence of deleting a project. Final videos and storyboards
 may also be discarded when requested.
 
+## Screen recordings and personal footage
+
+Keep these projects in a dedicated workspace outside the synthetic fixture tree,
+using the asset-preservation rules above. Review samples across the full recording
+before selecting shots, then inspect candidate ranges through their starts and
+ends. Choose distinct scenes, locations and actions from the usable footage;
+avoid concentrating on one convenient section or repeating the same shot unless
+the brief calls for it. Check for browser chrome, player controls and cuts inside
+otherwise usable ranges.
+
+A screen recording can contain a sideways picture baked into its pixels even
+when rotation metadata is zero. OpenCut applies source rotation metadata, but
+its clip controls do not rotate baked-in content or provide an arbitrary crop
+rectangle. If needed, explicitly prepare upright, reframed working masters with
+external media tools, preserving the original recording unchanged. Import those
+masters as editing assets and retain them with the project. They are intentional
+source edits, separate from preview proxies, which remain preview-only. Preparing
+caption graphics and audio also happens outside OpenCut, as described above.
+
+Review framing separately for each output aspect ratio. Check the start, middle
+and end of every shot for clipped faces, lost headroom and subject movement out
+of the crop, with caption overlays visible. Position and scale are static per
+clip; there is no automatic subject tracking or keyframe animation.
+
+Use the verification steps below for each final version. Project validation
+checks structure and file availability, not decoding or visual quality. Inspect
+the actual exported frames and play the MP4; when delivering an editable desktop
+project, also open it in Electron and check Project viewer, including later cuts
+and the ending. Report export verification and desktop playback checks separately.
+
 ## Verification and adaptation
 
 For the 18-second fixture recipe, require H.264 video at 320×180 and 30/1 fps,

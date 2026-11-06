@@ -318,6 +318,18 @@ requires `ffmpeg` with PNG support. Composition needs FFmpeg 8+ with libx264/AAC
 and standard filters. Existing output files are refused. See
 [CLI.md](CLI.md) for fields, timestamp behavior, limits and exit codes.
 
+## Personal media projects
+
+Keep personal footage and demo projects in a separate workspace outside
+`tests/fixtures/generated/`; automated tests use synthetic fixtures. Saved projects
+reference media files rather than embedding them, so keep their referenced assets
+with the project when moving or sharing it. An exported MP4 is self-contained.
+
+For editing screen recordings into portrait or landscape videos, follow the
+[screen-recording adaptation](../skills/video-editor/references/workflow.md#screen-recordings-and-personal-footage).
+It covers shot selection across the recording, external media preparation,
+framing checks and delivery verification.
+
 ## Commands
 
 | Command                                  | Purpose                                                                                 |

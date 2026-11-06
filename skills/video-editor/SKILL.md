@@ -216,6 +216,10 @@ a verified MP4, representative PNGs, ffprobe results and a CLI transcript in a n
 isolated generated directory. `pnpm test:e2e` runs it twice and cleans each run.
 For image-only stories and collages, follow the [portrait/photo adaptation](references/workflow.md#photo-slideshows-and-vertical-edits),
 including imported caption/music assets and project cleanup boundaries.
+For personal footage and screen recordings, follow the
+[screen-recording adaptation](references/workflow.md#screen-recordings-and-personal-footage)
+for varied shot selection, external orientation/crop preparation, per-aspect framing
+and export/desktop verification. Keep personal demo media outside test fixtures.
 Preview transport and path-based media commands do not modify project data.
 
 From an installed and built OpenCut checkout, run `pnpm cli --help` to discover
