@@ -553,3 +553,46 @@ it('rejects HEVC dimensions that libx265 cannot encode during preflight', async 
   ).rejects.toThrow('at least 16');
   expect(runMediaTool).not.toHaveBeenCalled();
 });
+
+// Range trimming must happen after sampling, composition and mixing, so edits,
+// fractional boundaries and limiter state keep the same meaning as full export.
+it('preflights exact preview range length and downscales the finished canvas', async () => {
+  vi.mocked(runMediaTool).mockResolvedValue(
+    Buffer.from(' V..... libx264 H.264\n A..... aac AAC'),
+  );
+  const summary = await validateVideoTimeline({
+    ...options,
+    range: { startFrame: 3, endFrame: 10 },
+    maxDimension: 64,
+  });
+  expect(summary).toMatchObject({ width: 64, height: 36, frameCount: 7 });
+  // Preflight runs only the encoder query. Execution's filter graph is exercised
+  // by native CLI tests; invalid range controls must fail before any subprocess.
+});
+
+it.each([
+  { startFrame: -1, endFrame: 2 },
+  { startFrame: 2, endFrame: 2 },
+  { startFrame: 0, endFrame: 13 },
+  { startFrame: 0.5, endFrame: 2 },
+])('rejects invalid preview ranges before file creation: %j', async (range) => {
+  await expect(renderVideoTimeline({ ...options, range })).rejects.toThrow(
+    'Preview range',
+  );
+  expect(runMediaTool).not.toHaveBeenCalled();
+  expect(await readdir(directory)).toEqual([]);
+});
+
+it('rejects preview range resampling and oversized previews before execution', async () => {
+  await expect(
+    renderVideoTimeline({
+      ...options,
+      range: { startFrame: 0, endFrame: 2 },
+      outputFrameRate: { numerator: 24, denominator: 1 },
+    }),
+  ).rejects.toThrow('range and outputFrameRate');
+  await expect(
+    renderVideoTimeline({ ...options, maxDimension: 1921 }),
+  ).rejects.toThrow('Preview size');
+  expect(runMediaTool).not.toHaveBeenCalled();
+});

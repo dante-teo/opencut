@@ -5,6 +5,7 @@ import {
   validateCacheLimits,
 } from '@opencut/media';
 import { UsageError } from './timeline.js';
+import { discovery } from './discovery.js';
 
 export const cacheHelp = `Usage: opencut cache status|cleanup|clear [--directory <cache-dir>] [--json]
        opencut cache configure --disk-mib <n> --memory-mib <n> [--directory <cache-dir>] [--json]
@@ -31,7 +32,13 @@ export async function runCacheCommand(args: string[]) {
     },
   });
   if (values.help) {
-    console.log(values.json ? JSON.stringify({ help: cacheHelp }) : cacheHelp);
+    console.log(
+      values.json
+        ? JSON.stringify(
+            discovery(['cache', ...positionals.slice(0, 1)], cacheHelp),
+          )
+        : cacheHelp,
+    );
     return;
   }
   const [command, source] = positionals;

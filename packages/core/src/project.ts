@@ -97,7 +97,7 @@ export const canvasShape = {
   height: z.int().positive().optional(),
   backgroundColor: z.string().regex(canvasColorPattern).optional(),
 };
-const clipSchema = z.strictObject({
+export const clipSchema = z.strictObject({
   id,
   assetId: id,
   trackId: id,
@@ -113,7 +113,7 @@ const settingsSchema = z.strictObject({
   height: z.int().positive(),
   frameRate: frameRateSchema,
 });
-const snapshotSchema = z.strictObject({
+export const snapshotSchema = z.strictObject({
   schemaVersion: z.literal(PROJECT_SCHEMA_VERSION),
   metadata: z.strictObject({
     id,

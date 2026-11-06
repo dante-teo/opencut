@@ -42,6 +42,10 @@ export type RenderCodec = (typeof renderCodecs)[number];
 export type RenderQuality = (typeof renderQualities)[number];
 export type RenderResolution = (typeof renderResolutions)[number];
 export interface RenderControls {
+  /** Trim the finished composition on the project grid; end is exclusive. */
+  range?: { startFrame: number; endFrame: number } | undefined;
+  /** Preview-only downscale of the finished canvas, never individual layers. */
+  maxDimension?: number | undefined;
   codec?: RenderCodec | undefined;
   /** Resample the finished composition; source selection stays on the project grid. */
   outputFrameRate?: { numerator: number; denominator: number } | undefined;
@@ -203,7 +207,7 @@ function sameFrameRate(
 }
 
 /** Execute an integer-frame plan without depending on projects, CLI or Electron. */
-async function prepareTimeline(options: VideoTimelineOptions) {
+async function prepareTimeline(options: VideoTimelineOptions, png = false) {
   checkRenderSignal(options.signal);
   validateOptions(options);
   const codec = options.codec ?? 'h264';
@@ -228,12 +232,22 @@ async function prepareTimeline(options: VideoTimelineOptions) {
   const maxHeight = width < height ? longSide : shortSide;
   // Keep the scale as an integer ratio until the final division, so exact even
   // dimensions cannot lose two pixels through floating-point multiplication.
-  const [scaleNumerator, scaleDenominator]: [number, number] =
+  let [scaleNumerator, scaleDenominator]: [number, number] =
     resolution === 'project'
       ? [1, 1]
       : maxWidth * height <= maxHeight * width
         ? [maxWidth, width]
         : [maxHeight, height];
+  if (options.maxDimension !== undefined) {
+    const size = options.maxDimension;
+    if (!Number.isSafeInteger(size) || size < 64 || size > 1920)
+      throw new MediaError(
+        'Preview size must be an integer between 64 and 1920.',
+      );
+    const longest = Math.max(width, height);
+    scaleNumerator = Math.min(size, longest);
+    scaleDenominator = longest;
+  }
   const outputWidth = Math.max(
     2,
     Math.floor((width * scaleNumerator) / (2 * scaleDenominator)) * 2,
@@ -242,6 +256,20 @@ async function prepareTimeline(options: VideoTimelineOptions) {
     2,
     Math.floor((height * scaleNumerator) / (2 * scaleDenominator)) * 2,
   );
+  const startFrame = options.range?.startFrame ?? 0;
+  const endFrame = options.range?.endFrame ?? frameCount;
+  if (
+    ![startFrame, endFrame].every(Number.isSafeInteger) ||
+    startFrame < 0 ||
+    endFrame <= startFrame ||
+    endFrame > frameCount ||
+    (options.range && options.outputFrameRate)
+  )
+    throw new MediaError(
+      'Preview range must satisfy 0 <= start < end <= timeline frame count; range and outputFrameRate cannot be combined.',
+    );
+  if (png && endFrame - startFrame !== 1)
+    throw new MediaError('PNG rendering requires exactly one project frame.');
   if (codec === 'hevc' && (outputWidth < 16 || outputHeight < 16))
     throw new MediaError(
       'HEVC requires output dimensions of at least 16 × 16 pixels.',
@@ -267,14 +295,18 @@ async function prepareTimeline(options: VideoTimelineOptions) {
   )
     throw new MediaError('Output frame rate must be between 1 and 120 fps.');
   const ticks =
-    BigInt(frameCount) * BigInt(denominator) * BigInt(outputRate.numerator);
+    BigInt(endFrame - startFrame) *
+    BigInt(denominator) *
+    BigInt(outputRate.numerator);
   const divisor = BigInt(numerator) * BigInt(outputRate.denominator);
   const outputFrameCount = Number((ticks + divisor - 1n) / divisor);
   const durationSeconds =
     (outputFrameCount * outputRate.denominator) / outputRate.numerator;
   const path = resolve(options.output);
-  if (extname(path).toLowerCase() !== '.mp4')
-    throw new MediaError('Render output must have a .mp4 extension.');
+  if (extname(path).toLowerCase() !== (png ? '.png' : '.mp4'))
+    throw new MediaError(
+      `Render output must have a ${png ? '.png' : '.mp4'} extension.`,
+    );
   try {
     const existing = await lstat(path);
     if (!options.overwrite || !existing.isFile())
@@ -310,6 +342,18 @@ async function prepareTimeline(options: VideoTimelineOptions) {
     '-progress',
     'pipe:1',
   ];
+  const prepared = {
+    args,
+    path,
+    quality,
+    resolution,
+    codec,
+    outputWidth,
+    outputHeight,
+    frameRate: outputRate,
+    frameCount: outputFrameCount,
+    durationSeconds,
+  };
   const filters: string[] = [];
   const sources = new Map<string, MediaMetadata>();
   const inputs = new Map<string, number>();
@@ -428,12 +472,32 @@ async function prepareTimeline(options: VideoTimelineOptions) {
     );
   }
   filters.push(
-    `[canvas${visualClips.length}]settb=1/${numerator},setpts=N*${denominator},scale=${outputWidth}:${outputHeight}:out_color_matrix=bt709,setsar=1,` +
+    `[canvas${visualClips.length}]trim=start_frame=${startFrame}:end_frame=${endFrame},settb=1/${numerator},setpts=N*${denominator},scale=${outputWidth}:${outputHeight}:out_color_matrix=bt709,setsar=1,` +
       (options.outputFrameRate
         ? `fps=${outputRate.numerator}/${outputRate.denominator}:round=up:eof_action=pass,tpad=stop_mode=clone:stop=1,trim=end_frame=${outputFrameCount},settb=1/${outputRate.numerator},setpts=N*${outputRate.denominator},`
         : '') +
-      `format=yuv420p[video]`,
+      `format=${png ? 'rgb24' : 'yuv420p'}[video]`,
   );
+  if (png) {
+    args.push(
+      '-filter_complex_threads',
+      '1',
+      '-filter_complex',
+      filters.join(';'),
+      '-map',
+      '[video]',
+      '-an',
+      '-frames:v',
+      '1',
+      '-c:v',
+      'png',
+      '-threads',
+      '1',
+      '-f',
+      'image2',
+    );
+    return prepared;
+  }
   // Round absolute project boundaries to the nearest 48 kHz sample. Never sum
   // independently rounded durations: fractional frame rates must not accumulate drift.
   const sample = (frame: number, rate = frameRate) => {
@@ -441,7 +505,9 @@ async function prepareTimeline(options: VideoTimelineOptions) {
     const n = BigInt(frame) * BigInt(denominator) * 48000n;
     return Number((2n * n + BigInt(numerator)) / (2n * BigInt(numerator)));
   };
-  const totalSamples = sample(outputFrameCount, outputRate);
+  const totalSamples = options.range
+    ? sample(frameCount)
+    : sample(outputFrameCount, outputRate);
   const audioLabels = ['[silence]'];
   filters.push(
     `anullsrc=r=48000:cl=stereo,atrim=end_sample=${totalSamples},asetpts=N/SR/TB[silence]`,
@@ -499,7 +565,7 @@ async function prepareTimeline(options: VideoTimelineOptions) {
   // existing composer limiter, including latency compensation for sync markers.
   filters.push(
     `${audioLabels.join('')}amix=inputs=${audioLabels.length}:duration=first:normalize=0,` +
-      `alimiter=limit=0.95:level=0:latency=1,atrim=end_sample=${totalSamples},asetpts=N/SR/TB[audio]`,
+      `alimiter=limit=0.95:level=0:latency=1,atrim=start_sample=${sample(startFrame)}:end_sample=${options.range ? sample(endFrame) : totalSamples},asetpts=N/SR/TB[audio]`,
   );
   checkRenderSignal(options.signal);
   args.push(
@@ -551,18 +617,7 @@ async function prepareTimeline(options: VideoTimelineOptions) {
     '-f',
     'mp4',
   );
-  return {
-    args,
-    path,
-    quality,
-    resolution,
-    codec,
-    outputWidth,
-    outputHeight,
-    frameRate: outputRate,
-    frameCount: outputFrameCount,
-    durationSeconds,
-  };
+  return prepared;
 }
 
 /** Full preflight uses the exact same plan, media probes and filters as execution. */
@@ -720,6 +775,47 @@ export async function renderVideoTimeline(
       frameCount,
       durationSeconds,
       metadata: { ...metadata, path },
+    };
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+}
+
+/** Lossless frame output from the same RGB compositor used by video exports. */
+export async function renderTimelineFrame(options: VideoTimelineOptions) {
+  const prepared = await prepareTimeline(options, true);
+  const temporary = await mkdtemp(
+    join(dirname(prepared.path), '.opencut-frame-'),
+  );
+  const rendered = join(temporary, 'frame.png');
+  try {
+    await runMediaTool(
+      'ffmpeg',
+      [...prepared.args, '-update', '1', rendered],
+      4 * 1024 * 1024,
+      600_000,
+      { signal: options.signal },
+    );
+    const metadata = await probeMedia(rendered, options.signal);
+    if (
+      metadata.video?.codec !== 'png' ||
+      metadata.video.width !== prepared.outputWidth ||
+      metadata.video.height !== prepared.outputHeight
+    )
+      throw new MediaError(
+        'Frame verification failed: unexpected PNG dimensions or codec.',
+      );
+    checkRenderSignal(options.signal);
+    await link(rendered, prepared.path).catch((cause: unknown) => {
+      throw new MediaError(
+        `Cannot publish frame '${prepared.path}'; use a new path in a writable directory.`,
+        { cause },
+      );
+    });
+    return {
+      path: prepared.path,
+      width: prepared.outputWidth,
+      height: prepared.outputHeight,
     };
   } finally {
     await rm(temporary, { recursive: true, force: true });

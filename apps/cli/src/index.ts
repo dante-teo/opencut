@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
+import { discovery } from './discovery.js';
+import { inspectionOptions, runInspectionCommand } from './inspection.js';
 import { runCacheCommand } from './cache.js';
 import { editHelp, runEditCommand } from './edit.js';
 import {
@@ -40,9 +42,15 @@ import type {
 
 const help = `Usage: opencut [command] [options]
 
-OpenCut — project, media asset and timeline editing, transactions and headless rendering (T13).
+OpenCut — project, media asset and timeline editing, transactions and headless rendering and visual inspection (T29).
 
 Commands:
+  help --json                         Discover commands, arguments, capabilities and schemas
+  project inspect <project-file>      Read revision-tagged content (offline)
+  timeline inspect <project-file> --frame <n>
+                                       Evaluate layers, audio and exact source times
+  preview frame|contact-sheet|clip <project-file> --output <new.png|mp4>
+                                       Inspect the composited timeline (preview --help)
   project create <project-file> --name <name> [--width <px>] [--height <px>] [--fps <n|n/d>]
                                        Create a new project without overwriting
   project info <project-file>           Show metadata, settings and statistics
@@ -250,6 +258,7 @@ async function runCli(args: string[]): Promise<void> {
       help: { type: 'boolean', short: 'h' },
       version: { type: 'boolean', short: 'v' },
       json: { type: 'boolean' },
+      ...inspectionOptions,
       'dry-run': { type: 'boolean' },
       'expected-revision': { type: 'string' },
       name: { type: 'string' },
@@ -283,6 +292,19 @@ async function runCli(args: string[]): Promise<void> {
     allowNegative: false,
   });
   const [command, file, projectFile] = positionals;
+  if (
+    command === 'preview' ||
+    (['project', 'timeline'].includes(command ?? '') && file === 'inspect')
+  )
+    return runInspectionCommand(args);
+  for (const option of Object.keys(
+    inspectionOptions,
+  ) as (keyof typeof inspectionOptions)[]) {
+    if (values[option] !== undefined)
+      throw new UsageError(
+        `--${option} applies only to inspection or preview commands.`,
+      );
+  }
   const timelineCommand = ['timeline', 'track', 'clip', 'canvas'].includes(
     command ?? '',
   );
@@ -296,6 +318,17 @@ async function runCli(args: string[]): Promise<void> {
     command === 'media' && file !== undefined && Object.hasOwn(mediaHelp, file)
       ? (file as keyof typeof mediaHelp)
       : undefined;
+  if (command === 'help') {
+    if (Object.keys(values).some((key) => !['help', 'json'].includes(key)))
+      throw new UsageError('help accepts only --json and --help.');
+    const result = discovery(positionals.slice(1), help);
+    if (result.commands.length === 0)
+      throw new UsageError(
+        'Unknown help command. Run help --json for discovery.',
+      );
+    output(result, help, values.json);
+    return;
+  }
   if (values.help || args.length === 0) {
     const usage =
       command === 'edit'
@@ -311,7 +344,7 @@ async function runCli(args: string[]): Promise<void> {
                 ? mediaHelp[mediaCommand]
                 : `Usage: opencut media <import|list|info|remove> <project-file> [file|asset-id] [--json]\n\n${Object.values(mediaHelp).join('\n')}`
               : help;
-    output({ help: usage }, usage, values.json);
+    output(discovery(positionals.slice(0, 2), usage), usage, values.json);
     return;
   }
   if (command !== 'project' || file !== 'render') {

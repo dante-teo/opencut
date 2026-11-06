@@ -17,9 +17,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@opencut/shared": "workspace:*",
     "lru-cache": "^11.5.3",
     "proper-lockfile": "^4.1.2",
-    "@opencut/shared": "workspace:*"
+    "sharp": "0.35.5"
   },
   "devDependencies": {
     "@types/proper-lockfile": "^4.1.4"

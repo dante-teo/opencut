@@ -5,7 +5,8 @@
 intent from the existing project model and validate the project, including history.
 They perform no I/O, decoding, edits, caching or playback. Call them on the current
 T22 session snapshot; they do not acquire writer ownership or read disk themselves.
-No new CLI command or project schema is introduced.
+T23 introduced no CLI command or project schema. T29 exposes these point queries
+through `timeline inspect`; see [CLI inspection](CLI.md#agent-discovery-and-visual-inspection-t29).
 
 ```ts
 import { evaluateTimeline, evaluateTimelineFrame } from '@opencut/core';
@@ -115,3 +116,7 @@ without a point query for adapters that need lookahead.
 The desktop [T24–T26 playback/composition adapter](TIMELINE_PLAYBACK.md) uses this prepared
 T23 evaluator as its authoritative mapping. Decoding, clock and audio routing
 stay in desktop; evaluation itself remains headless and does no I/O or playback.
+
+T29 exposes exact point evaluation through `timeline inspect PROJECT --frame N --json`.
+See [CLI inspection and previews](CLI.md#agent-discovery-and-visual-inspection-t29)
+for the versioned structured contract and headless composited output commands.

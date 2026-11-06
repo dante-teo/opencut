@@ -7,6 +7,7 @@ export type { MediaMetadata, MediaStream } from './probe.js';
 export type { FrameResult } from './frame.js';
 export {
   renderVideoTimeline,
+  renderTimelineFrame,
   validateVideoTimeline,
   renderCodecs,
   renderQualities,
@@ -39,3 +40,4 @@ export type {
 export { waveformImage } from './waveform.js';
 export { ThumbnailCache } from './thumbnail.js';
 export type { ThumbnailResult } from './thumbnail.js';
+export { renderContactSheet } from './contact-sheet.js';

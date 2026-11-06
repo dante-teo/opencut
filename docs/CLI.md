@@ -1,4 +1,4 @@
-# CLI reference (T27)
+# CLI reference (T29)
 
 Build from the checkout root with `pnpm build`. The `opencut` executable is
 workspace-local. Use the direct Node form for machine-readable stdout; pnpm
@@ -24,13 +24,154 @@ with `pnpm fixtures:generate` if absent; see the
 [fixture contract](../tests/fixtures/README.md). The output parent directory must
 already exist, and the output file must not exist.
 
+## Agent discovery and visual inspection (T29)
+
+Use the built executable directly so package-manager logs cannot enter JSON stdout:
+
+```sh
+node apps/cli/dist/index.js help --json
+node apps/cli/dist/index.js help preview --json
+node apps/cli/dist/index.js project inspect /path/to/project.opencut.json --json
+node apps/cli/dist/index.js timeline inspect /path/to/project.opencut.json --frame 20 --json
+node apps/cli/dist/index.js preview frame /path/to/project.opencut.json --frame 20 --output /path/to/new-frame.png --json
+node apps/cli/dist/index.js preview contact-sheet /path/to/project.opencut.json --from 0 --to 66 --count 4 --columns 2 --size 160 --output /path/to/new-sheet.png --json
+node apps/cli/dist/index.js preview clip /path/to/project.opencut.json --from 12 --to 42 --size 160 --quality high --output /path/to/new-preview.mp4 --json
+```
+
+These forms are exercised by `tests/integration/inspection.native.spec.ts` on a
+30 fps synthetic project with a leading canvas gap, trimmed/split video,
+a translucent transformed image layer and two mixed audio sources. At frame 20,
+the base source maps to 17/30 seconds. The sheet samples frames 0, 21, 43 and 65;
+the clip contains 30 frames (one second), with both streams starting at zero.
+Choose ranges from your own project's inspected duration and frame rate.
+The native test also verifies a 30000/1001 project and cancellation cleanup.
+Run `pnpm test:media` with manually installed FFmpeg/ffprobe, or run just this
+native file after a CLI build using
+`node --import tsx --test tests/integration/inspection.native.spec.ts`.
+`OPENCUT_T29_KEEP=1` retains that test's synthetic preview artifacts for inspection.
+
+`help --json` and `--help --json` return `discoveryVersion: 1`, application
+identity, every command's positional arguments and options, required flags,
+defaults, units, constraints, prerequisites, capability statuses and exit codes.
+`help GROUP [ACTION] --json` scopes the command list. The retained `help` field
+contains readable usage. `globalOptions` includes version/help aliases.
+`jsonOutput` distinguishes existing JSONL commands (`project render`, `cache proxy`)
+from single-document results. A `resultSchema` key points into `schemas`, which
+contains JSON Schema 2020-12 definitions for the five T29 results and errors.
+Implemented capability status does not imply tools or media are available on this
+machine; execution checks prerequisites. SDK, scripting runtime and MCP are
+explicitly unavailable.
+
+Inspection and preview commands accept `--json` and `--help`/`-h` before the
+command group, between the group and action, or after the action. For example:
+
+```sh
+node apps/cli/dist/index.js project --json inspect /path/to/project.opencut.json
+node apps/cli/dist/index.js timeline --json inspect /path/to/project.opencut.json --frame 20
+node apps/cli/dist/index.js preview --json -h frame
+```
+
+These forms return the same JSON results or scoped help as placing the flags at
+the end. `tests/integration/inspection-cli.test.ts` covers option ordering,
+scoped help and rejection of inspection-only options on unrelated commands.
+The six inspection options `--frame`, `--from`, `--to`, `--size`, `--count` and
+`--columns` apply only to their supported inspection/preview commands;
+`--version` remains a standalone command (optionally with `--json`).
+
+`project inspect` returns `inspectionVersion: 1`, canonical absolute `path`,
+project `schemaVersion`, metadata, settings, asset references/metadata, ordered
+tracks, clips, exact rational duration and current `revision`. It omits undo/redo
+snapshots. It uses the same authoritative project read as other CLI queries,
+including an open GUI session. No media tools or online sources are required;
+use `media list` for source availability and resolved paths.
+
+`timeline inspect --frame N` returns `inspectionVersion: 1`, canonical `path`,
+`projectId`, `revision`, `frame`, `frameRate`, and the shared evaluator's `time`,
+`duration`, `boundary`, `activeClips`, `visualClips`, `audioClips`, `mixingSources`,
+`gap`, `visualGap` and `backgroundColor`. Times are exact rational seconds;
+visual clips are ordered bottom to top and include normalized transform values.
+Each active clip includes `sourceTime`, effective gain, mute and audio-presence
+intent. Muted sources remain in `audioClips`; unknown audio metadata remains a
+candidate. Inspection does not decode media or determine actual occlusion/alpha.
+Half-open clip boundaries match playback/export. `boundary` is `inside`, `end`
+or `after`; inspecting the end or later is supported and returns no active clips.
+
+All new time flags (`--frame`, `--from`, `--to`) accept nonnegative safe integer
+**project-frame indices**, never decimal seconds or source-file frame numbers.
+`--to` is exclusive. A preview frame must be strictly before the timeline end.
+Ranges must satisfy `0 <= from < to <= timeline frame count`.
+
+- `preview frame` requires `--frame` and a new `.png` output. Default size is the
+  project canvas; optional `--size 64..1920` caps its longest side.
+- `preview contact-sheet` requires a new `.png` output. `--from` defaults to 0,
+  `--to` to the timeline end, `--count` to min(8, range frames), `--columns` to
+  min(4, count), and `--size` to 320. Count is 1–16 and cannot exceed the range
+  length; columns are 1–count; size is 64–640. Uniform integer samples include
+  the first and last included frame (a single sample uses the first). Every tile
+  is labeled with its exact frame index and approximate seconds. JSON `samples`
+  includes exact rational times and tile x/y coordinates; `tileWidth`,
+  `tileHeight`, `cellWidth`, `labelHeight`, `columns` and `rows` describe the grid.
+  Cell width is at least 96 pixels to keep labels readable for narrow canvases;
+  image pixels start at each sample x/y and occupy tileWidth by tileHeight.
+- `preview clip` requires `--from`, `--to` and a new `.mp4` output. Ranges are
+  limited to 30 seconds. Default longest side is 640 and quality is `draft`;
+  `--size 64..1920` and `--quality draft|balanced|high` configure output. It retains
+  the project frame rate, full composition and synchronized mixed audio.
+
+Size scales the finished canvas without upscaling and rounds sides down to even
+pixels (minimum 2). All previews return `inspectionVersion: 1`, absolute `path`
+and `projectPath`, `projectId`, `revision`, rational `frameRate`, width and height.
+Frame results add `kind: "frame"`, `frame` and exact `time`. Clip results add
+`kind: "clip"`, start/end frame and rational times, frame count, measured duration
+and quality. Sheets add `kind: "contact-sheet"` and the range/grid/sample fields.
+The `schemas` map in discovery is the precise field contract. T29 results use the
+same JSON field names with or without `--json`.
+
+Visual inspection runs headlessly, without Electron, using the production export
+compositor and original sources. It preserves shared evaluation, RGB color,
+source-over layers, geometry and sampling rules; it never previews just one
+selected asset. PNGs avoid H.264 compression and chroma loss, but flatten canvas
+transparency over black like MP4. Contact-sheet layout/labels use Sharp and a
+system sans-serif font; Sharp does not render timeline layers. Font availability
+and exact label appearance depend on the host.
+
+Export limits still apply to the whole project: at least one video/image clip,
+frame-aligned boundaries, at most 64 clips and 600 seconds, rational 1–120 fps,
+even sides 2–3840 and at most 3840×2160 pixels. Referenced visual sources must be
+readable even outside the requested range; clips also validate referenced audio.
+Unused offline assets do not block rendering. Audio-only/empty projects remain
+inspectable but cannot generate visual previews. T27's SDR/color, VFR, HDR and
+long-run audio limitations still apply. Preview ranges trim the finished
+composition; decoding preceding frames can make late-frame requests slower.
+This is an inspection/export path, not a real-time playback benchmark.
+
+Only explicit new output paths in existing writable directories are accepted;
+previews never overwrite files, symlinks, project data, history or original media.
+PNG files are probed and videos are probed and frame-count verified
+before atomic publication. Contact sheets render tiles sequentially, retain at
+most 16 bounded PNGs, and cap the final grid below 13 million pixels; their temporary
+directory is removed on success or handled failure. Clip output is bounded by
+30 seconds and existing renderer limits. Existing output files remain intact.
+Handled cancellation removes temporary files before exit 130 (SIGINT) or 143
+(SIGTERM); SIGKILL/power loss cannot run cleanup.
+
+With `--json`, stdout contains one success document. Preview clip progress is
+JSONL on stderr; its last stderr line on failure is the existing structured error
+`{ "ok": false, "error": { "code": "...", "message": "..." } }`.
+Check exit status before using results: 0 success, 2 invalid command/option/range,
+1 invalid project/media/prerequisite/file/runtime failure. Invalid requests never
+publish partial destinations. JSON errors preserve existing CLI codes; argument
+errors include a usage hint.
+
 ## Commands
 
 - No arguments, `--help`, or `-h`: print usage. Help takes precedence over version.
+- `help [GROUP [ACTION]] --json`: discover commands, arguments, capabilities and schemas.
 - `--version` or `-v`: print the application version.
 - `project create <project-file> --name <name> [--width <px>] [--height <px>] [--fps <n|n/d>] [--json]`:
   create an empty version 1 project without overwriting.
 - `project info <project-file> [--json]`: display validated metadata, settings and collection counts.
+- `project inspect <project-file> [--json]`: read revision-tagged settings, assets, tracks, clips and duration.
 - `project validate <project-file> [--json]`: validate project structure, internal references and media availability.
 - `project render <project-file> --output <file.mp4> [--quality <draft|balanced|high>] [--resolution <project|720p|1080p>] [--overwrite] [--json]`: composite video/image layers with mixed audio tracks to H.264/AAC MP4.
 - `project --help` and `project create|info|validate|render --help`: show project usage.
@@ -40,6 +181,8 @@ already exist, and the output file must not exist.
 - `media remove <project-file> <asset-id> [--json]`: remove an unreferenced asset entry.
 - `media --help` and `media import|list|info|remove --help`: show asset usage.
 - `timeline list <project-file> [--json]`: inspect tracks, clips and exact timing.
+- `timeline inspect <project-file> --frame <n> [--json]`: evaluate active layers, audio candidates and exact source-time mappings.
+- `preview frame|contact-sheet|clip <project-file> --output <new.png|new.mp4> [options]`: generate headless composited inspection media; see [selection, quality and resource limits](#agent-discovery-and-visual-inspection-t29).
 - `track add <project-file> --type <video|audio> --name <name> [--json]`: append a track.
 - `track remove <project-file> <track-id> [--json]`: remove an empty track.
 - `clip add <project-file> <asset-id> --track <track-id> --at <frame> --in <frame> --out <frame> [--json]`: place an asset range.
@@ -117,13 +260,15 @@ is the current OS account. See [the session decision](adr/0011-shared-project-se
 
 Exit codes: **0** success, **2** invalid command/arguments, **1** failed project
 validation, invalid project data, media, filesystem, prerequisite or execution failure.
-Project-render cancellation exits **130** for SIGINT or **143** for SIGTERM.
+Render/preview cancellation exits **130** for SIGINT or **143** for SIGTERM.
 Unknown commands/options, extra positional arguments and options that do not apply
 to the command fail. Repeated options use the last value, matching Node's parser
 and existing media commands. `--name` applies to project creation and track creation;
 `--width`, `--height` and `--fps` apply to project creation and composition with
-the distinct bounds below. `--timestamp` applies only to extraction; `--output`
-applies to extraction, composition and project rendering. Help with `--json` returns `{ "help": "..." }`;
+the distinct bounds below. `--timestamp` uses source seconds for extraction/cache;
+T29 inspection/previews use integer project frames. `--output` applies to
+extraction, composition, project rendering and timeline previews. Help with
+`--json` returns the versioned discovery catalog, retaining its `help` text field;
 version with `--json` returns `{ "name": "OpenCut", "version": "0.1.0" }`.
 The application version is separate from the project file's `schemaVersion`;
 use the latter to identify the supported project format.

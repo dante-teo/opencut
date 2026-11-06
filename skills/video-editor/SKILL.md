@@ -1,6 +1,6 @@
 ---
 name: video-editor
-description: Use the OpenCut CLI to create, inspect and validate video projects, manage media assets and timeline tracks/clips, apply atomic batches, undo/redo edits, inspect media, extract PNG frames, render a saved timeline with video/image layers, canvas transforms and mixed audio to H.264/AAC MP4, compose video clips with background music, or manage preview proxies and bounded caches.
+description: Use the OpenCut CLI to create, inspect and validate video projects, manage media assets and timeline tracks/clips, apply atomic batches, undo/redo edits, inspect media, extract PNG frames, render a saved timeline with video/image layers, canvas transforms and mixed audio to H.264/AAC MP4, compose video clips with background music, generate composited timeline PNGs, labeled contact sheets and short audio/video previews, discover command schemas, or manage preview proxies and bounded caches.
 ---
 
 # OpenCut CLI
@@ -441,8 +441,8 @@ T22 does not add timeline playback. See
 Core APIs `evaluateTimeline(project, rationalTime)` and
 `evaluateTimelineFrame(project, frameIndex)` inspect active layers, exact source
 times and audio mixing candidates without media tools. Export planning shares
-their timing/order/property resolution. These headless queries add no CLI command
-and perform no playback themselves; Project viewer uses them for live T24–T26 playback. Read [evaluation semantics](../../docs/TIMELINE_EVALUATION.md)
+their timing/order/property resolution. T29 exposes these queries through
+`timeline inspect --frame N`; the queries perform no playback themselves; Project viewer uses them for live T24–T26 playback. Read [evaluation semantics](../../docs/TIMELINE_EVALUATION.md)
 for half-open boundaries, metadata uncertainty and export-specific limits.
 
 T26 uses the same headless geometry and RGB source-over composition rules in
@@ -464,3 +464,61 @@ checkout. The [T27 consistency gate](../../docs/PREVIEW_EXPORT_CONSISTENCY.md)
 checks Chromium Canvas frames against decoded FFmpeg export frames and records
 independent frame identity, audio timing, gain and mute evidence. It adds no CLI
 editing commands.
+
+## Agent discovery and visual verification (T29)
+
+Start with `node apps/cli/dist/index.js help --json` after building. Discover
+command arguments/options, prerequisites, units, defaults, limits and statuses
+without reading internal source. `help preview --json` scopes the command list.
+Use `resultSchema` and `schemas` for the five versioned T29 result contracts.
+Check exit status and `jsonOutput`; project render/cache proxy stream JSONL.
+SDK, scripting runtime and MCP remain unavailable.
+
+Read `project inspect PROJECT --json` for revision, settings, asset references,
+tracks, clips and exact duration (without undo snapshots). Read
+`timeline inspect PROJECT --frame 20 --json` for ordered active layers, exact
+source mappings, gain/mute and audio candidates. Both work offline without media
+tools and return the authoritative session snapshot when Electron is open.
+Use the returned revision for subsequent existing `--expected-revision` edits.
+Inspection/preview `--json` and `--help`/`-h` may appear before the group, between
+group and action, or after the action. For example, `project --json inspect PROJECT`
+and `timeline --json inspect PROJECT --frame 20` return the usual inspection
+results; `preview --json -h frame` returns scoped discovery/help. Option ordering
+does not make command-specific flags valid on other commands. Use `--version`
+alone, optionally with `--json`.
+
+Verify edited composition using these native-tested command forms, choosing
+valid frames/ranges from inspection:
+
+```sh
+node apps/cli/dist/index.js preview frame PROJECT --frame 20 --output /path/to/new-frame.png --json
+node apps/cli/dist/index.js preview contact-sheet PROJECT --from 0 --to 66 --count 4 --columns 2 --size 160 --output /path/to/new-sheet.png --json
+node apps/cli/dist/index.js preview clip PROJECT --from 12 --to 42 --size 160 --quality high --output /path/to/new-preview.mp4 --json
+```
+
+All times are safe integer **project-frame indices**, with exclusive `--to`.
+These examples cover a 30 fps project: four sheet positions 0/21/43/65 and a
+one-second clip. `preview frame` defaults to project dimensions. Sheets default
+to the full timeline, up to eight uniform samples, four columns and size 320;
+they allow at most 16 samples and size 640. Clips require from/to, allow at most
+30 seconds and default to size 640/quality draft. `--size 64..1920` caps finished
+frame/clip dimensions without upscaling; quality accepts draft/balanced/high.
+See [the inspection reference](references/cli.md#agent-discovery-and-timeline-previews-t29)
+for exact options/results, resource limits and errors.
+
+Visual inspection is headless and uses the existing original-media export
+compositor, preserving layer ordering, transforms, source sampling and audio
+mixing. It never substitutes a selected source asset for the timeline. PNGs
+flatten canvas alpha over black; sheets add labels outside each image. Referenced
+visual media must be available even outside the selected range; clip previews
+also validate audio. Existing whole-project export limits and T27 SDR/color
+limitations apply. Empty/audio-only projects are inspectable but cannot generate
+visual previews. Late requests can decode preceding frames.
+
+Choose new explicit PNG/MP4 paths in existing directories. Outputs never modify
+project/history/source media or overwrite files. Success is one JSON document on
+stdout; clip progress JSONL and errors go to stderr. Require exit 0, parse the
+version/revision, then inspect the saved PNG/sheet or decode/play the clip before
+claiming verification. Handled failures/cancellation clean temporary output;
+SIGINT/SIGTERM exit 130/143. SIGKILL cannot clean up. A generated preview is visual
+inspection evidence, not evidence of interactive playback performance.

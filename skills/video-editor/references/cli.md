@@ -1,4 +1,4 @@
-# OpenCut CLI through T28
+# OpenCut CLI through T29
 
 For a complete CLI-only edit with tested timing, layers, audio and persistent history,
 see the [T14 workflow](workflow.md).
@@ -41,9 +41,77 @@ extra arguments and inapplicable options fail. Repeated options use the last val
 Errors are structured on stderr with `--json`:
 `{ "ok": false, "error": { "code": "...", "message": "..." } }`.
 Help and version also accept `--json`, returning
-`{ "help": "..." }` and `{ "name": "OpenCut", "version": "0.1.0" }` respectively.
+`{ "discoveryVersion": 1, "help": "...", "commands": [...], ... }` and
+`{ "name": "OpenCut", "version": "0.1.0" }` respectively.
 The application version and project `schemaVersion` identify different contracts;
 use `schemaVersion` when checking project-format compatibility.
+
+## Agent discovery and timeline previews (T29)
+
+Start with `node apps/cli/dist/index.js help --json`. It describes every command,
+arguments, required options, defaults, units, constraints, prerequisites,
+capability availability and exit codes. `help preview --json` scopes the list.
+`schemas` contains versioned JSON Schema definitions for T29 results/errors;
+`resultSchema` links each new command to its schema. Existing JSONL commands are
+marked explicitly. SDK, scripting runtime and MCP are unavailable.
+
+```sh
+node apps/cli/dist/index.js project inspect /path/to/project.opencut.json --json
+node apps/cli/dist/index.js timeline inspect /path/to/project.opencut.json --frame 20 --json
+node apps/cli/dist/index.js preview frame /path/to/project.opencut.json --frame 20 --output /path/to/new-frame.png --json
+node apps/cli/dist/index.js preview contact-sheet /path/to/project.opencut.json --from 0 --to 66 --count 4 --columns 2 --size 160 --output /path/to/new-sheet.png --json
+node apps/cli/dist/index.js preview clip /path/to/project.opencut.json --from 12 --to 42 --size 160 --quality high --output /path/to/new-preview.mp4 --json
+```
+
+Inspection/preview `--json` and `--help`/`-h` also work before the group or
+between group and action. These regression-tested forms are equivalent to the
+usual option placement:
+
+```sh
+node apps/cli/dist/index.js project --json inspect /path/to/project.opencut.json
+node apps/cli/dist/index.js timeline --json inspect /path/to/project.opencut.json --frame 20
+node apps/cli/dist/index.js preview --json -h frame
+```
+
+Inspection-only options remain restricted to their supported commands.
+`--version` is used alone, optionally with `--json`.
+
+These forms are native-tested on a 66-frame, 30 fps layered project. Use your
+inspected duration/rate to choose valid ranges. Project inspection returns full
+content and revision without undo snapshots; media can be offline. Timeline
+inspection uses the shared evaluator for bottom-to-top layers, gain/mute, gaps
+and exact source-time mappings. Unknown audio metadata describes candidates,
+not confirmed decoded streams. Inspection at end/after is supported.
+
+All new time flags use safe integer project-frame indices; `--to` is exclusive.
+Previews require an inside frame or `0 <= from < to <= timeline frame count`.
+Frames default to project size; `--size 64..1920` caps the finished canvas side
+without upscaling. Sheets default to the full timeline, min(8, range frames)
+samples, min(4, count) columns and size 320. They support at most 16 samples and
+size 640; count cannot exceed range length. Labels show exact frame/approximate
+seconds; JSON lists exact times and tile coordinates. Clips require from/to,
+allow at most 30 seconds, and default to size 640 and quality draft; quality also
+accepts balanced/high. They retain project FPS, composition and mixed audio.
+
+All five results carry `inspectionVersion: 1` and revision information; previews
+also identify project, output path, frame rate and dimensions. Use discovery's
+schemas for exact fields. Each success is one JSON document on stdout;
+`preview clip --json` sends progress JSONL to stderr, followed by a structured
+error there on failure. Check exit status before consuming output: 0 success,
+2 invalid arguments/range, 1 project/media/file/runtime/prerequisite failure.
+Cancellation uses 130/143 and cleans temporary files. SIGKILL cannot clean up.
+
+Visual previews use the original-media export compositor headlessly, without
+Electron. PNGs preserve RGB composition without H.264 compression, flattening
+canvas alpha over black. Sharp only assembles sheet tiles and font labels.
+All referenced visual sources must be available, even outside the range; clip
+previews validate audio too. Existing export limits apply to the whole project
+(64 clips, 600 seconds, aligned frames, even dimensions, 1–120 fps, video/image
+required). Empty/audio-only projects can be inspected but cannot render previews.
+Late-frame extraction may decode preceding frames. Previews never alter project,
+history or source media, and never overwrite outputs. Use new files in an existing
+writable directory. Read back/inspect generated media before reporting success.
+See the [complete contract and test command](../../../docs/CLI.md#agent-discovery-and-visual-inspection-t29).
 
 ## Projects
 

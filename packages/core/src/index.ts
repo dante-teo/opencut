@@ -93,3 +93,14 @@ export type {
   EvaluatedTimelineClip,
   ResolvedTimelineClip,
 } from './evaluation.js';
+
+export {
+  inspectProject,
+  inspectTimeline,
+  inspectionJsonSchemas,
+  projectInspectionSchema,
+  timelineInspectionSchema,
+  previewFrameSchema,
+  previewClipSchema,
+  previewSheetSchema,
+} from './inspection.js';

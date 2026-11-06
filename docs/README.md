@@ -43,6 +43,13 @@ resolution/FPS/codec/quality controls, preflight validation, progress and cancel
 Exports capture an immutable revision, use original media, and publish only verified
 complete files without overwriting existing destinations. Hide the panel to keep editing.
 
+T29 adds [agent discovery and headless visual inspection](CLI.md#agent-discovery-and-visual-inspection-t29):
+`help --json`, revision-tagged project inspection, exact frame-based timeline
+inspection, composited PNGs, labeled contact sheets and short preview clips with
+mixed audio. Previews use the existing original-media export compositor without
+launching Electron and preserve the project and source media. Clips are limited
+to 30 seconds and sheets to 16 samples; existing export limits still apply.
+
 Select a clip to edit **Timeline position**, **Duration**, **Source in/out** in
 whole project frames, **Volume** (linear 0–1), **Mute**, and video **Position X/Y**
 (pixels), **Scale** (0.01–4), and **Opacity** (0–1). Enter or leave a numeric field
@@ -307,6 +314,13 @@ with one hard link. See [asset paths and results](CLI.md#project-media-assets).
 To build only the headless packages and CLI, use `pnpm build:packages` followed
 by `pnpm --filter @opencut/cli build` instead of the full workspace build.
 
+Start agent workflows with `node apps/cli/dist/index.js help --json`, then use
+`project inspect PROJECT --json` and `timeline inspect PROJECT --frame N --json`
+to choose exact project-frame positions. Generate a frame, sheet or short clip
+with `preview frame|contact-sheet|clip`; see [CLI inspection](CLI.md#agent-discovery-and-visual-inspection-t29)
+for explicit output paths, ranges, quality, JSON schemas and limits. Inspection
+works offline; visual previews need FFmpeg and ffprobe.
+
 Project create/info/validate, media list/info/remove and timeline edits need no media tools.
 See [timeline editing](CLI.md#timeline-editing) for commands, exact project-frame
 indices, overlap rules and JSON results.
@@ -419,7 +433,11 @@ trims/splits, black/silent gaps, overlapping tones, volume/mute, A/V markers,
 delayed audio, fractional frame timing and source preservation. T13 checks also
 cover JSONL progress, exact preset dimensions, SIGINT/SIGTERM child termination,
 temporary cleanup and safe export replacement. The suite creates and cleans only
-its own derived inputs and outputs under the generated directory.
+its own derived inputs and outputs under the generated directory. T29 checks
+also decode composited frames and sheet tiles, verify preview-clip audio/video
+PTS at integer/fractional rates, and check source/project preservation, invalid
+requests and cancellation cleanup. Headless CLI regressions cover discovery,
+offline inspection and global options between the command group and action.
 `pnpm fixtures:validate` only needs ffprobe: it counts decoded video frames and
 rejects decoder errors, even when a damaged file retains valid header metadata.
 See the [fixture contract](../tests/fixtures/README.md) for prerequisites and safe
