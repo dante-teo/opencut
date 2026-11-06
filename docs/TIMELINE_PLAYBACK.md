@@ -82,17 +82,59 @@ most 128 simultaneous timeline grants. T25 also accepts an original-only retry f
 capabilities into Web Audio and origin-clean Canvas composition/readback; renderer fetch and filesystem privileges stay blocked
 by CSP and the sandbox.
 
+## Timeline clip artwork
+
+Visible timeline clips display video/still filmstrips or audio waveforms from
+original media. Artwork follows the trimmed source range and remains anchored
+while scrolling. Zoom, trims and splits select new samples. Loading and
+unavailable previews are labeled; absent tools or media never produce a synthetic
+preview. Artwork is a navigation aid: it does not apply clip transforms, opacity,
+gain or mute and is not an export preview.
+
+Filmstrips use 144×80 JPEG cells, batching up to four samples into one FFmpeg
+decode when their spacing is at most 1.5 seconds. Coarser zoom levels use individual
+seeks. The `fps` filter uses `round=up`, matching the export sampling rule, so a
+frame is not moved into an earlier sample slot. Thumbnail extraction is separate
+from the exact-PTS PNG playback cache; it does not acquire that cache's disk lock
+or perform its covering-frame probe. It does not extend the playback/export
+frame-accuracy contract to arbitrary codecs, VFR or unusual stream offsets.
+
+Waveforms use FFmpeg's `showwavespic` filter on the original source range, decoded
+as mono at 8 kHz. Leading stream offsets and silent tails retain their position.
+Each request is limited to 120 seconds and a 32-pixel-high image; only visible
+source chunks are requested.
+
+On macOS, eligible H.264/HEVC batches start with software decoding. After a
+software batch takes more than 100 ms, subsequent batches with the same source
+identity and sample spacing can try VideoToolbox. Recent measured decode costs
+select the faster path; an unsupported hardware request falls back to software.
+Single-frame library thumbnails and widely spaced timeline samples use software.
+This does not introduce a native Metal compositor or change export encoding.
+
+The renderer schedules at most two artwork requests at a time, prioritizes each
+visible clip's first image and removes obsolete queued work. Main independently
+admits at most two timeline-artwork requests and validates sender, asset ID,
+project ID, revision and bounded sampling parameters. Renderer-supplied filesystem
+paths are not accepted. Project changes cancel worker work and suppress late
+replies; reopening a project requires a fresh authorized lookup even if IDs match.
+The worker and renderer have separate fixed artwork caches; see
+[navigation artwork budgets and identity](MEDIA_CACHE.md#navigation-artwork).
+
 ## Diagnostics and verification
 
-Expand **Playback diagnostics** for current position/state, audible candidate count,
-visible-video frame callbacks (summed across layers), complete project-frame composite FPS, visible/painted layer counts, maximum composition submission time, last/maximum all-layer seek latency, visible and all-decoder dropped-frame deltas, late
-callbacks, waiting events, blank visual ticks, clock corrections, maximum tick gap,
-media/audio/presented-frame skew and browser output latency. Errors appear outside
-the disclosure too. Counters cover the current player lifetime and reset on a new
-snapshot or viewer re-entry. Hidden video decoders can discard frames while their
-audio continues; `decoderDroppedFrames` therefore includes work that is not a
+Expand **Playback diagnostics** for playback state, visible/painted layer counts,
+composite FPS, dropped/late frames, waiting events, last seek latency, maximum
+media skew and audio skew. The complete diagnostic record also includes audible
+candidate counts, frame callbacks, composition submission time, decoder drops,
+blank visual ticks, clock corrections, tick gaps, presented-frame skew and browser
+output latency. Errors appear outside the disclosure too. Counters cover the
+current player lifetime and reset on a new snapshot or viewer re-entry. Hidden
+video decoders can discard frames while their audio continues; `decoderDroppedFrames` therefore includes work that is not a
 visible preview drop. Callback lateness is `now > expectedDisplayTime + 2 ms`.
 These browser observations do not measure physical speaker/display latency.
+The disclosure shows readable measurements in a popover; complete diagnostic data
+remains available to automated checks in its `data-report` attribute, outside
+visible UI text.
 
 `pnpm test:desktop` includes `tests/desktop/timeline-playback.spec.ts`: actual T21
 cuts, gaps and mixing, continuous split playback, trimmed source mapping, emitted
@@ -107,6 +149,15 @@ Inputs are synthetic and owned under `tests/fixtures/generated/`; FFmpeg is need
 for marker generation and existing complete T21 assets are reused when available.
 Headless clock/evaluator tests run in `pnpm test`. Performance samples print in the
 test output and screenshots go to ignored `test-results/`; no source files change.
+
+The [Electron artwork regression](../tests/desktop/timeline-artwork.spec.ts)
+checks actual filmstrip/waveform pixels, trim updates, missing-media recovery and
+light/dark layouts. The [native thumbnail regression](../tests/integration/thumbnail.native.spec.ts)
+checks color transitions inside a sample interval, including a trimmed start,
+software/VideoToolbox requests and cached results. It must keep the first sample
+before a later cut; a `round=down` mutation fails this check. The
+[native waveform regression](../tests/integration/waveform.native.spec.ts) checks
+delayed stream starts, trimmed audio and silent tails against decoded pixels.
 
 ## Limits
 

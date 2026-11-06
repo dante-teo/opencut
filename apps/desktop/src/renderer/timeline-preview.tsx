@@ -1,3 +1,4 @@
+import { Play, Pause, StepBack, StepForward } from 'lucide-react';
 import type { DesktopCacheStatus } from '../bridge.js';
 import { MediaCacheControls } from './media-cache.js';
 import {
@@ -128,20 +129,26 @@ export function TimelinePreview({
           onClick={() => player.current?.step(-1)}
           aria-label="Previous frame"
         >
-          ◀│
+          <StepBack aria-hidden="true" />
         </button>
         <button
           disabled={interrupted || !project.clips.length}
           onClick={() => void player.current?.toggle()}
+          aria-label={diagnostics?.playing ? 'Pause' : 'Play'}
+          title={diagnostics?.playing ? 'Pause' : 'Play'}
         >
-          {diagnostics?.playing ? 'Pause' : 'Play'}
+          {diagnostics?.playing ? (
+            <Pause aria-hidden="true" />
+          ) : (
+            <Play aria-hidden="true" />
+          )}
         </button>
         <button
           disabled={interrupted}
           onClick={() => player.current?.step(1)}
           aria-label="Next frame"
         >
-          │▶
+          <StepForward aria-hidden="true" />
         </button>
         <output data-testid="project-position">
           {timelineTimecode(position, rate)} NDF
@@ -166,28 +173,40 @@ export function TimelinePreview({
           {diagnostics.unavailable.join('\n')}
         </p>
       )}
-      <MediaCacheControls project={project} onStatus={onCacheStatus} />
-      <details className="timeline-diagnostics">
-        <summary>Playback diagnostics</summary>
-        <p>
-          Ordered visual layers · Chromium decoding · Media skew is observed
-          timing, not speaker loopback.
-        </p>
-        {diagnostics && (
-          <>
-            <output>
-              {diagnostics.paintedLayers}/{diagnostics.visibleLayers} layers ·{' '}
-              {diagnostics.compositeFps.toFixed(1)} fps ·{' '}
-              {diagnostics.droppedFrames} dropped · {diagnostics.lateFrames}{' '}
-              late · {diagnostics.maxMediaSkewMs.toFixed(1)} ms maximum media
-              skew · {diagnostics.waitingEvents} waits
-            </output>
-            <pre data-testid="timeline-diagnostics">
-              {JSON.stringify(diagnostics, null, 2)}
-            </pre>
-          </>
-        )}
-      </details>
+      <div className="viewer-utilities">
+        <MediaCacheControls project={project} onStatus={onCacheStatus} />
+        <details name="viewer-utilities" className="timeline-diagnostics">
+          <summary>Playback diagnostics</summary>
+          <div className="viewer-utility-content">
+            <h3>Playback</h3>
+            {diagnostics && (
+              <>
+                <output>
+                  {diagnostics.paintedLayers}/{diagnostics.visibleLayers} layers
+                  · {diagnostics.compositeFps.toFixed(1)} fps ·{' '}
+                  {diagnostics.droppedFrames} dropped · {diagnostics.lateFrames}{' '}
+                  late · {diagnostics.maxMediaSkewMs.toFixed(1)} ms maximum
+                  media skew · {diagnostics.waitingEvents} waits
+                </output>
+                <dl
+                  data-testid="timeline-diagnostics"
+                  data-report={JSON.stringify(diagnostics)}
+                  className="diagnostic-values"
+                >
+                  <dt>State</dt>
+                  <dd>{diagnostics.playing ? 'Playing' : 'Paused'}</dd>
+                  <dt>Seek</dt>
+                  <dd>{diagnostics.lastSeekLatencyMs.toFixed(1)} ms</dd>
+                  <dt>Audio skew</dt>
+                  <dd>{diagnostics.maxAudioSkewMs.toFixed(1)} ms</dd>
+                  <dt>Waiting</dt>
+                  <dd>{diagnostics.waitingEvents}</dd>
+                </dl>
+              </>
+            )}
+          </div>
+        </details>
+      </div>
     </div>
   );
 }

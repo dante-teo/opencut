@@ -340,7 +340,8 @@ Electron main owns native privileges. React runs with `contextIsolation: true`,
 disabled. A bundled **CommonJS preload** exposes typed capabilities including:
 `getApplicationInfo()`, `openPreview()`, `getPreviewMetrics()`, `getProject()`,
 `createProject(input)`, `openProject()`, `saveProject()`, `closeProject()`,
-`previewAsset(assetId)`, `releasePreview(url)`, `chooseExportOutput()`,
+`previewAsset(assetId)`, `timelineArtwork(input)`, `releasePreview(url)`,
+`chooseExportOutput()`,
 `getExport()`, `startExport(input)`, `cancelExport(id)` and `onExportChanged(callback)`
 on `window.opencut`. ESM is used elsewhere. CommonJS here keeps
 Electron's renderer sandbox enabled; sandboxed preloads cannot use native ESM.
@@ -515,10 +516,17 @@ listener. Library drags have a distinct MIME type with project ID, revision and
 asset ID, while external Files are accepted only in the library. Timeline drop
 coordinates reuse the virtual scrollbar, track geometry and exact frame helpers.
 
-Video thumbnails use the headless bounded PNG cache through the media worker.
-Still-image thumbnails retain Electron's asynchronous native thumbnail service
-(macOS/Windows), with icon fallback on unavailable tools/formats/platforms.
-No video element is mounted solely for library thumbnails.
+Video library thumbnails and timeline filmstrips use the headless, bounded JPEG
+`ThumbnailCache` through the media worker, independently of playback PNG extraction.
+Nearby timeline samples share a small atlas. Still-image library thumbnails retain
+Electron's asynchronous native thumbnail service (macOS/Windows), with icon
+fallback on unavailable tools/formats/platforms. Timeline stills and audio
+waveforms also use worker-generated artwork; no media element is mounted solely
+for navigation images. `timelineArtwork(input)` accepts only a current asset ID,
+project/revision and bounded sampling parameters. Main resolves the source path;
+project changes cancel work and suppress stale completions. See the
+[artwork contract](TIMELINE_PLAYBACK.md#timeline-clip-artwork) and
+[separate cache budgets](MEDIA_CACHE.md#navigation-artwork).
 Audio/image source previews reuse the revocable
 single-source media protocol, with native audio controls or an image element;
 source previews remain separate from project compositing/playback. Hiding source
@@ -648,9 +656,9 @@ selection. T26 adds ordered Canvas video/image compositing using the shared head
 ## Proxy and cache ownership (T25–T26)
 
 `@opencut/media` owns `MediaCache`, source fingerprinting, verified FFmpeg proxies,
-PNG extraction, byte budgets, invalidation and disk eviction. Electron main forwards
-authorized asset IDs to a separate Node worker; it performs no cache hashing,
-transcoding or frame extraction. The CLI calls the same headless layer. Native
+PNG extraction, byte budgets, invalidation and disk eviction. Electron main
+validates asset IDs and resolves paths for a separate Node worker; main performs
+no cache hashing, transcoding or frame extraction. The CLI calls the same headless layer. Native
 Chromium decoding stays asynchronous in the existing player. No native bindings
 or new timeline operations are introduced. `lru-cache` supplies bounded PNG/source
 metadata caches; `proper-lockfile` coordinates disk writers, heartbeats and crash

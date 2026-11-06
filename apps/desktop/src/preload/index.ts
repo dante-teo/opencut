@@ -14,6 +14,7 @@ import {
   TIMELINE_PREVIEW_CHANNEL,
   MEDIA_CACHE_CHANNEL,
   TIMELINE_FRAME_CHANNEL,
+  TIMELINE_ARTWORK_CHANNEL,
   type DesktopAPI,
 } from '../bridge.js';
 
@@ -83,6 +84,8 @@ const api: DesktopAPI = {
     ipcRenderer.invoke(TIMELINE_PREVIEW_CHANNEL, input),
   mediaCache: (input) => ipcRenderer.invoke(MEDIA_CACHE_CHANNEL, input),
   timelineFrame: (input) => ipcRenderer.invoke(TIMELINE_FRAME_CHANNEL, input),
+  timelineArtwork: (input) =>
+    ipcRenderer.invoke(TIMELINE_ARTWORK_CHANNEL, input),
   releasePreview: (url) => ipcRenderer.invoke(RELEASE_PREVIEW_CHANNEL, url),
   getPreviewMetrics: () => ipcRenderer.invoke(PREVIEW_METRICS_CHANNEL),
 };

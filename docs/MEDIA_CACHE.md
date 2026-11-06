@@ -37,6 +37,9 @@ mapping; it never substitutes original bytes into a proxy byte-range response.
 
 ## Identity, storage and invalidation
 
+These identity/storage rules apply to persisted proxy and PNG entries.
+[Navigation artwork](#navigation-artwork) has a separate in-memory lifetime.
+
 Source identity combines SHA-256 of the entire source with its real path, device,
 inode, size, nanosecond mtime/ctime and normalized media metadata. A bounded 64-source
 metadata LRU avoids rehashing unchanged identities during one process lifetime.
@@ -82,8 +85,8 @@ cause useful derivatives to be regenerated. Cache maintenance may evict a grante
 proxy; the media-error path falls back to its original.
 
 640×360-or-smaller PNG frames are cached on disk and in a byte-bounded `lru-cache`
-(at most 256 buffers). Library video thumbnails reuse this cache. On a cache miss,
-ffprobe reads a seek-local interval and returns integer presentation timestamps in
+(at most 256 buffers). This exact-PTS cache serves playback and CLI frame requests.
+On a cache miss, ffprobe reads a seek-local interval and returns integer presentation timestamps in
 the source time base, bounded to 4 MiB output, 60 seconds and two decoder threads.
 The last presentation timestamp at or before the requested instant identifies the
 covering frame; source FPS is not used to guess VFR boundaries. Extraction seeks
@@ -116,6 +119,29 @@ splits share one decoder. Leaving a run/viewer or changing a project unloads med
 disconnects audio nodes and releases grants. Cache work stays in a Node worker;
 FFmpeg executes outside Electron main/renderer.
 
+## Navigation artwork
+
+Library video thumbnails and timeline filmstrips use `ThumbnailCache`, a separate
+in-memory JPEG LRU capped at 8 MiB and 128 entries in the media worker. Its keys
+include resolved source path, device/inode, size, mtime/ctime, requested source
+time, batch size, sample interval and decoder options. File identity is checked
+before lookup and after decoding; a source changed during decoding is not cached.
+These small navigation images do not use the persistent proxy/PNG directory,
+whole-source hashing or its cross-process lock. Clearing the worker cache clears
+this JPEG cache and its transient decoder-selection measurements too.
+
+The renderer separately retains up to 8 MiB / 128 encoded artwork entries,
+including waveform images. Project snapshots distinguish reopened/copied projects
+that reuse IDs and relative paths. These fixed budgets are independent of the
+configurable PNG limit and are not included in the disk/PNG usage counters shown
+by **Proxy & cache** or CLI cache status. They are not a process RSS limit.
+
+Nearby filmstrip samples share a small atlas; waveforms decode only visible source
+chunks. Failed or obsolete requests are not cached as successful artwork. All of
+this is preview-only: originals, project data and export paths are unchanged.
+See [timeline artwork](TIMELINE_PLAYBACK.md#timeline-clip-artwork) for sampling,
+waveform limits, VideoToolbox selection and the security boundary.
+
 ## Management and measurement
 
 Expand **Proxy & cache** in Project viewer for use toggle, disk/PNG usage, jobs and
@@ -140,7 +166,18 @@ Behavioral coverage is separate from performance measurement:
   are checked independently.
 - `pnpm test:desktop` includes [proxy/cache controls](../tests/desktop/cache.spec.ts),
   fallback and same-key regeneration, plus persisted limits on the initial player
-  and changed limits during its lifetime.
+  and changed limits during its lifetime. The [artwork regression](../tests/desktop/timeline-artwork.spec.ts)
+  checks the actual displayed filmstrip/waveform pixels and layout.
+- `pnpm test:media` also includes [thumbnail timing and decode-cost checks](../tests/integration/thumbnail.native.spec.ts)
+  and [waveform timing checks](../tests/integration/waveform.native.spec.ts).
+  Thumbnail measurements use a newly generated eight-second 3840×2160/30 fps
+  H.264 source (`libx264`, ultrafast, CRF 28, two encoder threads), sampling every
+  0.9 seconds from 0 through 6.3 seconds. They compare the playback PNG path,
+  individual JPEGs, and four-sample software or VideoToolbox atlases. Source bytes
+  are checked before/after; warm JPEG cache timings are separate. The paths produce
+  different formats/sizes, so this measures navigation-pipeline cost rather than
+  isolated decoder throughput, whole-editor speed or a hardware-independent
+  performance guarantee.
 
 `pnpm benchmark:t25` builds and runs a dedicated visible Electron benchmark. It
 generates new eight-second 1080p and 4K H.264/AAC synthetic sources with GOP 120,

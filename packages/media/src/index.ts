@@ -35,3 +35,7 @@ export type {
   CacheControls,
   ProxyResult,
 } from './cache.js';
+
+export { waveformImage } from './waveform.js';
+export { ThumbnailCache } from './thumbnail.js';
+export type { ThumbnailResult } from './thumbnail.js';

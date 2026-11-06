@@ -8,6 +8,8 @@ import {
   type RationalTime,
   type TimelineClip,
 } from '@opencut/core';
+import { Scissors, Trash2, Clapperboard } from 'lucide-react';
+import { ClipArtwork } from './clip-artwork.js';
 import { ASSET_DRAG_TYPE, readAssetDrag } from './media-library.js';
 import type { AssetClipInput, TimelineOperation } from '../bridge.js';
 import {
@@ -472,14 +474,18 @@ export function ProjectTimeline({
           <button
             disabled={disabled || !canSplit || !!proposal}
             onClick={splitSelected}
+            aria-label="Split at playhead"
+            title="Split at playhead (S)"
           >
-            Split at playhead
+            <Scissors aria-hidden="true" /> Split
           </button>
           <button
             disabled={disabled || !selectedClip || !!proposal}
             onClick={deleteSelected}
+            aria-label="Delete clip"
+            title="Delete clip (Delete)"
           >
-            Delete clip
+            <Trash2 aria-hidden="true" />
           </button>
           <label>
             <input
@@ -516,10 +522,12 @@ export function ProjectTimeline({
             {timelineTimecode(position, rate)} NDF
           </output>
           <button
+            aria-label="Preview selected clip"
+            title="Preview selected clip"
             disabled={!previewable}
             onClick={() => selectedClip && onPreviewClip?.(selectedClip.id)}
           >
-            Preview selected clip
+            <Clapperboard aria-hidden="true" />
           </button>
           <button
             aria-label="Zoom out"
@@ -823,11 +831,25 @@ export function ProjectTimeline({
                             height="52"
                             overflow="hidden"
                           >
-                            <text x="10" y="22">
-                              {asset?.name ?? clip.assetId}
-                            </text>
-                            <text className="clip-id" x="10" y="40">
-                              {clip.id}
+                            <ClipArtwork
+                              project={project}
+                              clip={clip}
+                              asset={asset}
+                              audio={track.type === 'audio'}
+                              offset={Math.max(
+                                0,
+                                x -
+                                  relativePixels(
+                                    clip.timelineStart,
+                                    origin,
+                                    zoom,
+                                  ),
+                              )}
+                              width={Math.max(0, clipWidth - 2)}
+                              zoom={zoom}
+                            />
+                            <text className="clip-name" x="8" y="14">
+                              {asset?.name ?? 'Missing media'}
                             </text>
                           </svg>
                           {(['left', 'right'] as const).map((edge) => {

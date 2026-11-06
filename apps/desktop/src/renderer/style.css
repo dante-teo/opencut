@@ -15,9 +15,6 @@
   --audio-clip: #bfe6da;
   --clip-text: #302647;
   --stage: #17151f;
-  --radius-control: 10px;
-  --radius-card: 14px;
-  --radius-panel: 20px;
   --radius-dialog: 26px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   color: var(--text);
@@ -125,11 +122,9 @@ header * {
   app-region: drag;
 }
 .mark {
-  display: grid;
   place-items: center;
   width: 26px;
   height: 26px;
-  border: 1px solid var(--accent-border);
   border-radius: var(--radius-control);
   color: var(--accent);
   font-size: 10px;
@@ -155,13 +150,10 @@ header * {
   flex-shrink: 0;
 }
 .project-title {
-  display: flex;
   align-items: center;
-  gap: 9px;
   min-width: 0;
 }
 .project-title h1 {
-  font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -169,7 +161,6 @@ header * {
 }
 .project-save-state {
   color: var(--muted);
-  font-size: 10px;
   white-space: nowrap;
 }
 .save-indicator,
@@ -220,7 +211,6 @@ header * {
   flex-direction: column;
 }
 .panel-heading {
-  min-height: 46px;
   padding: 0 14px;
   border-bottom: 1px solid var(--line);
   display: flex;
@@ -241,10 +231,7 @@ header * {
   align-items: center;
   flex-direction: column;
   justify-content: center;
-  min-height: 200px;
   height: 100%;
-  padding: 24px;
-  gap: 12px;
   text-align: center;
 }
 .library-empty h3 {
@@ -253,7 +240,6 @@ header * {
 }
 .library-empty p {
   color: var(--muted);
-  font-size: 12px;
   line-height: 1.7;
 }
 .asset-list {
@@ -267,7 +253,6 @@ header * {
   gap: 10px;
   width: 100%;
   text-align: left;
-  padding: 8px;
   background: transparent;
   border-color: transparent;
 }
@@ -276,13 +261,10 @@ header * {
   border-color: var(--accent-border);
 }
 .asset-icon {
-  width: 46px;
-  height: 40px;
   flex-shrink: 0;
   background: var(--panel-alt);
   color: var(--accent);
   border: 1px solid var(--line);
-  border-radius: 4px;
   display: grid;
   place-items: center;
   font-size: 24px;
@@ -298,13 +280,11 @@ header * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
   font-weight: 500;
 }
 .asset-label small {
   display: block;
   color: var(--muted);
-  font-size: 10px;
   margin-top: 5px;
 }
 .asset-availability {
@@ -319,16 +299,11 @@ header * {
 }
 .viewer-tabs [role='tablist'] {
   display: flex;
-  height: 40px;
-  gap: 20px;
 }
 .viewer-tabs button {
   border: 0;
-  border-radius: 0;
-  padding: 0 2px;
   background: none;
   color: var(--muted);
-  font-size: 12px;
 }
 .project-viewer {
   display: flex;
@@ -352,7 +327,6 @@ header * {
   color: #c1b9d1;
   display: grid;
   justify-items: center;
-  gap: 10px;
   font-size: 11px;
 }
 .viewer-caption {
@@ -365,13 +339,7 @@ header * {
   color: var(--muted);
   font-size: 10px;
 }
-.inspector-content {
-  padding: 16px;
-}
-.inspector-content h3 {
-  margin-bottom: 16px;
-}
-.inspector-content h3:not(:first-child) {
+.clip-properties h3:not(:first-of-type) {
   padding-top: 16px;
   border-top: 1px solid var(--line);
 }
@@ -399,7 +367,6 @@ dd {
   margin-bottom: 20px;
 }
 .timeline-panel {
-  height: clamp(190px, 31vh, 340px);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -447,11 +414,8 @@ dd {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
 }
 .timeline-controls output {
-  margin: 0 8px 0 0;
-  font-size: 12px;
   white-space: nowrap;
 }
 .timeline-controls button,
@@ -494,7 +458,6 @@ dd {
   gap: 10px;
   background: var(--panel);
   border-right: 1px solid var(--line);
-  padding: 10px 14px;
   min-width: 0;
 }
 .track-heading strong {
@@ -507,7 +470,6 @@ dd {
   display: block;
   color: var(--muted);
   font-size: 10px;
-  margin-top: 5px;
 }
 .track-badge {
   border-radius: 4px;
@@ -572,10 +534,6 @@ dd {
     sans-serif;
   pointer-events: none;
 }
-.timeline-clip .clip-id {
-  font-size: 10px;
-  opacity: 0.7;
-}
 .empty-lane-label {
   fill: var(--muted);
   font:
@@ -601,7 +559,6 @@ dd {
 }
 .timeline-footer {
   padding: 7px 14px;
-  font-size: 10px;
   color: var(--muted);
   border-top: 1px solid var(--line);
 }
@@ -609,26 +566,19 @@ dd {
   display: flex;
   align-items: center;
   gap: 7px;
-  min-height: 25px;
   margin: 0;
-  padding: 5px 14px;
   color: var(--muted);
-  font-size: 10px;
   flex-shrink: 0;
-  border-top: 1px solid var(--line);
 }
 .dot {
   width: 5px;
   height: 5px;
-  background: var(--accent);
 }
 .new-project-dialog {
   width: min(480px, calc(100vw - 40px));
-  padding: 26px;
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: var(--radius-panel);
   box-shadow: 0 24px 80px #0005;
 }
 .new-project-dialog h2 {
@@ -751,7 +701,6 @@ output {
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 6px;
@@ -778,14 +727,6 @@ output {
 .measurements {
   margin: 16px 0;
   font-size: 11px;
-}
-pre {
-  overflow: auto;
-  max-height: 280px;
-  padding: 10px;
-  margin: 0;
-  background: var(--note-background);
-  font-size: 10px;
 }
 @media (max-width: 1000px) {
   .editor-panels {
@@ -869,7 +810,6 @@ pre {
 }
 .library-panel .panel-heading {
   gap: 6px;
-  flex-wrap: wrap;
 }
 .new-track-targets {
   display: flex;
@@ -878,8 +818,6 @@ pre {
 }
 .new-track-targets > div {
   border: 1px dashed currentColor;
-  border-radius: 4px;
-  padding: 1px 5px;
 }
 
 .simple-source-preview img {
@@ -894,7 +832,6 @@ pre {
 .timeline-title {
   display: flex;
   align-items: center;
-  gap: 12px;
 }
 
 .asset-list button[draggable='true'] {
@@ -946,7 +883,6 @@ button {
   letter-spacing: -0.3px;
 }
 .project-save-state {
-  width: 100%;
   padding-left: 14px;
   font-size: 10px;
 }
@@ -1016,7 +952,6 @@ button {
 }
 .library-search select {
   border: 0;
-  padding: 3px 0;
   background: transparent;
 }
 .library-empty {
@@ -1088,8 +1023,6 @@ button {
 }
 .studio-art {
   position: relative;
-  width: 100px;
-  height: 75px;
   margin-bottom: 10px;
 }
 .viewer-caption {
@@ -1107,10 +1040,6 @@ button {
 .inspector-content h3 {
   font-size: 11px;
   margin-bottom: 12px;
-}
-.inspector-content dl {
-  font-size: 10px;
-  gap: 12px 8px;
 }
 .inspector-content dd {
   font-variant-numeric: tabular-nums;
@@ -1133,7 +1062,6 @@ button {
 }
 .clip-property label {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 94px;
   align-items: center;
   gap: 8px;
   font-size: 11px;
@@ -1162,16 +1090,11 @@ button {
   line-height: 1.5;
   color: var(--muted);
 }
-.timeline-heading {
-  gap: 8px;
-  padding: 10px 14px;
-}
 .timeline-title {
   gap: 14px;
 }
 .timeline-controls {
   width: 100%;
-  gap: 8px;
 }
 .timeline-controls output {
   color: var(--accent);
@@ -1195,9 +1118,6 @@ button {
   border-color: var(--line);
   padding: 3px 8px;
   border-radius: 6px;
-}
-.timeline-footer {
-  font-size: 9px;
 }
 .status {
   border-top: 0;
@@ -1397,7 +1317,6 @@ button {
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  overflow: auto;
 }
 .timeline-stage {
   flex: 1;
@@ -1440,11 +1359,6 @@ button {
   padding: 0 12px 8px;
   font-size: 11px;
   color: var(--muted);
-}
-.timeline-diagnostics pre {
-  max-height: 100px;
-  overflow: auto;
-  user-select: text;
 }
 
 .media-cache-controls {
@@ -1553,4 +1467,290 @@ button {
   border-radius: var(--radius-control);
   color: var(--text);
   background: var(--panel-alt);
+}
+
+/* Shared control sizing keeps headings, fields, and toolbars on the same grid. */
+:root {
+  --radius-control: 6px;
+  --radius-card: 8px;
+  --radius-panel: 10px;
+}
+.panel-heading {
+  min-height: 44px;
+}
+.library-panel .panel-heading {
+  flex-wrap: nowrap;
+}
+.project-title {
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr);
+  gap: 3px 8px;
+}
+.project-title h1 {
+  grid-column: 2;
+}
+.project-save-state {
+  grid-column: 2;
+  width: auto;
+  padding: 0;
+}
+.project-title .save-indicator {
+  grid-column: 1;
+  grid-row: 1;
+}
+.library-search {
+  grid-template-columns: minmax(0, 1fr) 76px;
+  align-items: center;
+}
+.library-search select {
+  padding: 7px 3px;
+}
+.inspector-content {
+  padding: 16px;
+}
+.inspector-content h3 {
+  margin: 4px 0 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.inspector-content dl {
+  grid-template-columns: minmax(70px, 0.8fr) minmax(0, 1.2fr);
+  gap: 9px 10px;
+  font-size: 11px;
+}
+.inspector-content dd {
+  min-width: 0;
+}
+.clip-property label {
+  grid-template-columns: minmax(0, 1fr) 80px;
+  line-height: 1.5;
+}
+.clip-property input[type='number'] {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--background);
+  color: var(--text);
+  height: 30px;
+}
+.project-information {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.project-information summary,
+.asset-information summary {
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+.timeline-panel {
+  height: clamp(240px, 34vh, 380px);
+}
+.timeline-heading {
+  display: grid;
+  justify-content: stretch;
+  gap: 8px;
+  padding: 10px 14px;
+}
+.timeline-title {
+  justify-content: space-between;
+  min-width: 0;
+}
+.timeline-title h2 {
+  white-space: nowrap;
+}
+.timeline-controls {
+  gap: 6px;
+}
+.timeline-controls button,
+.timeline-controls select,
+.timeline-controls input[type='number'] {
+  height: 26px;
+  border-radius: 5px;
+}
+.timeline-controls label {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  white-space: nowrap;
+}
+.timeline-controls input[type='checkbox'] {
+  margin: 0;
+}
+.timeline-controls select {
+  padding: 0 5px;
+}
+.timeline-controls output {
+  margin: 0 6px 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+.timeline-footer {
+  font-size: 10px;
+  line-height: 1.4;
+}
+.track-heading {
+  padding: 8px 12px;
+}
+.track-heading small {
+  margin-top: 3px;
+  text-transform: capitalize;
+}
+.timeline-clip > rect:first-of-type {
+  fill: var(--video-clip);
+}
+.timeline-clip.audio > rect:first-of-type {
+  fill: var(--audio-clip);
+}
+.clip-artwork {
+  pointer-events: none;
+}
+.clip-artwork-tile {
+  background: #0001;
+}
+.timeline-clip .clip-name {
+  font-size: 10px;
+  font-weight: 550;
+}
+.timeline-clip .artwork-placeholder {
+  fill: var(--clip-text);
+  opacity: 0.65;
+  font-size: 9px;
+}
+.timeline-clip:focus-visible > rect:first-of-type {
+  stroke: var(--accent);
+  stroke-width: 2px;
+}
+.timeline-player {
+  overflow: hidden;
+  position: relative;
+}
+.timeline-player > .transport {
+  display: grid;
+  grid-template-columns: 28px 52px 28px minmax(100px, 1fr);
+  gap: 6px;
+  padding: 10px 12px 6px;
+  margin: 0;
+}
+.timeline-player > .transport button {
+  height: 28px;
+  padding: 0;
+}
+.timeline-player > .transport output {
+  text-align: right;
+  margin: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+.timeline-player > .transport input {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-width: 0;
+  margin: 5px 0 0;
+  accent-color: var(--accent);
+}
+.viewer-utilities {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 12px 10px;
+  flex-shrink: 0;
+}
+.viewer-utilities > details {
+  margin: 0;
+  padding: 0;
+  font-size: 10px;
+  color: var(--muted);
+}
+.viewer-utilities summary {
+  cursor: pointer;
+  white-space: nowrap;
+}
+.viewer-utility-content {
+  position: absolute;
+  right: 10px;
+  bottom: 64px;
+  z-index: 8;
+  width: min(360px, calc(100% - 20px));
+  max-height: calc(100% - 80px);
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px #0003;
+  color: var(--text);
+}
+.viewer-utility-content h3 {
+  font-size: 12px;
+  margin-bottom: 14px;
+}
+.viewer-utility-content output {
+  margin: 10px 0;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.viewer-utility-content .transport {
+  justify-content: flex-start;
+  padding: 0;
+}
+.viewer-utility-content label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.viewer-utility-content input[type='number'] {
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--background);
+}
+.diagnostic-values {
+  grid-template-columns: 1fr auto;
+  margin: 12px 0 0;
+  gap: 8px;
+}
+@media (max-width: 1000px) {
+  .editor-panels {
+    grid-template-columns: 200px minmax(0, 1fr) 220px;
+  }
+  .timeline-controls {
+    gap: 5px;
+  }
+  .timeline-controls button {
+    padding: 4px 6px;
+  }
+}
+@media (max-width: 800px) {
+  .editor-panels {
+    grid-template-columns: 170px minmax(230px, 1fr) 200px;
+  }
+  .library-search {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+  .timeline-controls output {
+    margin-left: 0;
+  }
+  .viewer-utilities {
+    gap: 8px;
+    justify-content: center;
+  }
+}
+@media (max-height: 650px) {
+  .timeline-panel {
+    height: 240px;
+  }
+}
+
+.library-actions .remove-asset-button {
+  flex: 0 0 30px;
+}
+.library-actions .remove-asset-button .lucide {
+  margin: 0;
+}
+.library-actions .import-button {
+  white-space: nowrap;
 }

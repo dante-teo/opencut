@@ -506,12 +506,12 @@ export function VideoPreview({
                   {report.playback.droppedPercent.toFixed(2)}%) ·{' '}
                   {report.playback.waitingEvents} waiting events
                 </p>
-                <details>
-                  <summary>Measurement JSON</summary>
-                  <pre data-testid="benchmark-result">
-                    {JSON.stringify(report, null, 2)}
-                  </pre>
-                </details>
+                <output
+                  data-testid="benchmark-result"
+                  data-report={JSON.stringify(report)}
+                >
+                  Performance validation complete
+                </output>
               </div>
             )}
           </div>

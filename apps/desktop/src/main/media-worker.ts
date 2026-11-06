@@ -1,12 +1,15 @@
 import { parentPort } from 'node:worker_threads';
 import {
   MediaCache,
+  waveformImage,
+  ThumbnailCache,
   type CacheLimits,
   type ProxyResult,
   type RenderProgress,
 } from '@opencut/media';
 
 const cache = new MediaCache();
+const thumbnails = new ThumbnailCache();
 interface ProxyJob {
   state:
     'queued' | 'generating' | 'ready' | 'original' | 'failed' | 'cancelled';
@@ -88,6 +91,11 @@ parentPort!.on(
     path?: string;
     auto?: boolean;
     timestamp?: number;
+    duration?: number;
+    width?: number;
+    hardware?: boolean;
+    count?: number;
+    interval?: number;
     limits?: CacheLimits;
   }) => {
     void (async () => {
@@ -150,6 +158,7 @@ parentPort!.on(
         value = null;
       } else if (request.method === 'clear') {
         await cancel();
+        thumbnails.clear();
         jobs.clear();
         value = await cache.clear();
       } else if (request.method === 'cleanup') {
@@ -161,16 +170,38 @@ parentPort!.on(
       } else if (request.method === 'enable') {
         enabled = request.auto!;
         value = null;
-      } else if (request.method === 'frame') {
+      } else if (['thumbnail', 'waveform', 'frame'].includes(request.method)) {
         const controller = new AbortController();
-        const work = cache.frame(
-          request.path!,
-          request.timestamp!,
-          controller.signal,
-        );
+        let work: Promise<Buffer>;
+        if (request.method === 'thumbnail') {
+          work = thumbnails
+            .get(request.path!, request.timestamp!, {
+              hardware: request.hardware ?? false,
+              adaptive: true,
+              count: request.count ?? 1,
+              interval: request.interval ?? 0,
+              signal: controller.signal,
+            })
+            .then((result) => result.bytes);
+        } else if (request.method === 'waveform') {
+          work = waveformImage(
+            request.path!,
+            request.timestamp!,
+            request.duration!,
+            request.width!,
+            controller.signal,
+          );
+        } else {
+          work = cache.frame(
+            request.path!,
+            request.timestamp!,
+            controller.signal,
+          );
+        }
         requests.set(controller, work);
         try {
-          value = `data:image/png;base64,${(await work).toString('base64')}`;
+          const format = request.method === 'thumbnail' ? 'jpeg' : 'png';
+          value = `data:image/${format};base64,${(await work).toString('base64')}`;
         } finally {
           requests.delete(controller);
         }

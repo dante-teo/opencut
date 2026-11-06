@@ -149,7 +149,21 @@ any failed file leaves the batch unchanged. Unsaved projects can import before
 saving; these assets use absolute paths that remain absolute after saving.
 Undo/redo refreshes changed asset availability even before the first save;
 restored readable assets can be dragged again, while missing sources remain offline.
-The library shows type, duration and cached video thumbnails with FFmpeg; stills use the native thumbnail service where available, with icon fallback.
+The library shows type, duration and small cached video thumbnails with FFmpeg;
+stills use the native thumbnail service where available, with icon fallback.
+Timeline clips show source-aligned video/still filmstrips and real audio waveforms
+with FFmpeg. Artwork follows trims, splits, scroll and zoom, loads only in the
+visible area, and labels unavailable media. It identifies original source content;
+it does not apply clip transforms, opacity or audio gain/mute. Nearby filmstrip
+samples are batched without moving later frames into earlier sample slots.
+Eligible macOS H.264/HEVC batches can select VideoToolbox when measurements favor
+it; hardware decoding is not forced for every thumbnail. See
+[artwork behavior](../../docs/TIMELINE_PLAYBACK.md#timeline-clip-artwork) and
+[navigation caches](../../docs/MEDIA_CACHE.md#navigation-artwork).
+Playback/cache disclosures open over the viewer; diagnostics and source performance
+results show readable measurements rather than raw JSON. Frame-aligned inspector
+timing uses project timecode; a source range with an off-grid endpoint keeps both
+endpoints as exact rational seconds.
 Select video/audio/image assets for source preview; browser codec support applies.
 Switching to Project viewer pauses audio, and replacing a source unloads the old
 media element. Drag library assets to compatible timeline lanes or **+ Video track** / **+ Audio
@@ -159,7 +173,7 @@ five seconds. A new track and clip form one undoable edit. Incompatible or
 overlapping drops fail without edits. External files must first enter the library.
 Select an unused asset, then **Remove asset**; referenced assets are protected.
 Save/reopen and use CLI `media list` / `timeline list` to inspect saved GUI edits.
-Waveforms, advanced library organization and transitions remain unavailable.
+Advanced library organization and transitions remain unavailable.
 
 T20 adds contextual clip properties in the inspector. Timing uses whole project
 frames (timeline position, duration, source in/out); audio uses linear volume 0–1

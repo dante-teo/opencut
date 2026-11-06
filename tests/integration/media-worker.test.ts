@@ -6,11 +6,16 @@ const mock = vi.hoisted(() => ({
   select: vi.fn(),
   generateProxy: vi.fn(),
   status: vi.fn(),
+  waveformImage: vi.fn(),
 }));
 vi.mock('node:worker_threads', () => ({
   parentPort: { on: mock.on, postMessage: mock.postMessage },
 }));
 vi.mock('../../packages/media/dist/index.js', () => ({
+  waveformImage: mock.waveformImage,
+  ThumbnailCache: class {
+    clear = vi.fn();
+  },
   MediaCache: class {
     select = mock.select;
     generateProxy = mock.generateProxy;
@@ -109,4 +114,28 @@ it('allows a new selection while invalidated work is still finishing cancellatio
   await vi.waitFor(async () =>
     expect((await request('status')).jobs[0].state).toBe('ready'),
   );
+});
+
+it('cancels waveform generation when a project snapshot is invalidated', async () => {
+  let signal: AbortSignal | undefined;
+  mock.waveformImage.mockImplementation(
+    (_path, _start, _duration, _width, abort: AbortSignal) =>
+      new Promise((_resolve, reject) => {
+        signal = abort;
+        abort.addEventListener('abort', () => reject(new Error('cancelled')), {
+          once: true,
+        });
+      }),
+  );
+  const work = request('waveform', {
+    path: '/source.wav',
+    timestamp: 2,
+    duration: 4,
+    width: 320,
+  });
+  const rejected = expect(work).rejects.toThrow('cancelled');
+  await vi.waitFor(() => expect(signal).toBeDefined());
+  await request('invalidate');
+  await rejected;
+  expect(signal!.aborted).toBe(true);
 });

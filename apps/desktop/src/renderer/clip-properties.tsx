@@ -199,7 +199,7 @@ export function ClipProperties({
   return (
     <fieldset className="clip-properties" disabled={disabled}>
       <legend>Clip properties</legend>
-      <p>Enter or leave a field to apply. Sliders apply on release.</p>
+      <p>Enter to apply. Sliders apply on release.</p>
       <h3>Timing · project frames</h3>
       {start !== null &&
         field('Timeline position', start, 0, maximum, (at) => ({

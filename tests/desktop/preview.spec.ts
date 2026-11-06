@@ -131,7 +131,7 @@ test('preview IPC rejects another window even at the trusted application URL', a
         try {
           await other.loadURL('opencut://app/index.html');
           return (await other.webContents
-            .executeJavaScript(`Promise.all(['openPreview', 'getPreviewMetrics', 'previewAsset', 'releasePreview', 'timelinePreview', 'mediaCache', 'timelineFrame'].map(async method => {
+            .executeJavaScript(`Promise.all(['openPreview', 'getPreviewMetrics', 'previewAsset', 'releasePreview', 'timelinePreview', 'mediaCache', 'timelineFrame', 'timelineArtwork'].map(async method => {
           try { await window.opencut[method](); return 'allowed'; }
           catch (error) { return error.message; }
         }))`)) as string[];
@@ -141,7 +141,7 @@ test('preview IPC rejects another window even at the trusted application URL', a
       },
       resolve('apps/desktop/dist/preload/index.cjs'),
     );
-    expect(rejected).toHaveLength(7);
+    expect(rejected).toHaveLength(8);
     for (const message of rejected)
       expect(message).toContain('Untrusted IPC sender');
   } finally {
@@ -271,7 +271,9 @@ test('pending import excludes validation and the replacement player can validate
     const output = page.getByTestId('benchmark-result');
     await expect(output).toBeAttached({ timeout: 20000 });
     expect(
-      JSON.parse((await output.textContent())!) as { seek: { count: number } },
+      JSON.parse((await output.getAttribute('data-report'))!) as {
+        seek: { count: number };
+      },
     ).toHaveProperty('seek.count', 30);
     await expect(open).toBeEnabled();
     await expect(

@@ -219,7 +219,9 @@ test('T25 original/proxy timeline seek and playback benchmark', async () => {
             .getByRole('slider', { name: 'Seek timeline', exact: true })
             .fill('0');
           const before: TimelineDiagnostics = JSON.parse(
-            (await page.getByTestId('timeline-diagnostics').textContent())!,
+            (await page
+              .getByTestId('timeline-diagnostics')
+              .getAttribute('data-report'))!,
           );
           await page
             .locator('#project-viewer')
@@ -242,7 +244,9 @@ test('T25 original/proxy timeline seek and playback benchmark', async () => {
             .getByRole('button', { name: 'Pause', exact: true })
             .click();
           const after: TimelineDiagnostics = JSON.parse(
-            (await page.getByTestId('timeline-diagnostics').textContent())!,
+            (await page
+              .getByTestId('timeline-diagnostics')
+              .getAttribute('data-report'))!,
           );
           const wallSeconds = (performance.now() - playbackStarted) / 1000;
           results.push({

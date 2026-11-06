@@ -38,6 +38,7 @@ import {
   TIMELINE_PREVIEW_CHANNEL,
   MEDIA_CACHE_CHANNEL,
   TIMELINE_FRAME_CHANNEL,
+  TIMELINE_ARTWORK_CHANNEL,
   type PreviewSource,
 } from '../bridge.js';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -457,9 +458,10 @@ app
         if (!asset.mediaTypes.includes('video')) return null;
         if (asset.metadata?.kind === 'video') {
           try {
-            const result = await mediaClient!.request<string>('frame', {
+            const result = await mediaClient!.request<string>('thumbnail', {
               path,
               timestamp: 0,
+              hardware: false,
             });
             if ((await projectSession.libraryAsset(args[0])).path !== path)
               return null;
@@ -619,6 +621,91 @@ app
         return mediaClient!.request('generate', { path });
       }
       throw new Error('Invalid cache request.');
+    });
+    // Artwork has its own admission limit, so it cannot consume paused playback slots.
+    let pendingArtwork = 0;
+    ipcMain.handle(TIMELINE_ARTWORK_CHANNEL, async (event, input: unknown) => {
+      assertSender(event);
+      if (!input || typeof input !== 'object')
+        throw new Error('Invalid artwork request.');
+      const value = input as Record<string, unknown>;
+      if (
+        Object.keys(value)
+          .filter((key) => !['count', 'interval'].includes(key))
+          .sort()
+          .join(',') !==
+          'assetId,duration,expectedRevision,kind,projectId,start,width' ||
+        (value.count !== undefined &&
+          (typeof value.count !== 'number' ||
+            !Number.isInteger(value.count) ||
+            value.count < 1 ||
+            value.count > 4)) ||
+        (value.interval !== undefined &&
+          (typeof value.interval !== 'number' ||
+            !Number.isFinite(value.interval) ||
+            value.interval <= 0 ||
+            value.interval > 1.5)) ||
+        (Number(value.count ?? 1) > 1 && value.interval === undefined) ||
+        !['frame', 'waveform'].includes(String(value.kind)) ||
+        (value.kind === 'waveform' &&
+          (value.count !== undefined || value.interval !== undefined)) ||
+        typeof value.start !== 'number' ||
+        !Number.isFinite(value.start) ||
+        value.start < 0 ||
+        typeof value.duration !== 'number' ||
+        !Number.isFinite(value.duration) ||
+        value.duration <= 0 ||
+        value.duration > 120 ||
+        typeof value.width !== 'number' ||
+        !Number.isInteger(value.width) ||
+        value.width < 1 ||
+        value.width > 2048
+      )
+        throw new Error('Invalid artwork request.');
+      if (pendingArtwork >= 2) return null;
+      const generation = timelineGeneration;
+      const current = await projectSession.run('current');
+      if (
+        !current.ok ||
+        !current.state ||
+        value.projectId !== current.state.project.metadata.id ||
+        value.expectedRevision !== projectRevision(current.state.project)
+      )
+        return null;
+      const { asset, path } = await projectSession.libraryAsset(value.assetId);
+      if (
+        !asset.mediaTypes.includes(
+          value.kind === 'waveform' ? 'audio' : 'video',
+        )
+      )
+        return null;
+      assertSender(event);
+      if (generation !== timelineGeneration || pendingArtwork >= 2) return null;
+      pendingArtwork++;
+      try {
+        const result = await mediaClient!.request<string>(
+          value.kind === 'waveform' ? 'waveform' : 'thumbnail',
+          {
+            path,
+            timestamp: value.start,
+            count: value.count ?? 1,
+            interval: value.interval ?? 0,
+            hardware:
+              Number(value.count ?? 1) > 1 &&
+              !!asset.metadata &&
+              demandingMedia(asset.metadata) &&
+              ['h264', 'hevc'].includes(asset.metadata.videoCodec ?? ''),
+            duration: value.duration,
+            width: value.width,
+          },
+        );
+        assertSender(event);
+        return generation === timelineGeneration ? result : null;
+      } catch {
+        return null;
+      } finally {
+        pendingArtwork--;
+      }
     });
     let pendingFrames = 0;
     ipcMain.handle(TIMELINE_FRAME_CHANNEL, async (event, input: unknown) => {

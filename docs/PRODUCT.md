@@ -7,7 +7,9 @@ provides project management, a media library, timeline editing, clip properties,
 shared undo/redo and [local video export](EXPORT.md). Single-source preview can
 link to an individual video clip;
 Project viewer plays edited cuts, gaps and synchronized multi-track audio.
-Project viewer composites ordered video/image layers with position, scale, opacity, fitting and canvas alpha.
+Project viewer composites ordered video/image layers with position, scale, opacity,
+fitting and canvas alpha. Timeline clips now show source filmstrips and audio
+waveforms, with visible-area loading and bounded navigation caches.
 
 ## Two equally important workflows
 
@@ -156,8 +158,9 @@ and resets on project replacement.
 Horizontal clip and vertical track culling bound rendered DOM work. Long sequences
 use a capped physical scrollbar with a proportional logical offset so SVG coordinates
 stay viewport-sized; at extreme durations scrollbar navigation is correspondingly
-coarser. No waveforms, thumbnails, trimming, moving, splitting or rendering controls
-are introduced.
+coarser. T17 itself introduced no waveforms, thumbnails, trimming, moving,
+splitting or rendering controls; later editing milestones and the current
+workspace refinements below add those controls and artwork.
 
 T18 adds GUI timeline editing through the shared core: move clips, change
 compatible tracks, trim either edge, split, delete and snap to nearby boundaries.
@@ -250,3 +253,20 @@ resolution, frame rate, H.264/HEVC codec, quality or a preset, then monitor prog
 cancel or continue editing while the captured revision renders from original media.
 Validation errors, execution failures, cancellation and verified success are distinct.
 Atomic publication refuses existing destinations even if they appear during export.
+
+### Timeline artwork and workspace refinements
+
+The current workspace adds video/still filmstrips and real source audio waveforms
+to timeline clips. Samples follow trims, splits, scroll and zoom; missing media or
+tools produce a labeled fallback. Artwork identifies source content and does not
+apply clip transforms or audio gain/mute. Batched thumbnails use a bounded memory
+cache, with measured VideoToolbox selection for eligible macOS sources. See the
+[timeline artwork contract](TIMELINE_PLAYBACK.md#timeline-clip-artwork).
+
+Panel headings and controls share a consistent layout at compact and large window
+sizes and in light/dark appearances. Playback/cache details open over the viewer
+without resizing the picture. Diagnostics and performance results show readable
+measurements rather than raw JSON; machine-readable reports remain available to
+automated checks. The inspector presents frame-aligned timing as project timecode
+and preserves exact rational source-range values when either endpoint is off-grid.
+These refinements add no CLI commands, editing operations or export formats.

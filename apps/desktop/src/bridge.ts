@@ -13,6 +13,16 @@ export const PREVIEW_METRICS_CHANNEL = 'preview:metrics';
 export const ASSET_PREVIEW_CHANNEL = 'preview:asset';
 export const TIMELINE_PREVIEW_CHANNEL = 'preview:timeline';
 export const MEDIA_CACHE_CHANNEL = 'media:cache';
+export const TIMELINE_ARTWORK_CHANNEL = 'media:timeline-artwork';
+export interface TimelineArtworkInput extends HistoryInput {
+  assetId: string;
+  kind: 'frame' | 'waveform';
+  count?: number;
+  interval?: number;
+  start: number;
+  duration: number;
+  width: number;
+}
 export const TIMELINE_FRAME_CHANNEL = 'media:frame';
 export type MediaCacheAction =
   | { action: 'status' | 'cancel' | 'clear' | 'cleanup' }
@@ -198,6 +208,7 @@ export interface DesktopAPI {
   timelineFrame(
     input: HistoryInput & { assetId: string; timestamp: number },
   ): Promise<string | null>;
+  timelineArtwork(input: TimelineArtworkInput): Promise<string | null>;
   releasePreview(url: string): Promise<void>;
   getPreviewMetrics(): Promise<PreviewMetrics>;
 }

@@ -275,7 +275,9 @@ test('the first cache status applies persisted memory limits to speculative deco
       .poll(
         async () =>
           JSON.parse(
-            (await page.getByTestId('timeline-diagnostics').textContent())!,
+            (await page
+              .getByTestId('timeline-diagnostics')
+              .getAttribute('data-report'))!,
           ).decoders,
       )
       .toBe(1);
@@ -291,7 +293,9 @@ test('the first cache status applies persisted memory limits to speculative deco
       .poll(
         async () =>
           JSON.parse(
-            (await page.getByTestId('timeline-diagnostics').textContent())!,
+            (await page
+              .getByTestId('timeline-diagnostics')
+              .getAttribute('data-report'))!,
           ).decoders,
       )
       .toBe(3);

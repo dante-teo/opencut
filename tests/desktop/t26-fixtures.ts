@@ -197,7 +197,9 @@ export async function compositionReport(
   page: Page,
 ): Promise<TimelineDiagnostics> {
   return JSON.parse(
-    (await page.getByTestId('timeline-diagnostics').textContent())!,
+    (await page
+      .getByTestId('timeline-diagnostics')
+      .getAttribute('data-report'))!,
   );
 }
 export async function seekComposition(

@@ -153,6 +153,8 @@ export function MediaLibrary({
           <Upload aria-hidden="true" focusable="false" /> Import media
         </button>
         <button
+          aria-label="Remove asset"
+          className="remove-asset-button"
           disabled={busy || !selectedAsset || referenced}
           title={
             referenced
@@ -161,7 +163,7 @@ export function MediaLibrary({
           }
           onClick={() => selectedAsset && onRemove(selectedAsset.id)}
         >
-          <Trash2 aria-hidden="true" focusable="false" /> Remove asset
+          <Trash2 aria-hidden="true" focusable="false" />
         </button>
       </div>
       <div className="library-search">

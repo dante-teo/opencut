@@ -1,8 +1,40 @@
 import { SlidersHorizontal } from 'lucide-react';
+import { ClipProperties } from './clip-properties.js';
 import { CanvasArtwork } from './studio-graphics.js';
 import type { DesktopProject, TimelineOperation } from '../bridge.js';
-import { exactTime } from './project-timeline.js';
-import { ClipProperties } from './clip-properties.js';
+import { compareTimes, type RationalTime, type Project } from '@opencut/core';
+import {
+  frameIndex,
+  framePosition,
+  timelineTimecode,
+} from './timeline-geometry.js';
+
+const exactTime = (value: RationalTime) =>
+  `${value.numerator}/${value.denominator} s`;
+function displayTime(value: RationalTime, project: Project) {
+  const rate = project.settings.frameRate;
+  try {
+    return compareTimes(framePosition(frameIndex(value, rate), rate), value) ===
+      0
+      ? timelineTimecode(value, rate)
+      : exactTime(value);
+  } catch {
+    // Valid rational boundaries can exceed the representable project-frame range.
+    return exactTime(value);
+  }
+}
+
+function displayRange(
+  start: RationalTime,
+  end: RationalTime,
+  project: Project,
+) {
+  const from = displayTime(start, project);
+  const to = displayTime(end, project);
+  return from.includes('/') || to.includes('/')
+    ? `${exactTime(start)} → ${exactTime(end)}`
+    : `${from} → ${to}`;
+}
 
 export function ProjectInspector({
   state,
@@ -51,8 +83,6 @@ export function ProjectInspector({
                   onEdit={onEdit}
                 />
                 <dl>
-                  <dt>Clip ID</dt>
-                  <dd>{clip.id}</dd>
                   <dt>Track</dt>
                   <dd>
                     {
@@ -61,10 +91,10 @@ export function ProjectInspector({
                     }
                   </dd>
                   <dt>Timeline start</dt>
-                  <dd>{exactTime(clip.timelineStart)}</dd>
+                  <dd>{displayTime(clip.timelineStart, project!)}</dd>
                   <dt>Source in → out</dt>
                   <dd>
-                    {exactTime(clip.sourceIn)} → {exactTime(clip.sourceOut)}
+                    {displayRange(clip.sourceIn, clip.sourceOut, project!)}
                   </dd>
                 </dl>
               </>
@@ -72,48 +102,53 @@ export function ProjectInspector({
             {asset && (
               <>
                 <h3>{asset.name}</h3>
-                <dl>
-                  <dt>Asset ID</dt>
-                  <dd>{asset.id}</dd>
-                  <dt>File</dt>
-                  <dd>{asset.file.path}</dd>
-                  <dt>Availability</dt>
-                  <dd>
-                    {availability?.status ?? 'Unchecked'} ·{' '}
-                    {availability?.message}
-                  </dd>
-                  <dt>Media type</dt>
-                  <dd>{asset.metadata?.kind ?? asset.mediaTypes.join(', ')}</dd>
-                  {asset.metadata && (
-                    <>
-                      <dt>Dimensions</dt>
-                      <dd>
-                        {asset.metadata.width ?? '—'} ×{' '}
-                        {asset.metadata.height ?? '—'}
-                      </dd>
-                      <dt>Duration</dt>
-                      <dd>{asset.metadata.durationSeconds ?? '—'} s</dd>
-                      <dt>Video codec</dt>
-                      <dd>{asset.metadata.videoCodec ?? '—'}</dd>
-                      <dt>Audio codec</dt>
-                      <dd>{asset.metadata.audioCodec ?? '—'}</dd>
-                      <dt>Source FPS</dt>
-                      <dd>
-                        {asset.metadata.frameRateRatio ??
-                          asset.metadata.frameRate ??
-                          '—'}
-                      </dd>
-                    </>
-                  )}
-                </dl>
+                <details className="asset-information" open={!clip}>
+                  <summary>Media information</summary>
+                  <dl>
+                    <dt>File</dt>
+                    <dd>{asset.file.path}</dd>
+                    <dt>Availability</dt>
+                    <dd>
+                      {availability?.status ?? 'Unchecked'} ·{' '}
+                      {availability?.message}
+                    </dd>
+                    <dt>Media type</dt>
+                    <dd>
+                      {asset.metadata?.kind ?? asset.mediaTypes.join(', ')}
+                    </dd>
+                    {asset.metadata && (
+                      <>
+                        <dt>Dimensions</dt>
+                        <dd>
+                          {asset.metadata.width ?? '—'} ×{' '}
+                          {asset.metadata.height ?? '—'}
+                        </dd>
+                        <dt>Duration</dt>
+                        <dd>{asset.metadata.durationSeconds ?? '—'} s</dd>
+                        <dt>Video codec</dt>
+                        <dd>{asset.metadata.videoCodec ?? '—'}</dd>
+                        <dt>Audio codec</dt>
+                        <dd>{asset.metadata.audioCodec ?? '—'}</dd>
+                        <dt>Source FPS</dt>
+                        <dd>
+                          {asset.metadata.frameRateRatio ??
+                            asset.metadata.frameRate ??
+                            '—'}
+                        </dd>
+                      </>
+                    )}
+                  </dl>
+                </details>
               </>
             )}
           </>
         )}
-        <div className="inspector-overview" aria-hidden="true">
-          <CanvasArtwork />
-        </div>
-        {project && (
+        {!selection && (
+          <div className="inspector-overview" aria-hidden="true">
+            <CanvasArtwork />
+          </div>
+        )}
+        {project && !selection && (
           <>
             <h3>Project settings</h3>
             <dl className="project-metadata">
@@ -129,21 +164,23 @@ export function ProjectInspector({
               <dt>Background</dt>
               <dd>{project.settings.backgroundColor ?? '#000000'}</dd>
             </dl>
-            <h3>Project information</h3>
-            <dl>
-              <dt>Project ID</dt>
-              <dd>{project.metadata.id}</dd>
-              <dt>Created</dt>
-              <dd>{project.metadata.createdAt}</dd>
-              <dt>Updated</dt>
-              <dd>{project.metadata.updatedAt}</dd>
-              <dt>Format / revision</dt>
-              <dd>
-                {project.schemaVersion} / {project.editing?.revision ?? 0}
-              </dd>
-              <dt>File</dt>
-              <dd>{state?.path ?? 'Not saved yet'}</dd>
-            </dl>
+            <details className="project-information">
+              <summary>Project information</summary>
+              <dl>
+                <dt>Project ID</dt>
+                <dd>{project.metadata.id}</dd>
+                <dt>Created</dt>
+                <dd>{project.metadata.createdAt}</dd>
+                <dt>Updated</dt>
+                <dd>{project.metadata.updatedAt}</dd>
+                <dt>Format / revision</dt>
+                <dd>
+                  {project.schemaVersion} / {project.editing?.revision ?? 0}
+                </dd>
+                <dt>File</dt>
+                <dd>{state?.path ?? 'Not saved yet'}</dd>
+              </dl>
+            </details>
           </>
         )}
       </div>

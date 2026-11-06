@@ -189,7 +189,11 @@ async function open(
   return path;
 }
 const report = async (page: Page): Promise<TimelineDiagnostics> =>
-  JSON.parse((await page.getByTestId('timeline-diagnostics').textContent())!);
+  JSON.parse(
+    (await page
+      .getByTestId('timeline-diagnostics')
+      .getAttribute('data-report'))!,
+  );
 const time = (value: TimelineDiagnostics) =>
   value.position.numerator / value.position.denominator;
 const seek = async (page: Page, frame: number) => {

@@ -172,7 +172,7 @@ test('T21 source playback with representative timelines loaded', async () => {
         const output = page.getByTestId('benchmark-result');
         await expect(output).toBeAttached({ timeout: 55000 });
         const warm = JSON.parse(
-          (await output.textContent())!,
+          (await output.getAttribute('data-report'))!,
         ) as PreviewBenchmark;
         expect(warm.seek.count).toBe(30);
         expect(warm.playback.mediaSeconds).toBeGreaterThan(1);

@@ -129,7 +129,7 @@ test('reproducible HTML video preview measurements', async () => {
         const output = page.getByTestId('benchmark-result');
         await expect(output).toBeAttached({ timeout: 55000 });
         const report = JSON.parse(
-          (await output.textContent())!,
+          (await output.getAttribute('data-report'))!,
         ) as PreviewBenchmark;
         console.log(
           'T04 measurement',

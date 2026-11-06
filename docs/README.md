@@ -99,9 +99,20 @@ Project metadata/settings, imported assets (including missing-media warnings),
 and video/audio tracks and clips appear in a docked editor workspace: media
 library on the left, viewer in the center, inspector on the right, and a timeline
 below. Select an asset or clip to inspect its stored details. Timeline blocks
-show relative positions and durations. Source ranges and timeline starts retain
-exact rational seconds. T22 synchronizes CLI edits through the active session
-and pushes updates immediately; there is no file-watching loop.
+show relative positions and durations, video/still filmstrips, and audio waveforms.
+Artwork follows the trimmed source range and loads only for visible clips;
+FFmpeg is required. Loading or unavailable previews are labeled. Artwork helps
+identify source content; it does not show clip transforms, opacity or gain.
+See [timeline artwork](TIMELINE_PLAYBACK.md#timeline-clip-artwork) for sampling,
+cache and hardware-decoding behavior.
+
+Stored timing remains exact. The inspector uses project timecode for frame-aligned
+timing and rational seconds for off-grid boundaries. If either source-range
+endpoint is off-grid, both endpoints retain their exact rational values.
+Playback and cache disclosures open over the viewer without resizing the picture;
+diagnostics use readable values instead of JSON. T22 synchronizes CLI edits
+through the active session and pushes updates immediately; there is no
+file-watching loop.
 Project management needs no FFmpeg or ffprobe. Closing, quitting, creating or
 opening another project offers **Save**, **Discard**, and **Cancel** when the
 current project is unsaved. Canceled dialogs and failed saves preserve it; failed
@@ -252,7 +263,7 @@ Open **Details & shortcuts** for source-frame diagnostics and
 **Run performance validation**, which runs a positioning seek, three warm-up seeks,
 30 fixed target seeks, then up to eight seconds of playback. Keep the window visible.
 Open **Details & measurements** after validation for median/p95 seek latency,
-dropped frames and expandable measurement JSON. **Details & shortcuts** also
+dropped frames and waiting events in a readable report. The disclosure also
 explains keyboard controls and preview precision limits.
 For the reproducible fixture/1080p suite, run `pnpm test:preview` after generating
 fixtures. It uses FFmpeg/ffprobe already on PATH, creates and cleans only an owned

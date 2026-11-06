@@ -242,7 +242,7 @@ test('shows offline assets and exact track/clip data; failed opens preserve the 
       page.getByRole('heading', { name: 'Clip details' }),
     ).toBeVisible();
     await expect(
-      page.getByText('1001/30000 s → 1001/1000 s', { exact: true }),
+      page.getByText('00:00:00:01 → 00:00:01:00', { exact: true }),
     ).toBeVisible();
     await page
       .getByRole('button', { name: 'Save project', exact: true })
