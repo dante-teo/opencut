@@ -21,9 +21,12 @@ import {
   validateCacheLimits,
   type ProxyResult,
 } from '@opencut/media';
+import { ExportSession } from './export-session.js';
 import { MediaClient } from './media-client.js';
 import {
   APP_INFO_CHANNEL,
+  EXPORT_CHANNELS,
+  EXPORT_CHANGED_CHANNEL,
   PROJECT_CHANGED_CHANNEL,
   IMPORT_PROGRESS_CHANNEL,
   THUMBNAIL_CHANNEL,
@@ -159,6 +162,24 @@ const projectSession = new ProjectSession(
   },
 );
 
+const exportSession = new ExportSession(
+  (input) => projectSession.captureExport(input),
+  async () => {
+    if (!mainWindow) throw new Error('No export window is available.');
+    const selection = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export video',
+      defaultPath: 'Export.mp4',
+      buttonLabel: 'Choose output',
+      filters: [{ name: 'MP4 video', extensions: ['mp4'] }],
+    });
+    return selection.canceled ? null : (selection.filePath ?? null);
+  },
+  (state) => {
+    if (!mainWindow?.isDestroyed())
+      mainWindow?.webContents.send(EXPORT_CHANGED_CHANNEL, state);
+  },
+);
+
 async function closeProjectWindow(
   window: BrowserWindow,
   quit: boolean,
@@ -176,6 +197,7 @@ async function closeProjectWindow(
       return;
     }
     if (reply.canceled) return;
+    await exportSession.cancelAndWait();
     if (quit) app.quit();
     else window.close();
   } finally {
@@ -301,7 +323,7 @@ async function createWindow(): Promise<void> {
   });
   mainWindow = window;
   window.on('close', (event) => {
-    if (projectSession.needsCloseGuard) {
+    if (projectSession.needsCloseGuard || exportSession.active) {
       event.preventDefault();
       void closeProjectWindow(window, false);
     } else {
@@ -365,6 +387,19 @@ app
         return new Response(null, { status: 404 });
       }
     });
+    for (const [action, channel] of Object.entries(EXPORT_CHANNELS)) {
+      ipcMain.handle(channel, async (event, ...args: unknown[]) => {
+        assertSender(event);
+        if (args.length !== (action === 'start' || action === 'cancel' ? 1 : 0))
+          throw new Error('Invalid export request arguments.');
+        if (action === 'current') return exportSession.current();
+        if (action === 'start') return exportSession.start(args[0]);
+        if (action === 'cancel') return exportSession.cancel(args[0]);
+        const output = await exportSession.chooseOutput();
+        assertSender(event);
+        return output;
+      });
+    }
     ipcMain.handle(APP_INFO_CHANNEL, (event) => {
       assertSender(event);
       return getApplicationInfo();
@@ -661,12 +696,15 @@ app.on('window-all-closed', () => {
 
 let mediaClosed = false;
 app.on('before-quit', (event) => {
-  if (mainWindow && projectSession.needsCloseGuard) {
+  if (mainWindow && (projectSession.needsCloseGuard || exportSession.active)) {
     event.preventDefault();
     void closeProjectWindow(mainWindow, true);
   } else if (!mediaClosed && mediaClient) {
     event.preventDefault();
     mediaClosed = true;
-    void mediaClient.close().finally(() => app.quit());
+    void Promise.allSettled([
+      exportSession.dispose(),
+      mediaClient.close(),
+    ]).finally(() => app.quit());
   }
 });

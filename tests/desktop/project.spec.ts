@@ -379,7 +379,7 @@ test('project IPC rejects untrusted windows and malformed creation requests', as
         try {
           await other.loadURL('opencut://app/index.html');
           return (await other.webContents
-            .executeJavaScript(`Promise.all(['getProject', 'createProject', 'openProject', 'saveProject', 'closeProject', 'editTimeline', 'undoProject', 'redoProject', 'importMedia', 'removeAsset', 'addAssetClip', 'assetThumbnail'].map(async method => {
+            .executeJavaScript(`Promise.all(['getProject', 'createProject', 'openProject', 'saveProject', 'closeProject', 'editTimeline', 'undoProject', 'redoProject', 'importMedia', 'removeAsset', 'addAssetClip', 'assetThumbnail', 'chooseExportOutput', 'getExport', 'startExport', 'cancelExport'].map(async method => {
           try { await window.opencut[method]({ name: 'Untrusted' }); return 'allowed'; }
           catch (error) { return error.message; }
         }))`)) as string[];
@@ -389,7 +389,7 @@ test('project IPC rejects untrusted windows and malformed creation requests', as
       },
       resolve('apps/desktop/dist/preload/index.cjs'),
     );
-    expect(rejected).toHaveLength(12);
+    expect(rejected).toHaveLength(16);
     for (const message of rejected)
       expect(message).toContain('Untrusted IPC sender');
   } finally {

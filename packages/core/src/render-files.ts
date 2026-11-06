@@ -1,3 +1,4 @@
+import type { Project } from './project.js';
 import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { RenderControls } from '@opencut/media';
@@ -33,13 +34,29 @@ export async function renderProjectFile(
       throw new RenderError('Render output must not replace the project file.');
   }
   const project = await readProjectFile(path);
+  const plan = await resolveProjectRender(project, path);
+  return {
+    projectPath: path,
+    ...(await renderVideoTimeline({
+      ...plan,
+      ...controls,
+      output,
+    })),
+  };
+}
+
+/** Resolve original references once, detached from any preview/cache or editor session. */
+export async function resolveProjectRender(
+  project: Project,
+  projectFilePath: string,
+) {
   const plan = planProjectRender(project);
   const assets = new Map(project.assets.map((asset) => [asset.id, asset]));
   const visualClips = [];
   const checked = new Set<string>();
   const resolveSource = async (clip: { assetId: string; clipId: string }) => {
     const asset = assets.get(clip.assetId)!;
-    const sourcePath = resolveMediaReference(asset.file, path);
+    const sourcePath = resolveMediaReference(asset.file, projectFilePath);
     if (!checked.has(sourcePath)) {
       const source = await inspectMediaFile(sourcePath);
       if (source.status === 'unsupported_path')
@@ -55,14 +72,5 @@ export async function renderProjectFile(
   const audioClips = [];
   for (const clip of plan.audioClips)
     audioClips.push({ ...clip, path: await resolveSource(clip) });
-  return {
-    projectPath: path,
-    ...(await renderVideoTimeline({
-      ...plan,
-      ...controls,
-      visualClips,
-      audioClips,
-      output,
-    })),
-  };
+  return { ...plan, visualClips, audioClips };
 }

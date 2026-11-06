@@ -1,3 +1,4 @@
+import type { ExportSettings } from './export-settings.js';
 import type { CacheLimits, CacheStatus, RenderProgress } from '@opencut/media';
 import type {
   ApplicationInfo,
@@ -126,7 +127,50 @@ export interface AssetClipInput extends AssetRemoveInput {
   mediaType: 'video' | 'audio';
   at: number;
 }
+export const EXPORT_CHANNELS = {
+  choose: 'export:choose',
+  current: 'export:current',
+  start: 'export:start',
+  cancel: 'export:cancel',
+} as const;
+export const EXPORT_CHANGED_CHANNEL = 'export:changed';
+export interface ExportInput extends HistoryInput {
+  settings: ExportSettings;
+}
+export interface ExportState {
+  id: string;
+  projectId: string;
+  projectName: string;
+  revision: number;
+  output: string;
+  settings: ExportSettings;
+  status:
+    | 'validating'
+    | 'rendering'
+    | 'verifying'
+    | 'cancelling'
+    | 'succeeded'
+    | 'validation_failed'
+    | 'failed'
+    | 'cancelled';
+  progress: RenderProgress | null;
+  elapsedSeconds: number;
+  summary: {
+    width: number;
+    height: number;
+    frameRate: { numerator: number; denominator: number };
+    frameCount: number;
+    durationSeconds: number;
+    codec: string;
+  } | null;
+  error: string;
+}
 export interface DesktopAPI {
+  chooseExportOutput(): Promise<string | null>;
+  getExport(): Promise<ExportState | null>;
+  startExport(input: ExportInput): Promise<ExportState>;
+  cancelExport(id: string): Promise<ExportState | null>;
+  onExportChanged(callback: (state: ExportState) => void): () => void;
   onProjectChanged(
     callback: (state: DesktopProject | null) => void,
   ): () => void;

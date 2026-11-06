@@ -1461,3 +1461,96 @@ button {
 .media-cache-controls .transport {
   flex-wrap: wrap;
 }
+
+.export-panel {
+  position: fixed;
+  inset: 76px 18px auto auto;
+  margin: 0;
+  width: min(480px, calc(100vw - 36px));
+  max-height: calc(100vh - 100px);
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 16px 60px #0005;
+  z-index: 20;
+}
+.export-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.export-panel fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 12px;
+}
+.export-panel label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+}
+.export-settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.export-project-info,
+.export-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.export-progress {
+  display: grid;
+  gap: 7px;
+  margin: 14px 0;
+  font-size: 12px;
+}
+.export-progress progress {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.export-path,
+.export-panel [role='alert'] {
+  overflow-wrap: anywhere;
+}
+.export-panel [role='alert'] {
+  color: #d65368;
+}
+
+.export-panel[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: hidden;
+}
+.export-body {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  overflow: auto;
+}
+.export-heading,
+.export-panel .dialog-actions {
+  flex-shrink: 0;
+}
+.export-panel .dialog-actions {
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.export-panel input,
+.export-panel select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  background: var(--panel-alt);
+}

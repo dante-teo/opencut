@@ -38,7 +38,8 @@ resolution fits the completed canvas, preserving project-space layer transforms.
 Compare integer products to select the limiting dimension and retain the scale
 as an integer ratio until final division to even pixels, minimum 2. Exact even
 preset dimensions must not shrink through floating-point multiplication. Export
-controls do not change frame timing, project schema, saved content or history.
+quality/resolution controls do not change frame timing, project schema, saved
+content or history.
 
 Write only inside an owned temporary directory on the destination filesystem.
 Verify codecs, dimensions, timing and decoded frame count before publication.
@@ -61,7 +62,30 @@ Publication is the commit point; cancellation after it cannot retract the export
   rename. Atomic visibility does not promise power-loss durability. SIGKILL of
   the caller or power loss can leave an owned temporary directory.
 - Existing T10–T12 sampling, compositing and audio behavior remains in effect.
-  Desktop project integration and Windows/Linux validation remain deferred.
+  Desktop integration was deferred at T13 and is added by T28 below.
+  Windows/Linux validation remains separate.
 
 The [rendering contract](../CLI.md#render-presets-and-progress) defines exact preset
 values, progress fields, JSONL events, exit codes and filesystem limits.
+
+## T28 extension: desktop snapshots and output selection
+
+Electron main owns one foreground export using the same headless renderer,
+progress callback, cancellation signal, verification and temporary-file cleanup.
+Capture the accepted project revision and detached project document before
+asynchronous preparation, then resolve original-media references from that snapshot.
+GUI edits and preview proxies cannot alter the active job. Source files remain
+referenced in place; the snapshot does not freeze externally modified media bytes.
+
+Keep the native destination selection separate from the last job's output path.
+Restoring job status after a reload or window recreation must not populate the
+next output field from historical job data. A successful native picker selection
+is required again before another export. GUI publication always uses the exclusive
+no-overwrite path; the CLI's explicit atomic replacement option remains available.
+Job state stays in memory for the current process, without a persistent queue.
+
+T28 adds optional HEVC and output-rate conversion to the shared media API.
+Composition and source trims stay on the project grid; conversion samples the
+finished composition and rounds duration up to a complete output frame, extending
+the last picture and audio silence as needed. CLI flags and defaults are unchanged.
+See [desktop export](../EXPORT.md) for settings, lifecycle and supported bounds.

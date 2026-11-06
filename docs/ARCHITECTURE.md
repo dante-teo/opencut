@@ -302,15 +302,47 @@ cleanup. [ADR 0010](adr/0010-foreground-render-lifecycle.md) records the lifecyc
 progress, preset and replacement decisions. The [rendering contract](CLI.md#render-presets-and-progress)
 defines event fields, presets, exit codes and filesystem requirements.
 
+## Desktop export (T28)
+
+`ExportSession` owns one foreground job in Electron main. The sandboxed renderer
+can choose an output through a native picker, query the current job, start with a
+project ID/revision and bounded settings, subscribe to progress, or cancel by job ID.
+It cannot submit paths, documents, FFmpeg arguments or overwrite flags. Each invoke
+checks the existing main-window/frame/origin trust boundary and rejects malformed
+requests. Native picker results grant only the selected destination.
+The selected destination and the last job's captured output path are separate state.
+The renderer restores job status and settings after reload, but only a successful
+native picker result populates its next output selection. Window recreation also
+requires a fresh selection; historical job output is never copied into that field.
+This prevents the displayed destination from disagreeing with the path held by main.
+
+`ProjectSession.captureExport` checks the accepted revision and clones the current
+published state synchronously. `resolveProjectRender` is the core Node adapter shared
+with CLI rendering; it resolves original media from that detached document and its
+captured project path. It never consults preview/cache state. The media adapter's
+`validateVideoTimeline` and execution share plan/filter preparation and media probes.
+Preflight also checks encoder availability. Native work is asynchronous; main remains
+available for IPC and edits. Progress is throttled to 200 ms, while phase/terminal
+changes publish immediately; a current-state query restores status after UI reload.
+
+Codec and optional output FPS extend the shared media renderer. Project-grid
+composition and source trims remain unchanged, and output resampling happens after
+composition. Duration rounds up to an output-frame boundary when necessary. Existing
+CLI defaults and flags remain unchanged. Cancellation, output verification, temporary
+cleanup and atomic no-overwrite publication use T13's implementation. Window close
+and app quit wait for cancellation/cleanup. No queue or background service is added.
+See [desktop export](EXPORT.md) for controls, limits and filesystem requirements.
+
 ## Desktop trust boundary
 
 Electron main owns native privileges. React runs with `contextIsolation: true`,
 `nodeIntegration: false`, `sandbox: true`, web security enabled and webviews
-disabled. A bundled **CommonJS preload** exposes typed capabilities:
+disabled. A bundled **CommonJS preload** exposes typed capabilities including:
 `getApplicationInfo()`, `openPreview()`, `getPreviewMetrics()`, `getProject()`,
 `createProject(input)`, `openProject()`, `saveProject()`, `closeProject()`,
-`previewAsset(assetId)` and `releasePreview(url)` on
-`window.opencut`. ESM is used elsewhere. CommonJS here keeps
+`previewAsset(assetId)`, `releasePreview(url)`, `chooseExportOutput()`,
+`getExport()`, `startExport(input)`, `cancelExport(id)` and `onExportChanged(callback)`
+on `window.opencut`. ESM is used elsewhere. CommonJS here keeps
 Electron's renderer sandbox enabled; sandboxed preloads cannot use native ESM.
 No raw IPC, arbitrary channel, filesystem or shell API reaches React.
 
@@ -427,7 +459,7 @@ availability snapshot. Unsaved sessions use the same fallback project location a
 import, with absolute references resolving directly to their sources. A refresh
 must succeed before the restored session is accepted; failure preserves the prior
 session. This checks readability, without watching files or refreshing probe metadata.
-Project playback and render controls need separate capabilities.
+Project playback uses the T24 timeline capabilities; T28 adds separate export capabilities.
 
 T18 adds narrow `editTimeline`, `undoProject` and `redoProject` preload methods.
 Main checks sender, arity, project identity, revision and request shape, allows only

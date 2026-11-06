@@ -3,8 +3,9 @@
 OpenCut will be a lightweight, local desktop video editor for YouTubers,
 TikTok and Instagram creators, vloggers, and streamers. A clear conventional
 interface should make everyday editing accessible without code. The desktop now
-provides project management, a media library, timeline editing, clip properties
-and shared undo/redo. Single-source preview can link to an individual video clip;
+provides project management, a media library, timeline editing, clip properties,
+shared undo/redo and [local video export](EXPORT.md). Single-source preview can
+link to an individual video clip;
 Project viewer plays edited cuts, gaps and synchronized multi-track audio.
 Project viewer composites ordered video/image layers with position, scale, opacity, fitting and canvas alpha.
 
@@ -24,7 +25,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 and [architecture decisions](adr/0012-realtime-layer-composition.md) define their
 current contracts and validation boundaries.
 
-## Implemented milestones through T27
+## Implemented milestones through T28
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -186,8 +187,8 @@ See [desktop usage](README.md) for property ranges, shortcuts and preview limits
 
 ## Excluded
 
-Desktop export controls, transitions, keyframes, fades and new audio/visual effects
-are outside the current scope. Project export is available through the CLI. No FFmpeg or MLT runtime is bundled; media commands require
+Transitions, keyframes, fades and new audio/visual effects
+are outside the current scope. Project export is available through the GUI and CLI. No FFmpeg or MLT runtime is bundled; media commands require
 manually installed external tools.
 Fixture generation remains an optional development utility.
 
@@ -198,7 +199,7 @@ User media must never be silently changed or overwritten.
 
 macOS is the initial required platform. Package boundaries should stay portable;
 Windows/Linux support requires explicit validation later. No distribution,
-installer, updater, signing or notarization work is included through T26. Render jobs
+installer, updater, signing or notarization work is included through T28. Render jobs
 run in the invoking process, without a persistent queue, background service or database.
 
 ## Playback and compositing milestones
@@ -242,3 +243,10 @@ to the desktop test workflow. It checks actual Chromium Canvas draws, decoded
 FFmpeg frames, independent source-frame markers, muxed audio and video
 timestamps, and audio timing and gain. It also aligns mixed-rate sampling, timeline seeks and untagged VP9 color handling
 for the covered cases.
+
+T28 adds [GUI export and preflight validation](EXPORT.md) through the existing
+headless renderer and T13 foreground lifecycle. Users choose a new output file,
+resolution, frame rate, H.264/HEVC codec, quality or a preset, then monitor progress,
+cancel or continue editing while the captured revision renders from original media.
+Validation errors, execution failures, cancellation and verified success are distinct.
+Atomic publication refuses existing destinations even if they appear during export.

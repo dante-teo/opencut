@@ -10,7 +10,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { renderVideoTimeline } from './render.js';
+import { renderVideoTimeline, validateVideoTimeline } from './render.js';
 import type { RenderProgress } from './render-progress.js';
 import type { VideoTimelineOptions } from './render.js';
 import { probeMedia } from './probe.js';
@@ -487,4 +487,69 @@ describe('video timeline executor safety', () => {
     ).rejects.toThrow(/existing writable directory/);
     expect(runMediaTool).not.toHaveBeenCalled();
   });
+});
+
+describe('export preflight', () => {
+  it('checks the exact media plan and encoders without rendering or creating output files', async () => {
+    vi.mocked(runMediaTool).mockResolvedValue(
+      Buffer.from(
+        ' V..... libx264 H.264\n V..... libx265 HEVC\n A..... aac AAC',
+      ),
+    );
+    const summary = await validateVideoTimeline({
+      ...options,
+      codec: 'hevc',
+      outputFrameRate: { numerator: 24, denominator: 1 },
+    });
+    expect(summary).toMatchObject({
+      codec: 'hevc',
+      frameRate: { numerator: 24, denominator: 1 },
+      frameCount: 10,
+    });
+    expect(summary.durationSeconds).toBeCloseTo(10 / 24);
+    expect(await readdir(directory)).toEqual([]);
+    expect(runMediaTool).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(runMediaTool).mock.calls[0]![1]).toContain('-encoders');
+  });
+  it('rejects unavailable encoders and tools before output creation', async () => {
+    vi.mocked(runMediaTool).mockResolvedValue(Buffer.from(' V..... libx264'));
+    await expect(validateVideoTimeline(options)).rejects.toThrow(
+      "encoder 'aac' is unavailable",
+    );
+    vi.mocked(runMediaTool).mockRejectedValue(
+      new MediaError('ffmpeg not found'),
+    );
+    await expect(validateVideoTimeline(options)).rejects.toThrow(
+      'ffmpeg not found',
+    );
+    expect(await readdir(directory)).toEqual([]);
+  });
+  it('refuses output conflicts, unreadable media and incompatible rates before encoding', async () => {
+    await writeFile(options.output, 'existing');
+    await expect(validateVideoTimeline(options)).rejects.toThrow(
+      'Refusing to overwrite',
+    );
+    expect(await readFile(options.output, 'utf8')).toBe('existing');
+    await rm(options.output);
+    await expect(
+      validateVideoTimeline({
+        ...options,
+        outputFrameRate: { numerator: 121, denominator: 1 },
+      }),
+    ).rejects.toThrow('Output frame rate');
+    vi.mocked(probeMedia).mockRejectedValue(
+      new MediaError('Cannot read media file'),
+    );
+    await expect(validateVideoTimeline(options)).rejects.toThrow(
+      'cannot read/probe media',
+    );
+    expect(runMediaTool).not.toHaveBeenCalled();
+  });
+});
+
+it('rejects HEVC dimensions that libx265 cannot encode during preflight', async () => {
+  await expect(
+    validateVideoTimeline({ ...options, width: 8, height: 8, codec: 'hevc' }),
+  ).rejects.toThrow('at least 16');
+  expect(runMediaTool).not.toHaveBeenCalled();
 });

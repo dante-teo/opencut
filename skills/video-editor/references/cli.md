@@ -1,4 +1,4 @@
-# OpenCut CLI through T27
+# OpenCut CLI through T28
 
 For a complete CLI-only edit with tested timing, layers, audio and persistent history,
 see the [T14 workflow](workflow.md).
@@ -339,9 +339,15 @@ snapshot and composites video/image tracks with mixed audio to H.264/yuv420p and
 with libx264 and standard filters, plus ffprobe on PATH. The project's resolution
 and exact rational frame rate determine the default output. Original video audio is preserved
 by default. Independent audio clips on any number of audio tracks can overlap
-original audio and each other across tracks. No transitions, audio effects,
-keyframes, fades or desktop export controls are implemented. Project viewer
+original audio and each other across tracks. Transitions, audio effects,
+keyframes and fades remain outside the current editing model. Project viewer
 composites the same saved layer configuration; source preview plays originals.
+
+T28 [desktop export](../../../docs/EXPORT.md) also offers HEVC and
+output-frame-rate conversion.
+The CLI keeps project-rate H.264 and its existing quality/resolution flags; there
+are no CLI codec or output-frame-rate flags. Desktop exports always refuse existing
+files; CLI replacement requires explicit `--overwrite` and successful verification.
 
 T12 accepts multiple video tracks, still images and any audio tracks. At least one
 video/image clip is required; empty tracks are allowed. Same-track overlaps remain

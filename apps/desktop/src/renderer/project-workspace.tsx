@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Undo2, Redo2, FolderOpen, Plus, Save } from 'lucide-react';
+import { ExportPanel } from './export-panel.js';
 import { StudioArtwork } from './studio-graphics.js';
 import type {
   DesktopProject,
@@ -335,6 +336,7 @@ export function ProjectWorkspace() {
           </span>
         </div>
         <div className="project-actions">
+          <ExportPanel state={state} disabled={blocking} />
           <button
             disabled={blocking || !project?.editing?.undo.length}
             onClick={() => history('undo')}

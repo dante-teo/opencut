@@ -543,6 +543,11 @@ test('Space and frame shortcuts operate the active source outside the player wit
           .evaluate((video: HTMLVideoElement) => video.currentTime),
       )
       .toBeGreaterThan(time);
+    // A new currentTime is observable before presentation settles. Wait until
+    // the first step completes before requesting the opposite step.
+    await expect(
+      page.getByRole('button', { name: 'Play', exact: true }),
+    ).toBeEnabled();
     const frame = await page
       .locator('video')
       .evaluate((video: HTMLVideoElement) => video.currentTime);

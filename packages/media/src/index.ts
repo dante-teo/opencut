@@ -7,6 +7,8 @@ export type { MediaMetadata, MediaStream } from './probe.js';
 export type { FrameResult } from './frame.js';
 export {
   renderVideoTimeline,
+  validateVideoTimeline,
+  renderCodecs,
   renderQualities,
   renderResolutions,
 } from './render.js';
@@ -15,6 +17,7 @@ export type {
   VideoTimelineOptions,
   VideoTimelineResult,
   RenderControls,
+  RenderCodec,
   RenderQuality,
   RenderResolution,
 } from './render.js';

@@ -650,9 +650,14 @@ snapshot and composites video/image tracks with mixed audio to H.264/yuv420p and
 with libx264 and standard filters, plus ffprobe on PATH. The project's resolution
 and exact rational frame rate determine the default output. Original video audio is preserved
 by default. Independent audio clips on any number of audio tracks can overlap
-original audio and each other across tracks. No transitions, audio effects,
-keyframes, fades or desktop export controls are implemented. Project viewer
+original audio and each other across tracks. Transitions, audio effects,
+keyframes and fades remain outside the current editing model. Project viewer
 composites the same saved layer configuration; source preview plays originals.
+
+T28 [desktop export](EXPORT.md) also offers HEVC and output-frame-rate conversion.
+The CLI keeps project-rate H.264 and its existing quality/resolution flags; there
+are no CLI codec or output-frame-rate flags. Desktop exports always refuse existing
+files; CLI replacement requires explicit `--overwrite` and successful verification.
 
 T12 accepts multiple video tracks, still images and any audio tracks. At least one
 video/image clip is required; empty tracks are allowed. Same-track overlaps remain
@@ -989,8 +994,12 @@ Workspace consumers declare `"@opencut/media": "workspace:*"` as a dependency
 and build the headless packages before importing it. The package exports
 `probeMedia(file)`,
 `extractFrame(file, timestampSeconds, output)`, `composeMedia(options)`,
-`renderVideoTimeline(options)`,
-their TypeScript option/result types, and `MediaError`.
+`renderVideoTimeline(options)`, `validateVideoTimeline(options)`,
+their TypeScript option/result types, `MediaError` and `RenderCancelledError`.
+Timeline preflight and execution share the same plan/media checks. API callers can
+select `codec: 'h264' | 'hevc'` and an optional rational `outputFrameRate`; these are
+media API controls used by T28, not new CLI flags. See [desktop export](EXPORT.md)
+for output-rate rounding, encoder prerequisites and publication behavior.
 
 ```ts
 import { composeMedia } from '@opencut/media';
@@ -1104,8 +1113,9 @@ integration tests render saved fixture projects through the built CLI and indepe
 probe/decode output. They check order, trim endpoints, split equivalence, leading/interior
 black boundaries, mixed source rates, fractional-rate PTS spacing, nonzero source starts,
 directory aliases, stale bounds and source/project preservation. Owned `t10-*` native
-test directories are cleaned on success or failure. Desktop export controls remain
-deferred; the existing T03 path-based composition command remains available.
+test directories are cleaned on success or failure. T28 exposes the same headless
+renderer through [desktop export controls](EXPORT.md); the existing T03 path-based
+composition command remains available.
 
 T11 native integration checks independently decode AAC samples, measure tone
 frequencies and amplitude ratios for overlapping sources, gains, muting, silence,

@@ -4,7 +4,16 @@ import {
   visualGeometry,
   sourceColorMatrix,
 } from '@opencut/shared';
-import { link, lstat, mkdtemp, rename, rm, stat } from 'node:fs/promises';
+import {
+  access,
+  link,
+  lstat,
+  mkdtemp,
+  rename,
+  rm,
+  stat,
+} from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
 import { probeMedia } from './probe.js';
 import type { MediaMetadata } from './probe.js';
@@ -28,9 +37,14 @@ export interface VisualTimelineClip {
 
 export const renderQualities = ['draft', 'balanced', 'high'] as const;
 export const renderResolutions = ['project', '720p', '1080p'] as const;
+export const renderCodecs = ['h264', 'hevc'] as const;
+export type RenderCodec = (typeof renderCodecs)[number];
 export type RenderQuality = (typeof renderQualities)[number];
 export type RenderResolution = (typeof renderResolutions)[number];
 export interface RenderControls {
+  codec?: RenderCodec | undefined;
+  /** Resample the finished composition; source selection stays on the project grid. */
+  outputFrameRate?: { numerator: number; denominator: number } | undefined;
   quality?: RenderQuality | undefined;
   resolution?: RenderResolution | undefined;
   overwrite?: boolean | undefined;
@@ -70,6 +84,7 @@ export interface VideoTimelineOptions extends RenderControls {
 }
 
 export interface VideoTimelineResult {
+  codec: RenderCodec;
   quality: RenderQuality;
   resolution: RenderResolution;
   path: string;
@@ -188,18 +203,18 @@ function sameFrameRate(
 }
 
 /** Execute an integer-frame plan without depending on projects, CLI or Electron. */
-export async function renderVideoTimeline(
-  options: VideoTimelineOptions,
-): Promise<VideoTimelineResult> {
+async function prepareTimeline(options: VideoTimelineOptions) {
   checkRenderSignal(options.signal);
   validateOptions(options);
+  const codec = options.codec ?? 'h264';
   const quality = options.quality ?? 'balanced';
   const resolution = options.resolution ?? 'project';
   if (
+    !renderCodecs.includes(codec) ||
     !renderQualities.includes(quality) ||
     !renderResolutions.includes(resolution)
   )
-    throw new MediaError('Unknown render quality or resolution preset.');
+    throw new MediaError('Unknown render codec, quality or resolution preset.');
   const encoding = {
     draft: { preset: 'ultrafast', crf: '28' },
     balanced: { preset: 'veryfast', crf: '20' },
@@ -227,6 +242,10 @@ export async function renderVideoTimeline(
     2,
     Math.floor((height * scaleNumerator) / (2 * scaleDenominator)) * 2,
   );
+  if (codec === 'hevc' && (outputWidth < 16 || outputHeight < 16))
+    throw new MediaError(
+      'HEVC requires output dimensions of at least 16 × 16 pixels.',
+    );
   let cursor = 0;
   const visualClips: VisualTimelineClip[] =
     options.visualClips ??
@@ -237,7 +256,22 @@ export async function renderVideoTimeline(
     });
   const { numerator, denominator } = frameRate;
   const rate = `${numerator}/${denominator}`;
-  const durationSeconds = (frameCount * denominator) / numerator;
+  const outputRate = options.outputFrameRate ?? frameRate;
+  if (
+    ![outputRate.numerator, outputRate.denominator].every(
+      (value) =>
+        Number.isSafeInteger(value) && value > 0 && value <= 2147483647,
+    ) ||
+    outputRate.numerator < outputRate.denominator ||
+    outputRate.numerator > 120 * outputRate.denominator
+  )
+    throw new MediaError('Output frame rate must be between 1 and 120 fps.');
+  const ticks =
+    BigInt(frameCount) * BigInt(denominator) * BigInt(outputRate.numerator);
+  const divisor = BigInt(numerator) * BigInt(outputRate.denominator);
+  const outputFrameCount = Number((ticks + divisor - 1n) / divisor);
+  const durationSeconds =
+    (outputFrameCount * outputRate.denominator) / outputRate.numerator;
   const path = resolve(options.output);
   if (extname(path).toLowerCase() !== '.mp4')
     throw new MediaError('Render output must have a .mp4 extension.');
@@ -250,6 +284,18 @@ export async function renderVideoTimeline(
   } catch (error) {
     if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT'))
       throw error;
+  }
+  try {
+    if (!(await stat(dirname(path))).isDirectory())
+      throw new Error('Not a directory');
+    await access(dirname(path), constants.W_OK | constants.X_OK);
+  } catch (cause) {
+    throw new MediaError(
+      'Cannot create render output; use an existing writable directory.',
+      {
+        cause,
+      },
+    );
   }
   const args = [
     '-hide_banner',
@@ -382,15 +428,20 @@ export async function renderVideoTimeline(
     );
   }
   filters.push(
-    `[canvas${visualClips.length}]settb=1/${numerator},setpts=N*${denominator},scale=${outputWidth}:${outputHeight}:out_color_matrix=bt709,setsar=1,format=yuv420p[video]`,
+    `[canvas${visualClips.length}]settb=1/${numerator},setpts=N*${denominator},scale=${outputWidth}:${outputHeight}:out_color_matrix=bt709,setsar=1,` +
+      (options.outputFrameRate
+        ? `fps=${outputRate.numerator}/${outputRate.denominator}:round=up:eof_action=pass,tpad=stop_mode=clone:stop=1,trim=end_frame=${outputFrameCount},settb=1/${outputRate.numerator},setpts=N*${outputRate.denominator},`
+        : '') +
+      `format=yuv420p[video]`,
   );
   // Round absolute project boundaries to the nearest 48 kHz sample. Never sum
   // independently rounded durations: fractional frame rates must not accumulate drift.
-  const sample = (frame: number) => {
+  const sample = (frame: number, rate = frameRate) => {
+    const { numerator, denominator } = rate;
     const n = BigInt(frame) * BigInt(denominator) * 48000n;
     return Number((2n * n + BigInt(numerator)) / (2n * BigInt(numerator)));
   };
-  const totalSamples = sample(frameCount);
+  const totalSamples = sample(outputFrameCount, outputRate);
   const audioLabels = ['[silence]'];
   filters.push(
     `anullsrc=r=48000:cl=stereo,atrim=end_sample=${totalSamples},asetpts=N/SR/TB[silence]`,
@@ -451,6 +502,117 @@ export async function renderVideoTimeline(
       `alimiter=limit=0.95:level=0:latency=1,atrim=end_sample=${totalSamples},asetpts=N/SR/TB[audio]`,
   );
   checkRenderSignal(options.signal);
+  args.push(
+    '-filter_complex_threads',
+    '1',
+    '-filter_complex',
+    filters.join(';'),
+    '-map',
+    '[video]',
+    '-map',
+    '[audio]',
+    '-map_metadata',
+    '-1',
+    '-c:v',
+    codec === 'h264' ? 'libx264' : 'libx265',
+    '-preset',
+    encoding.preset,
+    '-crf',
+    encoding.crf,
+    ...(codec === 'hevc'
+      ? ['-x265-params', 'pools=2:log-level=error', '-tag:v', 'hvc1']
+      : []),
+    '-pix_fmt',
+    'yuv420p',
+    '-threads',
+    '2',
+    '-fps_mode',
+    'passthrough',
+    '-enc_time_base:v',
+    `1/${outputRate.numerator}`,
+    '-colorspace',
+    'bt709',
+    '-color_primaries',
+    'bt709',
+    '-color_trc',
+    'bt709',
+    '-video_track_timescale',
+    String(outputRate.numerator),
+    '-c:a',
+    'aac',
+    '-b:a',
+    '192k',
+    '-ar',
+    '48000',
+    '-ac',
+    '2',
+    '-movflags',
+    '+faststart',
+    '-f',
+    'mp4',
+  );
+  return {
+    args,
+    path,
+    quality,
+    resolution,
+    codec,
+    outputWidth,
+    outputHeight,
+    frameRate: outputRate,
+    frameCount: outputFrameCount,
+    durationSeconds,
+  };
+}
+
+/** Full preflight uses the exact same plan, media probes and filters as execution. */
+export async function validateVideoTimeline(options: VideoTimelineOptions) {
+  const prepared = await prepareTimeline(options);
+  const encoders = (
+    await runMediaTool(
+      'ffmpeg',
+      ['-hide_banner', '-v', 'error', '-encoders'],
+      4 * 1024 * 1024,
+      60_000,
+      { signal: options.signal },
+    )
+  ).toString('utf8');
+  for (const encoder of [
+    prepared.codec === 'h264' ? 'libx264' : 'libx265',
+    'aac',
+  ]) {
+    if (!new RegExp(`\\b${encoder}\\b`).test(encoders))
+      throw new MediaError(
+        `Required encoder '${encoder}' is unavailable in this FFmpeg installation.`,
+      );
+  }
+  return {
+    width: prepared.outputWidth,
+    height: prepared.outputHeight,
+    frameRate: prepared.frameRate,
+    frameCount: prepared.frameCount,
+    durationSeconds: prepared.durationSeconds,
+    codec: prepared.codec,
+  };
+}
+
+/** Execute the shared headless pipeline and publish only a verified, complete file. */
+export async function renderVideoTimeline(
+  options: VideoTimelineOptions,
+): Promise<VideoTimelineResult> {
+  const {
+    args,
+    path,
+    quality,
+    resolution,
+    codec,
+    outputWidth,
+    outputHeight,
+    frameRate,
+    frameCount,
+    durationSeconds,
+  } = await prepareTimeline(options);
+  const { numerator, denominator } = frameRate;
   let temporary: string;
   try {
     temporary = await mkdtemp(join(dirname(path), '.opencut-render-'));
@@ -462,53 +624,7 @@ export async function renderVideoTimeline(
   }
   const rendered = join(temporary, 'render.mp4');
   try {
-    args.push(
-      '-filter_complex_threads',
-      '1',
-      '-filter_complex',
-      filters.join(';'),
-      '-map',
-      '[video]',
-      '-map',
-      '[audio]',
-      '-map_metadata',
-      '-1',
-      '-c:v',
-      'libx264',
-      '-preset',
-      encoding.preset,
-      '-crf',
-      encoding.crf,
-      '-pix_fmt',
-      'yuv420p',
-      '-threads',
-      '2',
-      '-fps_mode',
-      'passthrough',
-      '-enc_time_base:v',
-      `1/${numerator}`,
-      '-colorspace',
-      'bt709',
-      '-color_primaries',
-      'bt709',
-      '-color_trc',
-      'bt709',
-      '-video_track_timescale',
-      String(numerator),
-      '-c:a',
-      'aac',
-      '-b:a',
-      '192k',
-      '-ar',
-      '48000',
-      '-ac',
-      '2',
-      '-movflags',
-      '+faststart',
-      '-f',
-      'mp4',
-      rendered,
-    );
+    args.push(rendered);
     const progress = renderProgress(frameCount, options.onProgress);
     progress.start();
     checkRenderSignal(options.signal);
@@ -543,7 +659,7 @@ export async function renderVideoTimeline(
       streams?: { nb_read_frames?: string }[];
     };
     if (
-      video?.codec !== 'h264' ||
+      video?.codec !== codec ||
       metadata.streams.length !== 2 ||
       metadata.audio?.codec !== 'aac' ||
       metadata.audio.sampleRate !== 48000 ||
@@ -596,6 +712,7 @@ export async function renderVideoTimeline(
     return {
       path,
       quality,
+      codec,
       resolution,
       width: outputWidth,
       height: outputHeight,

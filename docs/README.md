@@ -34,6 +34,14 @@ and `pnpm benchmark:t25` for reproducible 1080p/4K comparisons.
 T26 composites overlapping video/image layers in Project viewer with shared
 preview/export transforms, fitting, ordering, alpha and background rules.
 `pnpm benchmark:t26` measures mixed-resolution multi-layer playback.
+T27 adds the [preview/export consistency gate](PREVIEW_EXPORT_CONSISTENCY.md),
+checking actual Chromium Canvas frames, source-frame identity, audio timing and
+muxed timestamps against the headless export.
+
+T28 adds [desktop video export](EXPORT.md): native output selection, presets,
+resolution/FPS/codec/quality controls, preflight validation, progress and cancellation.
+Exports capture an immutable revision, use original media, and publish only verified
+complete files without overwriting existing destinations. Hide the panel to keep editing.
 
 Select a clip to edit **Timeline position**, **Duration**, **Source in/out** in
 whole project frames, **Volume** (linear 0–1), **Mute**, and video **Position X/Y**
@@ -99,7 +107,7 @@ opening another project offers **Save**, **Discard**, and **Cancel** when the
 current project is unsaved. Canceled dialogs and failed saves preserve it; failed
 opens leave the current project displayed. Operations run one at a time, with
 loading indicators and errors shown in the workspace. New projects and edited
-timelines can be unsaved. There is no Save As or desktop render control.
+timelines can be unsaved. There is no Save As. Use **Export** for local MP4 export.
 
 Use **Import media** to choose several video, audio or image files, or drop files
 from Finder into the media library. Import requires ffprobe on PATH; original
@@ -183,8 +191,8 @@ to the next compatible track. Focus an edge handle and use Left/Right to trim.
 Keyboard edits use frame stepping without proximity snapping. Scroll to reach
 other tracks/times; there is no automatic edge scrolling during a drag. Zoom is
 locked while dragging. Successful edits and undo/redo pause and unlink source preview,
-retaining the project playhead. GUI editing does not add transitions,
-keyframes or rendering controls.
+retaining the project playhead. Transitions and keyframes remain unavailable.
+Use **Export** to render the edited project.
 
 Select a video clip and click **Preview selected clip** to link source playback.
 This explicit action sets the playhead to the clip start and opens its source-in.
@@ -301,35 +309,42 @@ and standard filters. Existing output files are refused. See
 
 ## Commands
 
-| Command                                  | Purpose                                                                                      |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `pnpm install`                           | Install and link workspace dependencies                                                      |
-| `pnpm dev` / `pnpm dev:desktop`          | Build internal packages, run the desktop dev server, open Electron                           |
-| `pnpm dev:cli --help`                    | Run the TypeScript CLI without launching Electron                                            |
-| `pnpm cli --help` / `pnpm cli --version` | Run the built CLI (build first)                                                              |
-| `pnpm build`                             | Build libraries, CLI and Electron main/preload/React assets in dependency order              |
-| `pnpm typecheck`                         | Build library declarations and strictly check all source, scripts and tests                  |
-| `pnpm lint`                              | Run ESLint                                                                                   |
-| `pnpm format` / `pnpm format:check`      | Apply / check Prettier formatting                                                            |
-| `pnpm test`                              | Build prerequisites and run headless unit + CLI/fixture-contract tests                       |
-| `pnpm test:desktop`                      | Build and check projects, IPC security, appearance, reopening and available fixture playback |
-| `pnpm test:preview`                      | Build and measure real Electron playback/seek performance (FFmpeg + ffprobe + fixtures)      |
-| `pnpm benchmark:t25`                     | Compare original/proxy 1080p and 4K playback on generated media                              |
-| `pnpm benchmark:t26`                     | Measure overlapping video/image playback, seeks, CPU and memory in Electron                  |
-| `pnpm test:fixtures`                     | Run the optional native intact/truncated-media regression (FFmpeg + ffprobe)                 |
-| `pnpm e2e --keep`                        | Build and run the complete 18-second CLI workflow; retain verified MP4 and evidence          |
-| `pnpm test:e2e`                          | Run the CLI-only workflow twice and clean per-run artifacts (FFmpeg + ffprobe)               |
-| `pnpm test:media`                        | Build and test real media CLI against existing generated fixtures (FFmpeg + ffprobe)         |
-| `pnpm fixtures:generate`                 | Generate and validate five small synthetic media files (optional FFmpeg + ffprobe)           |
-| `pnpm fixtures:validate`                 | Decode generated media and check metadata/readable video frame counts (ffprobe)              |
+| Command                                  | Purpose                                                                                 |
+| ---------------------------------------- | --------------------------------------------------------------------------------------- |
+| `pnpm install`                           | Install and link workspace dependencies                                                 |
+| `pnpm dev` / `pnpm dev:desktop`          | Build internal packages, run the desktop dev server, open Electron                      |
+| `pnpm dev:cli --help`                    | Run the TypeScript CLI without launching Electron                                       |
+| `pnpm cli --help` / `pnpm cli --version` | Run the built CLI (build first)                                                         |
+| `pnpm build`                             | Build libraries, CLI and Electron main/preload/React assets in dependency order         |
+| `pnpm typecheck`                         | Build library declarations and strictly check all source, scripts and tests             |
+| `pnpm lint`                              | Run ESLint                                                                              |
+| `pnpm format` / `pnpm format:check`      | Apply / check Prettier formatting                                                       |
+| `pnpm test`                              | Build prerequisites and run headless unit + CLI/fixture-contract tests                  |
+| `pnpm test:desktop`                      | Build and check projects, GUI exports, IPC security, appearance and fixture playback    |
+| `pnpm test:preview`                      | Build and measure real Electron playback/seek performance (FFmpeg + ffprobe + fixtures) |
+| `pnpm benchmark:t25`                     | Compare original/proxy 1080p and 4K playback on generated media                         |
+| `pnpm benchmark:t26`                     | Measure overlapping video/image playback, seeks, CPU and memory in Electron             |
+| `pnpm test:fixtures`                     | Run the optional native intact/truncated-media regression (FFmpeg + ffprobe)            |
+| `pnpm e2e --keep`                        | Build and run the complete 18-second CLI workflow; retain verified MP4 and evidence     |
+| `pnpm test:e2e`                          | Run the CLI-only workflow twice and clean per-run artifacts (FFmpeg + ffprobe)          |
+| `pnpm test:media`                        | Build and test real media CLI against existing generated fixtures (FFmpeg + ffprobe)    |
+| `pnpm fixtures:generate`                 | Generate and validate five small synthetic media files (optional FFmpeg + ffprobe)      |
+| `pnpm fixtures:validate`                 | Decode generated media and check metadata/readable video frame counts (ffprobe)         |
 
 `build` emits development-ready production assets, not a signed `.app`, DMG,
 or installer. `test:desktop` needs a graphical desktop session but no downloaded
-Playwright browser. Project regressions cover GUI/CLI file compatibility, offline
+Playwright browser. The full desktop suite requires FFmpeg/ffprobe with lavfi,
+libx264, libx265, libvpx-vp9, PNG and AAC support.
+
+Project regressions cover GUI/CLI file compatibility, offline
 assets, invalid files, stale saves, unsaved-close/quit choices, loading states and
-IPC rejection from another window. They exercise the production preload and main
-handlers with native dialog results stubbed; real native dialog interaction is a
-separate manual check. T19 regressions cover unsaved import/remove/undo/redo,
+IPC rejection from another window. T28 export checks cover original-media snapshots
+with active proxies and concurrent edits, metadata/presets/output FPS/HEVC, missing
+media/tools, output conflicts, cancellation, failure recovery and shutdown cleanup.
+A restoration regression checks fresh output selection after renderer reload and
+macOS window recreation, canceled pickers and preservation of the prior export.
+These tests exercise the production preload and main handlers with native dialog
+results stubbed; real native dialog interaction is a separate manual check. T19 regressions cover unsaved import/remove/undo/redo,
 readable and missing source availability, and dragging restored library assets.
 T20 regressions cover numeric properties and rejected values, slider history,
 keyboard focus, restored clip selection, and save/reopen against CLI inspection.

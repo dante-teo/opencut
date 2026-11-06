@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import {
   APP_INFO_CHANNEL,
+  EXPORT_CHANNELS,
+  EXPORT_CHANGED_CHANNEL,
   PROJECT_CHANGED_CHANNEL,
   IMPORT_PROGRESS_CHANNEL,
   THUMBNAIL_CHANNEL,
@@ -16,6 +18,20 @@ import {
 } from '../bridge.js';
 
 const api: DesktopAPI = {
+  chooseExportOutput: () => ipcRenderer.invoke(EXPORT_CHANNELS.choose),
+  getExport: () => ipcRenderer.invoke(EXPORT_CHANNELS.current),
+  startExport: (input) => ipcRenderer.invoke(EXPORT_CHANNELS.start, input),
+  cancelExport: (id) => ipcRenderer.invoke(EXPORT_CHANNELS.cancel, id),
+  onExportChanged: (callback) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      state: Parameters<typeof callback>[0],
+    ) => callback(state);
+    ipcRenderer.on(EXPORT_CHANGED_CHANNEL, listener);
+    return () => {
+      ipcRenderer.removeListener(EXPORT_CHANGED_CHANNEL, listener);
+    };
+  },
   onProjectChanged: (callback) => {
     const listener = (
       _event: Electron.IpcRendererEvent,

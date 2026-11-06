@@ -75,7 +75,25 @@ changing project assets. Filters combine and reset when switching to a different
 project. **Clear filters** shows the full library when a search has no matches.
 Select assets to inspect metadata, or clips to inspect exact stored timing.
 Unsaved projects prompt Save/Discard/Cancel before switching, closing or quitting.
-T22 synchronizes CLI edits immediately with the open GUI session; named projects save each accepted edit. Project playback is available through T24; desktop export controls remain unavailable.
+T22 synchronizes CLI edits immediately with the open GUI session; named projects save each accepted edit. Project playback is available through T24; T28 adds desktop export.
+
+T28 **Export** opens the desktop export panel. Choose a new `.mp4` destination,
+a preset or resolution/FPS/H.264-or-HEVC/quality settings, then **Export video**.
+Preflight checks timeline/media, encoder availability and output conflicts. Jobs show
+progress, elapsed/estimated remaining encoding time, and separate validation failure,
+render failure, cancellation and verified success. Hide the panel to keep editing;
+the active job captures the project ID/revision and original-media references and is
+unaffected by later edits or preview proxies. After reloading or reopening the window,
+choose an output file again before starting another export; canceling the picker
+does not enable export. The previous destination remains in the job status, which
+lasts only for the current application process. Hiding and reopening the panel keeps
+the current selection. Existing files are always refused.
+Cancel or normal app/window close waits for process closure and cleanup. Requires
+manually installed FFmpeg/ffprobe with libx264 or libx265 and AAC. Output FPS conversion
+rounds duration up by less than one output frame. See [desktop export](../../docs/EXPORT.md)
+for exact presets, source-file stability, limits and publication behavior. These are
+GUI capabilities; the CLI keeps its existing H.264 flags/defaults and does not gain
+new codec or output-FPS flags in T28.
 
 T17 adds read-only timeline navigation: video/audio tracks retain project order;
 clip positions, gaps and cross-track overlaps follow exact stored timing. Use the
@@ -97,8 +115,8 @@ Known limitation: repeated ruler seeks followed by **Play** can leave the linked
 source paused. Confirm that the source clock advances when checking playback.
 Zoom/scroll persist during selection/playback/save, and reset on project replacement.
 The timeline culls offscreen clips/tracks and caps the physical scrollbar for long
-sequences; extreme-duration scrollbar navigation is coarser. No waveforms or
-rendering controls are added. CLI edits synchronize automatically.
+sequences; extreme-duration scrollbar navigation is coarser. Waveforms remain
+unavailable. CLI edits synchronize automatically.
 
 T18 adds GUI clip editing through the same core transactions as the CLI. Drag
 clip bodies to move or change compatible tracks, and drag edges to trim while
@@ -122,7 +140,7 @@ tracks; focused edge handles
 support Left/Right trims, without proximity snapping. Named projects automatically persist completed
 edits and history; inspect with `timeline list` to verify. Save gives untitled projects a path. Successful
 edits pause/unlink source preview and retain the project playhead. Zoom is locked
-during gestures; scroll manually to reach offscreen targets. Transitions, keyframes, project playback and rendering controls are not added.
+during gestures; scroll manually to reach offscreen targets. Transitions and keyframes remain unavailable.
 
 T19 adds **Import media** (multi-selection) and Finder file drops into the library.
 ffprobe must be installed manually and available on PATH. Imports reference
@@ -141,7 +159,7 @@ five seconds. A new track and clip form one undoable edit. Incompatible or
 overlapping drops fail without edits. External files must first enter the library.
 Select an unused asset, then **Remove asset**; referenced assets are protected.
 Save/reopen and use CLI `media list` / `timeline list` to inspect saved GUI edits.
-No waveforms, advanced organization, transitions or rendering controls are added.
+Waveforms, advanced library organization and transitions remain unavailable.
 
 T20 adds contextual clip properties in the inspector. Timing uses whole project
 frames (timeline position, duration, source in/out); audio uses linear volume 0–1

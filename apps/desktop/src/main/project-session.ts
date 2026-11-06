@@ -128,6 +128,15 @@ export class ProjectSession {
     });
   }
 
+  captureExport(input: { projectId: string; expectedRevision: number }) {
+    if (this.busy) throw new Error('Wait for the project operation to finish.');
+    const state = this.publishedState;
+    if (!state || input.projectId !== state.project.metadata.id)
+      throw new Error('Project changed. Open the export settings again.');
+    checkProjectRevision(state.project, input.expectedRevision);
+    return structuredClone(state);
+  }
+
   async libraryAsset(id: unknown) {
     const state = this.state;
     if (!state || typeof id !== 'string')
