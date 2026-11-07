@@ -118,10 +118,11 @@ Project metadata/settings, imported assets (including missing-media warnings),
 and video/audio tracks and clips appear in a docked editor workspace: media
 library on the left, viewer in the center, inspector on the right, and a timeline
 below. Select an asset or clip to inspect its stored details. Timeline blocks
-show relative positions and durations, video/still filmstrips, and audio waveforms.
-Artwork follows the trimmed source range and loads only for visible clips;
-FFmpeg is required. Loading or unavailable previews are labeled. Artwork helps
-identify source content; it does not show clip transforms, opacity or gain.
+show relative positions and durations. Video and still clips have filmstrips.
+Video clips with audio and audio-only clips also show waveforms. Artwork follows
+the trimmed source range and loads for visible clips with FFmpeg. Placeholders
+appear while artwork loads or if decoding fails. The graphics show source
+content before applying clip transforms or gain.
 See [timeline artwork](TIMELINE_PLAYBACK.md#timeline-clip-artwork) for sampling,
 cache and hardware-decoding behavior.
 

@@ -12,11 +12,12 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(localFile).mockResolvedValue('/clip.mp4');
   vi.mocked(stat).mockResolvedValue({
-    dev: 1,
-    ino: 1,
-    size: 1000,
-    mtimeMs: 1,
-    ctimeMs: 1,
+    isFile: () => true,
+    dev: 1n,
+    ino: 1n,
+    size: 1000n,
+    mtimeNs: 1n,
+    ctimeNs: 1n,
   } as Awaited<ReturnType<typeof stat>>);
   vi.mocked(runMediaTool).mockResolvedValue(
     Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
@@ -39,20 +40,22 @@ it('invalidates an edited source and refuses changes during decoding', async () 
   const cache = new ThumbnailCache();
   await cache.get('/clip.mp4', 1, { hardware: false });
   vi.mocked(stat).mockResolvedValue({
-    dev: 1,
-    ino: 1,
-    size: 1000,
-    mtimeMs: 2,
-    ctimeMs: 2,
+    isFile: () => true,
+    dev: 1n,
+    ino: 1n,
+    size: 1000n,
+    mtimeNs: 2n,
+    ctimeNs: 2n,
   } as Awaited<ReturnType<typeof stat>>);
   await cache.get('/clip.mp4', 1, { hardware: false });
   expect(runMediaTool).toHaveBeenCalledTimes(2);
   vi.mocked(stat).mockResolvedValueOnce({
-    dev: 1,
-    ino: 1,
-    size: 1000,
-    mtimeMs: 3,
-    ctimeMs: 3,
+    isFile: () => true,
+    dev: 1n,
+    ino: 1n,
+    size: 1000n,
+    mtimeNs: 3n,
+    ctimeNs: 3n,
   } as Awaited<ReturnType<typeof stat>>);
   await expect(cache.get('/clip.mp4', 2, { hardware: false })).rejects.toThrow(
     'Source changed',

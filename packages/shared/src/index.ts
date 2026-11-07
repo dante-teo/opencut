@@ -1,3 +1,6 @@
+export const WAVEFORM_CHUNK_SECONDS = 16;
+export const WAVEFORM_BINS_PER_SECOND = 100;
+
 /** Headless composition rules used by both FFmpeg and the browser preview. */
 export interface VisualTransform {
   x?: number;

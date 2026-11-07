@@ -691,6 +691,9 @@ export function ProjectTimeline({
           )}
           {project?.tracks.slice(firstTrack, lastTrack).map((track, offset) => {
             const trackIndex = firstTrack + offset;
+            const top = RULER_HEIGHT + trackIndex * TRACK_HEIGHT - viewport.top;
+            const artworkVisible =
+              top < viewport.height && top + TRACK_HEIGHT > RULER_HEIGHT;
             const clips = index.tracks.get(track.id) ?? [];
             return (
               <div
@@ -698,7 +701,7 @@ export function ProjectTimeline({
                 key={track.id}
                 data-track-id={track.id}
                 style={{
-                  top: RULER_HEIGHT + trackIndex * TRACK_HEIGHT - viewport.top,
+                  top,
                 }}
               >
                 <div className="track-heading" title={track.name}>
@@ -736,15 +739,18 @@ export function ProjectTimeline({
                     ({ clip, end }) => {
                       // Clip geometry to the viewport before handing it to SVG; enormous
                       // offscreen coordinates must never reach browser layout/painting.
-                      const x = Math.max(
-                        -2,
-                        relativePixels(clip.timelineStart, origin, zoom),
+                      const clipLeft = relativePixels(
+                        clip.timelineStart,
+                        origin,
+                        zoom,
                       );
-                      const right = Math.min(
-                        width + 2,
-                        relativePixels(end, origin, zoom),
+                      const clipRight = relativePixels(end, origin, zoom);
+                      const x = Math.max(-2, clipLeft);
+                      const clipWidth = Math.max(
+                        0.5,
+                        Math.min(width + 2, clipRight) - x,
                       );
-                      const clipWidth = Math.max(0.5, right - x);
+                      const artworkWidth = Math.max(0, clipWidth - 2);
                       const asset = index.assets.get(clip.assetId);
                       return (
                         <g
@@ -780,7 +786,6 @@ export function ProjectTimeline({
                                     (event.shiftKey ? 10n : 1n),
                                 );
                               else {
-                                const asset = index.assets.get(clip.assetId);
                                 const direction =
                                   event.key === 'ArrowUp' ? -1 : 1;
                                 for (
@@ -827,37 +832,28 @@ export function ProjectTimeline({
                           <svg
                             x={x + 1}
                             y="6"
-                            width={Math.max(0, clipWidth - 2)}
+                            width={artworkWidth}
                             height="52"
                             overflow="hidden"
                           >
-                            <ClipArtwork
-                              project={project}
-                              clip={clip}
-                              asset={asset}
-                              audio={track.type === 'audio'}
-                              offset={Math.max(
-                                0,
-                                x -
-                                  relativePixels(
-                                    clip.timelineStart,
-                                    origin,
-                                    zoom,
-                                  ),
-                              )}
-                              width={Math.max(0, clipWidth - 2)}
-                              zoom={zoom}
-                            />
+                            {artworkVisible && (
+                              <ClipArtwork
+                                project={project}
+                                clip={clip}
+                                asset={asset}
+                                audio={track.type === 'audio'}
+                                offset={Math.max(0, x + 1 - clipLeft)}
+                                width={artworkWidth}
+                                zoom={zoom}
+                              />
+                            )}
                             <text className="clip-name" x="8" y="14">
                               {asset?.name ?? 'Missing media'}
                             </text>
                           </svg>
                           {(['left', 'right'] as const).map((edge) => {
-                            const boundaryX = relativePixels(
-                              edge === 'left' ? clip.timelineStart : end,
-                              origin,
-                              zoom,
-                            );
+                            const boundaryX =
+                              edge === 'left' ? clipLeft : clipRight;
                             if (boundaryX < 0 || boundaryX > width) return null;
                             const handleWidth = Math.min(8, clipWidth / 3);
                             return (

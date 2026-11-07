@@ -275,13 +275,14 @@ T31 makes the official Skill portable and adds
 transactional edits, visual review and playable export using the deployed CLI
 and TypeScript SDK.
 
-### Timeline artwork and workspace refinements
+### Timeline artwork (T32)
 
-The current workspace adds video/still filmstrips and real source audio waveforms
-to timeline clips. Samples follow trims, splits, scroll and zoom; missing media or
-tools produce a labeled fallback. Artwork identifies source content and does not
-apply clip transforms or audio gain/mute. Batched thumbnails use a bounded memory
-cache, with measured VideoToolbox selection for eligible macOS sources. See the
+Video and still clips display filmstrips. Video clips with audio and audio-only
+clips display waveforms. Artwork follows clip trims and splits. Scrolling
+schedules visible requests and cancels obsolete decodes. Zoom changes the
+thumbnail sample spacing and waveform detail. Fixed source-time waveform
+summaries and bounded worker caches support long clips. Placeholders keep clip
+positions visible while media loads or when artwork is unavailable. See the
 [timeline artwork contract](TIMELINE_PLAYBACK.md#timeline-clip-artwork).
 
 Panel headings and controls share a consistent layout at compact and large window

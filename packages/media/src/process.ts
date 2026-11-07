@@ -34,6 +34,13 @@ export async function localFile(file: string): Promise<string> {
   return path;
 }
 
+export async function sourceFileStamp(path: string) {
+  const info = await stat(path, { bigint: true });
+  if (!info.isFile())
+    throw new MediaError('Cache source must be a regular file.');
+  return [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':');
+}
+
 // execFile passes arguments directly, without shell expansion. Bound both runtime
 // and buffered output; close stdin so neither executable can wait for user input.
 export async function runMediaTool(

@@ -38,7 +38,7 @@ mapping; it never substitutes original bytes into a proxy byte-range response.
 ## Identity, storage and invalidation
 
 These identity/storage rules apply to persisted proxy and PNG entries.
-[Navigation artwork](#navigation-artwork) has a separate in-memory lifetime.
+[Navigation artwork](#navigation-artwork) uses memory for waveforms and a separate JPEG LRU.
 
 Source identity combines SHA-256 of the entire source with its real path, device,
 inode, size, nanosecond mtime/ctime and normalized media metadata. A bounded 64-source
@@ -72,9 +72,9 @@ Unsupported or excessive timestamp output fails safely to original preview.
 
 The default is `~/.cache/opencut/media-v1`, shared by GUI and CLI. Set
 `OPENCUT_MEDIA_CACHE` or the CLI `--directory` flag to isolate it. Defaults are
-2048 MiB disk and 64 MiB encoded PNG memory. Configure accepts 1 MiB–1 TiB disk
-and 1 MiB–1 GiB PNG memory. Disk accounting includes derivative manifests and
-staging bytes; the small config/ownership/lock files are administrative overhead.
+2048 MiB on disk and 64 MiB in memory. Configure accepts 1 MiB–1 TiB for disk
+and 1 MiB–1 GiB for memory. Disk accounting includes derivative manifests and
+staging bytes. The small config, ownership and lock files are administrative overhead.
 
 Disk entries evict by oldest manifest access time, with at most 4095 published
 entries. Before encoding, the writer reserves a staging allowance of at most the
@@ -84,8 +84,9 @@ smaller budget immediately evicts. Severe budgets may prevent proxy creation or
 cause useful derivatives to be regenerated. Cache maintenance may evict a granted
 proxy; the media-error path falls back to its original.
 
-640×360-or-smaller PNG frames are cached on disk and in a byte-bounded `lru-cache`
-(at most 256 buffers). This exact-PTS cache serves playback and CLI frame requests.
+640×360-or-smaller PNG frames are cached on disk and in a byte-bounded `lru-cache`.
+The worker holds up to 256 encoded PNG and waveform buffers in that cache.
+The exact-PTS frame path serves playback and CLI frame requests.
 On a cache miss, ffprobe reads a seek-local interval and returns integer presentation timestamps in
 the source time base, bounded to 4 MiB output, 60 seconds and two decoder threads.
 The last presentation timestamp at or before the requested instant identifies the
@@ -101,12 +102,12 @@ frame sequence is prefetched. Seek/playback generations discard stale completion
 Cached images bridge paused seeks; ready native decoders take precedence. The
 renderer retains decoded PNGs within the configured memory allowance and releases
 them on seek, playback start or disposal. Lowering the limit trims them immediately.
-The worker encoded-PNG cache and renderer decoded-PNG cache each apply that limit
-independently; it is not a combined memory pool. No unbounded decoded video-frame
-sequence or full-file PCM lives in JavaScript.
+The worker applies the memory limit to encoded playback PNGs and waveform
+peaks. The renderer applies the same limit separately to decoded playback PNGs.
+No unbounded decoded video-frame sequence or full-file PCM lives in JavaScript.
 
-Chromium owns native decoder buffers, so the PNG budget is **not a process RSS or
-GPU-memory guarantee**. The player caps owned source-run entries at 16, including
+Chromium owns native decoder buffers outside these cache budgets. The player
+caps owned source-run entries at 16, including
 still images as well as media-element decoders, and speculative
 lookahead runs at four/two seconds, with estimated three RGBA frames per source
 constrained by the configured memory allowance. The first cache status applies
@@ -121,31 +122,36 @@ FFmpeg executes outside Electron main/renderer.
 
 ## Navigation artwork
 
-Library video thumbnails and timeline filmstrips use `ThumbnailCache`, a separate
-in-memory JPEG LRU capped at 8 MiB and 128 entries in the media worker. Its keys
-include resolved source path, device/inode, size, mtime/ctime, requested source
-time, batch size, sample interval and decoder options. File identity is checked
-before lookup and after decoding; a source changed during decoding is not cached.
-These small navigation images do not use the persistent proxy/PNG directory,
-whole-source hashing or its cross-process lock. Clearing the worker cache clears
-this JPEG cache and its transient decoder-selection measurements too.
+Library video thumbnails and timeline filmstrips use the worker's JPEG LRU,
+capped at 8 MiB and 128 entries. The key includes source path, device/inode, size,
+mtime/ctime, requested source time, batch size, sample interval and decoder
+options. A filmstrip atlas can be reused at the same sample spacing across
+scrolling, window resizing and reopened projects.
 
-The renderer separately retains up to 8 MiB / 128 encoded artwork entries,
-including waveform images. Project snapshots distinguish reopened/copied projects
-that reuse IDs and relative paths. These fixed budgets are independent of the
-configurable PNG limit and are not included in the disk/PNG usage counters shown
-by **Proxy & cache** or CLI cache status. They are not a process RSS limit.
+Waveform chunks share the T25 memory cache and its configured byte limit with
+playback PNGs. Each chunk uses the original file's resolved path, nanosecond file
+identity, a summary version and a 16-second source-grid offset as its key.
+Waveform memory use and cache hits/misses are included in the desktop cache
+status. Zoom and clip dimensions only change the drawing, so a single chunk can
+serve clips with different trims or zoom levels. A cleared cache releases both
+artwork caches. JPEG bytes and waveform peaks are stored in memory only. If
+disk cache setup fails, waveform decoding continues with the last valid memory
+limit, or the default on a fresh worker. Disk cache operations still report the
+setup error.
 
-Nearby filmstrip samples share a small atlas; waveforms decode only visible source
-chunks. Failed or obsolete requests are not cached as successful artwork. All of
-this is preview-only: originals, project data and export paths are unchanged.
-See [timeline artwork](TIMELINE_PLAYBACK.md#timeline-clip-artwork) for sampling,
-waveform limits, VideoToolbox selection and the security boundary.
+The worker checks file identity before lookup and after decoding. Navigation
+lookups avoid whole-source hashing and the disk cache lock, so a late seek in a
+long file does not require reading its earlier contents. The renderer holds only
+mounted artwork and coalesces matching in-flight requests for a project snapshot.
+A reopened project always performs a new authorized lookup. See
+[timeline artwork](TIMELINE_PLAYBACK.md#timeline-clip-artwork) for source
+sampling, cancellation and decoding limits.
 
 ## Management and measurement
 
-Expand **Proxy & cache** in Project viewer for use toggle, disk/PNG usage, jobs and
-progress, regenerate/cancel, limits, stale cleanup and clear. These actions do not
+Expand **Proxy & cache** in Project viewer for the proxy toggle, disk and worker
+memory usage, cache hits, jobs and progress, regeneration and cancellation,
+limits, stale cleanup and clearing. These actions do not
 create edits. Project invalidation cancels obsolete work and forgets the affected
 queued/generating jobs, so a fresh valid selection can restart them even while old
 work finishes cancelling. **Cancel generation** retains cancelled job records;
@@ -169,7 +175,8 @@ Behavioral coverage is separate from performance measurement:
   and changed limits during its lifetime. The [artwork regression](../tests/desktop/timeline-artwork.spec.ts)
   checks the actual displayed filmstrip/waveform pixels and layout.
 - `pnpm test:media` also includes [thumbnail timing and decode-cost checks](../tests/integration/thumbnail.native.spec.ts)
-  and [waveform timing checks](../tests/integration/waveform.native.spec.ts).
+  and [waveform timing and cache fallback checks](../tests/integration/waveform.native.spec.ts).
+  The fallback regression covers a non-dedicated cache directory and a malformed config.
   Thumbnail measurements use a newly generated eight-second 3840×2160/30 fps
   H.264 source (`libx264`, ultrafast, CRF 28, two encoder threads), sampling every
   0.9 seconds from 0 through 6.3 seconds. They compare the playback PNG path,

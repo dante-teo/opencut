@@ -1,7 +1,6 @@
 import { parentPort } from 'node:worker_threads';
 import {
   MediaCache,
-  waveformImage,
   ThumbnailCache,
   type CacheLimits,
   type ProxyResult,
@@ -22,7 +21,10 @@ let queue = Promise.resolve();
 let enabled = true;
 let revision = 0;
 let shuttingDown = false;
-const requests = new Map<AbortController, Promise<unknown>>();
+const requests = new Map<
+  number,
+  { controller: AbortController; work: Promise<unknown> }
+>();
 let generation = 0;
 function start(path: string, force = false) {
   const previous = jobs.get(path);
@@ -80,8 +82,9 @@ async function cancel(invalidate = false) {
     if (invalidate && ['queued', 'generating'].includes(job.state))
       jobs.delete(path);
   }
-  for (const controller of requests.keys()) controller.abort();
-  await Promise.allSettled([queue, ...requests.values()]);
+  const pending = [...requests.values()];
+  for (const { controller } of pending) controller.abort();
+  await Promise.allSettled([queue, ...pending.map(({ work }) => work)]);
 }
 parentPort!.on(
   'message',
@@ -91,13 +94,15 @@ parentPort!.on(
     path?: string;
     auto?: boolean;
     timestamp?: number;
-    duration?: number;
-    width?: number;
     hardware?: boolean;
     count?: number;
     interval?: number;
     limits?: CacheLimits;
   }) => {
+    if (request.method === 'abort') {
+      requests.get(request.id)?.controller.abort();
+      return;
+    }
     void (async () => {
       let value: unknown;
       if (shuttingDown) throw new Error('Media worker is closing.');
@@ -112,13 +117,13 @@ parentPort!.on(
         try {
           if (enabled) {
             const work = cache.select(request.path!, controller.signal);
-            requests.set(controller, work);
+            requests.set(request.id, { controller, work });
             result = await work;
           } else result = { path: request.path!, key: '', proxy: false };
         } catch {
           result = { path: request.path!, key: '', proxy: false };
         } finally {
-          requests.delete(controller);
+          requests.delete(request.id);
         }
         if (
           selectionGeneration === generation &&
@@ -172,38 +177,36 @@ parentPort!.on(
         value = null;
       } else if (['thumbnail', 'waveform', 'frame'].includes(request.method)) {
         const controller = new AbortController();
-        let work: Promise<Buffer>;
+        const path = request.path!;
+        const timestamp = request.timestamp!;
+        const { signal } = controller;
+        let work: Promise<Buffer | null>;
         if (request.method === 'thumbnail') {
           work = thumbnails
-            .get(request.path!, request.timestamp!, {
+            .get(path, timestamp, {
               hardware: request.hardware ?? false,
               adaptive: true,
               count: request.count ?? 1,
               interval: request.interval ?? 0,
-              signal: controller.signal,
+              signal,
             })
             .then((result) => result.bytes);
-        } else if (request.method === 'waveform') {
-          work = waveformImage(
-            request.path!,
-            request.timestamp!,
-            request.duration!,
-            request.width!,
-            controller.signal,
-          );
         } else {
-          work = cache.frame(
-            request.path!,
-            request.timestamp!,
-            controller.signal,
-          );
+          work =
+            request.method === 'waveform'
+              ? cache.waveform(path, timestamp, signal)
+              : cache.frame(path, timestamp, signal);
         }
-        requests.set(controller, work);
+        requests.set(request.id, { controller, work });
         try {
+          const bytes = await work;
           const format = request.method === 'thumbnail' ? 'jpeg' : 'png';
-          value = `data:image/${format};base64,${(await work).toString('base64')}`;
+          value =
+            request.method === 'waveform'
+              ? (bytes ?? new Uint8Array())
+              : `data:image/${format};base64,${bytes!.toString('base64')}`;
         } finally {
-          requests.delete(controller);
+          requests.delete(request.id);
         }
       } else throw new Error('Unknown media worker method.');
       parentPort!.postMessage({ id: request.id, value });

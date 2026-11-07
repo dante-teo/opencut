@@ -30,6 +30,7 @@ import type {
   ProjectReply,
   ImportProgress,
   AssetClipInput,
+  HistoryInput,
 } from '../bridge.js';
 
 export interface ProjectDialogs {
@@ -137,10 +138,15 @@ export class ProjectSession {
     return structuredClone(state);
   }
 
-  async libraryAsset(id: unknown) {
+  async libraryAsset(id: unknown, scope?: HistoryInput) {
     const state = this.state;
     if (!state || typeof id !== 'string')
       throw new Error('Select a library asset.');
+    if (scope) {
+      if (scope.projectId !== state.project.metadata.id)
+        throw new Error('Project changed.');
+      checkProjectRevision(state.project, scope.expectedRevision);
+    }
     const asset = state.project.assets.find((asset) => asset.id === id);
     if (!asset) throw new Error('Asset is not in the current project.');
     const path = resolveMediaReference(

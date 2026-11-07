@@ -1,56 +1,77 @@
-import { localFile, MediaError, runMediaTool } from './process.js';
+import {
+  WAVEFORM_BINS_PER_SECOND,
+  WAVEFORM_CHUNK_SECONDS,
+} from '@opencut/shared';
+import { type MediaMetadata } from './probe.js';
+import { runMediaTool } from './process.js';
 
-/** FFmpeg supplies the waveform; no samples or user files enter the renderer. */
-export async function waveformImage(
-  file: string,
+const sampleRate = 48000;
+const samplesPerBin = sampleRate / WAVEFORM_BINS_PER_SECOND;
+const binCount = WAVEFORM_CHUNK_SECONDS * WAVEFORM_BINS_PER_SECOND;
+
+/** Summarize the selected stream on a fixed source-time grid without buffering PCM. */
+export async function waveformPeaks(
+  media: MediaMetadata,
   start: number,
-  duration: number,
-  width: number,
   signal?: AbortSignal,
-): Promise<Buffer> {
-  if (
-    !Number.isFinite(start) ||
-    start < 0 ||
-    !Number.isFinite(duration) ||
-    duration <= 0 ||
-    duration > 120 ||
-    !Number.isInteger(width) ||
-    width < 1 ||
-    width > 2048
-  )
-    throw new MediaError('Invalid waveform range or dimensions.');
-  const path = await localFile(file);
-  const png = await runMediaTool(
+): Promise<Buffer | null> {
+  const { audio } = media;
+  if (!audio) return null;
+  const peaks = Buffer.alloc(binCount);
+  if (audio.startTimeSeconds !== null) {
+    const audioStart = audio.startTimeSeconds - (media.startTimeSeconds ?? 0);
+    if (
+      audioStart >= start + WAVEFORM_CHUNK_SECONDS ||
+      (audio.durationSeconds !== null &&
+        audioStart + audio.durationSeconds <= start)
+    )
+      return peaks;
+  }
+  const samples = binCount * samplesPerBin;
+  const output = await runMediaTool(
     'ffmpeg',
     [
       '-v',
       'error',
       '-nostdin',
-      '-ss',
-      start.toFixed(6),
-      '-t',
-      duration.toFixed(6),
-      '-i',
-      path,
-      '-filter_complex',
-      `[0:a:0]aformat=channel_layouts=mono,aresample=8000:async=1:first_pts=0,apad=whole_dur=${duration.toFixed(6)},atrim=duration=${duration.toFixed(6)},showwavespic=s=${width}x32:colors=0x47b89f:scale=sqrt[v]`,
-      '-map',
-      '[v]',
-      '-frames:v',
-      '1',
       '-threads',
       '1',
-      '-c:v',
-      'png',
+      '-filter_threads',
+      '1',
+      '-ss',
+      String(start),
+      '-t',
+      String(WAVEFORM_CHUNK_SECONDS),
+      '-i',
+      media.path,
+      '-map',
+      `0:${audio.index}`,
+      '-af',
+      [
+        // Preserve stream delay, gaps and the silent tail in source time.
+        `aresample=${sampleRate}:async=1:min_hard_comp=0.001:first_pts=0`,
+        `apad=whole_len=${samples}`,
+        `atrim=end_sample=${samples}`,
+        `asetnsamples=n=${samplesPerBin}:p=0`,
+        'astats=metadata=1:reset=1:measure_perchannel=none:measure_overall=Peak_level',
+        "ametadata=mode=print:key=lavfi.astats.Overall.Peak_level:file='pipe\\:1'",
+      ].join(','),
       '-f',
-      'image2pipe',
-      'pipe:1',
+      'null',
+      '-',
     ],
-    512 * 1024,
+    256 * 1024,
     30000,
     { signal },
   );
-  if (!png.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')))
-    throw new MediaError('No waveform could be decoded.');
-  return png;
+  // Use the peak across all channels. A mono mix would hide phase-inverted audio.
+  for (const match of output
+    .toString('utf8')
+    .matchAll(/frame:(\d+).*\n *lavfi\.astats\.Overall\.Peak_level=(.*)/g)) {
+    const bin = Number(match[1]);
+    const amplitude = Math.pow(10, Number(match[2]) / 20);
+    if (bin < binCount && !Number.isNaN(amplitude))
+      peaks[bin] = Math.min(255, Math.round(amplitude * 255));
+  }
+  return peaks;
 }

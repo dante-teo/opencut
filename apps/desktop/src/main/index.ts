@@ -15,6 +15,7 @@ import { stat } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getApplicationInfo, projectRevision } from '@opencut/core';
+import { WAVEFORM_CHUNK_SECONDS } from '@opencut/shared';
 import {
   probeMedia,
   demandingMedia,
@@ -39,6 +40,8 @@ import {
   MEDIA_CACHE_CHANNEL,
   TIMELINE_FRAME_CHANNEL,
   TIMELINE_ARTWORK_CHANNEL,
+  CANCEL_TIMELINE_ARTWORK_CHANNEL,
+  type TimelineArtworkResult,
   type PreviewSource,
 } from '../bridge.js';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -69,9 +72,11 @@ let mainWindow: BrowserWindow | null = null;
 let mediaClient: MediaClient | null = null;
 let previewFile: { url: string; path: string } | null = null;
 const timelineFiles = new Map<string, string>();
+const artworkRequests = new Map<number, AbortController>();
 let timelineGeneration = 0;
 function revokeTimeline() {
   timelineGeneration++;
+  for (const request of artworkRequests.values()) request.abort();
   void mediaClient?.request('invalidate').catch(() => {});
   timelineFiles.clear();
 }
@@ -623,90 +628,95 @@ app
       throw new Error('Invalid cache request.');
     });
     // Artwork has its own admission limit, so it cannot consume paused playback slots.
-    let pendingArtwork = 0;
-    ipcMain.handle(TIMELINE_ARTWORK_CHANNEL, async (event, input: unknown) => {
+    ipcMain.handle(CANCEL_TIMELINE_ARTWORK_CHANNEL, (event, id: unknown) => {
       assertSender(event);
-      if (!input || typeof input !== 'object')
-        throw new Error('Invalid artwork request.');
-      const value = input as Record<string, unknown>;
-      if (
-        Object.keys(value)
-          .filter((key) => !['count', 'interval'].includes(key))
-          .sort()
-          .join(',') !==
-          'assetId,duration,expectedRevision,kind,projectId,start,width' ||
-        (value.count !== undefined &&
-          (typeof value.count !== 'number' ||
-            !Number.isInteger(value.count) ||
-            value.count < 1 ||
-            value.count > 4)) ||
-        (value.interval !== undefined &&
-          (typeof value.interval !== 'number' ||
-            !Number.isFinite(value.interval) ||
-            value.interval <= 0 ||
-            value.interval > 1.5)) ||
-        (Number(value.count ?? 1) > 1 && value.interval === undefined) ||
-        !['frame', 'waveform'].includes(String(value.kind)) ||
-        (value.kind === 'waveform' &&
-          (value.count !== undefined || value.interval !== undefined)) ||
-        typeof value.start !== 'number' ||
-        !Number.isFinite(value.start) ||
-        value.start < 0 ||
-        typeof value.duration !== 'number' ||
-        !Number.isFinite(value.duration) ||
-        value.duration <= 0 ||
-        value.duration > 120 ||
-        typeof value.width !== 'number' ||
-        !Number.isInteger(value.width) ||
-        value.width < 1 ||
-        value.width > 2048
-      )
-        throw new Error('Invalid artwork request.');
-      if (pendingArtwork >= 2) return null;
-      const generation = timelineGeneration;
-      const current = await projectSession.run('current');
-      if (
-        !current.ok ||
-        !current.state ||
-        value.projectId !== current.state.project.metadata.id ||
-        value.expectedRevision !== projectRevision(current.state.project)
-      )
-        return null;
-      const { asset, path } = await projectSession.libraryAsset(value.assetId);
-      if (
-        !asset.mediaTypes.includes(
-          value.kind === 'waveform' ? 'audio' : 'video',
-        )
-      )
-        return null;
-      assertSender(event);
-      if (generation !== timelineGeneration || pendingArtwork >= 2) return null;
-      pendingArtwork++;
-      try {
-        const result = await mediaClient!.request<string>(
-          value.kind === 'waveform' ? 'waveform' : 'thumbnail',
-          {
-            path,
-            timestamp: value.start,
-            count: value.count ?? 1,
-            interval: value.interval ?? 0,
-            hardware:
-              Number(value.count ?? 1) > 1 &&
-              !!asset.metadata &&
-              demandingMedia(asset.metadata) &&
-              ['h264', 'hevc'].includes(asset.metadata.videoCodec ?? ''),
-            duration: value.duration,
-            width: value.width,
-          },
-        );
-        assertSender(event);
-        return generation === timelineGeneration ? result : null;
-      } catch {
-        return null;
-      } finally {
-        pendingArtwork--;
-      }
+      if (typeof id === 'number') artworkRequests.get(id)?.abort();
     });
+    ipcMain.handle(
+      TIMELINE_ARTWORK_CHANNEL,
+      async (event, id: unknown, input: unknown) => {
+        assertSender(event);
+        if (
+          typeof id !== 'number' ||
+          !Number.isSafeInteger(id) ||
+          id <= 0 ||
+          !input ||
+          typeof input !== 'object'
+        )
+          throw new Error('Invalid artwork request.');
+        const value = input as Record<string, unknown>;
+        const keys = Object.keys(value).sort().join(',');
+        if (
+          typeof value.assetId !== 'string' ||
+          typeof value.projectId !== 'string' ||
+          typeof value.expectedRevision !== 'number' ||
+          !Number.isSafeInteger(value.expectedRevision) ||
+          typeof value.start !== 'number' ||
+          !Number.isFinite(value.start) ||
+          value.start < 0 ||
+          (value.kind === 'waveform'
+            ? keys !== 'assetId,expectedRevision,kind,projectId,start' ||
+              !Number.isSafeInteger(value.start) ||
+              value.start % WAVEFORM_CHUNK_SECONDS !== 0
+            : value.kind !== 'frame' ||
+              keys !==
+                'assetId,count,expectedRevision,interval,kind,projectId,start' ||
+              typeof value.count !== 'number' ||
+              !Number.isInteger(value.count) ||
+              value.count < 1 ||
+              value.count > 4 ||
+              typeof value.interval !== 'number' ||
+              !Number.isFinite(value.interval) ||
+              (value.count === 1
+                ? value.interval !== 0
+                : value.interval <= 0 || value.interval > 1.5))
+        )
+          throw new Error('Invalid artwork request.');
+        if (artworkRequests.size >= 2 || artworkRequests.has(id)) return null;
+        const controller = new AbortController();
+        artworkRequests.set(id, controller);
+        try {
+          const { asset, path } = await projectSession.libraryAsset(
+            value.assetId,
+            {
+              projectId: value.projectId,
+              expectedRevision: value.expectedRevision,
+            },
+          );
+          assertSender(event);
+          const waveform = value.kind === 'waveform';
+          if (
+            controller.signal.aborted ||
+            (waveform
+              ? asset.metadata?.kind === 'image' ||
+                asset.metadata?.hasAudio === false
+              : !asset.mediaTypes.includes('video'))
+          )
+            return null;
+          const result = await mediaClient!.request<TimelineArtworkResult>(
+            waveform ? 'waveform' : 'thumbnail',
+            {
+              path,
+              timestamp: value.start,
+              count: value.count,
+              interval: value.interval,
+              hardware:
+                Number(value.count) > 1 &&
+                !!asset.metadata &&
+                demandingMedia(asset.metadata) &&
+                ['h264', 'hevc'].includes(asset.metadata.videoCodec ?? ''),
+            },
+            controller.signal,
+          );
+          assertSender(event);
+          return controller.signal.aborted ? null : result;
+        } catch {
+          return null;
+        } finally {
+          artworkRequests.delete(id);
+        }
+      },
+    );
     let pendingFrames = 0;
     ipcMain.handle(TIMELINE_FRAME_CHANNEL, async (event, input: unknown) => {
       assertSender(event);

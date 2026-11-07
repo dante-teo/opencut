@@ -62,8 +62,9 @@ PNG for the paused asset/source-time may bridge that seek. It represents the fra
 whose presentation interval covers the requested instant, including mixed-rate and
 VFR sources. A ready native decoder takes precedence over the cached image. Paused
 frame extraction is bounded to two requests across visible layers. The decoded-PNG
-cache applies the configured memory limit independently of the worker encoded-PNG
-cache; lowering the limit immediately evicts older decoded images. No adjacent
+cache applies the configured memory limit independently of the worker cache for
+encoded PNGs and waveform peaks. Lowering the limit immediately evicts older
+decoded images. No adjacent
 frame sequence is prefetched. Old asynchronous completions cannot paint after a
 new seek or playback start. New snapshots (including synchronized CLI edits), viewer changes and
 component cleanup dispose decoders, frame callbacks and URL grants. Project
@@ -84,41 +85,51 @@ by CSP and the sandbox.
 
 ## Timeline clip artwork
 
-Visible timeline clips display video/still filmstrips or audio waveforms from
-original media. Artwork follows the trimmed source range and remains anchored
-while scrolling. Zoom, trims and splits select new samples. Loading and
-unavailable previews are labeled; absent tools or media never produce a synthetic
-preview. Artwork is a navigation aid: it does not apply clip transforms, opacity,
-gain or mute and is not an export preview.
+Visible video clips display source thumbnails and, when audio is present, a
+waveform below the filmstrip. Audio clips use the full artwork height for their
+waveform. Stills display thumbnails. Trim and split boundaries determine which
+part of the source appears in each clip. Artwork shows the original media
+before clip transforms, gain and mute.
 
-Filmstrips use 144×80 JPEG cells, batching up to four samples into one FFmpeg
-decode when their spacing is at most 1.5 seconds. Coarser zoom levels use individual
-seeks. The `fps` filter uses `round=up`, matching the export sampling rule, so a
-frame is not moved into an earlier sample slot. Thumbnail extraction is separate
-from the exact-PTS PNG playback cache; it does not acquire that cache's disk lock
-or perform its covering-frame probe. It does not extend the playback/export
-frame-accuracy contract to arbitrary codecs, VFR or unusual stream offsets.
+Filmstrips sample every 72 timeline pixels. At closer zoom levels, up to four
+144×80 JPEG cells share an FFmpeg decode when their spacing is at most 1.5
+seconds. Coarser zoom levels use individual seeks. FFmpeg seeks to the preceding
+keyframe and retains source timestamps so the frame covering each sample time
+can fill its slot, including between video frames at a trim. The playback PNG
+cache still handles exact-PTS playback frames separately. Thumbnail accuracy
+depends on the container's seek behavior and timestamp continuity. If the video
+stream starts after the container's time origin, the filmstrip can show its first
+frame in samples before the stream starts.
 
-Waveforms use FFmpeg's `showwavespic` filter on the original source range, decoded
-as mono at 8 kHz. Leading stream offsets and silent tails retain their position.
-Each request is limited to 120 seconds and a 32-pixel-high image; only visible
-source chunks are requested.
+Audio analysis seeks to fixed 16-second source chunks on the original file.
+FFmpeg summarizes the probed default audio stream, or the first stream when
+there is no default, as one peak across channels every 10 ms. Leading stream
+offsets, gaps and silent tails keep their source positions. Only 1,600 peak
+bytes return per chunk. At coarse zoom the renderer takes the maximum across
+nearby bins to keep short transients visible. At close zoom it spreads the bins
+over the appropriate timeline width. The renderer omits partial bins at clip
+edges, so peaks from outside the clip cannot cross a trim or split. Silent
+sections display a baseline. Clips known to lack audio skip waveform requests.
 
 On macOS, eligible H.264/HEVC batches start with software decoding. After a
 software batch takes more than 100 ms, subsequent batches with the same source
-identity and sample spacing can try VideoToolbox. Recent measured decode costs
-select the faster path; an unsupported hardware request falls back to software.
+identity and sample spacing can try VideoToolbox. Recent decode costs select
+the faster path, with a software fallback for unsupported hardware requests.
 Single-frame library thumbnails and widely spaced timeline samples use software.
-This does not introduce a native Metal compositor or change export encoding.
 
-The renderer schedules at most two artwork requests at a time, prioritizes each
-visible clip's first image and removes obsolete queued work. Main independently
-admits at most two timeline-artwork requests and validates sender, asset ID,
-project ID, revision and bounded sampling parameters. Renderer-supplied filesystem
-paths are not accepted. Project changes cancel worker work and suppress late
-replies; reopening a project requires a fresh authorized lookup even if IDs match.
-The worker and renderer have separate fixed artwork caches; see
-[navigation artwork budgets and identity](MEDIA_CACHE.md#navigation-artwork).
+Only horizontally and vertically visible artwork is scheduled. Shared in-flight
+requests serve overlapping views of the same source chunk, such as a video clip
+and its detached audio. Two timeline requests can run at once. A tile leaving the
+viewport drops its subscription. When the last subscriber leaves, the renderer
+removes queued work or signals the worker to stop the running FFmpeg process.
+Main also checks sender, project, revision, asset and sampling bounds before
+resolving the source. Missing media, unsupported formats and decode failures
+leave the clip editable and show a placeholder in the artwork area. When the
+first filmstrip tile is partly offscreen, its status label starts in the visible
+area or moves to a later tile with room.
+
+See [navigation artwork budgets and identity](MEDIA_CACHE.md#navigation-artwork)
+for cache reuse and invalidation.
 
 ## Diagnostics and verification
 
@@ -150,14 +161,16 @@ for marker generation and existing complete T21 assets are reused when available
 Headless clock/evaluator tests run in `pnpm test`. Performance samples print in the
 test output and screenshots go to ignored `test-results/`; no source files change.
 
-The [Electron artwork regression](../tests/desktop/timeline-artwork.spec.ts)
-checks actual filmstrip/waveform pixels, trim updates, missing-media recovery and
-light/dark layouts. The [native thumbnail regression](../tests/integration/thumbnail.native.spec.ts)
-checks color transitions inside a sample interval, including a trimmed start,
-software/VideoToolbox requests and cached results. It must keep the first sample
-before a later cut; a `round=down` mutation fails this check. The
+The [Electron artwork regressions](../tests/desktop/timeline-artwork.spec.ts)
+check decoded thumbnail pixels, waveform geometry, trim and split updates,
+missing media, status labels during scrolling and light/dark layouts. They also
+scroll and zoom a 20-minute synthetic video with two audio tracks and a still,
+checking a late audio onset and silent sections. The [native thumbnail regression](../tests/integration/thumbnail.native.spec.ts)
+checks covering frames around color transitions and near the end of a source,
+including software and VideoToolbox paths. The
 [native waveform regression](../tests/integration/waveform.native.spec.ts) checks
-delayed stream starts, trimmed audio and silent tails against decoded pixels.
+delayed streams, opposite-phase stereo, nonzero chunk offsets, silence, warm
+cache reuse and invalidation after a source replacement.
 
 ## Limits
 

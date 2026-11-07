@@ -9,7 +9,7 @@ export class MediaClient {
   private failed: Error | null = null;
   private readonly pending = new Map<
     number,
-    { resolve(value: unknown): void; reject(error: Error): void }
+    (error: Error | null, value?: unknown) => void
   >();
   constructor() {
     this.worker.unref();
@@ -18,8 +18,7 @@ export class MediaClient {
       (reply: { id: number; value?: unknown; error?: string }) => {
         const pending = this.pending.get(reply.id);
         this.pending.delete(reply.id);
-        if (reply.error) pending?.reject(new Error(reply.error));
-        else pending?.resolve(reply.value);
+        pending?.(reply.error ? new Error(reply.error) : null, reply.value);
       },
     );
     this.worker.on('error', (error) => this.fail(error));
@@ -29,16 +28,28 @@ export class MediaClient {
   }
   private fail(error: Error) {
     this.failed = error;
-    for (const request of this.pending.values()) request.reject(error);
+    for (const finish of this.pending.values()) finish(error);
     this.pending.clear();
   }
-  request<T>(method: string, input: Record<string, unknown> = {}): Promise<T> {
+  request<T>(
+    method: string,
+    input: Record<string, unknown> = {},
+    signal?: AbortSignal,
+  ): Promise<T> {
     if (this.failed) return Promise.reject(this.failed);
+    if (signal?.aborted)
+      return Promise.reject(new Error('Media request cancelled.'));
     if (this.pending.size >= 128)
       return Promise.reject(new Error('Media worker request limit reached.'));
     return new Promise<T>((resolve, reject) => {
       const id = ++this.next;
-      this.pending.set(id, { resolve: (value) => resolve(value as T), reject });
+      const abort = () => this.worker.postMessage({ id, method: 'abort' });
+      this.pending.set(id, (error, value) => {
+        signal?.removeEventListener('abort', abort);
+        if (error) reject(error);
+        else resolve(value as T);
+      });
+      signal?.addEventListener('abort', abort, { once: true });
       this.worker.postMessage({ id, method, ...input });
     });
   }

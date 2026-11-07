@@ -1,10 +1,10 @@
-import { stat } from 'node:fs/promises';
 import { LRUCache } from 'lru-cache';
 import {
   checkRenderSignal,
   localFile,
   MediaError,
   runMediaTool,
+  sourceFileStamp,
 } from './process.js';
 
 export interface ThumbnailResult {
@@ -23,10 +23,6 @@ export class ThumbnailCache {
     string,
     Partial<Record<ThumbnailResult['decoder'], number>>
   >({ max: 128 });
-  private async stamp(path: string) {
-    const value = await stat(path);
-    return `${value.dev}:${value.ino}:${value.size}:${value.mtimeMs}:${value.ctimeMs}`;
-  }
   clear() {
     this.images.clear();
     this.softwareOnly.clear();
@@ -57,11 +53,12 @@ export class ThumbnailCache {
     )
       throw new MediaError('Invalid thumbnail batch.');
     const path = await localFile(file);
-    const stamp = await this.stamp(path);
+    const stamp = await sourceFileStamp(path);
+    const time = timestamp.toFixed(6);
     const key = JSON.stringify([
       path,
       stamp,
-      timestamp,
+      time,
       options.hardware,
       options.adaptive ?? false,
       count,
@@ -69,6 +66,7 @@ export class ThumbnailCache {
     ]);
     const cached = this.images.get(key);
     if (cached) return cached;
+    const fps = count > 1 ? 1 / interval : 1;
     const decode = async (hardware: boolean): Promise<ThumbnailResult> => {
       const bytes = await runMediaTool(
         'ffmpeg',
@@ -80,15 +78,18 @@ export class ThumbnailCache {
           '2',
           ...(hardware ? ['-hwaccel', 'videotoolbox'] : []),
           '-ss',
-          timestamp.toFixed(6),
+          time,
+          '-noaccurate_seek',
+          '-copyts',
+          '-start_at_zero',
           '-i',
           path,
           '-map',
-          '0:v:0',
+          '0:V:0',
           '-an',
           '-vf',
-          // A later source frame must not appear in an earlier sample slot.
-          `${count > 1 ? `fps=fps=${1 / interval}:start_time=0:round=up:eof_action=pass,` : ''}scale=144:80:force_original_aspect_ratio=increase,crop=144:80,setsar=1${count > 1 ? `,tile=${count}x1:nb_frames=${count}` : ''}`,
+          // Retain pre-seek frames so each sample uses its covering frame.
+          `settb=AVTB,setpts=PTS-(${time})/TB,fps=fps=${fps}:start_time=0:round=up:eof_action=pass,scale=144:80:force_original_aspect_ratio=increase,crop=144:80,setsar=1${count > 1 ? `,tile=${count}x1:nb_frames=${count}` : ''}`,
           '-frames:v',
           '1',
           '-threads',
@@ -134,7 +135,7 @@ export class ThumbnailCache {
       result = await decode(false);
     }
     checkRenderSignal(options.signal);
-    if (stamp !== (await this.stamp(path)))
+    if (stamp !== (await sourceFileStamp(path)))
       throw new MediaError('Source changed while generating its thumbnail.');
     cost[result.decoder] = performance.now() - started;
     this.costs.set(profile, cost);

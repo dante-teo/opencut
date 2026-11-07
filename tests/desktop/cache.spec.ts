@@ -145,7 +145,7 @@ test('proxy preview preserves trimmed source mapping, toggles safely and falls b
       .getByRole('button', { name: 'Pause', exact: true })
       .click();
     await page.getByLabel('Disk cache MiB').fill('8');
-    await page.getByLabel('Frame memory MiB').fill('1');
+    await page.getByLabel('Memory cache MiB').fill('1');
     await page
       .getByRole('button', { name: 'Apply limits', exact: true })
       .click();

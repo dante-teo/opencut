@@ -172,30 +172,47 @@ test('batched thumbnail samples do not show transitions before their source time
       [0, 0, 255],
       [255, 255, 0],
     ];
+    async function decodeJpeg(bytes: Buffer, name: string) {
+      const image = join(directory, name);
+      await writeFile(image, bytes);
+      return runMediaTool('ffmpeg', [
+        '-v',
+        'error',
+        '-nostdin',
+        '-i',
+        image,
+        '-pix_fmt',
+        'rgb24',
+        '-f',
+        'rawvideo',
+        'pipe:1',
+      ]);
+    }
     for (const hardware of process.platform === 'darwin'
       ? [false, true]
       : [false]) {
       const cache = new ThumbnailCache();
+      for (const [start, channel] of [
+        [0.49, 0],
+        [3.99, 1],
+      ] as const) {
+        const { bytes } = await cache.get(source, start, { hardware });
+        const pixels = await decodeJpeg(bytes, 'covering.jpg');
+        assert.ok(
+          pixels[channel]! > 225 && pixels[2]! < 30,
+          'single sample must cover the requested time',
+        );
+      }
       for (const start of [0, 0.2]) {
         const { bytes } = await cache.get(source, start, {
           hardware,
           count: 4,
           interval: 0.9,
         });
-        const image = join(directory, `strip-${hardware}-${start}.jpg`);
-        await writeFile(image, bytes);
-        const pixels = await runMediaTool('ffmpeg', [
-          '-v',
-          'error',
-          '-nostdin',
-          '-i',
-          image,
-          '-pix_fmt',
-          'rgb24',
-          '-f',
-          'rawvideo',
-          'pipe:1',
-        ]);
+        const pixels = await decodeJpeg(
+          bytes,
+          `strip-${hardware}-${start}.jpg`,
+        );
         assert.equal(pixels.length, 576 * 80 * 3);
         for (const [tile, color] of expected.entries()) {
           const offset = (40 * 576 + tile * 144 + 72) * 3;

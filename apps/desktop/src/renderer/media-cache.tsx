@@ -72,7 +72,7 @@ export function MediaCacheControls({
         </label>
         <output data-testid="cache-status">
           {status
-            ? `${(status.diskBytes / 1024 ** 2).toFixed(1)} MiB disk · ${(status.memoryBytes / 1024 ** 2).toFixed(1)} MiB frames · ${status.entries.filter((entry) => entry.kind === 'proxy').length} proxies · ${status.hits} hits`
+            ? `${(status.diskBytes / 1024 ** 2).toFixed(1)} MiB disk · ${(status.memoryBytes / 1024 ** 2).toFixed(1)} MiB memory · ${status.entries.filter((entry) => entry.kind === 'proxy').length} proxies · ${status.hits} hits`
             : 'Loading cache…'}
         </output>
         <div className="transport">
@@ -88,9 +88,9 @@ export function MediaCacheControls({
             />
           </label>
           <label>
-            Frame memory MiB{' '}
+            Memory MiB{' '}
             <input
-              aria-label="Frame memory MiB"
+              aria-label="Memory cache MiB"
               type="number"
               min="1"
               max="1024"

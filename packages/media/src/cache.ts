@@ -1,4 +1,5 @@
-import { sourceColorMatrix } from '@opencut/shared';
+import { sourceColorMatrix, WAVEFORM_CHUNK_SECONDS } from '@opencut/shared';
+import { waveformPeaks } from './waveform.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import {
@@ -23,6 +24,7 @@ import {
   MediaError,
   RenderCancelledError,
   runMediaTool,
+  sourceFileStamp,
 } from './process.js';
 import { renderProgress, type RenderProgress } from './render-progress.js';
 
@@ -113,13 +115,6 @@ async function hashFile(path: string, signal?: AbortSignal) {
   }
   return hash.digest('hex');
 }
-async function identity(path: string) {
-  const info = await stat(path, { bigint: true });
-  if (!info.isFile())
-    throw new MediaError('Cache source must be a regular file.');
-  return [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':');
-}
-
 /** Owns only digest-named derivatives. Originals are read-only; export never calls this API. */
 export class MediaCache {
   private root: string;
@@ -255,12 +250,12 @@ export class MediaCache {
       throw new MediaError(
         'Original media must be outside the dedicated cache directory.',
       );
-    const stamp = await identity(path);
+    const stamp = await sourceFileStamp(path);
     const previous = this.sources.get(path);
     if (previous?.stamp === stamp) return { ...previous, path };
     const hash = await hashFile(path, signal);
     const media = await probeMedia(path, signal);
-    if (stamp !== (await identity(path)))
+    if (stamp !== (await sourceFileStamp(path)))
       throw new MediaError('Source changed during cache identification.');
     const value = { stamp, hash, media };
     this.sources.set(path, value);
@@ -434,7 +429,7 @@ export class MediaCache {
     signal?: AbortSignal,
   ) {
     checkRenderSignal(signal);
-    if (source.stamp !== (await identity(source.path)))
+    if (source.stamp !== (await sourceFileStamp(source.path)))
       throw new MediaError('Source changed during generation.');
     const bytes = (await stat(temporary)).size;
     const entry: CacheEntry = {
@@ -654,6 +649,45 @@ export class MediaCache {
       }
     }, controls.signal);
   }
+  async waveform(
+    file: string,
+    start: number,
+    signal?: AbortSignal,
+  ): Promise<Buffer | null> {
+    if (
+      !Number.isSafeInteger(start) ||
+      start < 0 ||
+      start % WAVEFORM_CHUNK_SECONDS
+    )
+      throw new MediaError('Invalid waveform chunk.');
+    checkRenderSignal(signal);
+    // Waveforms can use the current memory budget when disk setup fails.
+    await this.initialize().catch(() => {});
+    const path = await realpath(file);
+    const stamp = await sourceFileStamp(path);
+    const key = digest(JSON.stringify(['waveform-v1', path, stamp, start]));
+    checkRenderSignal(signal);
+    const cached = this.memory.get(key);
+    if (cached) {
+      this.hits++;
+      return cached.length ? cached : null;
+    }
+    this.misses++;
+    // Navigation lookups must not hash or lock the entire media file.
+    const media = await probeMedia(path, signal);
+    const peaks = await waveformPeaks(media, start, signal);
+    if (stamp !== (await sourceFileStamp(path)))
+      throw new MediaError('Source changed while generating its waveform.');
+    checkRenderSignal(signal);
+    this.remember(key, peaks ?? Buffer.alloc(0));
+    return peaks;
+  }
+  private remember(key: string, bytes: Buffer) {
+    if (bytes.length <= this.limits.memoryBytes)
+      this.memory.set(key, bytes, { size: Math.max(1, bytes.length) });
+    while (this.memory.calculatedSize > this.limits.memoryBytes)
+      this.memory.pop();
+  }
   async frame(
     file: string,
     timestamp: number,
@@ -682,10 +716,7 @@ export class MediaCache {
       const disk = await this.lookup(key, 'frame', signal);
       if (disk) {
         const bytes = await readFile(disk);
-        if (bytes.length <= this.limits.memoryBytes)
-          this.memory.set(key, bytes);
-        while (this.memory.calculatedSize > this.limits.memoryBytes)
-          this.memory.pop();
+        this.remember(key, bytes);
         return bytes;
       }
       this.misses++;
@@ -777,9 +808,7 @@ export class MediaCache {
       } finally {
         await rm(temporary, { force: true });
       }
-      if (png.length <= this.limits.memoryBytes) this.memory.set(key, png);
-      while (this.memory.calculatedSize > this.limits.memoryBytes)
-        this.memory.pop();
+      this.remember(key, png);
       return png;
     }, signal);
   }

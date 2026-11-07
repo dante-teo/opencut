@@ -1,55 +1,57 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { waveformImage } from './waveform.js';
-import { localFile, runMediaTool } from './process.js';
-vi.mock('./process.js', async (original) => ({
-  ...(await original<typeof import('./process.js')>()),
-  localFile: vi.fn(),
-  runMediaTool: vi.fn(),
-}));
-beforeEach(() => {
-  vi.resetAllMocks();
-  vi.mocked(localFile).mockResolvedValue('/source.wav');
+import { waveformPeaks } from './waveform.js';
+import { type MediaMetadata, type MediaStream } from './probe.js';
+import { runMediaTool } from './process.js';
+
+vi.mock('./process.js', () => ({ runMediaTool: vi.fn() }));
+const audio = {
+  index: 2,
+  startTimeSeconds: 0,
+  durationSeconds: 30,
+} as MediaStream;
+const media: MediaMetadata = {
+  path: '/source.wav',
+  formatName: 'wav',
+  startTimeSeconds: 0,
+  durationSeconds: 30,
+  video: null,
+  audio,
+  hasAudio: true,
+  streams: [audio],
+};
+beforeEach(() => vi.resetAllMocks());
+
+it('reads bounded peak metadata from the selected audio stream on the source grid', async () => {
   vi.mocked(runMediaTool).mockResolvedValue(
-    Buffer.from('89504e470d0a1a0a', 'hex'),
+    Buffer.from(
+      'frame:0 pts:0 pts_time:0\nlavfi.astats.Overall.Peak_level=-inf\n' +
+        'frame:1 pts:480 pts_time:0.01\nlavfi.astats.Overall.Peak_level=-6.0206\n' +
+        'frame:4 pts:1920 pts_time:0.04\nlavfi.astats.Overall.Peak_level=0\n',
+    ),
   );
-});
-it('uses an input-relative range and bounded PNG output without an output file', async () => {
   const signal = new AbortController().signal;
-  await waveformImage('/source.wav', 1.5, 3.25, 320, signal);
+  const peaks = (await waveformPeaks(media, 16, signal))!;
+  expect(peaks).toHaveLength(1600);
+  expect([...peaks.subarray(0, 5)]).toEqual([0, 127, 0, 0, 255]);
   expect(runMediaTool).toHaveBeenCalledWith(
     'ffmpeg',
     expect.arrayContaining([
       '-ss',
-      '1.500000',
+      '16',
       '-t',
-      '3.250000',
+      '16',
       '-i',
-      '/source.wav',
+      media.path,
+      '-map',
+      '0:2',
     ]),
-    512 * 1024,
+    256 * 1024,
     30000,
     { signal },
   );
 });
-it.each([
-  [-1, 2, 100],
-  [0, 0, 100],
-  [0, Infinity, 100],
-  [0, 121, 100],
-  [0, 2, 2049],
-  [NaN, 2, 100],
-])(
-  'rejects invalid or unbounded waveform requests',
-  async (start, duration, width) => {
-    await expect(
-      waveformImage('/source.wav', start!, duration!, width!),
-    ).rejects.toThrow('Invalid waveform');
-    expect(runMediaTool).not.toHaveBeenCalled();
-  },
-);
-it('reports empty decode output instead of supplying a fake waveform', async () => {
-  vi.mocked(runMediaTool).mockResolvedValue(Buffer.alloc(0));
-  await expect(waveformImage('/source.wav', 0, 1, 100)).rejects.toThrow(
-    'No waveform',
-  );
+
+it('skips decoding when the probed file has no audio stream', async () => {
+  expect(await waveformPeaks({ ...media, audio: null }, 0)).toBeNull();
+  expect(runMediaTool).not.toHaveBeenCalled();
 });

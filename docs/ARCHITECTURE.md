@@ -341,7 +341,8 @@ Electron main owns native privileges. React runs with `contextIsolation: true`,
 disabled. A bundled **CommonJS preload** exposes typed capabilities including:
 `getApplicationInfo()`, `openPreview()`, `getPreviewMetrics()`, `getProject()`,
 `createProject(input)`, `openProject()`, `saveProject()`, `closeProject()`,
-`previewAsset(assetId)`, `timelineArtwork(input)`, `releasePreview(url)`,
+`previewAsset(assetId)`, `timelineArtwork(id, input)`, `cancelTimelineArtwork(id)`,
+`releasePreview(url)`,
 `chooseExportOutput()`,
 `getExport()`, `startExport(input)`, `cancelExport(id)` and `onExportChanged(callback)`
 on `window.opencut`. ESM is used elsewhere. CommonJS here keeps
@@ -517,17 +518,18 @@ listener. Library drags have a distinct MIME type with project ID, revision and
 asset ID, while external Files are accepted only in the library. Timeline drop
 coordinates reuse the virtual scrollbar, track geometry and exact frame helpers.
 
-Video library thumbnails and timeline filmstrips use the headless, bounded JPEG
-`ThumbnailCache` through the media worker, independently of playback PNG extraction.
-Nearby timeline samples share a small atlas. Still-image library thumbnails retain
-Electron's asynchronous native thumbnail service (macOS/Windows), with icon
-fallback on unavailable tools/formats/platforms. Timeline stills and audio
-waveforms also use worker-generated artwork; no media element is mounted solely
-for navigation images. `timelineArtwork(input)` accepts only a current asset ID,
-project/revision and bounded sampling parameters. Main resolves the source path;
-project changes cancel work and suppress stale completions. See the
+Video library thumbnails and timeline filmstrips use the headless JPEG
+cache through the media worker. Nearby timeline samples share an atlas.
+Still-image library thumbnails retain Electron's asynchronous native thumbnail
+service (macOS/Windows). Timeline stills also use the worker. The worker reuses
+T25's bounded memory cache for source-aligned audio peak summaries. The renderer
+draws the peaks at the current clip size and timeline zoom. No media element is
+mounted solely for navigation artwork. `timelineArtwork(id, input)` checks the
+sender, active project, revision, asset ID and source sampling bounds. Main
+resolves the asset path. The matching cancellation call is scoped to pending
+artwork and reaches the worker's FFmpeg subprocess. See the
 [artwork contract](TIMELINE_PLAYBACK.md#timeline-clip-artwork) and
-[separate cache budgets](MEDIA_CACHE.md#navigation-artwork).
+[cache budgets](MEDIA_CACHE.md#navigation-artwork).
 Audio/image source previews reuse the revocable
 single-source media protocol, with native audio controls or an image element;
 source previews remain separate from project compositing/playback. Hiding source

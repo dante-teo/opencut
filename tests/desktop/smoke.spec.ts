@@ -42,6 +42,7 @@ test('built desktop displays React through the sandboxed bridge', async () => {
       'mediaCache',
       'timelineFrame',
       'timelineArtwork',
+      'cancelTimelineArtwork',
       'releasePreview',
       'getPreviewMetrics',
     ]);
