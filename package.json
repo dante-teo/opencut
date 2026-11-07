@@ -28,7 +28,7 @@
     "test:fixtures": "node --import tsx --test tests/fixtures/validation.native.spec.ts",
     "test:media": "pnpm build:packages && pnpm --filter @opencut/cli build && node --import tsx --test tests/integration/*.native.spec.ts",
     "e2e": "pnpm build:packages && pnpm --filter @opencut/cli build && tsx scripts/cli-e2e.ts",
-    "test:e2e": "pnpm build:packages && pnpm --filter @opencut/cli build && node --import tsx --test tests/e2e/*.native.spec.ts",
+    "test:e2e": "pnpm build:packages && pnpm --filter @opencut/cli build && node --import tsx --test tests/e2e/cli.native.spec.ts && node --import tsx --test tests/e2e/agent.native.spec.ts",
     "audit:t21": "pnpm build && tsx scripts/t21.ts",
     "benchmark:t25": "pnpm build && playwright test --config playwright.t25.config.ts",
     "benchmark:t26": "pnpm build && playwright test --config playwright.t26.config.ts"

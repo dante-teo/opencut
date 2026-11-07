@@ -103,8 +103,8 @@ native file after a CLI build using
 `help --json` and `--help --json` return `discoveryVersion: 1`, application
 identity, every command's positional arguments and options, required flags,
 defaults, units, constraints, prerequisites, capability statuses and exit codes.
-`help GROUP [ACTION] --json` scopes the command list. The retained `help` field
-contains readable usage. `globalOptions` includes version/help aliases.
+`help GROUP [ACTION] --json` scopes the command list. The `help` field
+contains the corresponding readable command or group usage. `globalOptions` includes version/help aliases.
 `jsonOutput` distinguishes existing JSONL commands (`project render`, `cache proxy`)
 from single-document results. A `resultSchema` key points into `schemas`, which
 contains JSON Schema 2020-12 definitions for the five T29 results, script
@@ -1346,10 +1346,9 @@ retaining a verified MP4, project, representative frames, ffprobe/frame/audio
 measurements and CLI process transcript in a unique generated directory. Run
 `pnpm test:e2e` for two independent runs with automatic cleanup. Missing fixtures
 are generated only when their directory is absent; existing fixtures are validated
-and never overwritten. The [official Agent Skill workflow](../skills/video-editor/references/workflow.md)
-contains the complete public command recipe, timing and verification contract.
-It also covers [20-second portrait photo stories and collages](../skills/video-editor/references/workflow.md#photo-slideshows-and-vertical-edits),
-including static transforms, imported caption/music assets and cleanup boundaries.
+and never overwritten. The [Agent Skill](../skills/video-editor/SKILL.md) includes
+a shorter [creator workflow](../skills/video-editor/references/workflow.md)
+for trim, split, visual overlay and music, plus a 20-second portrait story.
 
 ## Preview proxies and cache management (T25)
 

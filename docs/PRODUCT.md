@@ -20,14 +20,14 @@ application, with discoverable controls and understandable feedback.
 headless core. The GUI and a standalone CLI will invoke the same operations.
 Scripts and compatible external AI coding agents should be able to control that
 core without launching Electron. Neither interface gets a separate editing model.
-A maintained official Agent Skill will teach agents the actual CLI as it grows.
+The [official Agent Skill](../skills/video-editor/SKILL.md) teaches agents the public CLI and SDK.
 
 The editing model (projects, intent, commands, validation) and the media engine
 (probing, decoding, playback and encoding) are separate concerns. The [project format](PROJECT_FORMAT.md), [playback contract](TIMELINE_PLAYBACK.md)
 and [architecture decisions](adr/0012-realtime-layer-composition.md) define their
 current contracts and validation boundaries.
 
-## Implemented milestones through T30
+## Implemented milestones through T31
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -102,9 +102,8 @@ cancelled jobs preserve previous exports and clean owned temporary output.
 T14 adds a reproducible CLI-only 18-second edit and automated repeatability test.
 It covers creation/import, track and clip edits, transforms/overlays, original and
 background audio, persistent history across processes, validation, export and
-independent decoded frame/audio checks. The official Agent Skill includes the
-complete workflow. This validates the existing headless capabilities without
-adding editing features or desktop integration.
+independent decoded frame/audio checks. See the [CLI workflow](CLI.md#complete-end-to-end-workflow)
+for reproduction.
 
 T15 adds Electron project management: create with configurable dimensions and
 rational frame rate, open/save shared project files, inspect metadata/settings,
@@ -270,6 +269,11 @@ T30 exposes the [workspace TypeScript SDK](SDK.md) and the
 [`opencut run` CLI](CLI.md#typescript-scripts-and-sdk-t30). Trusted local
 scripts stage edits, inspect and render the draft, and save a single undo step
 through the same project writer whether Electron is open or closed.
+
+T31 makes the official Skill portable and adds
+[black-box agent workflows](README.md#external-agent-validation) for discovery,
+transactional edits, visual review and playable export using the deployed CLI
+and TypeScript SDK.
 
 ### Timeline artwork and workspace refinements
 

@@ -68,8 +68,8 @@ Run `pnpm test:e2e` for the complete T14 public-CLI edit/export workflow twice.
 It reuses the generator only when `generated/` is absent; an existing fixture set
 must pass validation and is never overwritten. Each run removes only its own
 `t14-e2e-*` directory. Use `pnpm e2e --keep` to retain a successful render and its
-verification artifacts. See the [official workflow](../../skills/video-editor/references/workflow.md)
-for the command recipe, frame/audio checks and same-toolchain repeatability limits.
+verification artifacts. See the [CLI workflow](../../docs/CLI.md#complete-end-to-end-workflow)
+for reproduction and same-toolchain repeatability limits.
 
 The generator exclusively creates `generated/` and uses FFmpeg's no-overwrite
 mode. It refuses an existing directory or symlink. On failure, it removes only

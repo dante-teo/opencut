@@ -561,7 +561,7 @@ export function discovery(scope: string[] = [], help = '') {
         description: command.description,
         status: 'supported',
         arguments: command.args.map((name) => ({
-          name: name.replace(/[?.]/g, ''),
+          name: name.replace(/(?:\?|\.\.\.)$/, ''),
           required: !name.endsWith('?') && !name.endsWith('...'),
           variadic: name.endsWith('...'),
           type: 'string',

@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
 import { discovery } from './discovery.js';
-import { inspectionOptions, runInspectionCommand } from './inspection.js';
-import { runCacheCommand } from './cache.js';
+import {
+  inspectionHelp,
+  inspectionOptions,
+  runInspectionCommand,
+} from './inspection.js';
+import { cacheHelp, runCacheCommand } from './cache.js';
 import { editHelp, runEditCommand } from './edit.js';
 import { runScriptCommand, scriptHelp } from './script.js';
 import {
@@ -310,47 +314,53 @@ async function runCli(args: string[]): Promise<void> {
         `--${option} applies only to inspection or preview commands.`,
       );
   }
+  const explicitHelp = command === 'help';
+  const commandPositionals = explicitHelp ? positionals.slice(1) : positionals;
+  const [group, action] = commandPositionals;
   const timelineCommand = ['timeline', 'track', 'clip', 'canvas'].includes(
-    command ?? '',
+    group ?? '',
   );
   const projectCommand =
-    command === 'project' &&
-    file !== undefined &&
-    Object.hasOwn(projectHelp, file)
-      ? (file as keyof typeof projectHelp)
+    group === 'project' && action && Object.hasOwn(projectHelp, action)
+      ? (action as keyof typeof projectHelp)
       : undefined;
   const mediaCommand =
-    command === 'media' && file !== undefined && Object.hasOwn(mediaHelp, file)
-      ? (file as keyof typeof mediaHelp)
+    group === 'media' && action && Object.hasOwn(mediaHelp, action)
+      ? (action as keyof typeof mediaHelp)
       : undefined;
-  if (command === 'help') {
-    if (Object.keys(values).some((key) => !['help', 'json'].includes(key)))
+  if (explicitHelp || values.help || args.length === 0) {
+    if (
+      explicitHelp &&
+      Object.keys(values).some((key) => !['help', 'json'].includes(key))
+    )
       throw new UsageError('help accepts only --json and --help.');
-    const usage = file === 'run' ? scriptHelp : help;
-    const result = discovery(positionals.slice(1), usage);
-    if (result.commands.length === 0)
+    let usage = help;
+    if (group === 'run') usage = scriptHelp;
+    else if (group === 'cache') usage = cacheHelp;
+    else if (
+      group === 'preview' ||
+      (action === 'inspect' && (group === 'project' || group === 'timeline'))
+    )
+      usage = inspectionHelp;
+    else if (group === 'edit') usage = editHelp;
+    else if (timelineCommand) usage = timelineHelp;
+    else if (group === 'project')
+      usage = projectCommand
+        ? projectHelp[projectCommand]
+        : `Usage: opencut project <create|info|inspect|validate|render> <project-file> [options]\n\n${Object.values(projectHelp).join('\n')}`;
+    else if (group === 'media')
+      usage = mediaCommand
+        ? mediaHelp[mediaCommand]
+        : `Usage: opencut media <import|list|info|remove> <project-file> [file|asset-id] [--json]\n\n${Object.values(mediaHelp).join('\n')}`;
+    const scope = explicitHelp
+      ? commandPositionals
+      : commandPositionals.slice(0, 2);
+    const result = discovery(scope, usage);
+    if (explicitHelp && result.commands.length === 0)
       throw new UsageError(
         'Unknown help command. Run help --json for discovery.',
       );
     output(result, usage, values.json);
-    return;
-  }
-  if (values.help || args.length === 0) {
-    const usage =
-      command === 'edit'
-        ? editHelp
-        : timelineCommand
-          ? timelineHelp
-          : command === 'project'
-            ? projectCommand
-              ? projectHelp[projectCommand]
-              : `Usage: opencut project <create|info|validate|render> <project-file> [options]\n\n${Object.values(projectHelp).join('\n')}`
-            : command === 'media'
-              ? mediaCommand
-                ? mediaHelp[mediaCommand]
-                : `Usage: opencut media <import|list|info|remove> <project-file> [file|asset-id] [--json]\n\n${Object.values(mediaHelp).join('\n')}`
-              : help;
-    output(discovery(positionals.slice(0, 2), usage), usage, values.json);
     return;
   }
   if (command !== 'project' || file !== 'render') {

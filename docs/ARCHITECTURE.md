@@ -573,8 +573,8 @@ identical MP4 hashes with the same fixtures/toolchain, plus per-run cleanup.
 It generates fixtures only when their directory is absent, validates an existing
 set, and never overwrites it. `pnpm e2e --keep` retains a successful run for inspection;
 otherwise the workflow removes its owned directory. See the
-[official workflow](../skills/video-editor/references/workflow.md) for the recipe
-and verification boundaries.
+[CLI workflow](CLI.md#complete-end-to-end-workflow) for reproduction and
+verification boundaries.
 
 Fixture validation decodes media with ffprobe and checks `nb_read_frames` against
 the expected video frame count. Container headers alone are insufficient: an MP4

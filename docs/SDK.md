@@ -5,7 +5,9 @@ TypeScript declarations. Add `"@opencut/sdk": "workspace:*"` to a workspace
 consumer's dependencies and run `pnpm install` and `pnpm build:packages` from
 the checkout root. The repository's examples already have that dependency.
 The package is distributed in this workspace. Use the package root for all
-SDK imports.
+SDK imports. External agents can use the portable
+[Skill reference](../skills/video-editor/references/sdk.md) with a
+[staged runtime](README.md#external-agent-validation).
 
 ## Open, edit and save
 

@@ -55,6 +55,10 @@ T30 adds the [TypeScript workspace SDK](SDK.md) and
 Scripts can stage edits, inspect and render them, and publish the edits as a
 single undo step in headless or open Electron projects.
 
+T31 delivers the portable [OpenCut Agent Skill](../skills/video-editor/SKILL.md)
+and [black-box agent validation](#external-agent-validation). The Skill uses
+only the public CLI and TypeScript SDK.
+
 Select a clip to edit **Timeline position**, **Duration**, **Source in/out** in
 whole project frames, **Volume** (linear 0–1), **Mute**, and video **Position X/Y**
 (pixels), **Scale** (0.01–4), and **Opacity** (0–1). Enter or leave a numeric field
@@ -371,7 +375,7 @@ framing checks and delivery verification.
 | `pnpm benchmark:t26`                     | Measure overlapping video/image playback, seeks, CPU and memory in Electron             |
 | `pnpm test:fixtures`                     | Run the optional native intact/truncated-media regression (FFmpeg + ffprobe)            |
 | `pnpm e2e --keep`                        | Build and run the complete 18-second CLI workflow; retain verified MP4 and evidence     |
-| `pnpm test:e2e`                          | Run the CLI-only workflow twice and clean per-run artifacts (FFmpeg + ffprobe)          |
+| `pnpm test:e2e`                          | Run CLI repeatability and deployed CLI/SDK black-box tests (FFmpeg + ffprobe)           |
 | `pnpm test:media`                        | Build and test real media CLI against existing generated fixtures (FFmpeg + ffprobe)    |
 | `pnpm fixtures:generate`                 | Generate and validate five small synthetic media files (optional FFmpeg + ffprobe)      |
 | `pnpm fixtures:validate`                 | Decode generated media and check metadata/readable video frame counts (ffprobe)         |
@@ -426,10 +430,11 @@ not impose hardware-dependent latency thresholds.
 `pnpm e2e --keep` builds and validates the complete T14 workflow, creating fixtures
 only when their generated directory is absent. Existing fixtures must pass validation.
 It retains successful output/evidence in a unique `tests/fixtures/generated/t14-e2e-*`
-directory; omit `--keep` to clean it. `pnpm test:e2e` runs twice from fresh projects
-and verifies cleanup. Every project operation runs through a separate public CLI
-process. See the [official workflow](../skills/video-editor/references/workflow.md)
-for commands, expected timing and independent frame/audio checks.
+directory; omit `--keep` to clean it. `pnpm test:e2e` runs the T14 workflow twice
+from fresh projects and verifies cleanup. Every project operation runs through
+a separate public CLI process. See the [end-to-end workflow](CLI.md#complete-end-to-end-workflow)
+for the commands and the [creator workflows](../skills/video-editor/references/workflow.md)
+for a shorter rough cut.
 
 `pnpm test` runs the headless suite with Vitest and needs no native media tools.
 `pnpm test:fixtures` runs the separate Node native regression with FFmpeg and
@@ -465,7 +470,7 @@ skills/video-editor/   Product Agent Skill and its current CLI reference
 tests/
   fixtures/            Expected metadata and fixture documentation
   integration/         Headless CLI/fixture-contract tests and opt-in native media tests
-  e2e/                 Repeatable public-CLI editing/export workflow test
+  e2e/                 Public CLI and SDK editing/export tests
   desktop/             Electron integration and opt-in playback performance tests
 scripts/               Optional fixture generation/validation and CLI E2E tooling (TypeScript)
 docs/                  Product, architecture and architectural decisions (adr/)
@@ -474,9 +479,76 @@ docs/                  Product, architecture and architectural decisions (adr/)
 Read [PRODUCT.md](PRODUCT.md), [ARCHITECTURE.md](ARCHITECTURE.md),
 [PROJECT_FORMAT.md](PROJECT_FORMAT.md), [TIMELINE_EVALUATION.md](TIMELINE_EVALUATION.md),
 [AGENTS.md](../AGENTS.md), and the [fixture contract](../tests/fixtures/README.md).
-The official [Agent Skill](../skills/video-editor/SKILL.md) documents working CLI
-capabilities and links to the core API contract. It is distinct from repository
-coding instructions.
+The official [Agent Skill](../skills/video-editor/SKILL.md) documents the public CLI
+and SDK with references that travel with the Skill directory.
+
+## External agent validation
+
+Run `pnpm test:e2e` after installing workspace dependencies and putting
+FFmpeg 8+ and ffprobe on PATH. The T31 workflows need H.264 encoding through
+`libx264`, AAC, and PNG support. The suite builds the CLI and SDK, then uses
+offline pnpm deploy to stage their production dependencies. The deployed
+test processes reject Node modules that resolve outside the staged workspace,
+so a checkout dependency cannot mask a missing deployment dependency.
+
+The T31 tests generate three synthetic inputs per run. They exercise the Skill's
+CLI batch, a standalone TypeScript consumer, and the documented SDK and script
+runner examples. Checks cover rollback, stale revisions, source hashes,
+overlay placement in the preview and export, and decoded video and audio.
+Use a separate live session to evaluate how an agent discovers and uses the
+interfaces.
+
+### Prepare a live session
+
+Run these commands from the checkout root. On a clean checkout, `prepare`
+initializes the shared fixtures before staging the agent workspace. It reuses
+an existing fixture directory and keeps the agent's inputs in a separate
+`t31-agent-*` subdirectory.
+
+```sh
+pnpm build:packages
+pnpm --filter @opencut/cli build
+WORKSPACE=$(pnpm exec tsx tests/e2e/agent-workspace.ts prepare)
+printf '%s\n' "$WORKSPACE"
+```
+
+Give the agent access to that directory alone in an isolated environment.
+Mount `media/` read-only where supported. Move the workspace before the agent
+creates the project if needed, then set `WORKSPACE` to its new absolute path.
+The workspace includes `video-editor/SKILL.md`, the `./opencut` CLI, public
+SDK declarations and package entry, and three generated sources. Use a prompt
+such as:
+
+> Use the OpenCut Skill and public CLI help. Deliver `cut.opencut.json` and
+> `final.mp4` at 160×90 and 30 fps, 60 frames total. Trim `media/camera.mp4`
+> to source frames 15 through 74, split at timeline frame 30 and keep both
+> halves continuous. Overlay `media/logo.png` on a higher track, centered at
+> scale 0.25, during frames 15 through 44. Mix `media/music.wav` at gain 0.25
+> for the full cut. Dry-run and commit an atomic edit. Demonstrate a rejected
+> edit that preserves the project. Generate the project-size `review.png`
+> at frame 30 and open it with an image tool. Export, probe and fully decode
+> the video. Preserve inputs. Use CLI editing only, with no application source
+> or direct project JSON edits.
+
+To evaluate the standalone SDK, repeat in a fresh workspace and ask the agent
+to perform project creation, edits and rendering from a TypeScript script
+importing only `@opencut/sdk`. Public CLI discovery and independent media
+verification can still be used.
+
+### Verify the delivery
+
+After the agent exits, run the verifier from the checkout root.
+
+```sh
+pnpm exec tsx tests/e2e/agent-workspace.ts verify "$WORKSPACE"
+```
+
+The verifier uses the checkout-built CLI and local media tools. It passes the
+agent's project and media as absolute paths and checks the timeline, centered
+logo in the PNG and MP4, decoded frame count, and audio mix. Review the agent
+transcript separately for visual review, public-interface use, dry-run, and
+recovery. Compare the source hashes with their pre-run values. When finished,
+remove only the owned agent workspace and keep the shared fixtures available.
 
 ## T21 architecture and playback baseline
 
