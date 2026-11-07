@@ -10,6 +10,8 @@ import {
 } from './session-transport.js';
 import {
   access,
+  copyFile,
+  link,
   lstat,
   mkdtemp,
   open,
@@ -18,7 +20,6 @@ import {
   rename,
   rm,
   stat,
-  writeFile,
 } from 'node:fs/promises';
 import { basename, dirname, join, posix, win32 } from 'node:path';
 import {
@@ -266,17 +267,45 @@ export async function validateProjectFile(
   };
 }
 
-/** Exclusive creation only. Use updateProjectFile for guarded atomic updates. */
+/** Create a project without replacing an existing file or symlink. */
 export async function writeProjectFile(
   project: Project,
   projectFilePath: string,
+  signal?: AbortSignal,
 ): Promise<void> {
+  signal?.throwIfAborted();
   const path = nativePath(projectFilePath);
   const json = serializeProject(project);
+  let temporary: string | undefined;
   try {
-    await writeFile(path, json, { encoding: 'utf8', flag: 'wx' });
+    temporary = await mkdtemp(join(dirname(path), '.opencut-create-'));
+    const pending = join(temporary, 'project.json');
+    const file = await open(pending, 'wx');
+    try {
+      await file.writeFile(json, 'utf8');
+      await file.sync();
+    } finally {
+      await file.close();
+    }
+    signal?.throwIfAborted();
+    try {
+      await link(pending, path);
+    } catch (cause) {
+      if (
+        !(cause instanceof Error) ||
+        !('code' in cause) ||
+        (cause.code !== 'ENOTSUP' && cause.code !== 'EPERM')
+      )
+        throw cause;
+      // Some writable volumes, including exFAT, cannot publish a hard link.
+      signal?.throwIfAborted();
+      await copyFile(pending, path, constants.COPYFILE_EXCL);
+    }
   } catch (cause) {
+    if (signal?.aborted && cause === signal.reason) throw cause;
     throw new ProjectFileError('WRITE_FAILED', path, { cause });
+  } finally {
+    if (temporary) await rm(temporary, { recursive: true, force: true });
   }
 }
 
@@ -286,6 +315,8 @@ export interface ProjectUpdateOptions {
   label?: string | undefined;
   /** Restore one transaction, or preserve multiple validated in-memory session transactions. */
   history?: 'record' | 'restore' | 'preserve' | undefined;
+  /** Cancel before local publication or submission to the active session. */
+  signal?: AbortSignal | undefined;
 }
 
 const sessionSnapshot = z.object({ json: z.string(), sessionId: z.string() });
@@ -318,21 +349,28 @@ export async function updateProjectFile<T>(
   update: Update<T>,
   options: ProjectUpdateOptions = {},
 ): Promise<T> {
+  const { signal, ...sessionOptions } = options;
+  signal?.throwIfAborted();
   path = await canonicalProjectFilePath(nativePath(path));
   const response = await requestSession(path, { version: 1, type: 'read' });
+  signal?.throwIfAborted();
   if (response !== undefined) {
     const snapshot = sessionSnapshot.parse(response);
     const project = deserializeProject(snapshot.json);
     checkProjectRevision(project, options.expectedRevision);
     const changed = await update(project, path);
-    const reply = await requestSession(path, {
-      version: 1,
-      type: 'update',
-      sessionId: snapshot.sessionId,
-      base: fingerprint(snapshot.json),
-      json: serializeProject(changed.project),
-      options,
-    });
+    const reply = await requestSession(
+      path,
+      {
+        version: 1,
+        type: 'update',
+        sessionId: snapshot.sessionId,
+        base: fingerprint(snapshot.json),
+        json: serializeProject(changed.project),
+        options: sessionOptions,
+      },
+      signal,
+    );
     if (reply === undefined)
       throw new SessionError(
         'SESSION_DISCONNECTED',
@@ -429,6 +467,8 @@ async function updateProjectDisk<T>(
   update: Update<T>,
   options: ProjectUpdateOptions = {},
 ): Promise<T> {
+  const { signal } = options;
+  signal?.throwIfAborted();
   const requested = nativePath(projectFilePath);
   let path = requested;
   let temporary: string | undefined;
@@ -469,6 +509,7 @@ async function updateProjectDisk<T>(
         );
       getEditHistory(updated);
     }
+    signal?.throwIfAborted();
     if (options.dryRun || json === snapshot) return changed.result;
     temporary = await mkdtemp(join(dirname(path), '.opencut-update-'));
     const pending = join(temporary, 'project.json');
@@ -492,6 +533,7 @@ async function updateProjectDisk<T>(
         'REVISION_CONFLICT',
         'Project changed during the operation; reload and retry.',
       );
+    signal?.throwIfAborted();
     await rename(pending, path);
     const directory = await open(dirname(path), 'r');
     try {
@@ -501,6 +543,7 @@ async function updateProjectDisk<T>(
     }
     return changed.result;
   } catch (cause) {
+    if (signal?.aborted && cause === signal.reason) throw cause;
     if (
       cause instanceof ProjectFormatError ||
       cause instanceof AssetError ||

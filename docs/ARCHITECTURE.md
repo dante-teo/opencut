@@ -5,16 +5,17 @@
 | Package            | Owns                                                                                              | Actual dependencies                                               |
 | ------------------ | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | `@opencut/desktop` | Electron lifecycle, project session, restricted IPC, React workspace and source/project preview   | core, media, shared, Electron, React, Lucide, range-parser        |
-| `@opencut/cli`     | Argument parsing, stdout/stderr and exit codes                                                    | core, media, shared, Node built-ins                               |
+| `@opencut/cli`     | Argument parsing, script execution, stdout/stderr and exit codes                                  | core, media, sdk, shared, Node built-ins                          |
+| `@opencut/sdk`     | Typed project drafts, guarded saves, timeline inspection and original-media preview/export        | core, media, Node built-ins                                       |
 | `@opencut/core`    | Headless identity, project model, persistence, assets, timeline edits and render planning         | shared, Zod; media and Node built-ins in optional `/node` adapter |
 | `@opencut/media`   | Probing, extraction, proxy/frame caches, composition and timeline encoding through external tools | shared, Node built-ins, lru-cache, proper-lockfile                |
 | `@opencut/shared`  | Pure composition geometry, canvas colors and SDR source matrix rules                              | none                                                              |
 
-Actual runtime dependency direction is `desktop → core ← cli`, with desktop main,
-CLI and the core Node adapter depending on media. The rationale is
+Desktop, SDK and CLI all depend on core. The CLI invokes the SDK for scripts.
+Desktop main, SDK, CLI and the core Node adapter depend on media. The rationale is
 recorded in [ADR 0001](adr/0001-shared-headless-core.md). Core never
 imports Electron, React, CLI or desktop code. Media stays headless. Shared composition rules have no runtime dependencies and are used by media, core, CLI and desktop.
-The root uses core as a development dependency to test built workspace imports.
+The root uses core and SDK as development dependencies to test built workspace imports.
 All workspace dependencies use `workspace:*`; package exports point to built
 JavaScript and declarations rather than TypeScript path aliases.
 
@@ -638,6 +639,16 @@ save each edit; untitled projects retain their first-save flow. There is no poll
 
 See [ADR 0011](adr/0011-shared-project-session.md) for ownership, crash recovery,
 security, disconnect semantics, transport limits and platform boundaries.
+
+## TypeScript SDK and script execution (T30)
+
+The SDK applies existing core edit commands and asset preparation to an
+in-memory draft. Save compares the opened snapshot and revision through the
+T22 writer, committing at most one history step. The CLI loads trusted local
+ESM TypeScript with Node's type stripping, passes only the draft and execution
+context, and saves after successful execution and JSON serialization. Visual
+outputs use the shared renderer and are published independently of project edits.
+See the [SDK contract](SDK.md) for the public surface.
 
 ## Timeline evaluation
 

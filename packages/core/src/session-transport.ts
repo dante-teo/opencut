@@ -96,25 +96,29 @@ function encode(value: unknown): string {
 export async function requestSession(
   path: string,
   request: unknown,
+  signal?: AbortSignal,
 ): Promise<unknown | undefined> {
+  signal?.throwIfAborted();
   const address = await endpoint(path);
   return new Promise((resolve, reject) => {
     let connected = false;
     let finished = false;
     const socket = createConnection(address);
-    const finish = (value: unknown, error?: Error) => {
+    const finish = (value: unknown, ...failure: [] | [unknown]) => {
       if (finished) return;
       finished = true;
       socket.destroy();
-      if (error) reject(error);
+      if (failure.length) reject(failure[0]);
       else resolve(value);
     };
     socket.on('connect', () => {
       connected = true;
       try {
-        socket.write(encode(request));
+        const payload = encode(request);
+        signal?.throwIfAborted();
+        socket.write(payload);
       } catch (error) {
-        finish(undefined, error as Error);
+        finish(undefined, error);
       }
     });
     socket.on('error', (error: NodeJS.ErrnoException) => {

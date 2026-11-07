@@ -1,4 +1,4 @@
-# OpenCut CLI through T29
+# OpenCut CLI
 
 For a complete CLI-only edit with tested timing, layers, audio and persistent history,
 see the [T14 workflow](workflow.md).
@@ -53,7 +53,15 @@ arguments, required options, defaults, units, constraints, prerequisites,
 capability availability and exit codes. `help preview --json` scopes the list.
 `schemas` contains versioned JSON Schema definitions for T29 results/errors;
 `resultSchema` links each new command to its schema. Existing JSONL commands are
-marked explicitly. SDK, scripting runtime and MCP are unavailable.
+marked explicitly. Use `help run --json` for the T30 TypeScript runner and its
+result schema. MCP is unavailable.
+
+`run SCRIPT.ts --project PROJECT --json -- ARGS` uses the public `@opencut/sdk`
+draft against an existing named project, including in Electron. Add
+`--expected-revision N` for stale-state checks, `--dry-run` to validate without
+saving, or `--create NAME` for a new project. See the
+[script contract](../../../docs/CLI.md#typescript-scripts-and-sdk-t30) and
+[SDK reference](../../../docs/SDK.md).
 
 ```sh
 node apps/cli/dist/index.js project inspect /path/to/project.opencut.json --json
@@ -129,7 +137,11 @@ integers (maximum 9007199254740991). Decimal `29.97` is rejected; use `30000/100
 These are model settings without encoder-specific restrictions. Ratios are preserved.
 Creation validates inputs before opening the destination and refuses existing files,
 directories and symlinks, including dangling ones. There is no overwrite flag.
-The parent must exist. A write failure may leave a partial newly created file.
+The parent must exist. CLI and SDK creation use an exclusive copy when hard
+links are unavailable, including on exFAT. A forced termination during the copy
+can leave an incomplete new file. Desktop first Save and edits to existing
+projects also require the writer lock. See the
+[project storage limits](../../../docs/adr/0011-shared-project-session.md#failure-semantics-and-limits).
 
 `project info <project-file> [--json]` validates data and returns metadata,
 settings and asset/track/clip counts. Offline media does not prevent info.

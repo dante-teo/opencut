@@ -333,8 +333,11 @@ const report = await validateProjectFile('/absolute/path/demo.opencut.json');
 ```
 
 File I/O requires an absolute path for the current host. `writeProjectFile`
-creates a new file exclusively in an existing directory and refuses existing
-files and symlinks. It validates before opening the destination. T07 adds
+validates and syncs a temporary file, then publishes it with an exclusive hard
+link in an existing directory. When hard links are unavailable, it copies the
+prepared file to an exclusive destination. The fallback can expose the file
+while copying, and a forced termination can interrupt that copy. Both paths
+refuse existing files and symlinks. T07 adds
 `updateProjectFile(path, async (project, path) => ({ project, result }))` for
 existing regular, singly-linked files. It locks cooperating writers, validates
 the returned project, syncs a temporary file and atomically renames it over the
@@ -342,9 +345,16 @@ destination. A no-op preserves bytes and timestamps; failed publication preserve
 the prior file. The parent must be writable; project symlinks/hard links are
 refused. Outside changes detected before rename cause a retry error. Handled
 failures clean temporary data and release OS ownership. Forced termination may
-leave unused `.opencut-update-*` directories. The permanent `.opencut-lock`
-sidecar must remain; process death releases its lock automatically. Power-loss durability and
-arbitrary noncooperating writers are outside the guarantee.
+leave unused `.opencut-create-*` or `.opencut-update-*` directories. If creation
+was interrupted just after publication, the temporary directory can hold a
+second hard link to the complete new project. Once the creating process has
+exited, remove that temporary link before updating the project.
+Local saves check cancellation immediately before the final link, copy or rename.
+The permanent `.opencut-lock` sidecar stays in place and process death releases
+its lock automatically. CLI and SDK project creation can use the copy fallback
+on exFAT. Desktop first Save and updates to existing projects also require the
+writer lock. See the [session filesystem limits](adr/0011-shared-project-session.md#failure-semantics-and-limits).
+Power-loss durability and arbitrary noncooperating writers are outside the guarantee.
 I/O failures throw `ProjectFileError` with `READ_FAILED`, `WRITE_FAILED` or
 `UPDATE_FAILED`, `path` and the underlying
 `cause`. Format/version failures from reads remain `ProjectFormatError`.

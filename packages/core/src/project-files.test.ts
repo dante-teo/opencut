@@ -14,13 +14,19 @@ import {
   ProjectFileError,
   readProjectFile,
   resolveMediaReference,
+  updateProjectFile,
   writeProjectFile,
   validateProjectFile,
 } from './project-files.js';
 
 vi.mock('node:fs/promises', async (original) => {
   const actual = await original<typeof fs>();
-  return { ...actual, access: vi.fn(actual.access) };
+  return {
+    ...actual,
+    access: vi.fn(actual.access),
+    link: vi.fn(actual.link),
+    open: vi.fn(actual.open),
+  };
 });
 
 const directories: string[] = [];
@@ -386,6 +392,95 @@ describe('project file and media checks', () => {
       ProjectFileError,
     );
   });
+
+  it('creates exclusively when the destination filesystem rejects hard links', async () => {
+    const directory = await temporary();
+    const path = join(directory, 'project.json');
+    const missing = join(directory, 'missing.json');
+    const symlink = join(directory, 'alias.json');
+    await fs.symlink(missing, symlink);
+    const project = createProject({ name: 'Portable' });
+    const unsupported = Object.assign(new Error('Hard links unavailable'), {
+      code: 'ENOTSUP',
+    });
+
+    vi.mocked(fs.link).mockRejectedValueOnce(unsupported);
+    await writeProjectFile(project, path);
+    expect(await fs.readFile(path, 'utf8')).toBe(serializeProject(project));
+
+    vi.mocked(fs.link).mockRejectedValueOnce(unsupported);
+    await expect(
+      writeProjectFile(createProject({ name: 'Replacement' }), path),
+    ).rejects.toMatchObject({
+      code: 'WRITE_FAILED',
+      cause: { code: 'EEXIST' },
+    });
+    expect(await fs.readFile(path, 'utf8')).toBe(serializeProject(project));
+
+    vi.mocked(fs.link).mockRejectedValueOnce(unsupported);
+    await expect(writeProjectFile(project, symlink)).rejects.toMatchObject({
+      code: 'WRITE_FAILED',
+      cause: { code: 'EEXIST' },
+    });
+    expect(await fs.readlink(symlink)).toBe(missing);
+    expect((await fs.readdir(directory)).sort()).toEqual([
+      'alias.json',
+      'project.json',
+    ]);
+  });
+
+  it.each(['create', 'update'] as const)(
+    'cancels a project %s during sync before publishing the file',
+    async (mode) => {
+      const directory = await temporary();
+      const path = join(directory, 'project.json');
+      const project = createProject({ name: 'Original' });
+      if (mode === 'update') await writeProjectFile(project, path);
+      const controller = new AbortController();
+      const reason = new Error('Cancelled during project sync');
+      const actual = await vi.importActual<typeof fs>('node:fs/promises');
+      await vi.mocked(fs.open).withImplementation(
+        async (file, flags, permissions) => {
+          const handle = await actual.open(file, flags, permissions);
+          if (String(file).startsWith(join(directory, `.opencut-${mode}-`))) {
+            const sync = handle.sync.bind(handle);
+            handle.sync = async () => {
+              await sync();
+              controller.abort(reason);
+            };
+          }
+          return handle;
+        },
+        async () => {
+          const save =
+            mode === 'create'
+              ? writeProjectFile(project, path, controller.signal)
+              : updateProjectFile(
+                  path,
+                  async (current) => ({
+                    project: {
+                      ...current,
+                      metadata: { ...current.metadata, name: 'Changed' },
+                    },
+                    result: undefined,
+                  }),
+                  { signal: controller.signal },
+                );
+          await expect(save).rejects.toBe(reason);
+        },
+      );
+      if (mode === 'create') {
+        await expect(fs.lstat(path)).rejects.toMatchObject({ code: 'ENOENT' });
+        expect(await fs.readdir(directory)).toEqual([]);
+      } else {
+        expect(await fs.readFile(path, 'utf8')).toBe(serializeProject(project));
+        expect((await fs.readdir(directory)).sort()).toEqual([
+          'project.json',
+          'project.json.opencut-lock',
+        ]);
+      }
+    },
+  );
 
   it('retains actionable read, parse, version and write failures', async () => {
     const directory = await temporary();

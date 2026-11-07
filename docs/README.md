@@ -50,6 +50,11 @@ mixed audio. Previews use the existing original-media export compositor without
 launching Electron and preserve the project and source media. Clips are limited
 to 30 seconds and sheets to 16 samples; existing export limits still apply.
 
+T30 adds the [TypeScript workspace SDK](SDK.md) and
+[`opencut run`](CLI.md#typescript-scripts-and-sdk-t30) for trusted local scripts.
+Scripts can stage edits, inspect and render them, and publish the edits as a
+single undo step in headless or open Electron projects.
+
 Select a clip to edit **Timeline position**, **Duration**, **Source in/out** in
 whole project frames, **Volume** (linear 0–1), **Mute**, and video **Position X/Y**
 (pixels), **Scale** (0.01–4), and **Opacity** (0–1). Enter or leave a numeric field
@@ -101,6 +106,9 @@ save dialog offers replacement. **Open project** reads the same JSON files as
 the CLI. **Save project** on an existing project uses the core's lock, revision
 check and atomic update; saving unchanged content preserves timestamps and history.
 External changes are refused: reopen the project to refresh before saving.
+On macOS, first Save on exFAT can fail with `Writer sidecar changed during acquisition`.
+Use a local APFS volume for the project file in that case. See the
+[shared writer limits](adr/0011-shared-project-session.md#failure-semantics-and-limits).
 
 Project metadata/settings, imported assets (including missing-media warnings),
 and video/audio tracks and clips appear in a docked editor workspace: media

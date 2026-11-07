@@ -1,6 +1,6 @@
 ---
 name: video-editor
-description: Use the OpenCut CLI to create, inspect and validate video projects, manage media assets and timeline tracks/clips, apply atomic batches, undo/redo edits, inspect media, extract PNG frames, render a saved timeline with video/image layers, canvas transforms and mixed audio to H.264/AAC MP4, compose video clips with background music, generate composited timeline PNGs, labeled contact sheets and short audio/video previews, discover command schemas, or manage preview proxies and bounded caches.
+description: Use the OpenCut CLI and TypeScript SDK to create, inspect and validate video projects, run trusted scripts against headless or open Electron projects, manage media assets and timeline tracks/clips, apply atomic batches, undo/redo edits, inspect media, extract PNG frames, render a timeline with video/image layers, canvas transforms and mixed audio to MP4, compose video clips with background music, generate composited PNGs, labeled contact sheets and short audio/video previews, discover command schemas, or manage preview proxies and bounded caches.
 ---
 
 # OpenCut CLI
@@ -472,7 +472,7 @@ command arguments/options, prerequisites, units, defaults, limits and statuses
 without reading internal source. `help preview --json` scopes the command list.
 Use `resultSchema` and `schemas` for the five versioned T29 result contracts.
 Check exit status and `jsonOutput`; project render/cache proxy stream JSONL.
-SDK, scripting runtime and MCP remain unavailable.
+T30 adds the workspace SDK and TypeScript runner. MCP remains unavailable.
 
 Read `project inspect PROJECT --json` for revision, settings, asset references,
 tracks, clips and exact duration (without undo snapshots). Read
@@ -486,6 +486,33 @@ and `timeline --json inspect PROJECT --frame 20` return the usual inspection
 results; `preview --json -h frame` returns scoped discovery/help. Option ordering
 does not make command-specific flags valid on other commands. Use `--version`
 alone, optionally with `--json`.
+
+### TypeScript scripts (T30)
+
+Run a trusted local script with
+`node apps/cli/dist/index.js run SCRIPT.ts --project PROJECT --json -- ARG1 ARG2`.
+Default-export an `OpenCutScript` function that receives `project`, `args`,
+`dryRun` and `signal`. Import types and standalone open/create helpers from
+`@opencut/sdk`. Await all work and return JSON data. Send logs through the
+global console so stdout remains a single result document. Use `.mts` when
+the script lives outside an ESM package. The pinned Node runtime strips erasable
+TypeScript types without type checking.
+
+Stage changes with `project.apply(...operations)` and `await project.importMedia(file)`.
+Inspect the draft and use `previewFrame`, `previewContactSheet` or `render` with
+new destinations. The runner checks the base revision and saves successful
+staged edits in one undo step, including when Electron owns the project.
+`--create NAME` starts a new project at `--project`; `--dry-run` simulates the
+save and disables SDK preview and render outputs. For an existing project,
+pass `--expected-revision N` when acting on a previously inspected revision.
+On a conflict, reopen and inspect before retrying. Project transaction
+boundaries cover the supplied draft. Successful outputs and direct Node
+filesystem effects have their own publication semantics.
+
+See the [SDK reference and example commands](../../docs/SDK.md) and
+[`run` result and error contract](../../docs/CLI.md#typescript-scripts-and-sdk-t30).
+
+### Timeline preview commands
 
 Verify edited composition using these native-tested command forms, choosing
 valid frames/ranges from inspection:

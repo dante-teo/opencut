@@ -4,6 +4,7 @@ import { discovery } from './discovery.js';
 import { inspectionOptions, runInspectionCommand } from './inspection.js';
 import { runCacheCommand } from './cache.js';
 import { editHelp, runEditCommand } from './edit.js';
+import { runScriptCommand, scriptHelp } from './script.js';
 import {
   editOptions,
   runTimelineCommand,
@@ -42,10 +43,12 @@ import type {
 
 const help = `Usage: opencut [command] [options]
 
-OpenCut — project, media asset and timeline editing, transactions and headless rendering and visual inspection (T29).
+OpenCut — project and timeline editing, scripting, visual inspection and headless rendering.
 
 Commands:
   help --json                         Discover commands, arguments, capabilities and schemas
+  run <script.ts> --project <project-file>
+                                       Execute a trusted TypeScript script (run --help)
   project inspect <project-file>      Read revision-tagged content (offline)
   timeline inspect <project-file> --frame <n>
                                        Evaluate layers, audio and exact source times
@@ -241,17 +244,19 @@ function formatProbe(media: MediaMetadata): string {
 }
 
 async function runCli(args: string[]): Promise<void> {
-  const cachePosition = args.indexOf('cache');
-  if (
-    cachePosition >= 0 &&
-    args
-      .slice(0, cachePosition)
-      .every((arg) => ['--json', '--help', '-h'].includes(arg))
-  )
-    return runCacheCommand([
-      ...args.slice(0, cachePosition),
-      ...args.slice(cachePosition + 1),
-    ]);
+  const commandPosition = args.findIndex(
+    (arg) => !['--json', '--help', '-h'].includes(arg),
+  );
+  const leadingCommand = args[commandPosition];
+  if (leadingCommand === 'run' || leadingCommand === 'cache') {
+    const commandArgs = [
+      ...args.slice(0, commandPosition),
+      ...args.slice(commandPosition + 1),
+    ];
+    return leadingCommand === 'run'
+      ? runScriptCommand(commandArgs)
+      : runCacheCommand(commandArgs);
+  }
   const { values, positionals } = parseArgs({
     args,
     options: {
@@ -321,12 +326,13 @@ async function runCli(args: string[]): Promise<void> {
   if (command === 'help') {
     if (Object.keys(values).some((key) => !['help', 'json'].includes(key)))
       throw new UsageError('help accepts only --json and --help.');
-    const result = discovery(positionals.slice(1), help);
+    const usage = file === 'run' ? scriptHelp : help;
+    const result = discovery(positionals.slice(1), usage);
     if (result.commands.length === 0)
       throw new UsageError(
         'Unknown help command. Run help --json for discovery.',
       );
-    output(result, help, values.json);
+    output(result, usage, values.json);
     return;
   }
   if (values.help || args.length === 0) {
@@ -751,7 +757,11 @@ try {
   const usageError =
     error instanceof UsageError || code.startsWith('ERR_PARSE_ARGS_');
   const message = error instanceof Error ? error.message : String(error);
-  const json = process.argv.slice(2).includes('--json');
+  const args = process.argv.slice(2);
+  const separator = args.indexOf('--');
+  const json = (separator === -1 ? args : args.slice(0, separator)).includes(
+    '--json',
+  );
   process.stderr.write(
     json
       ? JSON.stringify({

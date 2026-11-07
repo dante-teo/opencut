@@ -84,7 +84,7 @@ describe('agent CLI discovery and offline inspection', () => {
     expect(result.stderr).toBe('');
     const catalog = JSON.parse(result.stdout);
     expect(catalog.discoveryVersion).toBe(1);
-    expect(catalog.commands).toHaveLength(38);
+    expect(catalog.commands).toHaveLength(39);
     expect(
       new Set(catalog.commands.map((command: { name: string }) => command.name))
         .size,
@@ -127,6 +127,9 @@ describe('agent CLI discovery and offline inspection', () => {
         .map((command: { name: string }) => command.name),
     );
     expect(catalog.capabilities.mcp.status).toBe('unavailable');
+    expect(catalog.capabilities.sdk.package).toBe('@opencut/sdk');
+    expect(catalog.capabilities.scriptingRuntime.status).toBe('supported');
+    expect(catalog.schemas.run.required).toContain('result');
     expect(catalog.capabilities.visualInspection.headless).toBe(true);
     expect(catalog.exitCodes['2']).toBe('invalid arguments');
     expect(JSON.parse(run('--help', '--json').stdout).commands).toEqual(

@@ -15,6 +15,12 @@ const options: Record<string, Option> = {
     description: 'Structured stdout and structured errors on stderr.',
   },
   name: { type: 'string', description: 'Nonblank project or track name.' },
+  project: { type: 'string', description: 'Project file to open or create.' },
+  create: {
+    type: 'string',
+    description:
+      'Create a project with this name at a new path. Incompatible with --expected-revision.',
+  },
   width: {
     type: 'string',
     description: 'Positive integer canvas/output width.',
@@ -239,6 +245,16 @@ const definitions: Definition[] = [
       'Discover commands, arguments, constraints, capability status and output schemas.',
     args: ['command?'],
     options: [],
+  },
+  {
+    name: 'run',
+    description:
+      'Execute a trusted local TypeScript default export. Pass script arguments after --.',
+    args: ['script-file'],
+    options: ['project', 'create', ...edit],
+    required: ['project'],
+    tools: ['Node.js with native TypeScript type stripping'],
+    mutates: true,
   },
   {
     name: 'project create',
@@ -564,7 +580,7 @@ export function discovery(scope: string[] = [], help = '') {
         modifiesProject: command.mutates ?? false,
         prerequisites: command.tools ?? [],
         jsonOutput: command.jsonl ? 'jsonl' : 'document',
-        ...(command.name in inspectionJsonSchemas
+        ...(command.name in inspectionJsonSchemas || command.name === 'run'
           ? { resultSchema: command.name }
           : {}),
       })),
@@ -592,8 +608,16 @@ export function discovery(scope: string[] = [], help = '') {
         originalMedia: true,
       },
       audioPreview: { status: 'supported', sampleRate: 48000, channels: 2 },
-      scriptingRuntime: { status: 'unavailable' },
-      sdk: { status: 'unavailable' },
+      scriptingRuntime: {
+        status: 'supported',
+        command: 'run',
+        trustedLocalCode: true,
+      },
+      sdk: {
+        status: 'supported',
+        package: '@opencut/sdk',
+        activeProjectSessions: true,
+      },
       mcp: { status: 'unavailable' },
     },
     limits: {
@@ -647,6 +671,34 @@ export function discovery(scope: string[] = [], help = '') {
     },
     schemas: {
       ...inspectionJsonSchemas,
+      run: {
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        type: 'object',
+        required: [
+          'scriptVersion',
+          'ok',
+          'path',
+          'projectId',
+          'baseRevision',
+          'revision',
+          'changed',
+          'created',
+          'dryRun',
+          'result',
+        ],
+        properties: {
+          scriptVersion: { const: 1 },
+          ok: { const: true },
+          path: { type: 'string' },
+          projectId: { type: 'string' },
+          baseRevision: { type: 'integer', minimum: 0 },
+          revision: { type: 'integer', minimum: 0 },
+          changed: { type: 'boolean' },
+          created: { type: 'boolean' },
+          dryRun: { type: 'boolean' },
+          result: {},
+        },
+      },
       error: {
         $schema: 'https://json-schema.org/draft/2020-12/schema',
         type: 'object',

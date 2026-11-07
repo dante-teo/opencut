@@ -27,7 +27,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 and [architecture decisions](adr/0012-realtime-layer-composition.md) define their
 current contracts and validation boundaries.
 
-## Implemented milestones through T29
+## Implemented milestones through T30
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -202,7 +202,7 @@ User media must never be silently changed or overwritten.
 
 macOS is the initial required platform. Package boundaries should stay portable;
 Windows/Linux support requires explicit validation later. No distribution,
-installer, updater, signing or notarization work is included through T29. Render jobs
+installer, updater, signing or notarization work is included through T30. Render jobs
 run in the invoking process, without a persistent queue, background service or database.
 
 ## Playback and compositing milestones
@@ -265,7 +265,11 @@ Frame/range selection uses integer project frames, with exclusive range ends;
 sheets are limited to 16 samples and clips to 30 seconds. Previews never modify
 project/history/source media or overwrite outputs, and handled failure/cancellation
 cleans temporary files. Existing export and T27 consistency limits apply.
-No SDK, scripting runtime, MCP server or new editing operations are included.
+
+T30 exposes the [workspace TypeScript SDK](SDK.md) and the
+[`opencut run` CLI](CLI.md#typescript-scripts-and-sdk-t30). Trusted local
+scripts stage edits, inspect and render the draft, and save a single undo step
+through the same project writer whether Electron is open or closed.
 
 ### Timeline artwork and workspace refinements
 

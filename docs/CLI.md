@@ -1,4 +1,4 @@
-# CLI reference (T29)
+# CLI reference
 
 Build from the checkout root with `pnpm build`. The `opencut` executable is
 workspace-local. Use the direct Node form for machine-readable stdout; pnpm
@@ -23,6 +23,56 @@ The media examples require the synthetic fixtures. Generate them explicitly
 with `pnpm fixtures:generate` if absent; see the
 [fixture contract](../tests/fixtures/README.md). The output parent directory must
 already exist, and the output file must not exist.
+
+## TypeScript scripts and SDK (T30)
+
+```sh
+node apps/cli/dist/index.js run script.ts --project project.opencut.json --json
+node apps/cli/dist/index.js run script.mts --project new.opencut.json --create "My project" --json -- input.mp4
+node apps/cli/dist/index.js help run --json
+```
+
+Default-export a synchronous or asynchronous `OpenCutScript` function from an
+ESM `.ts` or `.mts` file. It receives `{ project, args, dryRun, signal }`.
+Use `--` to pass arguments to the script. Relative paths resolve from the
+invocation's working directory. The runner uses the pinned Node 24 runtime's
+native type stripping. Use erasable types and explicit ESM import extensions.
+Use `.mts` outside a `"type": "module"` package. The runner executes TypeScript
+without type checking. See the [SDK reference](SDK.md) for types, usage and
+tested creator examples.
+
+`--project` identifies a saved project, including one currently open in
+Electron. With `--create <name>`, it identifies a new destination in an existing
+writable directory and starts with a 1920×1080, 30 fps canvas. The runner opens
+or prepares the project before importing the script. `--expected-revision <n>`
+checks the current revision before execution and applies only to existing
+projects. Every save also checks the exact snapshot the script opened.
+
+The runner publishes staged project edits as one undo step after the function
+resolves and its return value serializes. An uncaught script error, invalid
+result or revision conflict prevents project publication. `--dry-run` validates
+the same staged edit and reports the proposed revision without saving. SDK
+preview and render outputs are disabled for a runner dry run. Successful
+previews and renders during normal runs publish their own files independently.
+
+Stdout contains one JSON success document with `scriptVersion: 1`, `ok: true`,
+canonical `path`, `projectId`, `baseRevision`, `revision`, `changed`, `created`,
+`dryRun` and `result`. `created` and `revision` describe the proposed outcome
+on a dry run. An omitted return value becomes `null`. Return JSON data and use
+the global `console` for logs, which the runner sends to stderr. Direct stdout
+writes from scripts or their subprocesses can interfere with JSON output.
+With `--json`, the final stderr line on error follows the CLI error schema.
+Exit status is 0 for success, 2 for invalid arguments and 1 for runtime, data,
+file or session errors. Handled SIGINT and SIGTERM during script execution return
+130 and 143. Await all work and pass `signal` to cancellable custom operations.
+A save can finish if cancellation arrives after local publication starts or
+after the request has been sent to an active Electron session.
+
+Run only trusted local code. Scripts run with the invoking account's permissions
+and can access Node APIs and start processes. The transaction covers edits made
+through the bound `project` draft. Direct filesystem writes and separate SDK
+sessions have their own effects. OpenCut never executes script references from
+a project file.
 
 ## Agent discovery and visual inspection (T29)
 
@@ -57,10 +107,11 @@ defaults, units, constraints, prerequisites, capability statuses and exit codes.
 contains readable usage. `globalOptions` includes version/help aliases.
 `jsonOutput` distinguishes existing JSONL commands (`project render`, `cache proxy`)
 from single-document results. A `resultSchema` key points into `schemas`, which
-contains JSON Schema 2020-12 definitions for the five T29 results and errors.
+contains JSON Schema 2020-12 definitions for the five T29 results, script
+results and errors.
 Implemented capability status does not imply tools or media are available on this
-machine; execution checks prerequisites. SDK, scripting runtime and MCP are
-explicitly unavailable.
+machine; execution checks prerequisites. Discovery lists `run` and the workspace
+SDK. MCP is unavailable.
 
 Inspection and preview commands accept `--json` and `--help`/`-h` before the
 command group, between the group and action, or after the action. For example:
@@ -291,10 +342,13 @@ use an exact ratio. Ratios are preserved as supplied. These project settings are
 data-model values; T12 rendering supports the explicit limits below.
 The core generates a stable UUID and UTC creation/update timestamps. Assets,
 tracks and clips start empty. Inputs are validated before opening the destination.
-The parent must exist; existing files, directories and symlinks, including dangling
-symlinks, are refused. No force/overwrite mode exists. A disk write failure can
-leave a partially written newly created file. Media import/remove use the separate
-atomic update path described below.
+The parent must exist. Creation refuses existing files, directories and
+symlinks, including dangling symlinks. The CLI publishes a prepared file with
+an exclusive hard link where supported and falls back to an exclusive copy on
+volumes such as exFAT. Forced termination during the copy can leave an
+incomplete new file. Media import and removal use the separate atomic update
+path and require the shared writer lock. See the
+[project file persistence contract](PROJECT_FORMAT.md#api-and-errors).
 
 Creation and info JSON have the same shape:
 

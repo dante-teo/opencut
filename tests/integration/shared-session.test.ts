@@ -127,6 +127,26 @@ it('rejects a prepared stale operation and never drops a successful concurrent e
   expect(projectRevision(await readProjectFile(path))).toBe(2);
 });
 
+it('does not submit an aborted edit to the active project session', async () => {
+  await launch();
+  const before = await readFile(path, 'utf8');
+  const controller = new AbortController();
+  const reason = new Error('Cancelled before session submission');
+  await expect(
+    updateProjectFile(
+      path,
+      async (project) => {
+        const changed = addTrack(project, { name: 'Cancelled', type: 'video' });
+        controller.abort(reason);
+        return { project: changed.project, result: undefined };
+      },
+      { signal: controller.signal },
+    ),
+  ).rejects.toBe(reason);
+  expect(await readFile(path, 'utf8')).toBe(before);
+  expect(projectRevision(await readProjectFile(path))).toBe(0);
+});
+
 it('notifies the GUI session, shares GUI undo, and keeps dry-run bytes/history unchanged', async () => {
   const events: number[] = [];
   const session = new ProjectSession(
