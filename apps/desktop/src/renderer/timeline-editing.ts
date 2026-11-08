@@ -1,4 +1,6 @@
 import {
+  addTimes,
+  subtractTimes,
   clipDuration,
   clipTimelineEnd,
   compareTimes,
@@ -11,7 +13,12 @@ import {
   type TimelineClip,
 } from '@opencut/core';
 import type { TimelineOperation } from '../bridge.js';
-import { frameIndex, relativePixels, ZERO } from './timeline-geometry.js';
+import {
+  cueTimelineClip,
+  frameIndex,
+  relativePixels,
+  ZERO,
+} from './timeline-geometry.js';
 
 export type GestureKind = 'move' | 'left' | 'right';
 export interface EditProposal {
@@ -162,6 +169,64 @@ export function proposeEdit(
   } catch (error) {
     return {
       operations,
+      clip,
+      error: error instanceof Error ? error.message : String(error),
+      snap,
+    };
+  }
+}
+
+/** Pointer movement is measured in timeline seconds, independent of project fps. */
+export function proposeSubtitleEdit(
+  clip: TimelineClip,
+  kind: GestureKind,
+  delta: RationalTime,
+  backwards: boolean,
+  playhead: RationalTime,
+  zoom: number,
+  snapPixels: number,
+): EditProposal {
+  let snap: RationalTime | null = null;
+  try {
+    const end = clipTimelineEnd(clip);
+    const edge = kind === 'right' ? end : clip.timelineStart;
+    let target = backwards
+      ? compareTimes(delta, edge) > 0
+        ? ZERO
+        : subtractTimes(edge, delta)
+      : addTimes(edge, delta);
+    if (
+      snapPixels &&
+      Math.abs(relativePixels(target, playhead, zoom)) <= snapPixels
+    ) {
+      target = playhead;
+      snap = playhead;
+    }
+    const start = kind === 'right' ? clip.timelineStart : target;
+    const stop =
+      kind === 'move'
+        ? addTimes(start, clipDuration(clip))
+        : kind === 'right'
+          ? target
+          : end;
+    if (compareTimes(stop, start) <= 0)
+      throw new Error('Subtitle end must be later than start.');
+    const operation: TimelineOperation =
+      kind === 'move'
+        ? { type: 'subtitle.move', id: clip.id, start }
+        : { type: 'subtitle.set', id: clip.id, start, end: stop };
+    return {
+      clip: cueTimelineClip(
+        { id: clip.id, text: clip.text!.content, start, end: stop },
+        clip.trackId,
+      ),
+      operations: [operation],
+      error: null,
+      snap,
+    };
+  } catch (error) {
+    return {
+      operations: [],
       clip,
       error: error instanceof Error ? error.message : String(error),
       snap,

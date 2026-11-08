@@ -1,0 +1,13 @@
+WEBVTT OpenCut multilingual test
+
+NOTE Comments and settings exercise common WebVTT syntax.
+
+first-cue
+00:00.105 --> 00:00.605 line:90% align:center
+Hello, OpenCut!
+你好，世界！
+
+second-cue
+00:00:00.405 --> 00:00:00.905
+Overlapping cue
+繁體中文 😀

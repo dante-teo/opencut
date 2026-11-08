@@ -27,7 +27,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 and [architecture decisions](adr/0012-realtime-layer-composition.md) define their
 current contracts and validation boundaries.
 
-## Implemented milestones through T33
+## Implemented milestones through T34
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -306,3 +306,19 @@ desktop viewer and FFmpeg exports share text shaping and rasterization,
 including bundled English and Chinese typography and an emoji fallback.
 See [text layer commands](CLI.md#text-layers-t33) and the
 [preview/export gate](PREVIEW_EXPORT_CONSISTENCY.md#text-layers-t33).
+
+### Editable subtitles (T34)
+
+Use **Subtitles** in the timeline to add a cue, import SRT or WebVTT, or
+export a sidecar. Select a cue to edit its text, start, end or duration in
+the inspector. Timing fields accept decimal seconds such as `0.25`,
+timestamps such as `00:00:01.250`, or exact fractions such as `1/30`.
+Drag a cue to move it, drag its edges to adjust timing, or split it at the
+playhead. **Merge with next subtitle** joins the selected cue with its next
+neighbor in timeline order.
+
+**Apply subtitle** saves the selected cue. **Apply subtitle style** sets the
+shared style for all cues. Each action creates its own undo step when it
+changes the project and preserves the other form's pending edits. Projects
+retain exact cue timing and undo history. The viewer and burned-in exports
+share the title rasterizer. See [subtitle editing and export](CLI.md#editable-subtitles-t34).

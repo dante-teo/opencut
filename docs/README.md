@@ -62,6 +62,8 @@ only the public CLI and TypeScript SDK.
 T32 adds [timeline filmstrips and waveforms](TIMELINE_PLAYBACK.md#timeline-clip-artwork).
 T33 adds [editable text layers](PRODUCT.md#text-layers-t33) with shared typography
 in the Project viewer, CLI previews, and exports.
+T34 adds [editable subtitles](PRODUCT.md#editable-subtitles-t34) with exact cue
+timing, shared styles, SRT/WebVTT import and export, and optional MP4 burn-in.
 
 Select a media clip to edit **Timeline position**, **Duration**, **Source in/out** in
 whole project frames, **Volume** (linear 0–1), **Mute**, and video **Position X/Y**

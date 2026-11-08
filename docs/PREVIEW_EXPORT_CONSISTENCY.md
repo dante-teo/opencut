@@ -128,3 +128,16 @@ coverage of uncommon characters, complex-script line breaking and emoji
 sequences depend on the font and the text engine. Unavailable glyphs can
 appear as boxes. The suite verifies basic Latin, Chinese and emoji glyphs,
 plus one missing family on the host running both paths.
+
+## Subtitle cues (T34)
+
+Run `pnpm test:consistency --grep T34` to exercise the subtitle workflow in
+Electron. The test imports multilingual SRT and WebVTT fixtures, edits cue
+timing and shared style, checks undo and redo, reads an exported sidecar,
+and reopens the saved project. It compares the Chromium Canvas backing
+buffer with decoded burned-in H.264 frames before, during, and after
+overlapping cues, including boundaries between project frames.
+
+The test checks muxed timestamps and compares a second MP4 rendered with
+`--no-subtitles` to verify that disabling burn-in omits cue pixels while
+keeping the same frame count. See [cue sampling and export limits](CLI.md#editable-subtitles-t34).

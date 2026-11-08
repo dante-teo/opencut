@@ -36,7 +36,10 @@ export function frameTime(frame: number, rate: FrameRate): RationalTime {
   );
 }
 
-function rationalTime(numerator: bigint, denominator: bigint): RationalTime {
+export function rationalTime(
+  numerator: bigint,
+  denominator: bigint,
+): RationalTime {
   if (numerator < 0n) throw new RangeError('Time must not be negative.');
   let a = numerator;
   let b = denominator;

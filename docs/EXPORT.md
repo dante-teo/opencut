@@ -78,6 +78,17 @@ cancelled jobs leave existing files intact. The destination filesystem must
 support hard links. Forced termination or power loss can leave temporary files;
 normal cancellation and failure remove them.
 
+### Subtitles in video and sidecars
+
+The video export dialog includes **Burn subtitles into video** when a project
+has cues. It is enabled by default. Burn-in uses the shared subtitle style
+and includes cues visible at each project frame above the other visual layers.
+Clear the checkbox to export clean video at the same duration. Use
+**Subtitles → Export SRT…** or **Export WebVTT…** in the timeline to write a
+separate UTF-8 file with cue text and timing. Shared project styles stay with
+the project and burned video. Burn-in supports up to 256 sampled, nonempty
+cues per render range. See [subtitle timing and sidecar limits](CLI.md#editable-subtitles-t34).
+
 ## Desktop and CLI settings
 
 The desktop and [`project render`](CLI.md#project-rendering) share the same headless
@@ -92,8 +103,9 @@ renderer and verified publication path. Their controls differ:
 Both support the existing quality and resolution presets. T28 adds no CLI codec
 or output-frame-rate flags.
 
-Current limits remain 64 timeline clips, 600 seconds, even canvas sides from 2 to
-3840 and at most 3840 × 2160 pixels, and project rates from 1 to 120 fps. Browser
+Current limits include 64 non-subtitle timeline clips, 600 seconds, even canvas
+sides from 2 to 3840 and at most 3840 × 2160 pixels, and project rates from 1 to
+120 fps. Browser
 preview codec support can differ from FFmpeg export support. HDR, transitions,
 keyframes, distribution/signing, persistent queues and cloud rendering are outside
 the current scope.

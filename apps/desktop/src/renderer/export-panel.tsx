@@ -82,7 +82,7 @@ export function ExportPanel({
   const estimatedDuration = useMemo(() => {
     if (!state) return null;
     try {
-      const plan = planProjectRender(state.project);
+      const plan = planProjectRender(state.project, settings);
       const rate =
         settings.frameRate === 'project'
           ? state.project.settings.frameRate
@@ -101,7 +101,7 @@ export function ExportPanel({
     } catch {
       return null;
     }
-  }, [state, settings.frameRate]);
+  }, [state, settings]);
   async function perform(operation: () => Promise<void>) {
     setBusy(true);
     setError('');
@@ -290,6 +290,21 @@ export function ExportPanel({
                 </select>
               </label>
             </div>
+            {!!state?.project.subtitles?.cues.length && (
+              <label>
+                <input
+                  type="checkbox"
+                  checked={settings.burnSubtitles ?? true}
+                  onChange={(event) =>
+                    setSettings({
+                      ...settings,
+                      burnSubtitles: event.currentTarget.checked,
+                    })
+                  }
+                />
+                Burn subtitles into video
+              </label>
+            )}
             <label>
               Output file
               <input

@@ -132,7 +132,10 @@ export function TimelinePreview({
           <StepBack aria-hidden="true" />
         </button>
         <button
-          disabled={interrupted || !project.clips.length}
+          disabled={
+            interrupted ||
+            (!project.clips.length && !project.subtitles?.cues.length)
+          }
           onClick={() => void player.current?.toggle()}
           aria-label={diagnostics?.playing ? 'Pause' : 'Play'}
           title={diagnostics?.playing ? 'Pause' : 'Play'}

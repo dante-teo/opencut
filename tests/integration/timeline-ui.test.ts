@@ -103,6 +103,33 @@ describe('timeline geometry and transport', () => {
       denominator: 1,
     });
   });
+  it('indexes a large subtitle track and queries only cues intersecting the viewport', () => {
+    const project = createProject({ name: 'Long subtitle list' });
+    const at = (numerator: number) => ({ numerator, denominator: 1 });
+    project.subtitles = {
+      style: {},
+      cues: Array.from({ length: 10_000 }, (_, i) => ({
+        id: 'cue-' + i,
+        start: at(i * 2),
+        end: at(i * 2 + 3),
+        text: 'English\n中文字幕',
+      })),
+    };
+    const indexed = indexTimeline(project);
+    expect(indexed.rows).toHaveLength(2);
+    expect(indexed.end).toEqual(at(20001));
+    const visible = indexed.rows.flatMap(({ id }) =>
+      visibleClips(indexed.tracks.get(id)!, at(18000), at(18005)).map(
+        ({ clip }) => clip.id,
+      ),
+    );
+    expect(visible.sort()).toEqual([
+      'cue-8999',
+      'cue-9000',
+      'cue-9001',
+      'cue-9002',
+    ]);
+  });
   it('scales scrollbars beyond browser dimension limits and preserves the time at a zoom anchor', () => {
     const end = { numerator: 864_000, denominator: 1 };
     const geometry = scrollGeometry(end, 640, 1000);

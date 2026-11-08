@@ -192,7 +192,7 @@ export class TimelinePlayback {
     ) => void,
     private memoryBudget = 64 * 1024 ** 2,
   ) {
-    this.evaluate = createTimelineEvaluator(project);
+    this.evaluate = createTimelineEvaluator(project, true);
     // Resolve lookahead through T23 too; point queries remain the source-time authority.
     const clips = resolveTimeline(project).clips;
     let previous: ResolvedMediaClip | undefined;

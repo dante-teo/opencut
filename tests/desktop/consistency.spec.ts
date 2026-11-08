@@ -12,6 +12,7 @@ import {
   evaluateTimelineFrame,
   frameTime,
   planProjectRender,
+  parseSubtitles,
   serializeProject,
   type Project,
 } from '@opencut/core';
@@ -88,6 +89,7 @@ interface Point {
   mapping?: Mapping;
   marker?: number;
   textVisible?: boolean;
+  subtitleCount?: number;
 }
 
 interface TextScenario {
@@ -97,6 +99,7 @@ interface TextScenario {
     path: string,
   ) => Promise<Project>;
   guiExport?: boolean;
+  fontWarning?: boolean;
 }
 
 async function compareScenario(
@@ -150,6 +153,7 @@ async function compareScenario(
           application,
           page,
           join(directory, name + '.mp4'),
+          textScenario.fontWarning ?? true,
         )
       : exportProject(directory, name, exportPath);
     const plan = planProjectRender(project);
@@ -168,12 +172,31 @@ async function compareScenario(
     );
     let bareCanvas: Buffer | undefined;
     let bareExport: Buffer | undefined;
-    for (const { frame, mapping, marker, textVisible } of points) {
+    for (const {
+      frame,
+      mapping,
+      marker,
+      textVisible,
+      subtitleCount,
+    } of points) {
       const evaluation = evaluateTimelineFrame(project, frame);
       const layers = evaluation.visualClips.filter((clip) => clip.visible);
       const ids = layers.map((clip) => clip.id);
       if (textVisible !== undefined)
         expect(layers.some((clip) => clip.kind === 'text')).toBe(textVisible);
+      if (subtitleCount !== undefined) {
+        expect(
+          layers.filter((clip) => clip.kind === 'text' && clip.subtitle),
+        ).toHaveLength(subtitleCount);
+        expect(
+          plan.visualClips.filter(
+            (clip) =>
+              clip.subtitle &&
+              frame >= clip.timelineStartFrame &&
+              frame < clip.timelineStartFrame + clip.frameCount,
+          ),
+        ).toHaveLength(subtitleCount);
+      }
       const videoTimes = layers
         .filter((clip) => clip.kind === 'video')
         .map((clip) => seconds(clip.sourceTime));
@@ -313,6 +336,7 @@ async function exportTextFromDesktop(
   application: ElectronApplication,
   page: Page,
   output: string,
+  fontWarning = true,
 ) {
   await application.evaluate(({ dialog }, output) => {
     dialog.showSaveDialog = async () => ({ canceled: false, filePath: output });
@@ -330,9 +354,11 @@ async function exportTextFromDesktop(
       timeout: 60000,
     })
     .toMatchObject({ status: 'succeeded', output });
-  await expect(
-    panel.getByRole('list', { name: 'Export warnings' }),
-  ).toContainText(/Font .*unavailable. Using Noto Sans SC/);
+  if (fontWarning) {
+    await expect(
+      panel.getByRole('list', { name: 'Export warnings' }),
+    ).toContainText(/Font .*unavailable. Using Noto Sans SC/);
+  }
   await panel.getByRole('button', { name: 'Done', exact: true }).click();
   return output;
 }
@@ -1008,4 +1034,240 @@ test('T27 rejects muxed video and audio timestamp shifts', async () => {
       );
     }
   }
+});
+
+test('T34 edited multilingual subtitle cues match Chromium Canvas and burned-in video', async () => {
+  const video = 't34-source.mp4';
+  const width = 640;
+  const height = 360;
+  ffmpeg([
+    '-n',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=0x242937:s=640x360:r=30:d=2',
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+    '-colorspace',
+    'bt709',
+    '-threads',
+    '1',
+    join(directory, video),
+  ]);
+  const project = createProject({
+    name: 'T34 Subtitles',
+    settings: {
+      width,
+      height,
+      frameRate: { numerator: 30, denominator: 1 },
+    },
+  });
+  project.assets = [
+    {
+      id: 'base',
+      name: video,
+      file: { type: 'relative', path: video },
+      mediaTypes: ['video'],
+      duration: time(60),
+    },
+  ];
+  project.tracks = [{ id: 'video', name: 'Video', type: 'video' }];
+  project.clips = [
+    {
+      id: 'base-clip',
+      trackId: 'video',
+      assetId: 'base',
+      timelineStart: time(0),
+      sourceIn: time(0),
+      sourceOut: time(60),
+    },
+  ];
+  await compareScenario(
+    't34-subtitles',
+    project,
+    [
+      { frame: 0, textVisible: false, subtitleCount: 0 },
+      { frame: 3, textVisible: false, subtitleCount: 0 },
+      { frame: 4, textVisible: true, subtitleCount: 1 },
+      { frame: 12, textVisible: true, subtitleCount: 1 },
+      { frame: 13, textVisible: true, subtitleCount: 2 },
+      { frame: 18, textVisible: true, subtitleCount: 2 },
+      { frame: 19, textVisible: true, subtitleCount: 1 },
+      { frame: 27, textVisible: true, subtitleCount: 1 },
+      { frame: 28, textVisible: false, subtitleCount: 0 },
+      { frame: 59, textVisible: false, subtitleCount: 0 },
+    ],
+    undefined,
+    {
+      guiExport: true,
+      fontWarning: false,
+      async edit(application, page, path) {
+        const pick = (file: string) =>
+          application.evaluate(({ dialog }, selected) => {
+            dialog.showOpenDialog = async () => ({
+              canceled: false,
+              filePaths: [selected],
+            });
+          }, file);
+        const menu = page.locator('.subtitle-menu summary');
+        const importFile = async (format: string) => {
+          await pick(
+            resolve('tests/fixtures/subtitles/multilingual.' + format),
+          );
+          await menu.click();
+          await page
+            .getByRole('button', { name: 'Import SRT / WebVTT…' })
+            .click();
+        };
+        const clips = page.locator('.timeline-clip.subtitle');
+        await importFile('vtt');
+        await expect(clips).toHaveCount(2);
+        await page.getByRole('button', { name: 'Undo', exact: true }).click();
+        await expect(clips).toHaveCount(0);
+        await importFile('srt');
+        await expect(clips).toHaveCount(2);
+        const snapshot = () =>
+          page.evaluate(async () => {
+            const reply = await window.opencut.getProject();
+            if (!reply.ok || !reply.state) throw new Error('Missing project');
+            return reply.state.project;
+          });
+        const [first, second] = (await snapshot()).subtitles!.cues;
+        const select = (id: string) =>
+          page.getByRole('button', { name: 'Inspect subtitle ' + id });
+        await select(first!.id).focus();
+        await select(first!.id).press('Enter');
+        const field = (name: string) =>
+          page.getByRole('textbox', { name, exact: true });
+        const text = field('Subtitle text');
+        await expect(text).toHaveValue(first!.text);
+        await field('Start seconds').fill('0.115');
+        await field('Duration seconds').fill('0.495');
+        await expect(field('End seconds')).toHaveValue('');
+        await text.fill('Hello, OpenCut!\n你好，世界！');
+        await page
+          .getByRole('button', { name: 'Apply subtitle', exact: true })
+          .click();
+        await expect
+          .poll(async () => (await snapshot()).subtitles!.cues[0]!.start)
+          .toEqual({ numerator: 23, denominator: 200 });
+        await expect(field('End seconds')).toHaveValue('0.61');
+        const size = page.getByRole('spinbutton', { name: 'Subtitle size' });
+        await size.fill('37');
+        await expect(size).toHaveValue('37');
+        await field('Subtitle color').fill('#fff0bb');
+        await page
+          .getByRole('checkbox', { name: 'Background', exact: true })
+          .check();
+        await field('Subtitle background color').fill('#526884');
+        await expect(
+          page.getByRole('spinbutton', { name: 'Subtitle size' }),
+        ).toHaveValue('37');
+        await page
+          .getByRole('button', { name: 'Apply subtitle style' })
+          .click();
+        await expect
+          .poll(async () => (await snapshot()).subtitles!.style.fontSize)
+          .toBe(37);
+        await page
+          .getByRole('slider', { name: 'Seek timeline', exact: true })
+          .fill('12');
+        await page.getByRole('button', { name: 'Split at playhead' }).click();
+        await expect(clips).toHaveCount(3);
+        await menu.click();
+        await page
+          .getByRole('button', { name: 'Merge with next subtitle' })
+          .click();
+        await expect(clips).toHaveCount(2);
+        await expect(text).toHaveValue(first!.text + '\n' + first!.text);
+        await text.fill(first!.text);
+        await page
+          .getByRole('button', { name: 'Apply subtitle', exact: true })
+          .click();
+        await select(second!.id).focus();
+        await select(second!.id).press('Enter');
+        await select(second!.id).press('ArrowRight');
+        await expect(field('Start seconds')).toHaveValue('263/600');
+        await select(second!.id).press('ArrowLeft');
+        await expect(field('Start seconds')).toHaveValue('0.405');
+        await page
+          .getByRole('button', { name: 'Delete subtitle', exact: true })
+          .click();
+        await expect(clips).toHaveCount(1);
+        await page.getByRole('button', { name: 'Undo', exact: true }).click();
+        await expect(clips).toHaveCount(2);
+        await page.getByRole('button', { name: 'Redo', exact: true }).click();
+        await expect(clips).toHaveCount(1);
+        await page.getByRole('button', { name: 'Undo', exact: true }).click();
+        await expect(clips).toHaveCount(2);
+        const sidecar = join(directory, 't34-sidecar.vtt');
+        await application.evaluate(({ dialog }, file) => {
+          dialog.showSaveDialog = async () => ({
+            canceled: false,
+            filePath: file,
+          });
+        }, sidecar);
+        await menu.click();
+        await page.getByRole('button', { name: 'Export WebVTT…' }).click();
+        await expect(page.getByText(/Exported 2 subtitle cues/)).toBeVisible();
+        const sidecarCues = parseSubtitles(
+          await readFile(sidecar, 'utf8'),
+          'vtt',
+        );
+        expect(sidecarCues[0]).toMatchObject({
+          start: { numerator: 23, denominator: 200 },
+          text: first!.text,
+        });
+        expect(sidecarCues[1]?.text).toBe(second!.text);
+        await pick(path);
+        await page
+          .getByRole('button', { name: 'Open project', exact: true })
+          .click();
+        await expect(clips).toHaveCount(2);
+        await select(first!.id).focus();
+        await select(first!.id).press('Enter');
+        await expect(text).toHaveValue(first!.text);
+        await page
+          .getByRole('slider', { name: 'Seek timeline', exact: true })
+          .fill('13');
+        await expect(page.locator('#project-viewer canvas')).toHaveAttribute(
+          'data-presented-layers',
+          JSON.stringify(['base-clip', first!.id, second!.id]),
+        );
+        const diagnostics = page.locator('.timeline-diagnostics[open] summary');
+        if (await diagnostics.count()) await diagnostics.click();
+        await page.screenshot({
+          path: join(directory, 't34-subtitle-editor.png'),
+        });
+        return deserializeProject(await readFile(path, 'utf8'));
+      },
+    },
+  );
+  const clean = join(directory, 't34-clean.mp4');
+  command(process.execPath, [
+    resolve('apps/cli/dist/index.js'),
+    'project',
+    'render',
+    join(directory, 't34-subtitles.json'),
+    '--output',
+    clean,
+    '--no-subtitles',
+    '--json',
+  ]);
+  verifyVideoTimestamps(clean, project.settings.frameRate, 60);
+  const cleanFrames = decodeFrames(clean, [0, 13], width, height);
+  const burnedFrames = decodeFrames(
+    join(directory, 't34-subtitles.mp4'),
+    [13],
+    width,
+    height,
+  );
+  expect(
+    compareRgb(cleanFrames.get(0)!, cleanFrames.get(13)!, tolerance).passed,
+  ).toBe(true);
+  expect(
+    compareRgb(cleanFrames.get(13)!, burnedFrames.get(13)!, tolerance).passed,
+  ).toBe(false);
 });

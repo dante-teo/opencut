@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { canvasColorPattern } from '@opencut/shared';
+import { textLayerSchema } from './text-style.js';
+import { subtitleTrackSchema } from './subtitles.js';
 import {
   addTimes,
   compareTimes,
@@ -97,46 +99,6 @@ export const canvasShape = {
   height: z.int().positive().optional(),
   backgroundColor: z.string().regex(canvasColorPattern).optional(),
 };
-const textColor = z.string().regex(canvasColorPattern);
-export const textLayerSchema = z.strictObject({
-  content: z
-    .string()
-    .max(4096)
-    .refine(
-      (value) => !/\p{Cc}/u.test(value.replace(/[\t\r\n]/g, '')),
-      'Use printable text, tabs and line breaks.',
-    ),
-  fontFamily: z
-    .string()
-    .trim()
-    .min(1)
-    .max(120)
-    .regex(/^[^\p{Cc}]+$/u)
-    .optional(),
-  fontSize: z.number().min(1).max(512).optional(),
-  fontWeight: z.int().min(100).max(900).multipleOf(100).optional(),
-  color: textColor.optional(),
-  alignment: z.enum(['left', 'center', 'right']).optional(),
-  wrapWidth: z.number().min(1).max(3840).nullable().optional(),
-  rotation: z.number().min(-360).max(360).optional(),
-  stroke: z
-    .strictObject({ color: textColor, width: z.number().min(0).max(64) })
-    .nullable()
-    .optional(),
-  shadow: z
-    .strictObject({
-      color: textColor,
-      x: z.number().min(-128).max(128),
-      y: z.number().min(-128).max(128),
-      blur: z.number().min(0).max(64),
-    })
-    .nullable()
-    .optional(),
-  background: z
-    .strictObject({ color: textColor, padding: z.number().min(0).max(128) })
-    .nullable()
-    .optional(),
-});
 export const clipSchema = z.strictObject({
   id,
   assetId: id.optional(),
@@ -175,6 +137,7 @@ export const snapshotSchema = z.strictObject({
   assets: z.array(assetSchema),
   tracks: z.array(trackSchema),
   clips: z.array(persistedClipSchema),
+  subtitles: subtitleTrackSchema.optional(),
 });
 
 const historyEntrySchema = z.strictObject({
@@ -259,6 +222,34 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
       ids.add(entity.id);
     });
   }
+  project.subtitles?.cues.forEach((cue, index) => {
+    const location = `/subtitles/cues/${index}`;
+    if (ids.has(cue.id))
+      add(
+        location + '/id',
+        'duplicate_id',
+        `ID '${cue.id}' is already in use.`,
+      );
+    ids.add(cue.id);
+    if (compareTimes(cue.end, cue.start) <= 0) {
+      add(
+        location + '/end',
+        'invalid_range',
+        'Subtitle end must be later than start.',
+      );
+    } else {
+      try {
+        subtractTimes(cue.end, cue.start);
+      } catch (error) {
+        if (!(error instanceof RangeError)) throw error;
+        add(
+          location + '/end',
+          'time_overflow',
+          'Subtitle duration exceeds the supported time range.',
+        );
+      }
+    }
+  });
   if (
     Date.parse(project.metadata.updatedAt) <
     Date.parse(project.metadata.createdAt)

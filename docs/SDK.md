@@ -39,7 +39,7 @@ The example assumes the source contains at least 30 project frames. `at`, `in`
 and `out` are integer project frames. `at` is an absolute timeline position
 and `out` is an exclusive source boundary. Inspection returns exact rational
 seconds. The `EditOperation` union provides autocomplete for track add/remove,
-clip add/move/trim/split/remove, clip audio/visual settings, text add/set and
+clip add/move/trim/split/remove, clip audio/visual settings, text and subtitle edits, and
 canvas settings.
 See the [batch command reference](CLI.md#transactions-undo-and-redo) for
 operation fields and validation. Pass explicit IDs to refer to a new track or
@@ -112,6 +112,33 @@ The SDK uses exclusive output publication. Use the existing
 for short range MP4 previews from a saved project. The SDK exposes saved-project
 operations and snapshot previews. Desktop playback, selection, untitled projects
 and cache controls stay in their existing interfaces.
+
+## Editable subtitles
+
+```ts
+import { openProject, parseSubtitleTime } from '@opencut/sdk';
+
+const editor = await openProject('project.opencut.json');
+const { project } = editor;
+await project.importSubtitles('captions.srt');
+const cue = project.inspect().subtitles?.cues[0];
+if (cue) {
+  project.apply(
+    { type: 'subtitle.set', id: cue.id, duration: parseSubtitleTime('2.25') },
+    { type: 'subtitle.style', style: { fontSize: 48, color: '#fff4da' } },
+  );
+}
+await editor.save({ label: 'Import and style subtitles' });
+await project.exportSubtitles('captions.vtt');
+await project.render('captioned.mp4');
+await project.render('clean.mp4', { burnSubtitles: false });
+```
+
+Import stages a batch of cues in the draft. Export writes the current draft to
+a new sidecar, with format inferred from the extension. Use `parseSubtitles`
+and `serializeSubtitles` for in-memory conversion. The
+[subtitle operations and precision contract](CLI.md#editable-subtitles-t34)
+apply to both the SDK and the CLI.
 
 ## Creator examples
 

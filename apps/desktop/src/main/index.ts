@@ -133,6 +133,32 @@ const projectSession = new ProjectSession(
       });
       return selection.canceled ? null : selection.filePaths;
     },
+    async importSubtitles() {
+      const window = mainWindow;
+      if (!window) throw new Error('No project window is available.');
+      const selection = await dialog.showOpenDialog(window, {
+        title: 'Import subtitles',
+        properties: ['openFile'],
+        filters: [{ name: 'Subtitles', extensions: ['srt', 'vtt'] }],
+      });
+      return selection.canceled ? null : (selection.filePaths[0] ?? null);
+    },
+    async exportSubtitles(format) {
+      const window = mainWindow;
+      if (!window) throw new Error('No project window is available.');
+      const selection = await dialog.showSaveDialog(window, {
+        title: 'Export subtitle sidecar',
+        defaultPath: `Subtitles.${format}`,
+        filters: [
+          {
+            name: format === 'srt' ? 'SubRip' : 'WebVTT',
+            extensions: [format],
+          },
+        ],
+        buttonLabel: 'Save new file',
+      });
+      return selection.canceled ? null : (selection.filePath ?? null);
+    },
     async save() {
       const window = mainWindow;
       if (!window) throw new Error('No project window is available.');
@@ -431,6 +457,8 @@ app
             'undo',
             'redo',
             'import',
+            'importSubtitles',
+            'exportSubtitles',
             'removeAsset',
             'addAssetClip',
           ].includes(action)
@@ -446,7 +474,8 @@ app
           reply.ok &&
           !reply.canceled &&
           action !== 'current' &&
-          action !== 'save'
+          action !== 'save' &&
+          action !== 'exportSubtitles'
         )
           revokeTimeline();
         assertSender(event);

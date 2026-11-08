@@ -55,6 +55,10 @@ const options: Record<string, Option> = {
       'Scale finished canvas, preserving aspect/orientation; may upscale.',
     enum: ['project', '720p', '1080p'],
   },
+  'no-subtitles': {
+    type: 'boolean',
+    description: 'Leave the subtitle track out of the video.',
+  },
   overwrite: {
     type: 'boolean',
     description:
@@ -295,11 +299,32 @@ const definitions: Definition[] = [
     description:
       'Render the fully composited timeline with synchronized mixed audio to H.264/AAC MP4.',
     args: ['project-file'],
-    options: ['output', 'quality', 'resolution', 'overwrite'],
+    options: ['output', 'quality', 'resolution', 'overwrite', 'no-subtitles'],
     required: ['output'],
     defaults: { quality: 'balanced', resolution: 'project', overwrite: false },
     tools: ['ffmpeg', 'ffprobe'],
     jsonl: true,
+  },
+  {
+    name: 'subtitle import',
+    description: 'Append SRT or WebVTT cues as one undoable subtitle edit.',
+    args: ['project-file', 'file'],
+    options: edit,
+    mutates: true,
+  },
+  {
+    name: 'subtitle list',
+    description: 'Read the shared style and exact subtitle cue intervals.',
+    args: ['project-file'],
+    options: [],
+  },
+  {
+    name: 'subtitle export',
+    description:
+      'Write a new UTF-8 SRT or WebVTT sidecar with text and timing.',
+    args: ['project-file'],
+    options: ['output'],
+    required: ['output'],
   },
   {
     name: 'media import',
@@ -422,7 +447,7 @@ const definitions: Definition[] = [
   {
     name: 'edit apply',
     description:
-      'Apply atomic batch JSON with required expectedRevision and operations (optional label), including text.add and text.set.',
+      'Apply atomic batch JSON with required expectedRevision and operations (optional label), including text and subtitle operations.',
     args: ['project-file', 'batch.json'],
     options: edit,
     mutates: true,
@@ -636,6 +661,12 @@ export function discovery(scope: string[] = [], help = '') {
         transactionSchema: 'edit apply input',
         sizing: 'project pixels',
         defaultFont: 'Noto Sans SC',
+      },
+      subtitles: {
+        status: 'supported',
+        formats: ['srt', 'vtt'],
+        transactionSchema: 'edit apply input',
+        burnIn: true,
       },
       mcp: { status: 'unavailable' },
     },

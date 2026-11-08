@@ -1,5 +1,6 @@
 import type { Project, TimelineClip } from './project.js';
 import { resolveTimeline } from './evaluation.js';
+import { compareTimes } from './time.js';
 import type { FrameRate, RationalTime } from './time.js';
 
 export class RenderError extends Error {
@@ -20,8 +21,12 @@ interface VisualRenderProperties {
 
 export type VisualRenderClip = VisualRenderProperties &
   (
-    | { assetId: string; text?: never }
-    | { text: NonNullable<TimelineClip['text']>; assetId?: never }
+    | { assetId: string; text?: never; subtitle?: never }
+    | {
+        text: NonNullable<TimelineClip['text']>;
+        assetId?: never;
+        subtitle?: true;
+      }
   );
 
 export interface ProjectRenderPlan {
@@ -66,9 +71,15 @@ function exactFrame(
 }
 
 /** Pure compilation from saved-model semantics to ordered, integer-frame segments. */
-export function planProjectRender(project: Project): ProjectRenderPlan {
+export function planProjectRender(
+  project: Project,
+  { burnSubtitles = true }: { burnSubtitles?: boolean | undefined } = {},
+): ProjectRenderPlan {
   const timeline = resolveTimeline(project);
-  if (!timeline.clips.some((clip) => clip.trackType === 'video'))
+  if (
+    !timeline.clips.some((clip) => clip.trackType === 'video') &&
+    !project.subtitles?.cues.length
+  )
     throw new RenderError(
       'Video tracks are empty. Add a video, image or text clip before rendering.',
     );
@@ -107,8 +118,37 @@ export function planProjectRender(project: Project): ProjectRenderPlan {
     );
   const visualClips: VisualRenderClip[] = [];
   const audioClips: AudioRenderClip[] = [];
-  let totalFrames = 0;
+  if (compareTimes(timeline.duration, { numerator: 600, denominator: 1 }) > 0)
+    throw new RenderError(
+      'Rendering supports at most 600 seconds. Shorten the timeline.',
+    );
+  const sampledFrame = (time: RationalTime) => {
+    const scaled = BigInt(time.numerator) * BigInt(numerator);
+    const divisor = BigInt(time.denominator) * BigInt(denominator);
+    return Number((scaled + divisor - 1n) / divisor);
+  };
+  const totalFrames = sampledFrame(timeline.duration);
+  if (BigInt(totalFrames) * BigInt(denominator) > 600n * BigInt(numerator))
+    throw new RenderError(
+      'Rendering supports at most 600 seconds after frame sampling. Shorten the timeline.',
+    );
   for (const clip of timeline.clips) {
+    if (clip.kind === 'text' && clip.subtitle) {
+      if (!burnSubtitles) continue;
+      const start = sampledFrame(clip.timelineStart);
+      const end = sampledFrame(clip.timelineEnd);
+      if (end > start)
+        visualClips.push({
+          clipId: clip.id,
+          text: clip.text,
+          subtitle: true,
+          timelineStartFrame: start,
+          sourceStartFrame: 0,
+          frameCount: end - start,
+          ...clip.visual,
+        });
+      continue;
+    }
     const start = exactFrame(
       clip.timelineStart,
       frameRate,
@@ -125,15 +165,6 @@ export function planProjectRender(project: Project): ProjectRenderPlan {
       `Clip '${clip.id}' source out`,
     );
     const count = sourceEnd - sourceStart;
-    const end = start + count;
-    if (
-      !Number.isSafeInteger(end) ||
-      BigInt(end) * BigInt(denominator) > 600n * BigInt(numerator)
-    )
-      throw new RenderError(
-        'Rendering supports at most 600 seconds. Shorten the timeline.',
-      );
-    totalFrames = Math.max(totalFrames, end);
     if (clip.kind !== 'text')
       audioClips.push({
         clipId: clip.id,

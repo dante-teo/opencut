@@ -39,6 +39,7 @@ function newId(project: Project, requested?: string): string {
     ...project.assets.map((asset) => asset.id),
     ...project.tracks.map((track) => track.id),
     ...project.clips.map((clip) => clip.id),
+    ...(project.subtitles?.cues.map((cue) => cue.id) ?? []),
   ]);
   let id = globalThis.crypto.randomUUID();
   while (ids.has(id)) id = globalThis.crypto.randomUUID();
@@ -78,7 +79,15 @@ export function listTimeline(project: Project) {
         return { ...clip, duration: clipDuration(clip), timelineEnd };
       }),
   }));
-  return { frameRate: validated.settings.frameRate, duration, tracks };
+  for (const cue of validated.subtitles?.cues ?? []) {
+    if (compareTimes(cue.end, duration) > 0) duration = cue.end;
+  }
+  return {
+    frameRate: validated.settings.frameRate,
+    duration,
+    tracks,
+    ...(validated.subtitles ? { subtitles: validated.subtitles } : {}),
+  };
 }
 
 export interface AddTrackOptions {

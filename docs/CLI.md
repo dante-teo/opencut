@@ -186,8 +186,8 @@ transparency over black like MP4. Contact-sheet layout/labels use Sharp and a
 system sans-serif font; Sharp does not render timeline layers. Font availability
 and exact label appearance depend on the host.
 
-Export limits still apply to the whole project: at least one video, image or text clip,
-frame-aligned boundaries, at most 64 clips and 600 seconds, rational 1–120 fps,
+Export limits still apply to the whole project: at least one video, image, text or subtitle cue,
+frame-aligned media and title boundaries, at most 64 non-subtitle clips and 600 seconds, rational 1–120 fps,
 even sides 2–3840 and at most 3840×2160 pixels. Referenced visual sources must be
 readable even outside the requested range; clips also validate referenced audio.
 Unused offline assets do not block rendering. Audio-only/empty projects remain
@@ -224,7 +224,7 @@ errors include a usage hint.
 - `project info <project-file> [--json]`: display validated metadata, settings and collection counts.
 - `project inspect <project-file> [--json]`: read revision-tagged settings, assets, tracks, clips and duration.
 - `project validate <project-file> [--json]`: validate project structure, internal references and media availability.
-- `project render <project-file> --output <file.mp4> [--quality <draft|balanced|high>] [--resolution <project|720p|1080p>] [--overwrite] [--json]` composites video, image and text layers with mixed audio tracks to H.264/AAC MP4.
+- `project render <project-file> --output <file.mp4> [--quality <draft|balanced|high>] [--resolution <project|720p|1080p>] [--overwrite] [--no-subtitles] [--json]` composites video, image, text and subtitle layers with mixed audio tracks to H.264/AAC MP4.
 - `project --help` and `project create|info|validate|render --help`: show project usage.
 - `media import <project-file> <file> [--json]`: import a source reference and metadata.
 - `media list <project-file> [--json]`: list stored assets and source availability.
@@ -705,6 +705,66 @@ The fallback stack includes monochrome Noto Emoji.
 Unsupported characters may appear as a missing-glyph box. See the
 [typography comparison and limitations](PREVIEW_EXPORT_CONSISTENCY.md#text-layers-t33).
 
+### Editable subtitles (T34)
+
+```bash
+opencut subtitle import project.opencut.json captions.srt --expected-revision 0 --json
+opencut subtitle list project.opencut.json --json
+opencut subtitle export project.opencut.json --output captions.vtt --json
+opencut project render project.opencut.json --output captioned.mp4 --json
+opencut project render project.opencut.json --output clean.mp4 --no-subtitles --json
+```
+
+Import appends cues and preserves the existing shared style. One import is one
+undo step. Use `--dry-run` to validate without saving. A malformed cue rejects
+the entire import with its block number. A valid empty file adds no cues and
+creates no revision. Use `project inspect` to see the persisted track and
+`timeline inspect` to see its active text layers with `subtitle: true` and a
+static `sourceTime` of zero.
+
+Apply edits with `edit apply` and the current revision. Every cue time is exact
+rational seconds, such as `{"numerator":105,"denominator":1000}`. Cues can
+overlap and use exclusive ends.
+
+| Operation         | Fields besides `type`                                                                                                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `subtitle.import` | `cues`, an array of `{start,end,text}`                                                                                                                                                |
+| `subtitle.add`    | `start`, `end`, `text`, optional `id`                                                                                                                                                 |
+| `subtitle.set`    | `id` and any of `text`, `start`, `end` or `duration`. End and duration are mutually exclusive. A start-only edit keeps the old end.                                                   |
+| `subtitle.move`   | `id`, new `start`. Duration stays fixed.                                                                                                                                              |
+| `subtitle.split`  | `id`, interior time `at`, optional `rightId`. Both halves start with the same text.                                                                                                   |
+| `subtitle.merge`  | `ids`, two or more distinct cues. The first cue in timeline order keeps its ID. The merged range spans the earliest start to the latest end and joins nonempty text with line breaks. |
+| `subtitle.remove` | `id`                                                                                                                                                                                  |
+| `subtitle.style`  | `style` patch with `fontFamily`, `fontSize`, `color`, `stroke: {color,width}`, `background: {color,padding}`, `x` and `y`. Use `null` to turn off stroke or background.               |
+
+Sizes and offsets are in project pixels. `x` places the horizontal center
+relative to the canvas center. `y` places the bottom of the subtitle block
+relative to the canvas center, positive downward. The default uses bundled
+Noto Sans SC, white text, black outline and a lower-center position.
+Overlaps use separate lanes stacked upward, with stable positions within
+each connected group of overlapping cues. Long unbroken lines or tall stacks
+can clip at the canvas edge.
+
+SRT and WebVTT sidecars store plain text and timing. Files can use UTF-8
+or BOM-marked UTF-16. Output is UTF-8 with LF line endings and a new destination
+path. Millisecond-aligned timings round-trip exactly. Other cue boundaries round
+to the nearest millisecond. If a boundary must move to keep a sub-millisecond
+cue nonempty, the error stays under 1 ms. Empty cues round-trip in OpenCut.
+Blank lines inside or at the edges of a nonempty cue prevent sidecar export.
+SRT treats lines containing only spaces or tabs as blank.
+WebVTT IDs, cue positioning, CSS, voice annotations and inline styling are
+discarded, with text content retained. SRT markup is treated as literal text.
+The project supports up to 20,000 cues, 4,096 UTF-16 code units per cue and
+16 MiB per input file.
+
+Burn-in uses the shared title rasterizer and composites each visible cue once
+above all video and title layers. A frame shows cues active at that frame's
+start, so both boundaries round up to the next project frame for rendering.
+An interval with no sampled frame is preserved in sidecars. Video burn-in
+supports up to 256 sampled, nonempty cues in the requested render range.
+`--no-subtitles` leaves cue imagery out while preserving the project duration.
+Sidecar export works without FFmpeg.
+
 ### Undo and redo
 
 `edit undo PROJECT` restores the previous transaction's exact content, including
@@ -913,8 +973,8 @@ and no JSON success result on failure, including with `--json`.
 
 ## Project rendering
 
-`project render <project-file> --output <file.mp4> [--quality <draft|balanced|high>] [--resolution <project|720p|1080p>] [--overwrite] [--json]` reads a saved project
-snapshot and composites video, image and text with mixed audio to H.264/yuv420p and AAC MP4. It requires FFmpeg 8+
+`project render <project-file> --output <file.mp4> [--quality <draft|balanced|high>] [--resolution <project|720p|1080p>] [--overwrite] [--no-subtitles] [--json]` reads a saved project
+snapshot and composites video, image, text and subtitles with mixed audio to H.264/yuv420p and AAC MP4. It requires FFmpeg 8+
 with libx264 and standard filters, plus ffprobe on PATH. The project's resolution
 and exact rational frame rate determine the default output. Original video audio is preserved
 by default. Independent audio clips on any number of audio tracks can overlap
@@ -927,8 +987,7 @@ The CLI keeps project-rate H.264 and its existing quality/resolution flags; ther
 are no CLI codec or output-frame-rate flags. Desktop exports always refuse existing
 files; CLI replacement requires explicit `--overwrite` and successful verification.
 
-Video tracks accept video, image and text clips. At least one visual clip is
-required. Empty tracks are allowed. Same-track overlaps remain
+Video tracks accept video, image and text clips. Rendering requires a visual clip or a subtitle cue. Empty tracks are allowed. Same-track overlaps remain
 forbidden: use separate tracks for simultaneous layers or audio. Only referenced
 assets are probed; unused offline assets do not block a render. Relative sources
 resolve from the physical project directory, including directory aliases.
@@ -939,9 +998,9 @@ tracks. New tracks append above existing layers; reorder the array in a project
 without conflicting history to change stacking. Clips within each track are sorted
 by timeline start. Every visible layer is composited at each frame, including when
 lower tracks have gaps. Gaps reveal lower layers or the canvas background.
-Duration ends at the last clip's exclusive end across all tracks. Audio tails show
+Duration ends at the last exclusive end across all clips and subtitle cues. Audio tails show
 the background. Muted, zero-volume and zero-opacity clips still contribute to duration.
-There is no separately stored trailing duration. Every timeline start and source
+There is no separately stored trailing duration. Every regular clip timeline start and source
 in/out must align exactly with a project-frame boundary; subframe times are
 rejected with an alignment error. The CLI's existing frame-based edits satisfy
 this rule. Missing/unreadable media, invalid references/overlaps, unknown video

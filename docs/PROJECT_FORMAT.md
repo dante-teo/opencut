@@ -219,6 +219,18 @@ reject projects containing text clips. No asset entry, file reference or
 generated raster is persisted for a text clip. See
 [text layer fields](CLI.md#text-layers-t33).
 
+### Subtitle track
+
+T34 adds an optional top-level `subtitles` object with a shared `style` and
+a `cues` array. Each cue stores `id`, `text`, `start` and exclusive `end`.
+Cue IDs are unique across project entities, and cues can overlap. Exact rational
+seconds are independent of the project frame rate. Subtitle cues extend the
+timeline duration. Their rendering layers and display lanes are derived and
+excluded from project storage. The track is included in history snapshots.
+Version 1 files without this field retain their existing behavior. Earlier
+OpenCut builds with strict schema validation can reject files containing the
+new field. See [subtitle commands and fields](CLI.md#editable-subtitles-t34).
+
 ## Media references and portability
 
 `file` is `{ "type": "relative" | "absolute", "path": "..." }`.

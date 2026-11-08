@@ -1,5 +1,8 @@
 import {
   clipTimelineEnd,
+  subtitleLanes,
+  subtractTimes,
+  type SubtitleCue,
   compareTimes,
   frameTime,
   type FrameRate,
@@ -118,6 +121,22 @@ export function snapToFrame(time: RationalTime, rate: FrameRate) {
   return framePosition(frameIndex(time, rate, true), rate);
 }
 
+export const isSubtitleLane = (id: string) => id.startsWith('subtitle:');
+
+export function cueTimelineClip(
+  cue: SubtitleCue,
+  trackId: string,
+): TimelineClip {
+  return {
+    id: cue.id,
+    trackId,
+    timelineStart: cue.start,
+    sourceIn: ZERO,
+    sourceOut: subtractTimes(cue.end, cue.start),
+    text: { content: cue.text },
+  };
+}
+
 /** Transient search indexes reference the original clips; the project remains the model. */
 export function indexTimeline(project: Project | undefined) {
   const tracks = new Map<string, { clip: TimelineClip; end: RationalTime }[]>();
@@ -137,10 +156,32 @@ export function indexTimeline(project: Project | undefined) {
     entries.sort((a, b) =>
       compareTimes(a.clip.timelineStart, b.clip.timelineStart),
     );
-  return { tracks, assets, end };
+  const subtitles = new Map<string, TimelineClip>();
+  const subtitleTracks = subtitleLanes(project?.subtitles?.cues ?? []).map(
+    (lane, i) => {
+      const id = `subtitle:${i}`;
+      tracks.set(
+        id,
+        lane.map((cue) => {
+          const clip = cueTimelineClip(cue, id);
+          subtitles.set(clip.id, clip);
+          if (compareTimes(cue.end, end) > 0) end = cue.end;
+          return { clip, end: cue.end };
+        }),
+      );
+      return { id, type: 'subtitle' as const, name: 'Subtitles' };
+    },
+  );
+  return {
+    tracks,
+    assets,
+    end,
+    subtitles,
+    rows: [...(project?.tracks ?? []), ...subtitleTracks],
+  };
 }
 
-/** Valid projects prohibit same-track overlaps, so sorted ends are monotonic too. */
+/** Regular tracks and individual subtitle lanes have monotonic ends. */
 export function visibleClips(
   clips: { clip: TimelineClip; end: RationalTime }[],
   start: RationalTime,

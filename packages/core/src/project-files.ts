@@ -570,3 +570,5 @@ export {
 export type { AssetInfo, AssetImportResult } from './assets.js';
 
 export { renderProjectFile, resolveProjectRender } from './render-files.js';
+
+export { readSubtitleFile, writeSubtitleFile } from './subtitle-files.js';

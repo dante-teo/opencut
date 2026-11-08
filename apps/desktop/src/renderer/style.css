@@ -14,6 +14,7 @@
   --video-clip: #d9cafa;
   --audio-clip: #bfe6da;
   --text-clip: #e5bee9;
+  --subtitle-clip: #bce3e9;
   --clip-text: #302647;
   --stage: #17151f;
   --radius-dialog: 26px;
@@ -38,6 +39,7 @@
     --video-clip: #594277;
     --audio-clip: #2c6359;
     --text-clip: #704b78;
+    --subtitle-clip: #264a4d;
     --clip-text: #f2edf9;
     --stage: #0e0d12;
   }
@@ -1829,4 +1831,60 @@ button {
 }
 .library-actions .import-button {
   white-space: nowrap;
+}
+
+.subtitle-menu {
+  position: relative;
+  z-index: 4;
+}
+.subtitle-menu summary {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.subtitle-menu summary svg {
+  width: 14px;
+  height: 14px;
+}
+.subtitle-actions {
+  position: absolute;
+  inset: calc(100% + 4px) auto auto 0;
+  display: grid;
+  gap: 3px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  white-space: nowrap;
+}
+.subtitle-actions button {
+  text-align: left;
+}
+.timeline-clip.subtitle > rect:first-of-type {
+  fill: var(--subtitle-clip);
+}
+.timeline-clip.subtitle:not(:hover):not([aria-pressed='true'])
+  > rect:first-of-type {
+  stroke: #79c6bd;
+}
+.track-badge.subtitle {
+  background: var(--subtitle-clip);
+}
+.subtitle-properties .text-effect {
+  gap: 6px;
+  margin: 0;
+}
+.subtitle-properties {
+  display: block;
+}
+.subtitle-properties .text-properties {
+  margin-bottom: 14px;
+}
+.subtitle-properties fieldset {
+  grid-template-rows: none;
 }

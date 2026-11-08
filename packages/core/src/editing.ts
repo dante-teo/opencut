@@ -3,11 +3,12 @@ import {
   canvasShape,
   clipAudioShape,
   clipVisualSchema,
-  textLayerSchema,
   validateProject,
 } from './project.js';
 import type { HistoryEntry, Project, ProjectSnapshot } from './project.js';
 import { frameTime } from './time.js';
+import { textLayerSchema } from './text-style.js';
+import { editSubtitles, subtitleOperations } from './subtitles.js';
 import {
   addClip,
   addText,
@@ -29,6 +30,7 @@ const name = z
   .string()
   .refine((value) => value.trim().length > 0, 'Must not be blank.');
 const operationSchema = z.discriminatedUnion('type', [
+  ...subtitleOperations,
   z.strictObject({
     type: z.literal('text.add'),
     id: id.optional(),
@@ -249,6 +251,18 @@ export function previewTransaction(project: Project, input: EditTransaction) {
       const time = (frame: number) => frameTime(frame, next.settings.frameRate);
       let changed;
       switch (operation.type) {
+        case 'subtitle.import':
+        case 'subtitle.add':
+        case 'subtitle.set':
+        case 'subtitle.move':
+        case 'subtitle.split':
+        case 'subtitle.merge':
+        case 'subtitle.remove':
+        case 'subtitle.style': {
+          const edited = editSubtitles(next, operation);
+          changed = { ...edited, project: checked(edited.project) };
+          break;
+        }
         case 'track.add':
           changed = addTrack(next, {
             ...(operation.id !== undefined ? { id: operation.id } : {}),

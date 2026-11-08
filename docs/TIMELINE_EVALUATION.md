@@ -24,16 +24,16 @@ Both APIs return `TimelineEvaluation` and accept offline projects. Frame indices
 are nonnegative safe integers on the project frame grid; timestamp queries accept
 `RationalTime` in seconds. Neither API clamps a query to the project duration.
 
-| Field              | Meaning                                                                    |
-| ------------------ | -------------------------------------------------------------------------- |
-| `time`, `duration` | Requested time and greatest clip end, in rational seconds.                 |
-| `boundary`         | `inside` before duration, `end` exactly at duration, `after` beyond it.    |
-| `activeClips`      | All clips containing the query, in track order.                            |
-| `visualClips`      | Active video-track clips, including images, text and zero-opacity clips.   |
-| `audioClips`       | Active clips with present or unknown audio, including muted clips.         |
-| `mixingSources`    | Audio candidates whose effective volume is greater than zero.              |
-| `gap`, `visualGap` | No active clips, or no active opacity-positive visual clips, respectively. |
-| `backgroundColor`  | Stored canvas background, defaulting to `#000000`.                         |
+| Field              | Meaning                                                                     |
+| ------------------ | --------------------------------------------------------------------------- |
+| `time`, `duration` | Requested time and greatest clip or subtitle cue end, in rational seconds.  |
+| `boundary`         | `inside` before duration, `end` exactly at duration, `after` beyond it.     |
+| `activeClips`      | Clips and derived subtitle layers active at the query, in track order.      |
+| `visualClips`      | Active video-track clips and subtitle layers, including zero-opacity clips. |
+| `audioClips`       | Active clips with present or unknown audio, including muted clips.          |
+| `mixingSources`    | Audio candidates whose effective volume is greater than zero.               |
+| `gap`, `visualGap` | No active clips, or no active opacity-positive visual clips, respectively.  |
+| `backgroundColor`  | Stored canvas background, defaulting to `#000000`.                          |
 
 Each `EvaluatedTimelineClip` retains the stored clip fields and adds `duration`,
 `timelineEnd`, `trackIndex`, `trackType`, `kind`, `sourceTime`, `visible`,
@@ -42,6 +42,8 @@ explicit defaults. `kind` identifies the evaluated role: a video asset used on a
 audio track is reported as audio. The types are exported from `@opencut/core`.
 Text clips report `kind: "text"`, carry their stored typography and have absent
 audio. Their source time expresses elapsed position in a static clip range.
+Subtitle cues are derived text layers with `subtitle: true`. Their exact
+timeline interval determines visibility, and their source time is always zero.
 These results are derived values, not project fields to save back into the JSON.
 Mutating a returned clip does not modify the input project.
 
@@ -58,6 +60,10 @@ the right clip; moving preserves source points. Same-track overlaps remain inval
 cross-track overlaps are evaluated together. Results follow track array order then
 exact timeline start. `trackIndex` includes audio and empty tracks; later video
 tracks are above earlier ones. No priority depends on clip array order.
+Nonempty subtitle cues occupy `[start, end)` above the regular video layers.
+Overlapping cues stack upward. Lane heights stay fixed within a connected
+overlap group, so a tall cue in a separate group leaves the later stack's
+positions unchanged.
 
 Times use existing safe-integer rationals and bigint intermediate arithmetic.
 Frame queries multiply the absolute frame index by the project frame period;
@@ -67,12 +73,13 @@ instant, not a decoded source-frame index; VFR sampling remains a decoder concer
 Negative/invalid times and unsafe arithmetic throw instead of clamping or rounding.
 Exact subframe queries are supported.
 
-Duration is the greatest clip end, including muted, transparent and audio-only
-clips. The boundary is `inside`, `end`, or `after`; empty projects end at zero.
-There are no active clips at or after the end. `gap` means no active clips;
-`visualGap` means no opacity-positive visual clips. Audio tails therefore retain
-the project background. These flags also hold outside the project; inspect
-`boundary` to distinguish an interior gap from completion.
+Duration is the greatest end across clips and subtitle cues, including muted,
+transparent or audio-only clips and empty cues. The boundary is `inside`,
+`end`, or `after`, with a zero duration for empty projects. Exact point
+queries return an empty active layer list at and after the end. `gap` means
+no active clips, while `visualGap` means no opacity-positive visual clips.
+Audio tails therefore retain the project background. Use `boundary` to
+distinguish an interior gap from completion.
 
 ## Visual and audio intent
 
@@ -101,16 +108,22 @@ Point evaluation and `planProjectRender` share resolved clip ranges, ordering an
 property defaults. Export still probes all referenced streams, including optional
 video audio, and keeps existing integer project-grid, dimensions, duration and
 clip-count limits. Evaluation itself has none of those export-specific limits.
-Off-grid source/timeline boundaries evaluate exactly but still fail export rather
-than round. Existing FFmpeg project-rate sampling before trimming, still looping,
-stream origins and 48 kHz sample rounding are unchanged. No intentional export
-semantic change was introduced by T23. T26 shares geometry and RGB composition
-between preview and export; see [the composition contract](TIMELINE_PLAYBACK.md#composition-and-export-agreement-t26).
+Export requires frame-aligned media and title boundaries. The Project viewer
+and export sample subtitle visibility at each project frame's start. The
+render plan places each cue boundary at the first project tick at or after
+its exact stored time.
+
+FFmpeg samples video at the project rate before trimming and loops still
+images. Export uses stream origins and rounds audio samples on a 48 kHz grid.
+T26 shares geometry and RGB composition between preview and export. See
+[the composition contract](TIMELINE_PLAYBACK.md#composition-and-export-agreement-t26).
 
 `evaluateTimeline` and `evaluateTimelineFrame` validate and resolve a fresh snapshot
-on each call. `createTimelineEvaluator(project)` instead validates/resolves once
-and returns a timestamp-query function with identical results. It binary-searches
-nonoverlapping clips per track and returns detached values. Recreate it after
+on each call. `createTimelineEvaluator(project)` instead validates and resolves
+once, then returns a timestamp-query function with identical results. Pass
+`true` as the second argument to sample subtitle visibility on the project
+frame grid, as the desktop viewer does. The function binary-searches each
+nonoverlapping lane and returns detached values. Recreate it after
 edits; mutating the original project or an earlier result does not update it.
 `resolveTimeline(project)` also exposes validated ordered clip ranges/defaults
 without a point query for adapters that need lookahead.

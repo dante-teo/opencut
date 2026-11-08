@@ -212,3 +212,58 @@ test('T30 documented scripts create, inspect, preview and render from original m
   assert.deepEqual(await readFile(cut), before);
   assert.deepEqual(await readFile(source), original);
 });
+
+test('T34 SDK renders subtitle-only video and can omit subtitle pixels', async (t) => {
+  requireTool('ffmpeg');
+  requireTool('ffprobe');
+  const root = resolve('tests/fixtures/generated');
+  await mkdir(root, { recursive: true });
+  const directory = await mkdtemp(join(root, 't34-native-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const editor = await createProject(join(directory, 'subtitles.json'), {
+    name: 'Subtitle only',
+    settings: {
+      width: 320,
+      height: 180,
+      frameRate: { numerator: 30, denominator: 1 },
+    },
+  });
+  await editor.project.importSubtitles(
+    resolve('tests/fixtures/subtitles/multilingual.vtt'),
+  );
+  editor.project.apply({ type: 'subtitle.style', style: { fontSize: 22 } });
+  await editor.save();
+  const burned = await editor.project.render(join(directory, 'burned.mp4'));
+  const clean = await editor.project.render(join(directory, 'clean.mp4'), {
+    burnSubtitles: false,
+  });
+  assert.equal(burned.frameCount, 28);
+  assert.equal(clean.frameCount, burned.frameCount);
+  assert.equal(burned.metadata.streams.length, 2);
+  const ink = (file: string, frame: number) => {
+    const decoded = spawnSync('ffmpeg', [
+      '-v',
+      'error',
+      '-i',
+      file,
+      '-vf',
+      "select='eq(n," + frame + ")'",
+      '-frames:v',
+      '1',
+      '-pix_fmt',
+      'rgb24',
+      '-threads',
+      '1',
+      '-f',
+      'rawvideo',
+      'pipe:1',
+    ]);
+    assert.equal(decoded.status, 0, decoded.stderr.toString());
+    assert.equal(decoded.stdout.length, 320 * 180 * 3);
+    return decoded.stdout.filter((channel) => channel > 200).length;
+  };
+  assert.equal(ink(burned.path, 3), 0);
+  assert.ok(ink(burned.path, 4) > 1000);
+  assert.ok(ink(burned.path, 13) > ink(burned.path, 4));
+  assert.equal(ink(clean.path, 13), 0);
+});

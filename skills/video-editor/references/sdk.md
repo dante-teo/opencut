@@ -116,3 +116,13 @@ serialization succeed. On `dryRun`, skip file-producing operations. The
 runner disables SDK previews and renders in this mode. Run trusted code only.
 The draft transaction does not cover files written by the script or a separate
 SDK handle.
+
+## Subtitles
+
+`await project.importSubtitles(file)` stages SRT or WebVTT cues. Find IDs
+with `project.inspect().subtitles?.cues`, edit using `project.apply(...)`
+with `subtitle.*` operations, and publish via the editor's `save()`.
+`parseSubtitleTime('1.25')` produces rational seconds for cue fields.
+`await project.exportSubtitles('new.vtt')` writes the current draft as a
+sidecar. `project.render('new.mp4')` burns visible cues into the video by
+default. Set `{ burnSubtitles: false }` for clean video at the same duration.

@@ -2,18 +2,21 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, PointerEvent } from 'react';
 import {
   compareTimes,
+  sortSubtitleCues,
+  type SubtitleFormat,
   projectRevision,
   clipTimelineEnd,
   type Project,
   type RationalTime,
   type TimelineClip,
 } from '@opencut/core';
-import { Scissors, Trash2, Clapperboard, Type } from 'lucide-react';
+import { Scissors, Trash2, Clapperboard, Type, Captions } from 'lucide-react';
 import { ClipArtwork } from './clip-artwork.js';
 import { ASSET_DRAG_TYPE, readAssetDrag } from './media-library.js';
 import type { AssetClipInput, TimelineOperation } from '../bridge.js';
 import {
   proposeEdit,
+  proposeSubtitleEdit,
   createTimelinePreview,
   type EditProposal,
   type GestureKind,
@@ -23,6 +26,7 @@ import {
   frameIndex,
   framePosition,
   indexTimeline,
+  isSubtitleLane,
   LABEL_WIDTH,
   pixelTime,
   relativePixels,
@@ -53,6 +57,9 @@ export function ProjectTimeline({
   onEdit,
   onAddAsset,
   onAddText,
+  onAddSubtitle,
+  onImportSubtitles,
+  onExportSubtitles,
 }: {
   project: Project | undefined;
   selected: string | null;
@@ -64,6 +71,9 @@ export function ProjectTimeline({
   disabled?: boolean;
   onAddAsset?: (input: AssetClipInput) => Promise<void>;
   onAddText?: () => Promise<void>;
+  onAddSubtitle?: () => Promise<void>;
+  onImportSubtitles?: () => void;
+  onExportSubtitles?: (format: SubtitleFormat) => void;
   onEdit?: (operations: TimelineOperation[], label: string) => Promise<void>;
 }) {
   const gesture = useRef<{
@@ -87,6 +97,7 @@ export function ProjectTimeline({
     [project],
   );
   const scrollRef = useRef<HTMLDivElement>(null);
+  const subtitleMenu = useRef<HTMLDetailsElement>(null);
   const [zoom, setZoom] = useState(80);
   const [viewport, setViewport] = useState({
     width: 800,
@@ -105,7 +116,17 @@ export function ProjectTimeline({
   const rate = project?.settings.frameRate ?? { numerator: 30, denominator: 1 };
   const ticks = rulerTicks(origin, width, zoom, rate);
   const playheadX = relativePixels(position, origin, zoom);
-  const selectedClip = project?.clips.find((clip) => clip.id === selected);
+  const selectedClip =
+    project?.clips.find((clip) => clip.id === selected) ??
+    (selected === null ? undefined : index.subtitles.get(selected));
+  const selectedSubtitle = selectedClip && isSubtitleLane(selectedClip.trackId);
+  const sortedCues = useMemo(
+    () => sortSubtitleCues(project?.subtitles?.cues ?? []),
+    [project],
+  );
+  const nextCue = selectedSubtitle
+    ? sortedCues[sortedCues.findIndex((cue) => cue.id === selected) + 1]
+    : undefined;
   const previewable =
     selectedClip?.assetId &&
     project?.tracks.find((track) => track.id === selectedClip.trackId)?.type ===
@@ -124,17 +145,29 @@ export function ProjectTimeline({
       commit(
         [
           {
-            type: 'clip.split',
+            ...(selectedSubtitle
+              ? { type: 'subtitle.split' as const, at: position }
+              : {
+                  type: 'clip.split' as const,
+                  at: Number(frameIndex(position, rate, true)),
+                }),
             id: selectedClip.id,
-            at: Number(frameIndex(position, rate, true)),
           },
         ],
-        'Split clip',
+        selectedSubtitle ? 'Split subtitle' : 'Split clip',
       );
   }
   function deleteSelected() {
     if (selectedClip)
-      commit([{ type: 'clip.remove', id: selectedClip.id }], 'Delete clip');
+      commit(
+        [
+          {
+            type: selectedSubtitle ? 'subtitle.remove' : 'clip.remove',
+            id: selectedClip.id,
+          },
+        ],
+        selectedSubtitle ? 'Delete subtitle' : 'Delete clip',
+      );
   }
   function cancelGesture() {
     const current = gesture.current;
@@ -211,16 +244,26 @@ export function ProjectTimeline({
       current.kind === 'move'
         ? (current.project.tracks[row]?.id ?? '')
         : current.clip.trackId;
-    const next = proposeEdit(
-      current.preview,
-      current.clip,
-      current.kind,
-      frames,
-      track,
-      position,
-      zoom,
-      snapping ? snapPixels : 0,
-    );
+    const next = isSubtitleLane(current.clip.trackId)
+      ? proposeSubtitleEdit(
+          current.clip,
+          current.kind,
+          pixelTime(Math.abs(offset), zoom),
+          offset < 0,
+          position,
+          zoom,
+          snapping ? snapPixels : 0,
+        )
+      : proposeEdit(
+          current.preview,
+          current.clip,
+          current.kind,
+          frames,
+          track,
+          position,
+          zoom,
+          snapping ? snapPixels : 0,
+        );
     if (current.project !== project)
       next.error = 'Project changed during the interaction. Try again.';
     setProposal(next);
@@ -233,19 +276,36 @@ export function ProjectTimeline({
     trackId = clip.trackId,
   ) {
     if (!previewProject || disabled || gesture.current) return;
-    const next = proposeEdit(
-      previewProject,
-      clip,
-      kind,
-      direction,
-      trackId,
-      position,
-      zoom,
-      0,
-    );
+    const next = isSubtitleLane(clip.trackId)
+      ? proposeSubtitleEdit(
+          clip,
+          kind,
+          framePosition(direction < 0n ? -direction : direction, rate),
+          direction < 0n,
+          position,
+          zoom,
+          0,
+        )
+      : proposeEdit(
+          previewProject,
+          clip,
+          kind,
+          direction,
+          trackId,
+          position,
+          zoom,
+          0,
+        );
     setEditError(next.error ?? '');
-    if (!next.error)
-      commit(next.operations, kind === 'move' ? 'Move clip' : 'Trim clip');
+    if (!next.error) commit(next.operations, editLabel(kind, clip));
+  }
+  function editLabel(kind: GestureKind, clip: TimelineClip) {
+    const action = kind === 'move' ? 'Move' : 'Trim';
+    return `${action} ${isSubtitleLane(clip.trackId) ? 'subtitle' : 'clip'}`;
+  }
+  function subtitleAction(action: () => void) {
+    if (subtitleMenu.current) subtitleMenu.current.open = false;
+    action();
   }
   function measure() {
     const element = scrollRef.current;
@@ -412,10 +472,10 @@ export function ProjectTimeline({
     Math.floor((viewport.top - TRACK_HEIGHT) / TRACK_HEIGHT),
   );
   const lastTrack = Math.min(
-    project?.tracks.length ?? 0,
+    index.rows.length,
     Math.ceil((viewport.top + viewport.height) / TRACK_HEIGHT) + 1,
   );
-  const trackCount = project?.tracks.length ?? 0;
+  const trackCount = index.rows.length;
   return (
     <section
       className="timeline-panel"
@@ -423,6 +483,7 @@ export function ProjectTimeline({
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
           cancelGesture();
+          if (subtitleMenu.current) subtitleMenu.current.open = false;
           setEditError('');
           return;
         }
@@ -452,7 +513,10 @@ export function ProjectTimeline({
       <div className="panel-heading timeline-heading">
         <div className="timeline-title">
           <h2>
-            Timeline ({trackCount} tracks · {project?.clips.length ?? 0} clips)
+            Timeline (
+            {(project?.tracks.length ?? 0) + Number(sortedCues.length > 0)}{' '}
+            tracks · {project?.clips.length ?? 0} clips
+            {sortedCues.length > 0 && <> · {sortedCues.length} cues</>})
           </h2>
           {project && (
             <div className="new-track-targets">
@@ -479,6 +543,63 @@ export function ProjectTimeline({
           >
             <Type aria-hidden="true" /> Add text
           </button>
+          {project && (
+            <details ref={subtitleMenu} className="subtitle-menu">
+              <summary>
+                <Captions aria-hidden="true" /> Subtitles
+              </summary>
+              <div className="subtitle-actions">
+                <button
+                  disabled={disabled || !!proposal}
+                  onClick={() => subtitleAction(() => void onAddSubtitle?.())}
+                >
+                  Add subtitle
+                </button>
+                <button
+                  disabled={disabled || !!proposal}
+                  onClick={() => subtitleAction(() => onImportSubtitles?.())}
+                >
+                  Import SRT / WebVTT…
+                </button>
+                <button
+                  disabled={disabled || !!proposal || !sortedCues.length}
+                  onClick={() =>
+                    subtitleAction(() => onExportSubtitles?.('srt'))
+                  }
+                >
+                  Export SRT…
+                </button>
+                <button
+                  disabled={disabled || !!proposal || !sortedCues.length}
+                  onClick={() =>
+                    subtitleAction(() => onExportSubtitles?.('vtt'))
+                  }
+                >
+                  Export WebVTT…
+                </button>
+                {selectedSubtitle && (
+                  <button
+                    disabled={disabled || !!proposal || !nextCue}
+                    onClick={() =>
+                      subtitleAction(() =>
+                        commit(
+                          [
+                            {
+                              type: 'subtitle.merge',
+                              ids: [selectedClip.id, nextCue!.id],
+                            },
+                          ],
+                          'Merge subtitles',
+                        ),
+                      )
+                    }
+                  >
+                    Merge with next subtitle
+                  </button>
+                )}
+              </div>
+            </details>
+          )}
           <button
             disabled={disabled || !canSplit || !!proposal}
             onClick={splitSelected}
@@ -490,8 +611,12 @@ export function ProjectTimeline({
           <button
             disabled={disabled || !selectedClip || !!proposal}
             onClick={deleteSelected}
-            aria-label="Delete clip"
-            title="Delete clip (Delete)"
+            aria-label={selectedSubtitle ? 'Delete subtitle' : 'Delete clip'}
+            title={
+              selectedSubtitle
+                ? 'Delete subtitle (Delete)'
+                : 'Delete clip (Delete)'
+            }
           >
             <Trash2 aria-hidden="true" />
           </button>
@@ -591,10 +716,7 @@ export function ProjectTimeline({
           if (!next) return;
           setEditError(next.error ?? '');
           if (!next.error)
-            commit(
-              next.operations,
-              current.kind === 'move' ? 'Move clip' : 'Trim clip',
-            );
+            commit(next.operations, editLabel(current.kind, current.clip));
         }}
         onPointerCancel={cancelGesture}
         onLostPointerCapture={(event) => {
@@ -697,7 +819,7 @@ export function ProjectTimeline({
               <p>Drag media here</p>
             </div>
           )}
-          {project?.tracks.slice(firstTrack, lastTrack).map((track, offset) => {
+          {index.rows.slice(firstTrack, lastTrack).map((track, offset) => {
             const trackIndex = firstTrack + offset;
             const top = RULER_HEIGHT + trackIndex * TRACK_HEIGHT - viewport.top;
             const artworkVisible =
@@ -714,12 +836,15 @@ export function ProjectTimeline({
               >
                 <div className="track-heading" title={track.name}>
                   <span className={`track-badge ${track.type}`}>
-                    {track.type === 'video' ? 'V' : 'A'}
-                    {trackIndex + 1}
+                    {track.type === 'subtitle' ? (
+                      <Captions aria-hidden="true" size={14} />
+                    ) : (
+                      `${track.type === 'video' ? 'V' : 'A'}${trackIndex + 1}`
+                    )}
                   </span>
                   <span>
                     <strong>{track.name}</strong>
-                    <small>{track.type}</small>
+                    {track.type !== 'subtitle' && <small>{track.type}</small>}
                   </span>
                 </div>
                 <svg
@@ -767,16 +892,17 @@ export function ProjectTimeline({
                         ? clip.text.content
                             .split(/\r?\n/, 1)[0]
                             ?.trim()
-                            .slice(0, 100) || 'Text'
+                            .slice(0, 100) ||
+                          (track.type === 'subtitle' ? 'Subtitle' : 'Text')
                         : (asset?.name ?? 'Missing media');
                       return (
                         <g
                           key={clip.id}
                           role="button"
                           tabIndex={0}
-                          aria-label={`Inspect clip ${clip.id}`}
+                          aria-label={`Inspect ${track.type === 'subtitle' ? 'subtitle' : 'clip'} ${clip.id}`}
                           aria-pressed={selected === clip.id}
-                          className={`timeline-clip ${clip.text ? 'text' : track.type}`}
+                          className={`timeline-clip ${track.type === 'subtitle' ? 'subtitle' : clip.text ? 'text' : track.type}`}
                           onClick={() => onSelect(clip.id)}
                           onPointerDown={(event) =>
                             beginEdit(event, clip, 'move')
@@ -802,7 +928,7 @@ export function ProjectTimeline({
                                   (event.key === 'ArrowLeft' ? -1n : 1n) *
                                     (event.shiftKey ? 10n : 1n),
                                 );
-                              else {
+                              else if (track.type !== 'subtitle') {
                                 const direction =
                                   event.key === 'ArrowUp' ? -1 : 1;
                                 for (
@@ -855,7 +981,7 @@ export function ProjectTimeline({
                             height="52"
                             overflow="hidden"
                           >
-                            {artworkVisible && !clip.text && (
+                            {project && artworkVisible && !clip.text && (
                               <ClipArtwork
                                 project={project}
                                 clip={clip}
@@ -923,10 +1049,9 @@ export function ProjectTimeline({
           })}
           {proposal &&
             (() => {
-              const row =
-                project?.tracks.findIndex(
-                  (track) => track.id === proposal.clip.trackId,
-                ) ?? -1;
+              const row = index.rows.findIndex(
+                (track) => track.id === proposal.clip.trackId,
+              );
               const x = Math.max(
                 0,
                 relativePixels(proposal.clip.timelineStart, origin, zoom),

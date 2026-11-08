@@ -19,6 +19,7 @@ export interface ExportSettings {
   frameRate: (typeof exportRates)[number];
   codec: RenderCodec;
   quality: RenderQuality;
+  burnSubtitles?: boolean;
 }
 const defaultSettings: ExportSettings = {
   resolution: 'project',

@@ -174,6 +174,97 @@ test('preserves a pending field draft across an unrelated property commit and st
   }
 });
 
+test('T34 preserves subtitle cue and style drafts when applying either form', async () => {
+  await mkdir(root, { recursive: true });
+  const directory = await mkdtemp(join(root, 't34-drafts-'));
+  const path = join(directory, 'project.json');
+  const project = createProject({ name: 'T34 subtitle drafts' });
+  project.subtitles = {
+    style: { fontSize: 32 },
+    cues: [
+      {
+        id: 'cue',
+        text: 'Saved caption',
+        start: { numerator: 0, denominator: 1 },
+        end: { numerator: 2, denominator: 1 },
+      },
+    ],
+  };
+  await writeProjectFile(project, path);
+  const { application, page } = await launchDesktop();
+  try {
+    await open(application, page, path);
+    const cue = page.getByRole('button', {
+      name: 'Inspect subtitle cue',
+      exact: true,
+    });
+    await cue.focus();
+    await cue.press('Enter');
+    const text = page.getByRole('textbox', {
+      name: 'Subtitle text',
+      exact: true,
+    });
+    const start = page.getByRole('textbox', {
+      name: 'Start seconds',
+      exact: true,
+    });
+    const duration = page.getByRole('textbox', {
+      name: 'Duration seconds',
+      exact: true,
+    });
+    const size = page.getByRole('spinbutton', {
+      name: 'Subtitle size',
+      exact: true,
+    });
+    const applyCue = page.getByRole('button', {
+      name: 'Apply subtitle',
+      exact: true,
+    });
+    const applyStyle = page.getByRole('button', {
+      name: 'Apply subtitle style',
+      exact: true,
+    });
+
+    await text.fill('Draft caption\n字幕');
+    await start.fill('0.25');
+    await duration.fill('1.5');
+    await size.fill('40');
+    await applyStyle.click();
+    await expect
+      .poll(async () => (await current(page)).subtitles?.style.fontSize)
+      .toBe(40);
+    await expect(applyCue).toBeEnabled();
+    expect((await current(page)).subtitles?.cues).toEqual(
+      project.subtitles.cues,
+    );
+    await expect(text).toHaveValue('Draft caption\n字幕');
+    await expect(start).toHaveValue('0.25');
+    await expect(duration).toHaveValue('1.5');
+
+    await size.fill('48');
+    await applyCue.click();
+    await expect
+      .poll(async () => (await current(page)).subtitles?.cues[0])
+      .toMatchObject({
+        text: 'Draft caption\n字幕',
+        start: { numerator: 1, denominator: 4 },
+        end: { numerator: 7, denominator: 4 },
+      });
+    expect((await current(page)).subtitles?.style.fontSize).toBe(40);
+    await expect(size).toHaveValue('48');
+    await applyStyle.click();
+    await expect
+      .poll(async () => (await current(page)).subtitles?.style.fontSize)
+      .toBe(48);
+    expect(deserializeProject(await readFile(path, 'utf8')).subtitles).toEqual(
+      (await current(page)).subtitles,
+    );
+  } finally {
+    await application.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 for (const method of ['picker', 'drop'] as const) {
   test(`imports from ${method} queued behind a property commit using the accepted revision`, async () => {
     const video = join(root, 'video-short.mp4');

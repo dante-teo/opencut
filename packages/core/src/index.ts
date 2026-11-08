@@ -111,3 +111,24 @@ export {
   previewClipSchema,
   previewSheetSchema,
 } from './inspection.js';
+
+export {
+  SubtitleError,
+  parseSubtitles,
+  serializeSubtitles,
+  subtitleFormat,
+  parseSubtitleTime,
+} from './subtitle-formats.js';
+export type { SubtitleFormat } from './subtitle-formats.js';
+export {
+  effectiveSubtitleStyle,
+  sortSubtitleCues,
+  subtitleLanes,
+  subtitleTextLayers,
+} from './subtitles.js';
+export type {
+  SubtitleCue,
+  SubtitleCueInput,
+  SubtitleStyle,
+  SubtitleTrack,
+} from './subtitles.js';

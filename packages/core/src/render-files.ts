@@ -15,7 +15,7 @@ import { planProjectRender, RenderError } from './render-plan.js';
 export async function renderProjectFile(
   projectFilePath: string,
   output: string,
-  controls: RenderControls = {},
+  controls: RenderControls & { burnSubtitles?: boolean | undefined } = {},
 ) {
   if (controls.signal?.aborted) throw new RenderCancelledError();
   const path = await canonicalProjectFilePath(projectFilePath);
@@ -34,7 +34,7 @@ export async function renderProjectFile(
       throw new RenderError('Render output must not replace the project file.');
   }
   const project = await readProjectFile(path);
-  const plan = await resolveProjectRender(project, path);
+  const plan = await resolveProjectRender(project, path, controls);
   return {
     projectPath: path,
     ...(await renderVideoTimeline({
@@ -49,8 +49,9 @@ export async function renderProjectFile(
 export async function resolveProjectRender(
   project: Project,
   projectFilePath: string,
+  options?: { burnSubtitles?: boolean | undefined },
 ) {
-  const plan = planProjectRender(project);
+  const plan = planProjectRender(project, options);
   const assets = new Map(project.assets.map((asset) => [asset.id, asset]));
   const visualClips: VisualTimelineClip[] = [];
   const checked = new Set<string>();

@@ -27,6 +27,8 @@ test('built desktop displays React through the sandboxed bridge', async () => {
       'removeAsset',
       'addAssetClip',
       'assetThumbnail',
+      'importSubtitles',
+      'exportSubtitles',
       'editTimeline',
       'undoProject',
       'redoProject',

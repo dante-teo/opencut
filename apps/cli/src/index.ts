@@ -8,6 +8,7 @@ import {
 } from './inspection.js';
 import { cacheHelp, runCacheCommand } from './cache.js';
 import { editHelp, runEditCommand } from './edit.js';
+import { subtitleHelp, runSubtitleCommand } from './subtitle.js';
 import { runScriptCommand, scriptHelp } from './script.js';
 import {
   editOptions,
@@ -63,11 +64,12 @@ Commands:
   project info <project-file>           Show metadata, settings and statistics
   project validate <project-file>       Check project data and media references
   project render <project-file> --output <new.mp4>
-                                       Composite video, image and text layers and mix audio
+                                       Composite video, images, text and subtitles and mix audio
   media import <project-file> <file>    Import a source reference and probe metadata
   media list <project-file>             List assets, metadata and source availability
   media info <project-file> <asset-id>   Inspect an asset by stable ID
   media remove <project-file> <asset-id> Remove an unreferenced asset, keeping its file
+  subtitle <import|list|export>         Work with timed subtitle cues and sidecar files
   timeline list <project-file>          Inspect tracks, clips and exact timing
   track add|remove <project-file>       Manage video/audio tracks (track --help)
   clip add|move|trim|split|remove|audio|visual <project-file>
@@ -93,6 +95,7 @@ Options:
   --output      PNG/MP4 output path (parent directory must exist)
   --quality     draft|balanced|high (project render; default balanced)
   --resolution  project|720p|1080p (project render; default project)
+  --no-subtitles  Leave subtitles out of the video (project render only)
   --overwrite   Atomically replace a regular output file (project render only)
   --music       Background audio path (compose only; looped to fit)
   --width       Even output width, 2–3840 (compose default: 1280)
@@ -110,15 +113,15 @@ Exit codes: 0 success, 1 validation/runtime/file/media failure, 2 invalid argume
 `;
 
 const projectHelp = {
-  render: `Usage: opencut project render <project-file> --output <file.mp4> [--quality <draft|balanced|high>] [--resolution <project|720p|1080p>] [--overwrite] [--json] [--help]
+  render: `Usage: opencut project render <project-file> --output <file.mp4> [--quality <draft|balanced|high>] [--resolution <project|720p|1080p>] [--overwrite] [--no-subtitles] [--json] [--help]
 
-Composite ordered video, image and text layers and mix audio to H.264/AAC MP4 at project settings.
+Composite ordered video, image, text and subtitle layers and mix audio to H.264/AAC MP4 at project settings.
 Visual gaps use the canvas background; audio gaps are silent. Original audio is preserved by default.
 Use clip audio --volume <0..1> --muted <true|false> to configure gains and muting.
 Use clip visual for position/scale/opacity/contain/cover/stretch and canvas set for dimensions/background.
 Later video tracks draw above earlier tracks. Images and text use their explicit clip duration.
-Times must align to project frames; source points use the first video frame as zero.
-Supports even sides up to 3840 (at most 3840x2160 pixels), 1–120 fps, 64 clips across all tracks and 600 seconds.
+Regular clip times must align to project frames. Subtitles use exact seconds and burn in by default.
+Supports even sides up to 3840 (at most 3840x2160 pixels), 1–120 fps, 64 non-subtitle clips, up to 256 burned-in cues and 600 seconds.
 Requires FFmpeg 8+ and ffprobe. Output must be in an existing directory; replacement requires --overwrite.
 Balanced quality and project resolution are defaults; resolution presets fit the finished canvas, preserving orientation/aspect.
 Progress goes to stderr, or JSONL progress and completed/failed/cancelled events on stdout with --json.
@@ -281,6 +284,7 @@ async function runCli(args: string[]): Promise<void> {
       quality: { type: 'string' },
       resolution: { type: 'string' },
       overwrite: { type: 'boolean' },
+      'no-subtitles': { type: 'boolean' },
       music: { type: 'string' },
       width: { type: 'string' },
       height: { type: 'string' },
@@ -343,6 +347,7 @@ async function runCli(args: string[]): Promise<void> {
     )
       usage = inspectionHelp;
     else if (group === 'edit') usage = editHelp;
+    else if (group === 'subtitle') usage = subtitleHelp;
     else if (timelineCommand) usage = timelineHelp;
     else if (group === 'project')
       usage = projectCommand
@@ -364,11 +369,17 @@ async function runCli(args: string[]): Promise<void> {
     return;
   }
   if (command !== 'project' || file !== 'render') {
-    for (const option of ['quality', 'resolution', 'overwrite'] as const) {
+    for (const option of [
+      'quality',
+      'resolution',
+      'overwrite',
+      'no-subtitles',
+    ] as const) {
       if (values[option] !== undefined)
         throw new UsageError(`--${option} applies only to project render.`);
     }
   }
+  if (command === 'subtitle') return runSubtitleCommand(positionals, values);
   if (command === 'edit') {
     await runEditCommand(positionals, values);
     return;
@@ -483,7 +494,7 @@ async function runCli(args: string[]): Promise<void> {
       ...(projectCommand === 'create'
         ? ['name', 'width', 'height', 'fps']
         : projectCommand === 'render'
-          ? ['output', 'quality', 'resolution', 'overwrite']
+          ? ['output', 'quality', 'resolution', 'overwrite', 'no-subtitles']
           : []),
     ];
     for (const option of Object.keys(values)) {
@@ -530,6 +541,7 @@ async function runCli(args: string[]): Promise<void> {
           quality: values.quality as RenderQuality | undefined,
           resolution: values.resolution as RenderResolution | undefined,
           overwrite: values.overwrite,
+          burnSubtitles: !values['no-subtitles'],
           signal: controller.signal,
           onProgress: (event) => {
             if (values.json) jsonLine(event);

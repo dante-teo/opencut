@@ -84,7 +84,7 @@ describe('agent CLI discovery and offline inspection', () => {
     expect(result.stderr).toBe('');
     const catalog = JSON.parse(result.stdout);
     expect(catalog.discoveryVersion).toBe(1);
-    expect(catalog.commands).toHaveLength(39);
+    expect(catalog.commands).toHaveLength(42);
     expect(
       new Set(catalog.commands.map((command: { name: string }) => command.name))
         .size,
@@ -143,6 +143,11 @@ describe('agent CLI discovery and offline inspection', () => {
         }),
       ]),
     );
+    expect(catalog.capabilities.subtitles).toMatchObject({
+      formats: ['srt', 'vtt'],
+      transactionSchema: 'edit apply input',
+      burnIn: true,
+    });
     expect(catalog.capabilities.scriptingRuntime.status).toBe('supported');
     expect(catalog.schemas.run.required).toContain('result');
     expect(catalog.capabilities.visualInspection.headless).toBe(true);

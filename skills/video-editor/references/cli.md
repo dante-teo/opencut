@@ -92,6 +92,25 @@ Noto Sans SC for portable English and Chinese layout. Missing font families
 use this fallback. Check the final `completed` event's optional `warnings`
 array for substitutions and report any that affect the requested typography.
 
+## Editable subtitles
+
+Use `subtitle import PROJECT FILE.srt --expected-revision N --json` or
+pass a WebVTT file. Import appends cues in one undo step. List IDs, timings
+and shared style with `subtitle list PROJECT --json`. Use `edit apply` with
+`subtitle.add`, `subtitle.set`, `subtitle.move`, `subtitle.split`,
+`subtitle.merge`, `subtitle.remove` or `subtitle.style`. Discover their
+fields in the `edit apply input` schema. Times are rational seconds with
+exclusive ends. The shared style includes font, size, color, outline,
+position and background. Check active cues using `timeline inspect` at
+frames before, inside and after each interval, including overlaps. Subtitle
+layers report a static source time of zero.
+
+`subtitle export PROJECT --output NEW.vtt --json` writes a UTF-8 sidecar
+with text and millisecond timing. A `.srt` destination selects SubRip.
+`project render` burns subtitles in by default. Use `--no-subtitles` for
+clean video. Check the resulting sidecar by reading it back and verify
+burn-in by decoding frames. Burn-in supports 256 sampled cues per range.
+
 ## Visual review and export
 
 ```sh

@@ -37,7 +37,10 @@ interface VisualTimelineProperties {
   fit?: 'contain' | 'cover' | 'stretch';
 }
 export type VisualTimelineClip = VisualTimelineProperties &
-  ({ path: string; text?: never } | { text: TextLayer; path?: never });
+  (
+    | { path: string; text?: never; subtitle?: never }
+    | { text: TextLayer; path?: never; subtitle?: true }
+  );
 
 export const renderQualities = ['draft', 'balanced', 'high'] as const;
 export const renderResolutions = ['project', '720p', '1080p'] as const;
@@ -149,8 +152,7 @@ function validateOptions(options: VideoTimelineOptions): void {
         ) ||
         segments.reduce((sum, s) => sum + s.frameCount, 0) !== frameCount)) ||
     (options.visualClips !== undefined &&
-      (options.visualClips.length === 0 ||
-        options.visualClips.length > 64 ||
+      (options.visualClips.filter((clip) => !clip.subtitle).length > 64 ||
         options.visualClips.some(
           (clip) =>
             !Number.isSafeInteger(clip.timelineStartFrame) ||
@@ -196,7 +198,7 @@ function validateOptions(options: VideoTimelineOptions): void {
     )
   )
     throw new MediaError(
-      'Invalid video render plan: use positive integer frame counts, even sides up to 3840 (at most 3840x2160 pixels), 1–120 fps, at most 64 visual/audio clips (or 128 legacy segments), valid transforms and #RRGGBB[AA]/transparent background, and 600 seconds.',
+      'Invalid video render plan: use positive integer frame counts, even sides up to 3840 (at most 3840x2160 pixels), 1–120 fps, at most 64 non-subtitle visual/audio clips (or 128 legacy segments), valid transforms and #RRGGBB[AA]/transparent background, and 600 seconds.',
     );
 }
 
@@ -415,7 +417,17 @@ async function prepareTimeline(
     `color=c=${opaqueCanvasColor(options.backgroundColor ?? '#000000')}:s=${width}x${height}:r=${rate},` +
       `format=rgba,trim=end_frame=${frameCount},settb=1/${numerator},setpts=N*${denominator}[canvas0]`,
   );
-  for (const [index, clip] of visualClips.entries()) {
+  const visibleClips = visualClips.filter(
+    (clip) =>
+      !clip.subtitle ||
+      (clip.timelineStartFrame < endFrame &&
+        clip.timelineStartFrame + clip.frameCount > startFrame),
+  );
+  if (visibleClips.filter((clip) => clip.subtitle).length > 256)
+    throw new MediaError(
+      'Burn-in supports up to 256 visible subtitle cues per render. Shorten the render range or export a sidecar.',
+    );
+  for (const [index, clip] of visibleClips.entries()) {
     const overlay = ({ x, y }: { x: number; y: number }, framesync: string) =>
       `[canvas${index}][layer${index}]overlay=x=${x}:y=${y}:${framesync}:` +
       `format=rgb:alpha=straight:enable='gte(n,${clip.timelineStartFrame})*lt(n,${clip.timelineStartFrame + clip.frameCount})'[canvas${index + 1}]`;
@@ -513,7 +525,7 @@ async function prepareTimeline(
     );
   }
   filters.push(
-    `[canvas${visualClips.length}]trim=start_frame=${startFrame}:end_frame=${endFrame},settb=1/${numerator},setpts=N*${denominator},scale=${outputWidth}:${outputHeight}:out_color_matrix=bt709,setsar=1,` +
+    `[canvas${visibleClips.length}]trim=start_frame=${startFrame}:end_frame=${endFrame},settb=1/${numerator},setpts=N*${denominator},scale=${outputWidth}:${outputHeight}:out_color_matrix=bt709,setsar=1,` +
       (options.outputFrameRate
         ? `fps=${outputRate.numerator}/${outputRate.denominator}:round=up:eof_action=pass,tpad=stop_mode=clone:stop=1,trim=end_frame=${outputFrameCount},settb=1/${outputRate.numerator},setpts=N*${outputRate.denominator},`
         : '') +

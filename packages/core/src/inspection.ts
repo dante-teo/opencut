@@ -9,6 +9,8 @@ import { frameRateSchema, timeSchema } from './time.js';
 const natural = z.int().nonnegative();
 const version = z.literal(1);
 const resolvedClip = clipSchema.extend({
+  trackId: z.string(),
+  subtitle: z.literal(true).optional(),
   duration: timeSchema,
   timelineEnd: timeSchema,
   trackIndex: natural,

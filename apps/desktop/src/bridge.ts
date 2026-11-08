@@ -5,6 +5,7 @@ import type {
   Project,
   ProjectSettings,
   EditOperation,
+  SubtitleFormat,
 } from '@opencut/core';
 
 export const APP_INFO_CHANNEL = 'app:get-info';
@@ -81,6 +82,8 @@ export const PROJECT_CHANNELS = {
   undo: 'project:undo',
   redo: 'project:redo',
   import: 'project:import',
+  importSubtitles: 'project:import-subtitles',
+  exportSubtitles: 'project:export-subtitles',
   removeAsset: 'project:remove-asset',
   addAssetClip: 'project:add-asset-clip',
 } as const;
@@ -121,7 +124,11 @@ export type TimelineOperation = Extract<
       | 'clip.audio'
       | 'clip.visual'
       | 'text.add'
-      | 'text.set';
+      | 'text.set'
+      | Exclude<
+          Extract<EditOperation['type'], `subtitle.${string}`>,
+          'subtitle.import'
+        >;
   }
 >;
 export interface TimelineEditInput extends HistoryInput {
@@ -194,6 +201,10 @@ export interface DesktopAPI {
     callback: (state: DesktopProject | null) => void,
   ): () => void;
   importMedia(input: HistoryInput): Promise<ProjectReply>;
+  importSubtitles(input: HistoryInput): Promise<ProjectReply>;
+  exportSubtitles(
+    input: HistoryInput & { format: SubtitleFormat },
+  ): Promise<ProjectReply>;
   importDroppedMedia(input: HistoryInput, files: File[]): Promise<ProjectReply>;
   onImportProgress(callback: (progress: ImportProgress) => void): () => void;
   removeAsset(input: AssetRemoveInput): Promise<ProjectReply>;

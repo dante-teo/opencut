@@ -1,6 +1,7 @@
 import { SlidersHorizontal } from 'lucide-react';
 import { ClipProperties } from './clip-properties.js';
 import { TextProperties } from './text-properties.js';
+import { SubtitleProperties } from './subtitle-properties.js';
 import { CanvasArtwork } from './studio-graphics.js';
 import type { DesktopProject, TimelineOperation } from '../bridge.js';
 import { compareTimes, type RationalTime, type Project } from '@opencut/core';
@@ -55,6 +56,10 @@ export function ProjectInspector({
     selection?.kind === 'clip'
       ? project?.clips.find((clip) => clip.id === selection.id)
       : undefined;
+  const cue =
+    selection?.kind === 'clip'
+      ? project?.subtitles?.cues.find((cue) => cue.id === selection.id)
+      : undefined;
   const asset = project?.assets.find(
     (asset) =>
       asset.id === (selection?.kind === 'asset' ? selection.id : clip?.assetId),
@@ -69,7 +74,9 @@ export function ProjectInspector({
       </div>
       <div
         className={
-          clip?.text ? 'inspector-content text-inspector' : 'inspector-content'
+          clip?.text || cue
+            ? 'inspector-content text-inspector'
+            : 'inspector-content'
         }
       >
         {selection && (
@@ -77,6 +84,15 @@ export function ProjectInspector({
             <button className="text-button" onClick={onClear}>
               ← Project settings
             </button>
+            {cue && (
+              <SubtitleProperties
+                key={JSON.stringify([project!.metadata.id, cue.id])}
+                project={project!}
+                cue={cue}
+                disabled={disabled}
+                onEdit={onEdit}
+              />
+            )}
             {clip?.text && (
               <TextProperties
                 key={JSON.stringify([

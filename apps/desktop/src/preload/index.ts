@@ -71,6 +71,10 @@ const api: DesktopAPI = {
   addAssetClip: (input) =>
     ipcRenderer.invoke(PROJECT_CHANNELS.addAssetClip, input),
   assetThumbnail: (id) => ipcRenderer.invoke(THUMBNAIL_CHANNEL, id),
+  importSubtitles: (input) =>
+    ipcRenderer.invoke(PROJECT_CHANNELS.importSubtitles, input),
+  exportSubtitles: (input) =>
+    ipcRenderer.invoke(PROJECT_CHANNELS.exportSubtitles, input),
   editTimeline: (input) => ipcRenderer.invoke(PROJECT_CHANNELS.edit, input),
   undoProject: (input) => ipcRenderer.invoke(PROJECT_CHANNELS.undo, input),
   redoProject: (input) => ipcRenderer.invoke(PROJECT_CHANNELS.redo, input),

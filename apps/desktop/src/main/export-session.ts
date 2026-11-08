@@ -27,8 +27,18 @@ function parseInput(input: unknown): ExportInput {
     !settings ||
     typeof settings !== 'object' ||
     Array.isArray(settings) ||
-    Object.keys(settings).sort().join(',') !==
-      'codec,frameRate,quality,resolution' ||
+    Object.keys(settings).some(
+      (key) =>
+        ![
+          'codec',
+          'frameRate',
+          'quality',
+          'resolution',
+          'burnSubtitles',
+        ].includes(key),
+    ) ||
+    (settings.burnSubtitles !== undefined &&
+      typeof settings.burnSubtitles !== 'boolean') ||
     !renderCodecs.includes(settings.codec) ||
     !renderQualities.includes(settings.quality) ||
     !renderResolutions.includes(settings.resolution) ||
@@ -126,6 +136,7 @@ export class ExportSession {
       const plan = await resolveProjectRender(
         snapshot.project,
         snapshot.path ?? resolve('Untitled.opencut.json'),
+        job.settings,
       );
       const [numerator, denominator = 1] = job.settings.frameRate
         .split('/')

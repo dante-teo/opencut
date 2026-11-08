@@ -26,6 +26,8 @@ import {
   prepareMediaAsset,
   ProjectFileError,
   readProjectFile,
+  readSubtitleFile,
+  writeSubtitleFile,
   removeAssetFromProject,
   resolveProjectRender,
   updateProjectFile,
@@ -43,7 +45,15 @@ import type {
   VideoTimelineResult,
 } from '@opencut/media';
 
-export { EditError, ProjectFormatError, RenderError } from '@opencut/core';
+export {
+  EditError,
+  ProjectFormatError,
+  RenderError,
+  SubtitleError,
+  parseSubtitles,
+  serializeSubtitles,
+  parseSubtitleTime,
+} from '@opencut/core';
 export { AssetError, ProjectFileError, SessionError } from '@opencut/core/node';
 export { MediaError, RenderCancelledError } from '@opencut/media';
 export type {
@@ -54,6 +64,11 @@ export type {
   MediaReference,
   ProjectSettings,
   RationalTime,
+  SubtitleCue,
+  SubtitleCueInput,
+  SubtitleFormat,
+  SubtitleStyle,
+  SubtitleTrack,
   TextLayer,
   TimelineClip,
   Track,
@@ -93,7 +108,7 @@ export type RenderOptions = Pick<
   | 'resolution'
   | 'signal'
   | 'onProgress'
->;
+> & { burnSubtitles?: boolean | undefined };
 
 /** An in-memory view of one project. Only its owning editor can publish edits. */
 export interface ProjectDraft {
@@ -105,6 +120,10 @@ export interface ProjectDraft {
   checkMedia(): Promise<MediaAvailability[]>;
   importMedia(file: string): Promise<AssetImportResult>;
   removeMedia(assetId: string): void;
+  importSubtitles(
+    file: string,
+  ): Promise<{ format: 'srt' | 'vtt'; cueCount: number }>;
+  exportSubtitles(output: string): ReturnType<typeof writeSubtitleFile>;
   /** Apply one or more existing edit commands as an atomic group in the draft. */
   apply(...operations: EditOperation[]): void;
   /** Stage one history step. Save it separately from other edits. */
@@ -249,10 +268,25 @@ function editProject(
     draft = direction(base);
     historyPending = true;
   };
+  async function outputPath(file: string) {
+    const destination = await canonicalProjectFilePath(resolve(file));
+    // A new project's filename must remain available for the final save.
+    if (
+      destination === path ||
+      ((process.platform === 'darwin' || process.platform === 'win32') &&
+        destination.toLowerCase() === path.toLowerCase())
+    )
+      throw new SdkError(
+        'PROJECT_OUTPUT',
+        'Choose an output path different from the project file.',
+      );
+    return destination;
+  }
   async function output<T>(
     file: string,
     jobSignal: AbortSignal | undefined,
     run: (options: VideoTimelineOptions) => Promise<T>,
+    burnSubtitles = true,
   ): Promise<T> {
     return exclusive(async () => {
       if (dryRun)
@@ -260,24 +294,14 @@ function editProject(
           'DRY_RUN_OUTPUT',
           'Preview and render outputs are disabled in a dry run.',
         );
-      const destination = await canonicalProjectFilePath(resolve(file));
-      // A new project's filename must remain available for the final save.
-      if (
-        destination === path ||
-        ((process.platform === 'darwin' || process.platform === 'win32') &&
-          destination.toLowerCase() === path.toLowerCase())
-      )
-        throw new SdkError(
-          'PROJECT_OUTPUT',
-          'Choose an output path different from the project file.',
-        );
+      const destination = await outputPath(file);
       const combined =
         signal && jobSignal
           ? AbortSignal.any([signal, jobSignal])
           : (signal ?? jobSignal);
       combined?.throwIfAborted();
       return run({
-        ...(await resolveProjectRender(draft, path)),
+        ...(await resolveProjectRender(draft, path, { burnSubtitles })),
         output: destination,
         signal: combined,
       });
@@ -302,6 +326,31 @@ function editProject(
       ensureEditable();
       draft = removeAssetFromProject(draft, id);
     },
+    importSubtitles: async (file) => {
+      ensureEditable();
+      return exclusive(async () => {
+        const { format, cues } = await readSubtitleFile(file, signal);
+        signal?.throwIfAborted();
+        draft = previewTransaction(draft, {
+          expectedRevision: projectRevision(base),
+          operations: [{ type: 'subtitle.import', cues }],
+        }).project;
+        return { format, cueCount: cues.length };
+      });
+    },
+    exportSubtitles: (file) =>
+      exclusive(async () => {
+        if (dryRun)
+          throw new SdkError(
+            'DRY_RUN_OUTPUT',
+            'Sidecar export is disabled in a dry run.',
+          );
+        return writeSubtitleFile(
+          await outputPath(file),
+          draft.subtitles?.cues ?? [],
+          signal,
+        );
+      }),
     apply: (...operations) => {
       ensureEditable();
       draft = previewTransaction(draft, {
@@ -330,15 +379,19 @@ function editProject(
       );
     },
     render: (file, options = {}) =>
-      output(file, options.signal, (plan) =>
-        renderVideoTimeline({
-          ...plan,
-          codec: options.codec,
-          outputFrameRate: options.outputFrameRate,
-          quality: options.quality,
-          resolution: options.resolution,
-          ...(options.onProgress ? { onProgress: options.onProgress } : {}),
-        }),
+      output(
+        file,
+        options.signal,
+        (plan) =>
+          renderVideoTimeline({
+            ...plan,
+            codec: options.codec,
+            outputFrameRate: options.outputFrameRate,
+            quality: options.quality,
+            resolution: options.resolution,
+            ...(options.onProgress ? { onProgress: options.onProgress } : {}),
+          }),
+        options.burnSubtitles,
       ),
   };
   return {

@@ -10,6 +10,10 @@ import {
   executeTransaction,
   undoEdit,
   redoEdit,
+  subtitleTextLayers,
+  subtitleFormat,
+  type Project,
+  type SubtitleFormat,
 } from '@opencut/core';
 import {
   canonicalProjectFilePath,
@@ -17,6 +21,8 @@ import {
   removeAssetFromProject,
   checkProjectMedia,
   readProjectFile,
+  readSubtitleFile,
+  writeSubtitleFile,
   writeProjectFile,
   inspectMediaFile,
   resolveMediaReference,
@@ -36,6 +42,8 @@ import type {
 export interface ProjectDialogs {
   open(): Promise<string | null>;
   importMedia?(): Promise<string[] | null>;
+  importSubtitles?(): Promise<string | null>;
+  exportSubtitles?(format: SubtitleFormat): Promise<string | null>;
   save(): Promise<string | null>;
   unsaved(): Promise<'save' | 'discard' | 'cancel'>;
 }
@@ -49,6 +57,8 @@ export type ProjectAction =
   | 'undo'
   | 'redo'
   | 'import'
+  | 'importSubtitles'
+  | 'exportSubtitles'
   | 'removeAsset'
   | 'addAssetClip';
 
@@ -61,6 +71,10 @@ export class ProjectSession {
   private busy = false;
   private savedRevision = 0;
   private writer: ProjectWriter | null = null;
+  private subtitleText = new WeakMap<
+    Project,
+    Map<string, ReturnType<typeof subtitleTextLayers>[number][number]>
+  >();
 
   constructor(
     private readonly dialogs: ProjectDialogs,
@@ -147,9 +161,22 @@ export class ProjectSession {
     )
       return null;
     const clip = project.clips.find((entry) => entry.id === input.clipId);
-    if (!clip?.text) return null;
     const { width, height } = project.settings;
-    return { width, height, text: clip.text, visual: clip.visual ?? {} };
+    if (clip?.text)
+      return { width, height, text: clip.text, visual: clip.visual ?? {} };
+    let layers = this.subtitleText.get(project);
+    if (!layers) {
+      layers = new Map(
+        subtitleTextLayers(project)
+          .flat()
+          .map((layer) => [layer.cue.id, layer]),
+      );
+      this.subtitleText.set(project, layers);
+    }
+    const layer = layers.get(input.clipId);
+    return layer
+      ? { width, height, text: layer.text, visual: layer.visual }
+      : null;
   }
 
   async libraryAsset(id: unknown, scope?: HistoryInput) {
@@ -393,13 +420,17 @@ export class ProjectSession {
           break;
         }
         case 'edit':
+        case 'importSubtitles':
+        case 'exportSubtitles':
         case 'undo':
         case 'redo': {
           if (!this.state) throw new Error('Open a project before editing.');
           const allowed =
             action === 'edit'
               ? ['projectId', 'expectedRevision', 'label', 'operations']
-              : ['projectId', 'expectedRevision'];
+              : action === 'exportSubtitles'
+                ? ['projectId', 'expectedRevision', 'format']
+                : ['projectId', 'expectedRevision'];
           if (
             !input ||
             typeof input !== 'object' ||
@@ -415,7 +446,37 @@ export class ProjectSession {
             throw new Error('Expected a project revision.');
           checkProjectRevision(before, command.expectedRevision);
           let project;
-          if (action === 'edit') {
+          if (action === 'exportSubtitles') {
+            const { format } = command;
+            if (format !== 'srt' && format !== 'vtt')
+              throw new Error('Choose SRT or WebVTT.');
+            const file = await this.dialogs.exportSubtitles?.(format);
+            if (!file) {
+              canceled = true;
+              break;
+            }
+            if (subtitleFormat(file) !== format)
+              throw new Error(`Use the .${format} extension for this sidecar.`);
+            const output = await writeSubtitleFile(
+              file,
+              before.subtitles?.cues ?? [],
+            );
+            notice = `Exported ${output.cueCount} subtitle cues to ${output.path}.`;
+            break;
+          } else if (action === 'importSubtitles') {
+            const file = await this.dialogs.importSubtitles?.();
+            if (!file) {
+              canceled = true;
+              break;
+            }
+            const { cues } = await readSubtitleFile(file);
+            project = executeTransaction(before, {
+              expectedRevision: command.expectedRevision,
+              label: 'Import subtitles',
+              operations: [{ type: 'subtitle.import', cues }],
+            }).project;
+            notice = `Imported ${cues.length} subtitle cues.`;
+          } else if (action === 'edit') {
             const transaction = parseEditTransaction(command);
             if (
               transaction.operations.some(
@@ -429,6 +490,13 @@ export class ProjectSession {
                     'clip.visual',
                     'text.add',
                     'text.set',
+                    'subtitle.add',
+                    'subtitle.set',
+                    'subtitle.move',
+                    'subtitle.split',
+                    'subtitle.merge',
+                    'subtitle.remove',
+                    'subtitle.style',
                   ].includes(operation.type),
               )
             )
@@ -482,6 +550,7 @@ export class ProjectSession {
           'undo',
           'redo',
           'import',
+          'importSubtitles',
           'removeAsset',
           'addAssetClip',
         ].includes(action)

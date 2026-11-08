@@ -21,6 +21,7 @@ Batch JSON: { "expectedRevision": 0, "label": "Optional description", "operation
   { "type": "track.add", "id": "v1", "name": "Video", "mediaType": "video" }
 ] }
 Operations: track.add/remove, clip.add/move/trim/split/remove/audio/visual, text.add/set, canvas.set.
+Subtitle operations: subtitle.import/add/set/move/split/merge/remove/style. Subtitle times are exact { numerator, denominator } seconds.
 text.add takes at, duration, text { content, ...style }, optional id/trackId/visual.
 text.set takes id and optional text patch, at and duration. Use clip.visual for position/scale/opacity.
 clip.add and clip.audio accept volume (linear 0–1, default 1) and muted (boolean, default false).

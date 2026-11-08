@@ -1,5 +1,6 @@
 import type { Project, TimelineClip } from './project.js';
 import { listTimeline } from './timeline.js';
+import { subtitleTextLayers } from './subtitles.js';
 import {
   addTimes,
   compareTimes,
@@ -34,6 +35,7 @@ export type ResolvedMediaClip = ResolvedClipProperties & {
 export type ResolvedTextClip = ResolvedClipProperties & {
   text: NonNullable<TimelineClip['text']>;
   kind: 'text';
+  subtitle?: true;
 };
 export type ResolvedTimelineClip = ResolvedMediaClip | ResolvedTextClip;
 
@@ -77,6 +79,32 @@ export function resolveTimeline(project: Project) {
         };
       }),
   );
+  for (const [lane, layers] of subtitleTextLayers({
+    settings: project.settings,
+    subtitles: timeline.subtitles,
+  }).entries()) {
+    for (const { cue, text, visual } of layers) {
+      const duration = subtractTimes(cue.end, cue.start);
+      clips.push({
+        id: cue.id,
+        trackId: `subtitle:${lane}`,
+        trackIndex: project.tracks.length + lane,
+        trackType: 'video',
+        kind: 'text',
+        subtitle: true,
+        timelineStart: cue.start,
+        timelineEnd: cue.end,
+        sourceIn: { numerator: 0, denominator: 1 },
+        sourceOut: duration,
+        duration,
+        text,
+        visual,
+        volume: 1,
+        muted: false,
+        audioPresence: 'absent',
+      });
+    }
+  }
   return { duration: timeline.duration, clips };
 }
 
@@ -111,9 +139,15 @@ export function evaluateTimeline(
 }
 
 /** Validate and resolve one snapshot once; recreate after edits. Results stay detached. */
-export function createTimelineEvaluator(project: Project) {
+export function createTimelineEvaluator(
+  project: Project,
+  sampleSubtitles = false,
+) {
   const timeline = resolveTimeline(project);
   const backgroundColor = project.settings.backgroundColor ?? '#000000';
+  const rate = { ...project.settings.frameRate };
+  const needsSubtitleSampling =
+    sampleSubtitles && !!project.subtitles?.cues.length;
   const tracks = new Map<string, ResolvedTimelineClip[]>();
   for (const clip of timeline.clips) {
     const entries = tracks.get(clip.trackId) ?? [];
@@ -122,30 +156,38 @@ export function createTimelineEvaluator(project: Project) {
   }
   return (time: RationalTime): TimelineEvaluation => {
     timeSchema.parse(time);
-    const candidates: ResolvedTimelineClip[] = [];
-    for (const entries of tracks.values()) {
+    const activeClips: EvaluatedTimelineClip[] = [];
+    const frame = needsSubtitleSampling
+      ? (BigInt(time.numerator) * BigInt(rate.numerator)) /
+        (BigInt(time.denominator) * BigInt(rate.denominator))
+      : null;
+    const sampled =
+      frame !== null && frame <= BigInt(Number.MAX_SAFE_INTEGER)
+        ? frameTime(Number(frame), rate)
+        : time;
+    for (const [id, entries] of tracks) {
+      const at = id.startsWith('subtitle:') ? sampled : time;
       let low = 0,
         high = entries.length;
       while (low < high) {
         const middle = (low + high) >>> 1;
-        if (compareTimes(entries[middle]!.timelineEnd, time) <= 0)
+        if (compareTimes(entries[middle]!.timelineEnd, at) <= 0)
           low = middle + 1;
         else high = middle;
       }
       const clip = entries[low];
-      if (clip && compareTimes(clip.timelineStart, time) <= 0)
-        candidates.push(clip);
+      if (clip && compareTimes(clip.timelineStart, at) <= 0)
+        activeClips.push({
+          ...structuredClone(clip),
+          sourceTime:
+            clip.kind === 'text' && clip.subtitle
+              ? { ...clip.sourceIn }
+              : addTimes(clip.sourceIn, subtractTimes(at, clip.timelineStart)),
+          visible: clip.trackType === 'video' && clip.visual.opacity > 0,
+          effectiveVolume:
+            clip.muted || clip.audioPresence === 'absent' ? 0 : clip.volume,
+        });
     }
-    const activeClips = candidates.map((clip): EvaluatedTimelineClip => ({
-      ...structuredClone(clip),
-      sourceTime: addTimes(
-        clip.sourceIn,
-        subtractTimes(time, clip.timelineStart),
-      ),
-      visible: clip.trackType === 'video' && clip.visual.opacity > 0,
-      effectiveVolume:
-        clip.muted || clip.audioPresence === 'absent' ? 0 : clip.volume,
-    }));
     const visualClips = activeClips.filter(
       (clip) => clip.trackType === 'video',
     );

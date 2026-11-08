@@ -12,6 +12,8 @@ import { TimelinePreview, type TimelineTransport } from './timeline-preview.js';
 import {
   clipTimelineEnd,
   compareTimes,
+  addTimes,
+  type SubtitleFormat,
   projectRevision,
   type RationalTime,
 } from '@opencut/core';
@@ -118,7 +120,11 @@ export function ProjectWorkspace() {
         }
         if (!reply.canceled) {
           setCreating(false);
-          if (label !== 'Saving project…' && !editing) {
+          if (
+            label !== 'Saving project…' &&
+            label !== 'Exporting subtitles…' &&
+            !editing
+          ) {
             setSelection(null);
             setPlayhead(ZERO);
             setLinkedClipId(null);
@@ -227,6 +233,22 @@ export function ProjectWorkspace() {
       true,
     );
   }
+  function subtitleFile(format?: SubtitleFormat) {
+    if (!project) return;
+    void run(
+      format ? 'Exporting subtitles…' : 'Importing subtitles…',
+      () => {
+        const input = {
+          projectId: project.metadata.id,
+          expectedRevision: projectRevision(stateRef.current!.project),
+        };
+        return format
+          ? window.opencut.exportSubtitles({ ...input, format })
+          : window.opencut.importSubtitles(input);
+      },
+      !format,
+    );
+  }
   function edit(
     operations: TimelineOperation[],
     label: string,
@@ -292,6 +314,26 @@ export function ProjectWorkspace() {
         if (viewer === 'source') transport.current?.step(direction);
         else projectTransport.current?.step(direction);
       } else if (selection?.kind === 'clip' && project) {
+        const cue = project.subtitles?.cues.find(
+          (cue) => cue.id === selection.id,
+        );
+        if (cue) {
+          if (action === 'delete')
+            void edit(
+              [{ type: 'subtitle.remove', id: cue.id }],
+              'Delete subtitle',
+            );
+          else if (
+            action === 'split' &&
+            compareTimes(playhead, cue.start) > 0 &&
+            compareTimes(playhead, cue.end) < 0
+          )
+            void edit(
+              [{ type: 'subtitle.split', id: cue.id, at: playhead }],
+              'Split subtitle',
+            );
+          return;
+        }
         const clip = project.clips.find((clip) => clip.id === selection.id);
         if (!clip) return;
         if (action === 'delete')
@@ -530,6 +572,30 @@ export function ProjectWorkspace() {
         project={project}
         disabled={!!busy}
         onEdit={edit}
+        onImportSubtitles={subtitleFile}
+        onExportSubtitles={subtitleFile}
+        onAddSubtitle={async () => {
+          if (!project) return;
+          const id = crypto.randomUUID();
+          try {
+            await edit(
+              [
+                {
+                  type: 'subtitle.add',
+                  id,
+                  start: playhead,
+                  end: addTimes(playhead, { numerator: 3, denominator: 1 }),
+                  text: 'Subtitle',
+                },
+              ],
+              'Add subtitle',
+              true,
+            );
+            setSelection({ kind: 'clip', id });
+          } catch {
+            // The workspace displays the transaction rejection.
+          }
+        }}
         onAddText={async () => {
           if (!project) return;
           const id = crypto.randomUUID();
