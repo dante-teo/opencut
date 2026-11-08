@@ -2,10 +2,12 @@ import { parentPort } from 'node:worker_threads';
 import {
   MediaCache,
   ThumbnailCache,
+  rasterizeTextLayer,
   type CacheLimits,
   type ProxyResult,
   type RenderProgress,
 } from '@opencut/media';
+import type { TextLayer, VisualTransform } from '@opencut/shared';
 
 const cache = new MediaCache();
 const thumbnails = new ThumbnailCache();
@@ -23,7 +25,11 @@ let revision = 0;
 let shuttingDown = false;
 const requests = new Map<
   number,
-  { controller: AbortController; work: Promise<unknown> }
+  {
+    controller: AbortController;
+    work: Promise<unknown>;
+    text?: 'preview' | 'export';
+  }
 >();
 let generation = 0;
 function start(path: string, force = false) {
@@ -75,14 +81,16 @@ function start(path: string, force = false) {
   queue = work.catch(() => {});
   return true;
 }
-async function cancel(invalidate = false) {
+async function cancel(invalidate = false, includeAll = false) {
   generation++;
   for (const [path, job] of jobs) {
     job.controller.abort();
     if (invalidate && ['queued', 'generating'].includes(job.state))
       jobs.delete(path);
   }
-  const pending = [...requests.values()];
+  const pending = [...requests.values()].filter(
+    ({ text }) => includeAll || !text || (invalidate && text === 'preview'),
+  );
   for (const { controller } of pending) controller.abort();
   await Promise.allSettled([queue, ...pending.map(({ work }) => work)]);
 }
@@ -98,6 +106,10 @@ parentPort!.on(
     count?: number;
     interval?: number;
     limits?: CacheLimits;
+    width?: number;
+    height?: number;
+    text?: TextLayer;
+    visual?: VisualTransform;
   }) => {
     if (request.method === 'abort') {
       requests.get(request.id)?.controller.abort();
@@ -108,7 +120,7 @@ parentPort!.on(
       if (shuttingDown) throw new Error('Media worker is closing.');
       if (request.method === 'shutdown') {
         shuttingDown = true;
-        await cancel();
+        await cancel(false, true);
         value = null;
       } else if (request.method === 'select') {
         let result: ProxyResult;
@@ -175,6 +187,37 @@ parentPort!.on(
       } else if (request.method === 'enable') {
         enabled = request.auto!;
         value = null;
+      } else if (
+        request.method === 'text' ||
+        request.method === 'export-text'
+      ) {
+        const controller = new AbortController();
+        const forExport = request.method === 'export-text';
+        const work = rasterizeTextLayer(
+          request.width!,
+          request.height!,
+          request.text!,
+          request.visual!,
+          controller.signal,
+        );
+        requests.set(request.id, {
+          controller,
+          work,
+          text: forExport ? 'export' : 'preview',
+        });
+        try {
+          const { png, ...raster } = await work;
+          value = forExport
+            ? { ...raster, png }
+            : {
+                ...raster,
+                url: png
+                  ? 'data:image/png;base64,' + png.toString('base64')
+                  : null,
+              };
+        } finally {
+          requests.delete(request.id);
+        }
       } else if (['thumbnail', 'waveform', 'frame'].includes(request.method)) {
         const controller = new AbortController();
         const path = request.path!;

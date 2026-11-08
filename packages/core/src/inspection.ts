@@ -13,7 +13,7 @@ const resolvedClip = clipSchema.extend({
   timelineEnd: timeSchema,
   trackIndex: natural,
   trackType: z.enum(['video', 'audio']),
-  kind: z.enum(['video', 'audio', 'image']),
+  kind: z.enum(['video', 'audio', 'image', 'text']),
   volume: z.number(),
   muted: z.boolean(),
   visual: z.strictObject({

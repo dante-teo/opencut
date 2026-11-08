@@ -1,4 +1,4 @@
-import type { Project } from './project.js';
+import type { Project, TimelineClip } from './project.js';
 import { resolveTimeline } from './evaluation.js';
 import type { FrameRate, RationalTime } from './time.js';
 
@@ -6,9 +6,8 @@ export class RenderError extends Error {
   override name = 'RenderError';
 }
 
-export interface VisualRenderClip {
+interface VisualRenderProperties {
   clipId: string;
-  assetId: string;
   timelineStartFrame: number;
   sourceStartFrame: number;
   frameCount: number;
@@ -18,6 +17,12 @@ export interface VisualRenderClip {
   opacity: number;
   fit: 'contain' | 'cover' | 'stretch';
 }
+
+export type VisualRenderClip = VisualRenderProperties &
+  (
+    | { assetId: string; text?: never }
+    | { text: NonNullable<TimelineClip['text']>; assetId?: never }
+  );
 
 export interface ProjectRenderPlan {
   width: number;
@@ -65,7 +70,7 @@ export function planProjectRender(project: Project): ProjectRenderPlan {
   const timeline = resolveTimeline(project);
   if (!timeline.clips.some((clip) => clip.trackType === 'video'))
     throw new RenderError(
-      'Video tracks are empty. Add a video or image clip before rendering.',
+      'Video tracks are empty. Add a video, image or text clip before rendering.',
     );
   if (project.clips.length > 64)
     throw new RenderError(
@@ -129,25 +134,31 @@ export function planProjectRender(project: Project): ProjectRenderPlan {
         'Rendering supports at most 600 seconds. Shorten the timeline.',
       );
     totalFrames = Math.max(totalFrames, end);
-    audioClips.push({
-      clipId: clip.id,
-      assetId: clip.assetId,
-      timelineStartFrame: start,
-      sourceStartFrame: sourceStart,
-      frameCount: count,
-      volume: clip.volume,
-      muted: clip.muted,
-      required: clip.trackType === 'audio',
-    });
+    if (clip.kind !== 'text')
+      audioClips.push({
+        clipId: clip.id,
+        assetId: clip.assetId,
+        timelineStartFrame: start,
+        sourceStartFrame: sourceStart,
+        frameCount: count,
+        volume: clip.volume,
+        muted: clip.muted,
+        required: clip.trackType === 'audio',
+      });
     if (clip.trackType === 'video') {
       const visual = clip.visual;
-      if (width * visual.scale > 8192 || height * visual.scale > 8192)
+      if (
+        clip.kind !== 'text' &&
+        (width * visual.scale > 8192 || height * visual.scale > 8192)
+      )
         throw new RenderError(
           `Clip '${clip.id}' scaled canvas exceeds 8192 pixels per side. Reduce scale.`,
         );
       visualClips.push({
         clipId: clip.id,
-        assetId: clip.assetId,
+        ...(clip.kind === 'text'
+          ? { text: clip.text }
+          : { assetId: clip.assetId }),
         timelineStartFrame: start,
         sourceStartFrame: sourceStart,
         frameCount: count,

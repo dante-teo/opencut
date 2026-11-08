@@ -4,6 +4,7 @@ import {
   visualGeometry,
   sourceColorMatrix,
 } from '@opencut/shared';
+import type { TextLayer } from '@opencut/shared';
 import {
   access,
   link,
@@ -12,6 +13,7 @@ import {
   rename,
   rm,
   stat,
+  writeFile,
 } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
@@ -21,10 +23,10 @@ import { checkRenderSignal, MediaError, runMediaTool } from './process.js';
 import { renderProgress } from './render-progress.js';
 import type { RenderProgress } from './render-progress.js';
 import { fitVisual } from './video-filter.js';
+import { rasterizeTextLayer } from './text.js';
 
-export interface VisualTimelineClip {
+interface VisualTimelineProperties {
   clipId: string;
-  path: string;
   timelineStartFrame: number;
   sourceStartFrame: number;
   frameCount: number;
@@ -34,6 +36,8 @@ export interface VisualTimelineClip {
   opacity?: number;
   fit?: 'contain' | 'cover' | 'stretch';
 }
+export type VisualTimelineClip = VisualTimelineProperties &
+  ({ path: string; text?: never } | { text: TextLayer; path?: never });
 
 export const renderQualities = ['draft', 'balanced', 'high'] as const;
 export const renderResolutions = ['project', '720p', '1080p'] as const;
@@ -57,6 +61,8 @@ export interface RenderControls {
 }
 
 export interface VideoTimelineOptions extends RenderControls {
+  /** Allow a desktop host to do text shaping off its main thread. */
+  rasterizeText?: typeof rasterizeTextLayer;
   width: number;
   height: number;
   frameRate: { numerator: number; denominator: number };
@@ -98,6 +104,7 @@ export interface VideoTimelineResult {
   frameCount: number;
   durationSeconds: number;
   metadata: MediaMetadata;
+  warnings?: string[];
 }
 
 function validateOptions(options: VideoTimelineOptions): void {
@@ -162,8 +169,9 @@ function validateOptions(options: VideoTimelineOptions): void {
             !Number.isFinite(clip.scale ?? 1) ||
             (clip.scale ?? 1) < 0.01 ||
             (clip.scale ?? 1) > 4 ||
-            width * (clip.scale ?? 1) > 8192 ||
-            height * (clip.scale ?? 1) > 8192 ||
+            (!clip.text &&
+              (width * (clip.scale ?? 1) > 8192 ||
+                height * (clip.scale ?? 1) > 8192)) ||
             !Number.isFinite(clip.opacity ?? 1) ||
             (clip.opacity ?? 1) < 0 ||
             (clip.opacity ?? 1) > 1 ||
@@ -207,7 +215,11 @@ function sameFrameRate(
 }
 
 /** Execute an integer-frame plan without depending on projects, CLI or Electron. */
-async function prepareTimeline(options: VideoTimelineOptions, png = false) {
+async function prepareTimeline(
+  options: VideoTimelineOptions,
+  png = false,
+  stageText?: (index: number, bytes: Buffer) => Promise<string>,
+) {
   checkRenderSignal(options.signal);
   validateOptions(options);
   const codec = options.codec ?? 'h264';
@@ -342,6 +354,7 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
     '-progress',
     'pipe:1',
   ];
+  const warnings: string[] = [];
   const prepared = {
     args,
     path,
@@ -353,6 +366,7 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
     frameRate: outputRate,
     frameCount: outputFrameCount,
     durationSeconds,
+    warnings,
   };
   const filters: string[] = [];
   const sources = new Map<string, MediaMetadata>();
@@ -402,6 +416,36 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
       `format=rgba,trim=end_frame=${frameCount},settb=1/${numerator},setpts=N*${denominator}[canvas0]`,
   );
   for (const [index, clip] of visualClips.entries()) {
+    const overlay = ({ x, y }: { x: number; y: number }, framesync: string) =>
+      `[canvas${index}][layer${index}]overlay=x=${x}:y=${y}:${framesync}:` +
+      `format=rgb:alpha=straight:enable='gte(n,${clip.timelineStartFrame})*lt(n,${clip.timelineStartFrame + clip.frameCount})'[canvas${index + 1}]`;
+    if (clip.text) {
+      checkRenderSignal(options.signal);
+      const raster = await (options.rasterizeText ?? rasterizeTextLayer)(
+        width,
+        height,
+        clip.text,
+        clip,
+        options.signal,
+      );
+      checkRenderSignal(options.signal);
+      if (raster.warning)
+        warnings.push(`Clip '${clip.clipId}': ${raster.warning}`);
+      if (!raster.png) {
+        filters.push(`[canvas${index}]null[canvas${index + 1}]`);
+        continue;
+      }
+      // One static image held from time zero; the project-frame interval gates the blend.
+      const textPath = stageText
+        ? await stageText(index, raster.png)
+        : 'text.png';
+      args.push('-threads', '1', '-i', textPath);
+      filters.push(
+        `[${input++}:v]format=rgba,settb=1/${numerator},setpts=0[layer${index}]`,
+        overlay(raster, 'repeatlast=1'),
+      );
+      continue;
+    }
     const source = await readSource(clip);
     const { video } = source;
     const format = source.formatName ?? '';
@@ -465,10 +509,7 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
         `${fitVisual(geometry, matrix)},format=rgba,` +
         ((clip.opacity ?? 1) === 1 ? '' : `lut=a=val*${clip.opacity},`) +
         `settb=1/${numerator},setpts=(N+${clip.timelineStartFrame})*${denominator}[layer${index}]`,
-    );
-    filters.push(
-      `[canvas${index}][layer${index}]overlay=x=${geometry.x}:y=${geometry.y}:` +
-        `eof_action=pass:repeatlast=0:format=rgb:alpha=straight:enable='gte(n,${clip.timelineStartFrame})*lt(n,${clip.timelineStartFrame + clip.frameCount})'[canvas${index + 1}]`,
+      overlay(geometry, 'eof_action=pass:repeatlast=0'),
     );
   }
   filters.push(
@@ -651,34 +692,54 @@ export async function validateVideoTimeline(options: VideoTimelineOptions) {
   };
 }
 
+/** Stage generated overlays beside the temporary output, on the same filesystem. */
+function renderScratch(output: string, prefix: string) {
+  const directory = dirname(resolve(output));
+  let temporary: string | undefined;
+  const open = async () => {
+    try {
+      return (temporary ??= await mkdtemp(join(directory, prefix)));
+    } catch (cause) {
+      throw new MediaError(
+        `Cannot create render output in '${directory}'; use an existing writable directory.`,
+        { cause },
+      );
+    }
+  };
+  return {
+    open,
+    async stageText(index: number, bytes: Buffer) {
+      const path = join(await open(), `text-${index}.png`);
+      await writeFile(path, bytes, { flag: 'wx' });
+      return path;
+    },
+    async close() {
+      if (temporary) await rm(temporary, { recursive: true, force: true });
+    },
+  };
+}
+
 /** Execute the shared headless pipeline and publish only a verified, complete file. */
 export async function renderVideoTimeline(
   options: VideoTimelineOptions,
 ): Promise<VideoTimelineResult> {
-  const {
-    args,
-    path,
-    quality,
-    resolution,
-    codec,
-    outputWidth,
-    outputHeight,
-    frameRate,
-    frameCount,
-    durationSeconds,
-  } = await prepareTimeline(options);
-  const { numerator, denominator } = frameRate;
-  let temporary: string;
+  const scratch = renderScratch(options.output, '.opencut-render-');
   try {
-    temporary = await mkdtemp(join(dirname(path), '.opencut-render-'));
-  } catch (cause) {
-    throw new MediaError(
-      `Cannot create render output in '${dirname(path)}'; use an existing writable directory.`,
-      { cause },
-    );
-  }
-  const rendered = join(temporary, 'render.mp4');
-  try {
+    const {
+      args,
+      path,
+      quality,
+      resolution,
+      codec,
+      outputWidth,
+      outputHeight,
+      frameRate,
+      frameCount,
+      durationSeconds,
+      warnings,
+    } = await prepareTimeline(options, false, scratch.stageText);
+    const { numerator, denominator } = frameRate;
+    const rendered = join(await scratch.open(), 'render.mp4');
     args.push(rendered);
     const progress = renderProgress(frameCount, options.onProgress);
     progress.start();
@@ -775,20 +836,19 @@ export async function renderVideoTimeline(
       frameCount,
       durationSeconds,
       metadata: { ...metadata, path },
+      ...(warnings.length ? { warnings } : {}),
     };
   } finally {
-    await rm(temporary, { recursive: true, force: true });
+    await scratch.close();
   }
 }
 
 /** Lossless frame output from the same RGB compositor used by video exports. */
 export async function renderTimelineFrame(options: VideoTimelineOptions) {
-  const prepared = await prepareTimeline(options, true);
-  const temporary = await mkdtemp(
-    join(dirname(prepared.path), '.opencut-frame-'),
-  );
-  const rendered = join(temporary, 'frame.png');
+  const scratch = renderScratch(options.output, '.opencut-frame-');
   try {
+    const prepared = await prepareTimeline(options, true, scratch.stageText);
+    const rendered = join(await scratch.open(), 'frame.png');
     await runMediaTool(
       'ffmpeg',
       [...prepared.args, '-update', '1', rendered],
@@ -818,6 +878,6 @@ export async function renderTimelineFrame(options: VideoTimelineOptions) {
       height: prepared.outputHeight,
     };
   } finally {
-    await rm(temporary, { recursive: true, force: true });
+    await scratch.close();
   }
 }

@@ -40,3 +40,5 @@ export type {
 export { ThumbnailCache } from './thumbnail.js';
 export type { ThumbnailResult } from './thumbnail.js';
 export { renderContactSheet } from './contact-sheet.js';
+export { rasterizeTextLayer } from './text.js';
+export type { TextRaster } from './text.js';

@@ -138,6 +138,20 @@ export class ProjectSession {
     return structuredClone(state);
   }
 
+  captureText(input: HistoryInput & { clipId: string }) {
+    const project = this.publishedState?.project;
+    if (
+      !project ||
+      project.metadata.id !== input.projectId ||
+      projectRevision(project) !== input.expectedRevision
+    )
+      return null;
+    const clip = project.clips.find((entry) => entry.id === input.clipId);
+    if (!clip?.text) return null;
+    const { width, height } = project.settings;
+    return { width, height, text: clip.text, visual: clip.visual ?? {} };
+  }
+
   async libraryAsset(id: unknown, scope?: HistoryInput) {
     const state = this.state;
     if (!state || typeof id !== 'string')
@@ -413,6 +427,8 @@ export class ProjectSession {
                     'clip.remove',
                     'clip.audio',
                     'clip.visual',
+                    'text.add',
+                    'text.set',
                   ].includes(operation.type),
               )
             )

@@ -116,8 +116,12 @@ export function removeTrack(project: Project, id: string) {
   return { project: finish(next), removedTrackId: id };
 }
 
-export interface AddClipOptions extends Omit<TimelineClip, 'id'> {
+export interface AddClipOptions extends Omit<
+  TimelineClip,
+  'id' | 'assetId' | 'text'
+> {
   id?: string;
+  assetId: string;
 }
 
 /** Explicit 1x source range; unknown asset durations have no inferred bound. */
@@ -137,6 +141,89 @@ export function addClip(project: Project, options: AddClipOptions) {
   next.clips.push(clip);
   const updated = finish(next);
   return { project: updated, clip: requireClip(updated, clip.id) };
+}
+
+export interface AddTextOptions {
+  id?: string | undefined;
+  trackId?: string | undefined;
+  timelineStart: RationalTime;
+  duration: RationalTime;
+  text: NonNullable<TimelineClip['text']>;
+  visual?: Omit<ClipVisualOptions, 'fit'> | undefined;
+}
+
+/** Text uses the same clip interval and track order as media, with no asset. */
+export function addText(project: Project, options: AddTextOptions) {
+  const next = copyProject(project);
+  const clipId = newId(next, options.id);
+  let trackId = options.trackId;
+  if (trackId === undefined) {
+    do trackId = newId(next);
+    while (trackId === clipId);
+    next.tracks.push({ id: trackId, name: 'Text', type: 'video' });
+  }
+  next.clips.push({
+    id: clipId,
+    trackId,
+    timelineStart: options.timelineStart,
+    sourceIn: { numerator: 0, denominator: 1 },
+    sourceOut: options.duration,
+    text: options.text,
+    ...(options.visual === undefined ? {} : { visual: options.visual }),
+  });
+  const updated = finish(next);
+  return { project: updated, clip: requireClip(updated, clipId) };
+}
+
+export function setText(
+  project: Project,
+  id: string,
+  options: {
+    text?:
+      | {
+          [Key in keyof NonNullable<TimelineClip['text']>]?:
+            NonNullable<TimelineClip['text']>[Key] | undefined;
+        }
+      | undefined;
+    timelineStart?: RationalTime | undefined;
+    duration?: RationalTime | undefined;
+  },
+) {
+  const next = copyProject(project);
+  const clip = requireClip(next, id);
+  if (!clip.text)
+    throw new TimelineError(
+      'INVALID_EDIT',
+      'Text properties require a text clip.',
+    );
+  const properties = Object.entries(options.text ?? {}).filter(
+    ([, value]) => value !== undefined,
+  );
+  if (
+    !properties.length &&
+    options.timelineStart === undefined &&
+    options.duration === undefined
+  )
+    throw new TimelineError(
+      'INVALID_EDIT',
+      'Specify text properties, a start or a duration.',
+    );
+  const text = { ...clip.text, ...Object.fromEntries(properties) };
+  const start = options.timelineStart ?? clip.timelineStart;
+  const end = options.duration
+    ? addTimes(clip.sourceIn, options.duration)
+    : clip.sourceOut;
+  if (
+    JSON.stringify(clip.text) === JSON.stringify(text) &&
+    compareTimes(start, clip.timelineStart) === 0 &&
+    compareTimes(end, clip.sourceOut) === 0
+  )
+    return { project: next, clip };
+  clip.text = text;
+  clip.timelineStart = start;
+  clip.sourceOut = end;
+  const updated = finish(next);
+  return { project: updated, clip: requireClip(updated, id) };
 }
 
 export interface MoveClipOptions {

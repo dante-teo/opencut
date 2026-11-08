@@ -3,12 +3,14 @@ import {
   canvasShape,
   clipAudioShape,
   clipVisualSchema,
+  textLayerSchema,
   validateProject,
 } from './project.js';
 import type { HistoryEntry, Project, ProjectSnapshot } from './project.js';
 import { frameTime } from './time.js';
 import {
   addClip,
+  addText,
   addTrack,
   moveClip,
   removeClip,
@@ -17,6 +19,7 @@ import {
   trimClip,
   setClipAudio,
   setClipVisual,
+  setText,
   setCanvas,
 } from './timeline.js';
 
@@ -26,6 +29,22 @@ const name = z
   .string()
   .refine((value) => value.trim().length > 0, 'Must not be blank.');
 const operationSchema = z.discriminatedUnion('type', [
+  z.strictObject({
+    type: z.literal('text.add'),
+    id: id.optional(),
+    trackId: id.optional(),
+    at: frame,
+    duration: frame.positive(),
+    text: textLayerSchema,
+    visual: clipVisualSchema.omit({ fit: true }).optional(),
+  }),
+  z.strictObject({
+    type: z.literal('text.set'),
+    id,
+    text: textLayerSchema.partial().optional(),
+    at: frame.optional(),
+    duration: frame.positive().optional(),
+  }),
   z.strictObject({
     type: z.literal('track.add'),
     id: id.optional(),
@@ -78,6 +97,9 @@ const transactionSchema = z.strictObject({
 });
 export type EditOperation = z.infer<typeof operationSchema>;
 export type EditTransaction = z.infer<typeof transactionSchema>;
+export function editTransactionJsonSchema() {
+  return z.toJSONSchema(transactionSchema);
+}
 
 export class EditError extends Error {
   override name = 'EditError';
@@ -248,6 +270,27 @@ export function previewTransaction(project: Project, input: EditTransaction) {
             volume: operation.volume,
             muted: operation.muted,
             visual: operation.visual,
+          });
+          break;
+        case 'text.add':
+          changed = addText(next, {
+            id: operation.id,
+            trackId: operation.trackId,
+            timelineStart: time(operation.at),
+            duration: time(operation.duration),
+            text: operation.text,
+            visual: operation.visual,
+          });
+          break;
+        case 'text.set':
+          changed = setText(next, operation.id, {
+            text: operation.text,
+            timelineStart:
+              operation.at === undefined ? undefined : time(operation.at),
+            duration:
+              operation.duration === undefined
+                ? undefined
+                : time(operation.duration),
           });
           break;
         case 'clip.move':

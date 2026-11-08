@@ -92,3 +92,39 @@ proxies and the paused fallback. This suite does not establish arbitrary VFR,
 fractional project-rate playback, HDR, rotation/SAR parity, long-run drift,
 heavy-load frame delivery, high-level limiting or multichannel mixing parity.
 The preview compressor and export limiter can behave differently near clipping.
+
+## Text layers (T33)
+
+Run `pnpm test:consistency --grep T33` for the two text cases. They open
+640×360 and 360×640 30 fps video projects in Electron, use the real Inspector
+and timeline to create and edit multiline English and Chinese text, and
+exercise undo, redo, save and reopen. One case exports with the CLI, the
+other with the desktop export panel. Both compare the Canvas backing buffer
+with decoded export RGB24 at the frames immediately before, at, and after
+the text boundaries. The suite checks muxed video PTS and uses the same
+tolerances above. A clean-video reference also verifies that both paths
+paint a substantial overlay when it is active.
+
+Both paths use [Skia Canvas](https://github.com/Brooooooklyn/canvas) to shape
+and rasterize each static layer at project resolution. The layer is
+composited at the same integer PNG origin. Electron requests the raster
+from its media worker when the layer is active or approaching the playhead.
+Desktop export also requests text rasters from the worker, independently of
+preview invalidation. Export completion lists any missing-font substitutions.
+FFmpeg uses the static PNG over the same half-open project frame interval.
+Any preview or export downscaling occurs after geometry is computed.
+RGB blending and rounding, scaling kernels and encoded 4:2:0 chroma can
+still shift antialiased edges and colored strokes by a few channel values
+or soften them. The comparison uses full-resolution Canvas backing
+buffers and project-size H.264 exports.
+
+The bundled variable Noto Sans SC and monochrome Noto Emoji fonts come
+from [Google Fonts at revision 86aced91](https://github.com/google/fonts/tree/86aced91de05cd4f96a06838124cca45be337b2b/ofl)
+and ship with their SIL Open Font License texts. Named installed fonts can
+differ between machines. An unavailable family uses bundled Noto Sans SC.
+The default Chinese face uses Simplified Chinese glyph conventions and also
+covers common Traditional Chinese. Exact glyph shapes for other locales,
+coverage of uncommon characters, complex-script line breaking and emoji
+sequences depend on the font and the text engine. Unavailable glyphs can
+appear as boxes. The suite verifies basic Latin, Chinese and emoji glyphs,
+plus one missing family on the host running both paths.

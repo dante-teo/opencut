@@ -9,6 +9,7 @@ import {
   renderCodecs,
   renderQualities,
   renderResolutions,
+  type VideoTimelineOptions,
 } from '@opencut/media';
 import type { DesktopProject, ExportInput, ExportState } from '../bridge.js';
 import { exportRates } from '../export-settings.js';
@@ -49,6 +50,7 @@ export class ExportSession {
     private readonly capture: (input: ExportInput) => DesktopProject,
     private readonly choose: () => Promise<string | null>,
     private readonly changed: (state: ExportState) => void,
+    private readonly rasterizeText?: VideoTimelineOptions['rasterizeText'],
   ) {}
   get active() {
     return (
@@ -105,6 +107,7 @@ export class ExportSession {
       progress: null,
       elapsedSeconds: 0,
       summary: null,
+      warnings: [],
       error: '',
     };
     this.publish();
@@ -138,13 +141,14 @@ export class ExportSession {
           : { outputFrameRate: { numerator: numerator!, denominator } }),
         overwrite: false,
         signal: controller.signal,
+        ...(this.rasterizeText ? { rasterizeText: this.rasterizeText } : {}),
       };
       job.summary = await validateVideoTimeline(options);
       validated = true;
       if (controller.signal.aborted) throw new Error('Export cancelled.');
       job.status = 'rendering';
       this.publish();
-      await renderVideoTimeline({
+      const result = await renderVideoTimeline({
         ...options,
         onProgress: (progress) => {
           const now = performance.now();
@@ -160,6 +164,7 @@ export class ExportSession {
         },
       });
       // A completed atomic publication wins a cancellation racing after finalization.
+      job.warnings = result.warnings ?? [];
       job.status = 'succeeded';
     } catch (error) {
       job.status = controller.signal.aborted

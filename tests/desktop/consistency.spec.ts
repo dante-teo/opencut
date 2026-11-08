@@ -1,7 +1,14 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { expect, test } from '@playwright/test';
 import {
+  expect,
+  test,
+  type Page,
+  type ElectronApplication,
+} from '@playwright/test';
+import {
+  createProject,
+  deserializeProject,
   evaluateTimelineFrame,
   frameTime,
   planProjectRender,
@@ -80,6 +87,16 @@ interface Point {
   frame: number;
   mapping?: Mapping;
   marker?: number;
+  textVisible?: boolean;
+}
+
+interface TextScenario {
+  edit: (
+    application: ElectronApplication,
+    page: Page,
+    path: string,
+  ) => Promise<Project>;
+  guiExport?: boolean;
 }
 
 async function compareScenario(
@@ -87,6 +104,7 @@ async function compareScenario(
   project: Project,
   points: Point[],
   changed?: Project,
+  textScenario?: TextScenario,
 ) {
   const { width, height, frameRate } = project.settings;
   const { application, page } = await launchDesktop({
@@ -121,11 +139,19 @@ async function compareScenario(
       project,
       name,
     );
+    if (textScenario)
+      project = await textScenario.edit(application, page, exportPath);
     if (changed) {
       exportPath = join(directory, `${name}-injected.json`);
       await writeFile(exportPath, serializeProject(changed));
     }
-    const output = exportProject(directory, name, exportPath);
+    const output = textScenario?.guiExport
+      ? await exportTextFromDesktop(
+          application,
+          page,
+          join(directory, name + '.mp4'),
+        )
+      : exportProject(directory, name, exportPath);
     const plan = planProjectRender(project);
     const videoTimestamps = verifyVideoTimestamps(
       output,
@@ -140,10 +166,14 @@ async function compareScenario(
       width,
       height,
     );
-    for (const { frame, mapping, marker } of points) {
+    let bareCanvas: Buffer | undefined;
+    let bareExport: Buffer | undefined;
+    for (const { frame, mapping, marker, textVisible } of points) {
       const evaluation = evaluateTimelineFrame(project, frame);
       const layers = evaluation.visualClips.filter((clip) => clip.visible);
       const ids = layers.map((clip) => clip.id);
+      if (textVisible !== undefined)
+        expect(layers.some((clip) => clip.kind === 'text')).toBe(textVisible);
       const videoTimes = layers
         .filter((clip) => clip.kind === 'video')
         .map((clip) => seconds(clip.sourceTime));
@@ -213,6 +243,23 @@ async function compareScenario(
       }
       const result = compareRgb(canvas.rgb, rgb, tolerance);
       Object.assign(entry, result);
+      if (textVisible === false) {
+        bareCanvas ??= canvas.rgb;
+        bareExport ??= rgb;
+      }
+      if (textVisible && bareCanvas && bareExport) {
+        const previewInk = compareRgb(
+          canvas.rgb,
+          bareCanvas,
+          tolerance,
+        ).metrics;
+        const exportedInk = compareRgb(rgb, bareExport, tolerance).metrics;
+        entry.textComparedWithCleanVideo = { previewInk, exportedInk };
+        // The still-color fixture isolates the overlay. Require substantial text
+        // signal independently in each path so two missing overlays cannot pass.
+        expect(previewInk.largePixelFraction).toBeGreaterThan(0.025);
+        expect(exportedInk.largePixelFraction).toBeGreaterThan(0.025);
+      }
       if (marker !== undefined) {
         const preview = readMarker(canvas.rgb, width, height);
         const rendered = readMarker(rgb, width, height);
@@ -260,6 +307,240 @@ async function compareScenario(
       await application.close();
     }
   }
+}
+
+async function exportTextFromDesktop(
+  application: ElectronApplication,
+  page: Page,
+  output: string,
+) {
+  await application.evaluate(({ dialog }, output) => {
+    dialog.showSaveDialog = async () => ({ canceled: false, filePath: output });
+  }, output);
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  const panel = page.getByRole('dialog', { name: 'Export video', exact: true });
+  await panel
+    .getByRole('button', { name: 'Choose output…', exact: true })
+    .click();
+  await panel
+    .getByRole('button', { name: 'Export video', exact: true })
+    .click();
+  await expect
+    .poll(() => page.evaluate(() => window.opencut.getExport()), {
+      timeout: 60000,
+    })
+    .toMatchObject({ status: 'succeeded', output });
+  await expect(
+    panel.getByRole('list', { name: 'Export warnings' }),
+  ).toContainText(/Font .*unavailable. Using Noto Sans SC/);
+  await panel.getByRole('button', { name: 'Done', exact: true }).click();
+  return output;
+}
+
+for (const vertical of [false, true]) {
+  const orientation = vertical ? 'vertical' : 'horizontal';
+  test(
+    'T33 ' +
+      orientation +
+      ' GUI text matches encoded video at exact project boundaries',
+    async () => {
+      const width = vertical ? 360 : 640;
+      const height = vertical ? 640 : 360;
+      const video = 't33-' + orientation + '-source.mp4';
+      ffmpeg([
+        '-n',
+        '-f',
+        'lavfi',
+        '-i',
+        'color=c=0x242937:s=' + width + 'x' + height + ':r=30:d=2',
+        '-c:v',
+        'libx264',
+        '-pix_fmt',
+        'yuv420p',
+        '-colorspace',
+        'bt709',
+        '-threads',
+        '1',
+        join(directory, video),
+      ]);
+      const project = createProject({
+        name: 'T33 ' + orientation,
+        settings: {
+          width,
+          height,
+          frameRate: { numerator: 30, denominator: 1 },
+        },
+      });
+      project.assets = [
+        {
+          id: 'background',
+          name: video,
+          file: { type: 'relative', path: video },
+          mediaTypes: ['video'],
+          duration: time(60),
+        },
+      ];
+      project.tracks = [{ id: 'video', name: 'Video', type: 'video' }];
+      project.clips = [
+        {
+          id: 'base',
+          trackId: 'video',
+          assetId: 'background',
+          timelineStart: time(0),
+          sourceIn: time(0),
+          sourceOut: time(60),
+        },
+      ];
+      await compareScenario(
+        't33-' + orientation,
+        project,
+        [
+          { frame: 0, textVisible: false },
+          { frame: 8, textVisible: false },
+          { frame: 9, textVisible: true },
+          { frame: 24, textVisible: true },
+          { frame: 32, textVisible: true },
+          { frame: 33, textVisible: false },
+          { frame: 59, textVisible: false },
+        ],
+        undefined,
+        {
+          guiExport: vertical,
+          async edit(_application, page, path) {
+            await page
+              .getByRole('button', { name: 'Add text', exact: true })
+              .click();
+            const text = page.getByRole('textbox', {
+              name: 'Text',
+              exact: true,
+            });
+            await expect(text).toHaveValue('Text');
+            const content = vertical
+              ? 'OpenCut Vertical\n繁體中文 😀'
+              : 'OpenCut Wide\n简体中文 😀';
+            await text.fill(content);
+            const input = (name: string) =>
+              page.getByRole('spinbutton', { name, exact: true });
+            await input('Start frame').fill('8');
+            await input('Duration frames').fill('24');
+            await input('X').fill(vertical ? '-17' : '29');
+            await input('Y').fill(vertical ? '65' : '-27');
+            await input('Scale').fill('1.1');
+            await input('Opacity').fill('0.82');
+            await input('Rotation').fill(vertical ? '12' : '-8');
+            await input('Font size').fill('33');
+            await input('Wrap width').fill('260');
+            await page
+              .getByLabel('Weight', { exact: true })
+              .selectOption('700');
+            await page
+              .getByLabel('Alignment', { exact: true })
+              .selectOption(vertical ? 'right' : 'left');
+            await page
+              .getByRole('textbox', { name: 'Color', exact: true })
+              .fill('#f9e8b4');
+            if (vertical)
+              await page
+                .getByRole('textbox', { name: 'Font family', exact: true })
+                .fill('OpenCut Missing Test Face');
+            await page.getByText('Effects', { exact: true }).click();
+            await page
+              .getByRole('checkbox', { name: 'Stroke', exact: true })
+              .check();
+            await page
+              .getByRole('checkbox', { name: 'Shadow', exact: true })
+              .check();
+            await page
+              .getByRole('checkbox', { name: 'Background', exact: true })
+              .check();
+            await page
+              .getByRole('textbox', { name: 'Background color', exact: true })
+              .fill('#50365bbf');
+            await page
+              .getByRole('button', { name: 'Apply text', exact: true })
+              .click();
+            await expect(input('Start frame')).toHaveValue('8');
+            await page
+              .getByRole('button', { name: 'Undo', exact: true })
+              .click();
+            await expect(text).toHaveValue('Text');
+            await page
+              .getByRole('button', { name: 'Redo', exact: true })
+              .click();
+            await expect(text).toHaveValue(content);
+            const clip = page.locator('.timeline-clip.text');
+            await clip.focus();
+            await clip.press('ArrowRight');
+            await expect(input('Start frame')).toHaveValue('9');
+            await page
+              .getByRole('button', { name: 'Save project', exact: true })
+              .click();
+            await expect(
+              page.getByText('Saved project', { exact: true }),
+            ).toBeVisible();
+            const saved = deserializeProject(await readFile(path, 'utf8'));
+            expect(saved.clips[1]).toMatchObject({
+              timelineStart: time(9),
+              text: {
+                content,
+                fontWeight: 700,
+                stroke: { width: 2 },
+                shadow: { blur: 4 },
+                background: { padding: 8 },
+              },
+              visual: { x: vertical ? -17 : 29, opacity: 0.82 },
+            });
+            await page
+              .getByRole('button', { name: 'Open project', exact: true })
+              .click();
+            await expect(page.locator('.timeline-clip.text')).toBeVisible();
+            await page.locator('.timeline-clip.text').focus();
+            await page.locator('.timeline-clip.text').press('Enter');
+            await expect(text).toHaveValue(content);
+            await page
+              .getByRole('slider', { name: 'Seek timeline', exact: true })
+              .fill('24');
+            await expect(
+              page.locator('#project-viewer canvas'),
+            ).toHaveAttribute(
+              'data-presented-layers',
+              JSON.stringify(['base', saved.clips[1]!.id]),
+            );
+            if (vertical)
+              await expect(
+                page.getByText(/Font .*unavailable. Using Noto Sans SC/),
+              ).toBeVisible();
+            const diagnostics = page.locator(
+              '.timeline-diagnostics[open] summary',
+            );
+            if (await diagnostics.count()) await diagnostics.click();
+            await page.screenshot({
+              path: join(directory, 't33-' + orientation + '-editor.png'),
+            });
+            await page
+              .getByRole('slider', { name: 'Seek timeline', exact: true })
+              .fill('0');
+            await page
+              .getByRole('button', { name: 'Play', exact: true })
+              .click();
+            await expect(
+              page.getByRole('button', { name: 'Pause', exact: true }),
+            ).toBeVisible();
+            await expect(
+              page.locator('#project-viewer canvas'),
+            ).toHaveAttribute(
+              'data-presented-layers',
+              JSON.stringify(['base', saved.clips[1]!.id]),
+            );
+            await page
+              .getByRole('button', { name: 'Pause', exact: true })
+              .click();
+            return saved;
+          },
+        },
+      );
+    },
+  );
 }
 
 test('T27 T21 cuts, trims and continuous split at adjacent frames', async () => {

@@ -119,6 +119,21 @@ export function proposeEdit(
       operations = [
         { type: 'clip.trim', id: clip.id, out: safeFrame(sourceOut + change) },
       ];
+    } else if (clip.text) {
+      if (
+        compareTimes(frameTime(safeFrame(durationFrame), rate), duration) !== 0
+      )
+        throw new Error(
+          'Align the text clip end to a project frame before trimming its left edge.',
+        );
+      operations = [
+        {
+          type: 'text.set',
+          id: clip.id,
+          at: safeFrame(target),
+          duration: safeFrame(durationFrame - change),
+        },
+      ];
     } else {
       const trim: TimelineOperation = {
         type: 'clip.trim',

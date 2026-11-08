@@ -54,6 +54,7 @@ export type {
   MediaReference,
   ProjectSettings,
   RationalTime,
+  TextLayer,
   TimelineClip,
   Track,
 } from '@opencut/core';

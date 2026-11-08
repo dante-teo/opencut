@@ -37,10 +37,12 @@ export {
   addTrack,
   removeTrack,
   addClip,
+  addText,
   moveClip,
   trimClip,
   setClipAudio,
   setClipVisual,
+  setText,
   setCanvas,
   splitClip,
   removeClip,
@@ -51,6 +53,7 @@ export {
 export type {
   AddTrackOptions,
   AddClipOptions,
+  AddTextOptions,
   MoveClipOptions,
   TrimClipOptions,
   ClipAudioOptions,
@@ -60,6 +63,7 @@ export type {
 export {
   EditError,
   parseEditTransaction,
+  editTransactionJsonSchema,
   projectSnapshot,
   projectRevision,
   checkProjectRevision,
@@ -71,6 +75,7 @@ export {
   getEditHistory,
 } from './editing.js';
 export type { EditOperation, EditTransaction } from './editing.js';
+export type { TextLayer } from '@opencut/shared';
 export type { ProjectSnapshot, HistoryEntry } from './project.js';
 
 export { planProjectRender, RenderError } from './render-plan.js';
@@ -92,6 +97,8 @@ export type {
   TimelineEvaluation,
   EvaluatedTimelineClip,
   ResolvedTimelineClip,
+  ResolvedMediaClip,
+  ResolvedTextClip,
 } from './evaluation.js';
 
 export {

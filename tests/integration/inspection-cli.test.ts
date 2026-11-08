@@ -128,6 +128,21 @@ describe('agent CLI discovery and offline inspection', () => {
     );
     expect(catalog.capabilities.mcp.status).toBe('unavailable');
     expect(catalog.capabilities.sdk.package).toBe('@opencut/sdk');
+    expect(catalog.capabilities.textLayers).toMatchObject({
+      defaultFont: 'Noto Sans SC',
+      transactionSchema: 'edit apply input',
+    });
+    expect(
+      catalog.schemas['edit apply input'].properties.operations.items.oneOf,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          properties: expect.objectContaining({
+            type: { type: 'string', const: 'text.add' },
+          }),
+        }),
+      ]),
+    );
     expect(catalog.capabilities.scriptingRuntime.status).toBe('supported');
     expect(catalog.schemas.run.required).toContain('result');
     expect(catalog.capabilities.visualInspection.headless).toBe(true);

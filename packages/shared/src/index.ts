@@ -10,6 +10,24 @@ export interface VisualTransform {
   fit?: 'contain' | 'cover' | 'stretch';
 }
 
+export const DEFAULT_TEXT_FONT = 'Noto Sans SC';
+export const DEFAULT_TEXT_SIZE = 48;
+
+export interface TextLayer {
+  content: string;
+  fontFamily?: string | undefined;
+  fontSize?: number | undefined;
+  fontWeight?: number | undefined;
+  color?: string | undefined;
+  alignment?: 'left' | 'center' | 'right' | undefined;
+  wrapWidth?: number | null | undefined;
+  rotation?: number | undefined;
+  stroke?: { color: string; width: number } | null | undefined;
+  shadow?:
+    { color: string; x: number; y: number; blur: number } | null | undefined;
+  background?: { color: string; padding: number } | null | undefined;
+}
+
 export const canvasColorPattern =
   /^(?:#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?|transparent)$/;
 

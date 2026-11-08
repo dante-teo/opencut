@@ -193,6 +193,49 @@ test(
       'shifted.png',
     );
 
+    // Render editable text from the deployed CLI. This exercises its packaged
+    // native rasterizer and fonts inside the same module boundary as agents.
+    const textProject = 'text.opencut.json';
+    command(
+      'project',
+      'create',
+      textProject,
+      '--name',
+      'Bilingual title',
+      '--width',
+      '240',
+      '--height',
+      '160',
+    );
+    await writeBatch('text-batch.json', {
+      expectedRevision: 0,
+      operations: [
+        {
+          type: 'text.add',
+          id: 'title',
+          at: 0,
+          duration: 30,
+          text: { content: 'OpenCut\n中文字幕 😀', fontSize: 30 },
+        },
+      ],
+    });
+    command('edit', 'apply', textProject, 'text-batch.json');
+    assert.equal(
+      command('timeline', 'inspect', textProject, '--frame', '0').visualClips[0]
+        .kind,
+      'text',
+    );
+    command(
+      'preview',
+      'frame',
+      textProject,
+      '--frame',
+      '0',
+      '--output',
+      'bilingual.png',
+    );
+    assert.equal(command('probe', 'bilingual.png').video.codec, 'png');
+
     const deployedCli = join(cwd, 'dist/index.js');
     await rm(deployedCli);
     await writeFile(

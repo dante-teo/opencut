@@ -39,7 +39,8 @@ The example assumes the source contains at least 30 project frames. `at`, `in`
 and `out` are integer project frames. `at` is an absolute timeline position
 and `out` is an exclusive source boundary. Inspection returns exact rational
 seconds. The `EditOperation` union provides autocomplete for track add/remove,
-clip add/move/trim/split/remove, clip audio/visual settings and canvas settings.
+clip add/move/trim/split/remove, clip audio/visual settings, text add/set and
+canvas settings.
 See the [batch command reference](CLI.md#transactions-undo-and-redo) for
 operation fields and validation. Pass explicit IDs to refer to a new track or
 clip later in the same group. Inspect the draft for generated IDs.
@@ -73,6 +74,26 @@ unknown. Read back project content and history before retrying. See the
 [project session decision](adr/0011-shared-project-session.md) for live session limits.
 
 ## Preview and render
+
+Use the same `project.apply` method for editable titles. `TextLayer` is
+exported from `@opencut/sdk` for typed style data.
+
+```ts
+project.apply({
+  type: 'text.add',
+  id: 'title',
+  at: 15,
+  duration: 75,
+  text: { content: 'OpenCut\n中文字幕', fontSize: 64, fontWeight: 700 },
+  visual: { y: 200 },
+});
+project.apply({ type: 'text.set', id: 'title', text: { rotation: -5 } });
+await editor.save({ label: 'Add title' });
+```
+
+See the [CLI text layer contract](CLI.md#text-layers-t33) for units, defaults,
+style options and fallback. A named font missing on this host produces a
+`warnings` entry in the SDK render result.
 
 - `project.previewFrame(frame, output, options?)` writes a composited PNG.
 - `project.previewContactSheet(frames, output, options?)` writes a labeled PNG

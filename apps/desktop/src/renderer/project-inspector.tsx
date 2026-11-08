@@ -1,5 +1,6 @@
 import { SlidersHorizontal } from 'lucide-react';
 import { ClipProperties } from './clip-properties.js';
+import { TextProperties } from './text-properties.js';
 import { CanvasArtwork } from './studio-graphics.js';
 import type { DesktopProject, TimelineOperation } from '../bridge.js';
 import { compareTimes, type RationalTime, type Project } from '@opencut/core';
@@ -66,13 +67,30 @@ export function ProjectInspector({
           <SlidersHorizontal aria-hidden="true" focusable="false" /> Inspector
         </h2>
       </div>
-      <div className="inspector-content">
+      <div
+        className={
+          clip?.text ? 'inspector-content text-inspector' : 'inspector-content'
+        }
+      >
         {selection && (
           <>
             <button className="text-button" onClick={onClear}>
               ← Project settings
             </button>
-            {clip && (
+            {clip?.text && (
+              <TextProperties
+                key={JSON.stringify([
+                  project!.metadata.id,
+                  clip,
+                  project!.settings.frameRate,
+                ])}
+                project={project!}
+                clip={clip}
+                disabled={disabled}
+                onEdit={onEdit}
+              />
+            )}
+            {clip && !clip.text && (
               <>
                 <h3>Clip details</h3>
                 <ClipProperties

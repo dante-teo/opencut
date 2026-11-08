@@ -6,6 +6,9 @@ import {
   projectRevision,
   resolveTimeline,
   type ResolvedTimelineClip,
+  type EvaluatedTimelineClip,
+  type ResolvedMediaClip,
+  type ResolvedTextClip,
   type Project,
   type RationalTime,
 } from '@opencut/core';
@@ -110,7 +113,7 @@ export interface TimelineDiagnostics {
 }
 interface Entry {
   key: string;
-  clip: ResolvedTimelineClip;
+  clip: ResolvedMediaClip;
   media?: HTMLVideoElement;
   image?: HTMLImageElement;
   node?: MediaElementAudioSourceNode;
@@ -124,6 +127,20 @@ interface Entry {
   settleUntil: number;
   scheduledAction: number;
 }
+
+type TextPreviewEntry =
+  | { status: 'pending'; bytes: number; image?: HTMLImageElement }
+  | {
+      status: 'ready';
+      bytes: number;
+      x: number;
+      y: number;
+      image: HTMLImageElement | null;
+    }
+  | { status: 'budget'; bytes: number }
+  | { status: 'failed' };
+
+const textBudgetWarning = 'Some text layers exceed the preview memory budget.';
 
 /** Chromium decodes off-thread. This adapter only evaluates, schedules and paints. */
 export class TimelinePlayback {
@@ -152,6 +169,12 @@ export class TimelinePlayback {
   private frameRequests = 0;
   private readonly wantedFrames = new Set<string>();
   private readonly cachedFrames = new Map<string, HTMLImageElement>();
+  private readonly textKeys = new Map<string, string>();
+  private readonly textImages = new Map<string, TextPreviewEntry>();
+  private textWanted = new Map<string, ResolvedTextClip>();
+  private textBytes = 0;
+  private textBudgetLimited = false;
+  private textRequests = 0;
   private compositeFrame = '';
   private playbackSeconds = 0;
   private seekStarted: number | null = null;
@@ -172,8 +195,12 @@ export class TimelinePlayback {
     this.evaluate = createTimelineEvaluator(project);
     // Resolve lookahead through T23 too; point queries remain the source-time authority.
     const clips = resolveTimeline(project).clips;
-    let previous: ResolvedTimelineClip | undefined;
+    let previous: ResolvedMediaClip | undefined;
     for (const clip of clips) {
+      if (clip.kind === 'text') {
+        this.textKeys.set(clip.id, JSON.stringify([clip.text, clip.visual]));
+        continue;
+      }
       // A split with contiguous source points shares its decoder and never restarts audio.
       const continuous =
         previous &&
@@ -277,7 +304,7 @@ export class TimelinePlayback {
     }
     return request;
   }
-  private entry(clip: ResolvedTimelineClip): Entry {
+  private entry(clip: ResolvedMediaClip): Entry {
     const key = this.keys.get(clip.id)!;
     let entry = this.entries.get(key);
     if (entry) {
@@ -463,12 +490,13 @@ export class TimelinePlayback {
   }
   setMemoryBudget(memoryBytes: number) {
     this.memoryBudget = memoryBytes;
+    this.fitTextBudget();
     this.trimFrames();
   }
   private trimFrames(reservedBytes = 0) {
     let used = [...this.cachedFrames.values()].reduce(
       (sum, image) => sum + image.naturalWidth * image.naturalHeight * 4,
-      reservedBytes,
+      reservedBytes + this.textBytes,
     );
     for (const [key, image] of this.cachedFrames) {
       if (used <= this.memoryBudget) break;
@@ -479,6 +507,7 @@ export class TimelinePlayback {
   }
   private visible(clip: ResolvedTimelineClip) {
     if (clip.trackType !== 'video' || clip.visual.opacity === 0) return false;
+    if (clip.kind === 'text') return true;
     // The fitting box encloses contain/cover/stretch regardless of source aspect.
     const box = fittingBox(
       this.project.settings.width,
@@ -493,6 +522,99 @@ export class TimelinePlayback {
       clip.visual,
     ).visible;
   }
+  private releaseText(key: string, deferredBytes?: number) {
+    const entry = this.textImages.get(key);
+    if (entry && 'image' in entry && entry.image) entry.image.src = '';
+    if (deferredBytes === undefined) this.textImages.delete(key);
+    else this.textImages.set(key, { status: 'budget', bytes: deferredBytes });
+  }
+  private fitTextBudget() {
+    let used = 0;
+    // Active layers have priority over lookahead. Reserve bytes before decoding.
+    for (const key of this.textWanted.keys()) {
+      const entry = this.textImages.get(key);
+      if (entry?.status !== 'ready' && entry?.status !== 'pending') continue;
+      if (used + entry.bytes > this.memoryBudget)
+        this.releaseText(key, entry.bytes);
+      else used += entry.bytes;
+    }
+    if (used !== this.textBytes) {
+      this.textBytes = used;
+      this.trimFrames();
+    }
+  }
+  private scheduleText(wanted: Map<string, ResolvedTextClip>) {
+    this.textWanted = wanted;
+    for (const key of this.textImages.keys()) {
+      if (!wanted.has(key)) this.releaseText(key);
+    }
+    this.fitTextBudget();
+    let used = 0;
+    for (const [key, clip] of wanted) {
+      const entry = this.textImages.get(key);
+      if (entry?.status === 'ready' || entry?.status === 'pending') {
+        used += entry.bytes;
+      } else if (
+        this.textRequests < 2 &&
+        (!entry ||
+          (entry.status === 'budget' &&
+            used + entry.bytes <= this.memoryBudget))
+      ) {
+        this.requestText(key, clip);
+      }
+    }
+  }
+  private requestText(key: string, clip: ResolvedTextClip) {
+    this.textRequests++;
+    const pending: TextPreviewEntry = { status: 'pending', bytes: 0 };
+    this.textImages.set(key, pending);
+    const warn = (warning: string) => {
+      if (!this.diagnostics.unavailable.includes(warning))
+        this.diagnostics.unavailable.push(warning);
+    };
+    void window.opencut
+      .timelineText({
+        projectId: this.project.metadata.id,
+        expectedRevision: projectRevision(this.project),
+        clipId: clip.id,
+      })
+      .then(async (raster) => {
+        if (this.textImages.get(key) !== pending) return;
+        if (!raster) {
+          this.textImages.set(key, { status: 'failed' });
+          return;
+        }
+        if (raster.warning) warn(raster.warning);
+        pending.bytes = raster.width * raster.height * 4;
+        this.fitTextBudget();
+        if (this.textImages.get(key) !== pending) return;
+        const image = raster.url ? new Image() : null;
+        if (image) {
+          pending.image = image;
+          image.src = raster.url!;
+          await image.decode();
+        }
+        if (this.textImages.get(key) !== pending) return;
+        this.textImages.set(key, {
+          status: 'ready',
+          bytes: pending.bytes,
+          x: raster.x,
+          y: raster.y,
+          image,
+        });
+      })
+      .catch((error: unknown) => {
+        if (this.textImages.get(key) === pending) {
+          this.releaseText(key);
+          this.textImages.set(key, { status: 'failed' });
+          this.fitTextBudget();
+          warn(`Text preview: ${String(error)}`);
+        }
+      })
+      .finally(() => {
+        this.textRequests--;
+      });
+  }
   private frameKey(assetId: string, time: RationalTime) {
     return `${assetId}:${time.numerator}/${time.denominator}`;
   }
@@ -504,7 +626,12 @@ export class TimelinePlayback {
   private requestFrame() {
     if (this.clock.playing || this.starting || this.disposed) return;
     for (const visual of this.evaluate(this.clock.position).visualClips) {
-      if (!this.visible(visual) || visual.kind === 'image') continue;
+      if (
+        visual.kind === 'text' ||
+        visual.kind === 'image' ||
+        !this.visible(visual)
+      )
+        continue;
       const key = this.frameKey(visual.assetId, visual.sourceTime);
       if (this.wantedFrames.has(key)) continue;
       if (this.frameRequests >= 2) break;
@@ -548,8 +675,8 @@ export class TimelinePlayback {
           }
           // Bound decoded PNGs too, independently of the worker's encoded-byte cache.
           const size = image.naturalWidth * image.naturalHeight * 4;
-          this.trimFrames(size);
-          if (size <= this.memoryBudget) {
+          if (size + this.textBytes <= this.memoryBudget) {
+            this.trimFrames(size);
             this.cachedFrames.set(key, image);
             this.diagnostics.cachedFrames++;
           } else image.src = '';
@@ -627,6 +754,14 @@ export class TimelinePlayback {
       const deadline = performance.now() + 8000;
       while (
         this.evaluate(this.clock.position).activeClips.some((c) => {
+          if (c.kind === 'text') {
+            const status = this.textImages.get(
+              this.textKeys.get(c.id)!,
+            )?.status;
+            return (
+              this.visible(c) && (status === undefined || status === 'pending')
+            );
+          }
           const e = this.entries.get(this.keys.get(c.id)!);
           return e && !e.ready && !e.failed;
         })
@@ -671,7 +806,9 @@ export class TimelinePlayback {
     this.diagnostics.playing = this.clock.playing;
     this.report(this.diagnostics.position, {
       ...this.diagnostics,
-      unavailable: [...this.diagnostics.unavailable],
+      unavailable: this.textBudgetLimited
+        ? [...this.diagnostics.unavailable, textBudgetWarning]
+        : [...this.diagnostics.unavailable],
     });
   }
   private render() {
@@ -695,10 +832,19 @@ export class TimelinePlayback {
     const now = performance.now();
     const started = performance.now();
     const visuals = evaluation.visualClips.filter((c) => this.visible(c));
-    const visualKeys = new Set(visuals.map((c) => this.keys.get(c.id)!));
+    const visualKeys = new Set(
+      visuals.filter((c) => c.kind !== 'text').map((c) => this.keys.get(c.id)!),
+    );
+    const textWanted = new Map<string, ResolvedTextClip>();
+    for (const clip of visuals) {
+      if (clip.kind !== 'text') continue;
+      textWanted.set(this.textKeys.get(clip.id)!, clip);
+    }
     // Transparent, silent clips have neither visual nor audio work to decode.
     const needed = evaluation.activeClips.filter(
-      (c) => visualKeys.has(this.keys.get(c.id)!) || c.effectiveVolume > 0,
+      (c): c is EvaluatedTimelineClip & ResolvedMediaClip =>
+        c.kind !== 'text' &&
+        (visualKeys.has(this.keys.get(c.id)!) || c.effectiveVolume > 0),
     );
     const active = new Map(needed.map((c) => [this.keys.get(c.id)!, c]));
     const keep = new Set(active.keys());
@@ -739,12 +885,19 @@ export class TimelinePlayback {
     }
     for (let i = low; i < this.upcoming.length; i++) {
       const clip = this.upcoming[i]!;
+      if (!inPlaybackLookahead(clip.timelineStart, time)) break;
+      if (clip.kind === 'text') {
+        if (this.visible(clip)) {
+          const key = this.textKeys.get(clip.id)!;
+          if (!textWanted.has(key)) textWanted.set(key, clip);
+        }
+        continue;
+      }
       if (
         !this.visible(clip) &&
         (clip.muted || clip.volume === 0 || clip.audioPresence === 'absent')
       )
         continue;
-      if (!inPlaybackLookahead(clip.timelineStart, time)) break;
       const asset = this.project.assets.find(
         (asset) => asset.id === clip.assetId,
       );
@@ -757,7 +910,7 @@ export class TimelinePlayback {
         !keep.has(this.keys.get(clip.id)!) &&
         (speculative >= 4 ||
           this.entries.size >= 16 ||
-          speculativeBytes + bytes > this.memoryBudget)
+          speculativeBytes + bytes > this.memoryBudget - this.textBytes)
       )
         continue;
       keep.add(this.keys.get(clip.id)!);
@@ -767,6 +920,7 @@ export class TimelinePlayback {
       }
       if (!this.entries.has(this.keys.get(clip.id)!)) this.entry(clip);
     }
+    this.scheduleText(textWanted);
     this.diagnostics.activeAudio = evaluation.mixingSources.filter((c) => {
       const e = this.entries.get(this.keys.get(c.id)!);
       return e?.ready && !e.failed;
@@ -878,6 +1032,7 @@ export class TimelinePlayback {
     ctx.fillStyle = evaluation.backgroundColor;
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     const painted: string[] = [];
+    this.textBudgetLimited = false;
     // Geometry is resolved in project pixels before preview downsampling.
     ctx.save();
     ctx.scale(
@@ -885,6 +1040,17 @@ export class TimelinePlayback {
       this.canvas.height / this.project.settings.height,
     );
     for (const visual of visuals) {
+      if (visual.kind === 'text') {
+        const raster = this.textImages.get(this.textKeys.get(visual.id)!);
+        if (raster?.status === 'budget') this.textBudgetLimited = true;
+        if (raster?.status !== 'ready') continue;
+        if (raster.image) {
+          ctx.globalAlpha = 1;
+          ctx.drawImage(raster.image, raster.x, raster.y);
+        }
+        painted.push(visual.id);
+        continue;
+      }
       const entry = this.entries.get(this.keys.get(visual.id)!);
       const nativeReady =
         entry &&
@@ -1007,6 +1173,7 @@ export class TimelinePlayback {
     this.disposed = true;
     this.frameGeneration++;
     this.clearFrames();
+    for (const key of this.textImages.keys()) this.releaseText(key);
     cancelAnimationFrame(this.animation);
     document.removeEventListener('visibilitychange', this.onVisibility);
     for (const entry of this.entries.values()) this.remove(entry);

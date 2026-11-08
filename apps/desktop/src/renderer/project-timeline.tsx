@@ -8,7 +8,7 @@ import {
   type RationalTime,
   type TimelineClip,
 } from '@opencut/core';
-import { Scissors, Trash2, Clapperboard } from 'lucide-react';
+import { Scissors, Trash2, Clapperboard, Type } from 'lucide-react';
 import { ClipArtwork } from './clip-artwork.js';
 import { ASSET_DRAG_TYPE, readAssetDrag } from './media-library.js';
 import type { AssetClipInput, TimelineOperation } from '../bridge.js';
@@ -52,6 +52,7 @@ export function ProjectTimeline({
   disabled = false,
   onEdit,
   onAddAsset,
+  onAddText,
 }: {
   project: Project | undefined;
   selected: string | null;
@@ -62,6 +63,7 @@ export function ProjectTimeline({
   linkedClipId?: string | null;
   disabled?: boolean;
   onAddAsset?: (input: AssetClipInput) => Promise<void>;
+  onAddText?: () => Promise<void>;
   onEdit?: (operations: TimelineOperation[], label: string) => Promise<void>;
 }) {
   const gesture = useRef<{
@@ -105,7 +107,7 @@ export function ProjectTimeline({
   const playheadX = relativePixels(position, origin, zoom);
   const selectedClip = project?.clips.find((clip) => clip.id === selected);
   const previewable =
-    selectedClip &&
+    selectedClip?.assetId &&
     project?.tracks.find((track) => track.id === selectedClip.trackId)?.type ===
       'video' &&
     index.assets.get(selectedClip.assetId)?.metadata?.kind !== 'image';
@@ -472,6 +474,12 @@ export function ProjectTimeline({
         </div>
         <div className="timeline-controls">
           <button
+            disabled={disabled || !project || !!proposal}
+            onClick={() => void onAddText?.()}
+          >
+            <Type aria-hidden="true" /> Add text
+          </button>
+          <button
             disabled={disabled || !canSplit || !!proposal}
             onClick={splitSelected}
             aria-label="Split at playhead"
@@ -751,7 +759,16 @@ export function ProjectTimeline({
                         Math.min(width + 2, clipRight) - x,
                       );
                       const artworkWidth = Math.max(0, clipWidth - 2);
-                      const asset = index.assets.get(clip.assetId);
+                      const asset =
+                        clip.assetId === undefined
+                          ? undefined
+                          : index.assets.get(clip.assetId);
+                      const title = clip.text
+                        ? clip.text.content
+                            .split(/\r?\n/, 1)[0]
+                            ?.trim()
+                            .slice(0, 100) || 'Text'
+                        : (asset?.name ?? 'Missing media');
                       return (
                         <g
                           key={clip.id}
@@ -759,7 +776,7 @@ export function ProjectTimeline({
                           tabIndex={0}
                           aria-label={`Inspect clip ${clip.id}`}
                           aria-pressed={selected === clip.id}
-                          className={`timeline-clip ${track.type}`}
+                          className={`timeline-clip ${clip.text ? 'text' : track.type}`}
                           onClick={() => onSelect(clip.id)}
                           onPointerDown={(event) =>
                             beginEdit(event, clip, 'move')
@@ -797,7 +814,11 @@ export function ProjectTimeline({
                                 ) {
                                   const destination = project.tracks[i]!;
                                   if (
-                                    asset?.mediaTypes.includes(destination.type)
+                                    clip.text
+                                      ? destination.type === 'video'
+                                      : asset?.mediaTypes.includes(
+                                          destination.type,
+                                        )
                                   ) {
                                     keyboardEdit(
                                       clip,
@@ -817,10 +838,8 @@ export function ProjectTimeline({
                           }}
                         >
                           <title>
-                            {clip.id} · {asset?.name} · Start{' '}
-                            {exactTime(clip.timelineStart)} · Source{' '}
-                            {exactTime(clip.sourceIn)} →{' '}
-                            {exactTime(clip.sourceOut)}
+                            {clip.id} · {title} ·{' '}
+                            {exactTime(clip.timelineStart)} → {exactTime(end)}
                           </title>
                           <rect
                             x={x}
@@ -836,7 +855,7 @@ export function ProjectTimeline({
                             height="52"
                             overflow="hidden"
                           >
-                            {artworkVisible && (
+                            {artworkVisible && !clip.text && (
                               <ClipArtwork
                                 project={project}
                                 clip={clip}
@@ -848,7 +867,7 @@ export function ProjectTimeline({
                               />
                             )}
                             <text className="clip-name" x="8" y="14">
-                              {asset?.name ?? 'Missing media'}
+                              {title}
                             </text>
                           </svg>
                           {(['left', 'right'] as const).map((edge) => {

@@ -63,7 +63,7 @@ Commands:
   project info <project-file>           Show metadata, settings and statistics
   project validate <project-file>       Check project data and media references
   project render <project-file> --output <new.mp4>
-                                       Composite video/image layers and mix audio
+                                       Composite video, image and text layers and mix audio
   media import <project-file> <file>    Import a source reference and probe metadata
   media list <project-file>             List assets, metadata and source availability
   media info <project-file> <asset-id>   Inspect an asset by stable ID
@@ -112,11 +112,11 @@ Exit codes: 0 success, 1 validation/runtime/file/media failure, 2 invalid argume
 const projectHelp = {
   render: `Usage: opencut project render <project-file> --output <file.mp4> [--quality <draft|balanced|high>] [--resolution <project|720p|1080p>] [--overwrite] [--json] [--help]
 
-Composite ordered video/image tracks and mix audio to H.264/AAC MP4 at project settings.
+Composite ordered video, image and text layers and mix audio to H.264/AAC MP4 at project settings.
 Visual gaps use the canvas background; audio gaps are silent. Original audio is preserved by default.
 Use clip audio --volume <0..1> --muted <true|false> to configure gains and muting.
 Use clip visual for position/scale/opacity/contain/cover/stretch and canvas set for dimensions/background.
-Later video tracks draw above earlier tracks; still images use their explicit clip duration.
+Later video tracks draw above earlier tracks. Images and text use their explicit clip duration.
 Times must align to project frames; source points use the first video frame as zero.
 Supports even sides up to 3840 (at most 3840x2160 pixels), 1–120 fps, 64 clips across all tracks and 600 seconds.
 Requires FFmpeg 8+ and ffprobe. Output must be in an existing directory; replacement requires --overwrite.
@@ -540,10 +540,13 @@ async function runCli(args: string[]): Promise<void> {
           },
         });
         if (values.json) jsonLine({ event: 'completed', ...result });
-        else
+        else {
+          for (const warning of result.warnings ?? [])
+            process.stderr.write(`Warning: ${warning}\n`);
           process.stdout.write(
             `Saved ${result.frameCount} frames (${result.width}x${result.height}, ${result.frameRate.numerator}/${result.frameRate.denominator} fps, H.264/AAC) to ${result.path}\n`,
           );
+        }
       } catch (error) {
         if (values.json)
           jsonLine({

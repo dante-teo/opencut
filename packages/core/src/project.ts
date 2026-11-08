@@ -97,9 +97,50 @@ export const canvasShape = {
   height: z.int().positive().optional(),
   backgroundColor: z.string().regex(canvasColorPattern).optional(),
 };
+const textColor = z.string().regex(canvasColorPattern);
+export const textLayerSchema = z.strictObject({
+  content: z
+    .string()
+    .max(4096)
+    .refine(
+      (value) => !/\p{Cc}/u.test(value.replace(/[\t\r\n]/g, '')),
+      'Use printable text, tabs and line breaks.',
+    ),
+  fontFamily: z
+    .string()
+    .trim()
+    .min(1)
+    .max(120)
+    .regex(/^[^\p{Cc}]+$/u)
+    .optional(),
+  fontSize: z.number().min(1).max(512).optional(),
+  fontWeight: z.int().min(100).max(900).multipleOf(100).optional(),
+  color: textColor.optional(),
+  alignment: z.enum(['left', 'center', 'right']).optional(),
+  wrapWidth: z.number().min(1).max(3840).nullable().optional(),
+  rotation: z.number().min(-360).max(360).optional(),
+  stroke: z
+    .strictObject({ color: textColor, width: z.number().min(0).max(64) })
+    .nullable()
+    .optional(),
+  shadow: z
+    .strictObject({
+      color: textColor,
+      x: z.number().min(-128).max(128),
+      y: z.number().min(-128).max(128),
+      blur: z.number().min(0).max(64),
+    })
+    .nullable()
+    .optional(),
+  background: z
+    .strictObject({ color: textColor, padding: z.number().min(0).max(128) })
+    .nullable()
+    .optional(),
+});
 export const clipSchema = z.strictObject({
   id,
-  assetId: id,
+  assetId: id.optional(),
+  text: textLayerSchema.optional(),
   trackId: id,
   timelineStart: timeSchema,
   sourceIn: timeSchema,
@@ -107,6 +148,15 @@ export const clipSchema = z.strictObject({
   ...clipAudioShape,
   visual: clipVisualSchema.optional(),
 });
+const persistedClipSchema = clipSchema.refine(
+  ({ assetId, text }) => (assetId === undefined) !== (text === undefined),
+  {
+    message: 'A clip must specify exactly one of assetId or text.',
+    path: ['assetId'],
+    when: ({ value }) =>
+      typeof value === 'object' && value !== null && !Array.isArray(value),
+  },
+);
 const settingsSchema = z.strictObject({
   backgroundColor: canvasShape.backgroundColor,
   width: z.int().positive(),
@@ -124,7 +174,7 @@ export const snapshotSchema = z.strictObject({
   settings: settingsSchema,
   assets: z.array(assetSchema),
   tracks: z.array(trackSchema),
-  clips: z.array(clipSchema),
+  clips: z.array(persistedClipSchema),
 });
 
 const historyEntrySchema = z.strictObject({
@@ -227,9 +277,10 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
   >();
   project.clips.forEach((clip, index) => {
     const location = `/clips/${index}`;
-    const asset = assets.get(clip.assetId);
+    const asset =
+      clip.assetId === undefined ? undefined : assets.get(clip.assetId);
     const track = tracks.get(clip.trackId);
-    if (!asset)
+    if (clip.assetId !== undefined && !asset)
       add(
         `${location}/assetId`,
         'invalid_reference',
@@ -253,6 +304,24 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
         'incompatible_visual',
         'Visual properties require a video track.',
       );
+    if (clip.text !== undefined) {
+      if (track?.type !== 'video')
+        add(
+          location + '/text',
+          'incompatible_text',
+          'Text requires a video track.',
+        );
+      if (
+        clip.volume !== undefined ||
+        clip.muted !== undefined ||
+        clip.visual?.fit !== undefined
+      )
+        add(
+          location,
+          'text_properties',
+          'Text has no clip audio or media fitting mode.',
+        );
+    }
     if (compareTimes(clip.sourceOut, clip.sourceIn) <= 0)
       add(
         `${location}/sourceOut`,

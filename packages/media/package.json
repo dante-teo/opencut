@@ -10,13 +10,15 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "fonts"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@napi-rs/canvas": "1.1.0",
     "@opencut/shared": "workspace:*",
     "lru-cache": "^11.5.3",
     "proper-lockfile": "^4.1.2",

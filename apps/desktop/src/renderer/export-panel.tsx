@@ -189,6 +189,13 @@ export function ExportPanel({
                 </span>
               )}
               {job.error && <p role="alert">{job.error}</p>}
+              {job.warnings.length > 0 && (
+                <ul aria-label="Export warnings">
+                  {job.warnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              )}
             </section>
           )}
           <fieldset disabled={running || busy || !state}>

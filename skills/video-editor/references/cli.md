@@ -60,6 +60,8 @@ Supply explicit new IDs to refer to a track or clip later in the batch.
 | `clip.remove`  | `id`                                                                                                                                    |
 | `clip.audio`   | `id` and at least one of `volume` (linear 0–1), `muted` (boolean)                                                                       |
 | `clip.visual`  | `id` and at least one of `x`, `y` (pixel offsets from center), `scale` (0.01–4), `opacity` (0–1), `fit` (`contain`, `cover`, `stretch`) |
+| `text.add`     | `at`, positive `duration`, `text` with `content`; optional `id`, video `trackId`, `visual` (x/y/scale/opacity)                          |
+| `text.set`     | `id` and at least one of `text` patch, `at`, `duration`                                                                                 |
 | `canvas.set`   | At least one of `width`, `height`, `backgroundColor`                                                                                    |
 
 For `clip.add`, nest visual fields in `visual`. Every intermediate operation
@@ -75,6 +77,20 @@ opencut edit apply "$PROJECT" "$BATCH" --dry-run --json
 opencut edit apply "$PROJECT" "$BATCH" --json
 opencut project inspect "$PROJECT" --json
 ```
+
+For a title, add an operation such as
+`{"type":"text.add","id":"title","at":30,"duration":90,"text":{"content":"OpenCut\n中文字幕","fontSize":64},"visual":{"y":200}}`.
+Without `trackId` the operation creates a top video track. Its end is exclusive.
+Set `fontFamily`, `fontSize`, `fontWeight` (100–900 by 100), `color`,
+`alignment` (left/center/right), optional `wrapWidth` and clockwise `rotation`
+in degrees on `text`. Effects are `stroke: {color,width}`,
+`shadow: {color,x,y,blur}` and `background: {color,padding}`. Use `null`
+in a patch to clear an effect or wrap width. Sizes and offsets use project
+pixels. Colors accept `#RRGGBB`, `#RRGGBBAA` or `transparent`. Set
+position, scale and opacity with `clip.visual`. Use the bundled default
+Noto Sans SC for portable English and Chinese layout. Missing font families
+use this fallback. Check the final `completed` event's optional `warnings`
+array for substitutions and report any that affect the requested typography.
 
 ## Visual review and export
 

@@ -29,7 +29,7 @@ are nonnegative safe integers on the project frame grid; timestamp queries accep
 | `time`, `duration` | Requested time and greatest clip end, in rational seconds.                 |
 | `boundary`         | `inside` before duration, `end` exactly at duration, `after` beyond it.    |
 | `activeClips`      | All clips containing the query, in track order.                            |
-| `visualClips`      | Active video-track clips, including images and zero-opacity clips.         |
+| `visualClips`      | Active video-track clips, including images, text and zero-opacity clips.   |
 | `audioClips`       | Active clips with present or unknown audio, including muted clips.         |
 | `mixingSources`    | Audio candidates whose effective volume is greater than zero.              |
 | `gap`, `visualGap` | No active clips, or no active opacity-positive visual clips, respectively. |
@@ -40,6 +40,8 @@ Each `EvaluatedTimelineClip` retains the stored clip fields and adds `duration`,
 `audioPresence` and `effectiveVolume`. Its visual properties, volume and mute have
 explicit defaults. `kind` identifies the evaluated role: a video asset used on an
 audio track is reported as audio. The types are exported from `@opencut/core`.
+Text clips report `kind: "text"`, carry their stored typography and have absent
+audio. Their source time expresses elapsed position in a static clip range.
 These results are derived values, not project fields to save back into the JSON.
 Mutating a returned clip does not modify the input project.
 

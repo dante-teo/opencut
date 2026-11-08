@@ -260,9 +260,10 @@ export async function runTimelineCommand(
       `Duration: ${time(result.duration)}`,
       ...result.tracks.flatMap((track) => [
         `Track: ${track.id} (${track.type}, ${track.name})`,
-        ...track.clips.map(
-          (clip) =>
-            `  Clip: ${clip.id}; asset ${clip.assetId}; timeline [${time(clip.timelineStart)}, ${time(clip.timelineEnd)}); source [${time(clip.sourceIn)}, ${time(clip.sourceOut)}); volume ${clip.volume ?? 1}; muted ${clip.muted ?? false}; visual ${JSON.stringify(clip.visual ?? {})}`,
+        ...track.clips.map((clip) =>
+          clip.text
+            ? `  Text: ${clip.id}; timeline [${time(clip.timelineStart)}, ${time(clip.timelineEnd)}); text ${JSON.stringify(clip.text)}; visual ${JSON.stringify(clip.visual ?? {})}`
+            : `  Clip: ${clip.id}; asset ${clip.assetId}; timeline [${time(clip.timelineStart)}, ${time(clip.timelineEnd)}); source [${time(clip.sourceIn)}, ${time(clip.sourceOut)}); volume ${clip.volume ?? 1}; muted ${clip.muted ?? false}; visual ${JSON.stringify(clip.visual ?? {})}`,
         ),
       ]),
       '',

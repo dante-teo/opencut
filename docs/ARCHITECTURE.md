@@ -342,6 +342,7 @@ disabled. A bundled **CommonJS preload** exposes typed capabilities including:
 `getApplicationInfo()`, `openPreview()`, `getPreviewMetrics()`, `getProject()`,
 `createProject(input)`, `openProject()`, `saveProject()`, `closeProject()`,
 `previewAsset(assetId)`, `timelineArtwork(id, input)`, `cancelTimelineArtwork(id)`,
+`timelineText(input)`,
 `releasePreview(url)`,
 `chooseExportOutput()`,
 `getExport()`, `startExport(input)`, `cancelExport(id)` and `onExportChanged(callback)`
@@ -665,6 +666,15 @@ routing, canvas painting and disposal. This remains a desktop adapter: core, CLI
 media inspection and offline rendering have no Electron/Web Audio dependency.
 Timeline media capabilities are revision-scoped and independent of source-preview
 selection. T26 adds ordered Canvas video/image compositing using the shared headless geometry/color contract. FFmpeg exports reuse that contract and blend in RGB; see the [composition rules](TIMELINE_PLAYBACK.md#composition-and-export-agreement-t26).
+
+T33 uses the same timeline and RGB layer order for asset-free text. Main
+resolves the clip and canvas settings from a revision-scoped text preview
+request. The media worker and headless render use the same Skia rasterizer.
+Desktop export requests rasters from the worker using its captured snapshot.
+Project changes invalidate preview requests independently of export work.
+Electron paints the resulting static PNG in the Canvas. FFmpeg stages its PNG
+beside the temporary output and blends it over the clip's project-frame range.
+See the [typography contract](PREVIEW_EXPORT_CONSISTENCY.md#text-layers-t33).
 
 ## Proxy and cache ownership (T25–T26)
 

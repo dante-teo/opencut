@@ -39,9 +39,11 @@ import {
   TIMELINE_PREVIEW_CHANNEL,
   MEDIA_CACHE_CHANNEL,
   TIMELINE_FRAME_CHANNEL,
+  TIMELINE_TEXT_CHANNEL,
   TIMELINE_ARTWORK_CHANNEL,
   CANCEL_TIMELINE_ARTWORK_CHANNEL,
   type TimelineArtworkResult,
+  type TimelineTextImage,
   type PreviewSource,
 } from '../bridge.js';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -183,6 +185,14 @@ const exportSession = new ExportSession(
   (state) => {
     if (!mainWindow?.isDestroyed())
       mainWindow?.webContents.send(EXPORT_CHANGED_CHANNEL, state);
+  },
+  async (width, height, text, visual, signal) => {
+    const { png, ...raster } = await mediaClient!.request<
+      Omit<import('@opencut/media').TextRaster, 'png'> & {
+        png: Uint8Array | null;
+      }
+    >('export-text', { width, height, text, visual }, signal);
+    return { ...raster, png: png ? Buffer.from(png) : null };
   },
 );
 
@@ -717,6 +727,48 @@ app
         }
       },
     );
+    let pendingText = 0;
+    ipcMain.handle(TIMELINE_TEXT_CHANNEL, async (event, input: unknown) => {
+      assertSender(event);
+      if (!input || typeof input !== 'object' || Array.isArray(input))
+        throw new Error('Invalid text preview request.');
+      const { clipId, projectId, expectedRevision } = input as Record<
+        string,
+        unknown
+      >;
+      if (
+        Object.keys(input).sort().join(',') !==
+          'clipId,expectedRevision,projectId' ||
+        typeof clipId !== 'string' ||
+        typeof projectId !== 'string' ||
+        typeof expectedRevision !== 'number' ||
+        !Number.isSafeInteger(expectedRevision)
+      )
+        throw new Error('Invalid text preview request.');
+      const request = projectSession.captureText({
+        clipId,
+        projectId,
+        expectedRevision,
+      });
+      if (!request) return null;
+      if (pendingText >= 8)
+        throw new Error('Text preview request limit reached.');
+      const generation = timelineGeneration;
+      pendingText++;
+      try {
+        const result = await mediaClient!.request<TimelineTextImage>(
+          'text',
+          request,
+        );
+        assertSender(event);
+        return generation === timelineGeneration ? result : null;
+      } catch (error) {
+        if (generation !== timelineGeneration) return null;
+        throw error;
+      } finally {
+        pendingText--;
+      }
+    });
     let pendingFrames = 0;
     ipcMain.handle(TIMELINE_FRAME_CHANNEL, async (event, input: unknown) => {
       assertSender(event);

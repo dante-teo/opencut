@@ -186,7 +186,7 @@ transparency over black like MP4. Contact-sheet layout/labels use Sharp and a
 system sans-serif font; Sharp does not render timeline layers. Font availability
 and exact label appearance depend on the host.
 
-Export limits still apply to the whole project: at least one video/image clip,
+Export limits still apply to the whole project: at least one video, image or text clip,
 frame-aligned boundaries, at most 64 clips and 600 seconds, rational 1–120 fps,
 even sides 2–3840 and at most 3840×2160 pixels. Referenced visual sources must be
 readable even outside the requested range; clips also validate referenced audio.
@@ -224,7 +224,7 @@ errors include a usage hint.
 - `project info <project-file> [--json]`: display validated metadata, settings and collection counts.
 - `project inspect <project-file> [--json]`: read revision-tagged settings, assets, tracks, clips and duration.
 - `project validate <project-file> [--json]`: validate project structure, internal references and media availability.
-- `project render <project-file> --output <file.mp4> [--quality <draft|balanced|high>] [--resolution <project|720p|1080p>] [--overwrite] [--json]`: composite video/image layers with mixed audio tracks to H.264/AAC MP4.
+- `project render <project-file> --output <file.mp4> [--quality <draft|balanced|high>] [--resolution <project|720p|1080p>] [--overwrite] [--json]` composites video, image and text layers with mixed audio tracks to H.264/AAC MP4.
 - `project --help` and `project create|info|validate|render --help`: show project usage.
 - `media import <project-file> <file> [--json]`: import a source reference and metadata.
 - `media list <project-file> [--json]`: list stored assets and source availability.
@@ -534,7 +534,7 @@ and transactions; T09 history is described below.
 `{ numerator, denominator }` in exact seconds; `duration` is the maximum clip
 end, or zero for an empty timeline. Tracks retain insertion order and contain
 `id`, `name`, `type`, and `clips` ordered by timeline start. Each listed clip
-contains the stored `id`, `assetId`, `trackId`, `timelineStart`, `sourceIn`,
+contains the stored `id`, `assetId` or `text`, `trackId`, `timelineStart`, `sourceIn`,
 `sourceOut`, plus derived `duration` and `timelineEnd`. Derived fields are not saved.
 
 Mutation JSON results are:
@@ -617,18 +617,20 @@ follow the project ID rules. Time fields are nonnegative safe integer **project
 frame indices**, including source points; the same exact rational conversion and
 T08 validation apply. No media probing, source changes or rendering occurs.
 
-| Operation `type` | Required fields besides `type`           | Optional fields                                     |
-| ---------------- | ---------------------------------------- | --------------------------------------------------- |
-| `track.add`      | `name`, `mediaType` (`video` or `audio`) | `id`                                                |
-| `track.remove`   | `id`                                     | —                                                   |
-| `clip.add`       | `assetId`, `trackId`, `at`, `in`, `out`  | `id`, `volume`, `muted`, `visual`                   |
-| `clip.audio`     | `id`                                     | `volume`, `muted` (at least one)                    |
-| `clip.visual`    | `id`                                     | `x`, `y`, `scale`, `opacity`, `fit` (at least one)  |
-| `canvas.set`     | —                                        | `width`, `height`, `backgroundColor` (at least one) |
-| `clip.move`      | `id`, at least one of `trackId` / `at`   | remaining destination field                         |
-| `clip.trim`      | `id`, at least one of `in` / `out`       | remaining source field                              |
-| `clip.split`     | `id`, `at`                               | `rightId`                                           |
-| `clip.remove`    | `id`                                     | —                                                   |
+| Operation `type` | Required fields besides `type`                | Optional fields                                     |
+| ---------------- | --------------------------------------------- | --------------------------------------------------- |
+| `track.add`      | `name`, `mediaType` (`video` or `audio`)      | `id`                                                |
+| `track.remove`   | `id`                                          | —                                                   |
+| `clip.add`       | `assetId`, `trackId`, `at`, `in`, `out`       | `id`, `volume`, `muted`, `visual`                   |
+| `clip.audio`     | `id`                                          | `volume`, `muted` (at least one)                    |
+| `clip.visual`    | `id`                                          | `x`, `y`, `scale`, `opacity`, `fit` (at least one)  |
+| `text.add`       | `at`, `duration`, `text` (requires `content`) | `id`, `trackId`, `visual` (x/y/scale/opacity)       |
+| `text.set`       | `id`                                          | `text` patch, `at`, `duration` (at least one)       |
+| `canvas.set`     | —                                             | `width`, `height`, `backgroundColor` (at least one) |
+| `clip.move`      | `id`, at least one of `trackId` / `at`        | remaining destination field                         |
+| `clip.trim`      | `id`, at least one of `in` / `out`            | remaining source field                              |
+| `clip.split`     | `id`, `at`                                    | `rightId`                                           |
+| `clip.remove`    | `id`                                          | —                                                   |
 
 Omitted new IDs become UUIDs. Supply explicit IDs when later operations in the
 same batch must reference a newly added track/clip or the right side of a split.
@@ -637,6 +639,73 @@ a temporary overlap or removing a populated track fails even if a later operatio
 would repair it. Any failure discards the entire batch without changing saved
 content, revision, undo or redo. Diagnostics include the failing operation's
 one-based index and type. An empty batch is invalid.
+
+### Text layers (T33)
+
+Create and update text with `edit apply` and inspect it with `timeline list`,
+`timeline inspect` or `project inspect`. `help --json` publishes the
+batch shape under `schemas["edit apply input"]`. This example adds a layer
+on an automatically created top video track.
+
+```json
+{
+  "expectedRevision": 0,
+  "label": "Add bilingual title",
+  "operations": [
+    {
+      "type": "text.add",
+      "id": "title",
+      "at": 30,
+      "duration": 90,
+      "text": {
+        "content": "OpenCut\n你好，世界！",
+        "fontSize": 64,
+        "fontWeight": 700,
+        "color": "#fff4da",
+        "alignment": "center",
+        "wrapWidth": 640,
+        "rotation": -5,
+        "stroke": { "color": "#181428", "width": 2 },
+        "shadow": { "color": "#000000aa", "x": 4, "y": 5, "blur": 8 },
+        "background": { "color": "#251b3599", "padding": 18 }
+      },
+      "visual": { "x": 30, "y": 220, "scale": 1, "opacity": 0.92 }
+    }
+  ]
+}
+```
+
+Use an existing video `trackId` to control stacking. The layer shows on
+`[at, at + duration)` in project frames. `text.set` can update start,
+duration and style together. Omitted fields keep their values. Supply `null`
+to clear stroke, shadow, background or wrapping. Move, split and remove the
+layer with the normal clip commands. Use `clip visual` for x, y, scale
+and opacity. Text supports no media fitting mode or clip audio.
+
+Font size (1–512), wrap width (1–3840), stroke width (0–64), shadow
+offsets (±128), shadow blur (0–64) and background padding (0–128) use
+project pixels before uniform scale. Rotation is clockwise in degrees around
+the block center (±360). The block is centered on the canvas, with x/y moving
+it right/down. Alignment positions lines within that block. The line height is
+1.25× font size. Explicit newlines are preserved. Wrapping, when enabled, uses
+word boundaries and splits overlong words at grapheme boundaries. A single
+grapheme can exceed the width. Tabs expand to four spaces. Text accepts up to
+4096 UTF-16 code units. Weight uses 100–900 in steps of 100. Colors accept
+`#RRGGBB`, `#RRGGBBAA` and `transparent`. Opacity applies to the whole
+layer including its effects. Font, size, weight, fill and alignment default to
+Noto Sans SC, 48 px, 400, white and center.
+
+Electron, `preview frame`, `preview contact-sheet`, `preview clip` and
+`project render` share text shaping and rasterization. A project can render
+with text as its only visual content. Named installed fonts are host-dependent.
+A missing family falls back to bundled Noto Sans SC. `project render --json`
+lists substitutions in the final `completed` event's `warnings` array when
+there are any. Human-readable rendering prints the warnings to stderr.
+The fallback stack includes monochrome Noto Emoji.
+Unsupported characters may appear as a missing-glyph box. See the
+[typography comparison and limitations](PREVIEW_EXPORT_CONSISTENCY.md#text-layers-t33).
+
+### Undo and redo
 
 `edit undo PROJECT` restores the previous transaction's exact content, including
 metadata timestamps, IDs, rational representations and collection ordering.
@@ -845,7 +914,7 @@ and no JSON success result on failure, including with `--json`.
 ## Project rendering
 
 `project render <project-file> --output <file.mp4> [--quality <draft|balanced|high>] [--resolution <project|720p|1080p>] [--overwrite] [--json]` reads a saved project
-snapshot and composites video/image tracks with mixed audio to H.264/yuv420p and AAC MP4. It requires FFmpeg 8+
+snapshot and composites video, image and text with mixed audio to H.264/yuv420p and AAC MP4. It requires FFmpeg 8+
 with libx264 and standard filters, plus ffprobe on PATH. The project's resolution
 and exact rational frame rate determine the default output. Original video audio is preserved
 by default. Independent audio clips on any number of audio tracks can overlap
@@ -858,8 +927,8 @@ The CLI keeps project-rate H.264 and its existing quality/resolution flags; ther
 are no CLI codec or output-frame-rate flags. Desktop exports always refuse existing
 files; CLI replacement requires explicit `--overwrite` and successful verification.
 
-T12 accepts multiple video tracks, still images and any audio tracks. At least one
-video/image clip is required; empty tracks are allowed. Same-track overlaps remain
+Video tracks accept video, image and text clips. At least one visual clip is
+required. Empty tracks are allowed. Same-track overlaps remain
 forbidden: use separate tracks for simultaneous layers or audio. Only referenced
 assets are probed; unused offline assets do not block a render. Relative sources
 resolve from the physical project directory, including directory aliases.
@@ -1051,7 +1120,7 @@ node apps/cli/dist/index.js project render PROJECT --output export.mp4 --overwri
 
 Headless APIs: `planProjectRender(project)` from `@opencut/core` returns width,
 height, backgroundColor, reduced frameRate, total frameCount, and ordered
-`visualClips` / `audioClips`. Visual entries contain clipId, assetId,
+`visualClips` / `audioClips`. Visual entries contain clipId, assetId or text,
 timelineStartFrame, sourceStartFrame, frameCount, x/y, scale, opacity and fit;
 array order is bottom to top. Audio entries contain the same identity/time fields,
 plus volume, muted and required (true for audio-track clips).

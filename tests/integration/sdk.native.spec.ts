@@ -3,8 +3,73 @@ import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
-import { openProject } from '@opencut/sdk';
+import { createProject, openProject } from '@opencut/sdk';
 import { requireTool, runTool } from '../../scripts/fixture-lib.js';
+
+test('T33 SDK previews and exports text-only projects with frame-accurate visibility', async (t) => {
+  requireTool('ffmpeg');
+  requireTool('ffprobe');
+  const root = resolve('tests/fixtures/generated');
+  await mkdir(root, { recursive: true });
+  const directory = await mkdtemp(join(root, 't33-native-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, 'title.json');
+  const editor = await createProject(path, {
+    name: 'Text only',
+    settings: {
+      width: 240,
+      height: 160,
+      frameRate: { numerator: 30, denominator: 1 },
+    },
+  });
+  editor.project.apply({
+    type: 'text.add',
+    id: 'title',
+    at: 3,
+    duration: 6,
+    text: {
+      content: 'Title\n中文字幕',
+      fontFamily: 'OpenCut Missing Test Face',
+      fontSize: 27,
+    },
+  });
+  await editor.save();
+  const project = (await openProject(path)).project;
+  const gap = join(directory, 'before.png');
+  const visible = join(directory, 'visible.png');
+  const output = join(directory, 'title.mp4');
+  await project.previewFrame(2, gap);
+  await project.previewFrame(3, visible);
+  const video = await project.render(output);
+  assert.equal(video.frameCount, 9);
+  assert.equal(video.metadata.video?.codec, 'h264');
+  assert.match(video.warnings?.join(' ') ?? '', /Using Noto Sans SC/);
+  const pixels = (path: string, ...filters: string[]) => {
+    const decoded = spawnSync('ffmpeg', [
+      '-v',
+      'error',
+      '-i',
+      path,
+      ...filters,
+      '-frames:v',
+      '1',
+      '-pix_fmt',
+      'rgb24',
+      '-threads',
+      '1',
+      '-f',
+      'rawvideo',
+      'pipe:1',
+    ]);
+    assert.equal(decoded.status, 0, decoded.stderr.toString());
+    assert.equal(decoded.stdout.length, 240 * 160 * 3);
+    return decoded.stdout.filter((channel) => channel > 200).length;
+  };
+  assert.equal(pixels(gap), 0);
+  assert.equal(pixels(output, '-vf', "select='eq(n,2)'"), 0);
+  assert.ok(pixels(visible) > 1000);
+  assert.ok(pixels(output, '-vf', "select='eq(n,3)'") > 1000);
+});
 
 test('T30 documented scripts create, inspect, preview and render from original media', async (t) => {
   requireTool('ffmpeg');

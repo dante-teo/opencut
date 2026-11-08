@@ -530,6 +530,41 @@ export function ProjectWorkspace() {
         project={project}
         disabled={!!busy}
         onEdit={edit}
+        onAddText={async () => {
+          if (!project) return;
+          const id = crypto.randomUUID();
+          const { width, height, frameRate } = project.settings;
+          const at = Number(frameIndex(playhead, frameRate, true));
+          try {
+            await edit(
+              [
+                {
+                  type: 'text.add',
+                  id,
+                  at,
+                  duration: Math.max(
+                    1,
+                    Math.round(
+                      (3 * frameRate.numerator) / frameRate.denominator,
+                    ),
+                  ),
+                  text: {
+                    content: 'Text',
+                    fontSize: Math.max(
+                      1,
+                      Math.min(96, Math.round(Math.min(width, height) / 12)),
+                    ),
+                  },
+                },
+              ],
+              'Add text',
+              true,
+            );
+            setSelection({ kind: 'clip', id });
+          } catch {
+            // The workspace displays the transaction rejection.
+          }
+        }}
         onAddAsset={(input) =>
           run(
             'Adding media clip…',
@@ -542,7 +577,7 @@ export function ProjectWorkspace() {
         linkedClipId={linkedClipId}
         onPreviewClip={(id) => {
           const clip = project?.clips.find((clip) => clip.id === id);
-          if (!clip) return;
+          if (!clip?.assetId) return;
           setLinkedClipId(id);
           setPlayhead(clip.timelineStart);
           setPreviewPosition(

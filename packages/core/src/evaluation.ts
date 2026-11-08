@@ -10,13 +10,11 @@ import {
 import type { RationalTime } from './time.js';
 
 /** Derived intent only: no decoded frames, stream offsets, or media availability. */
-export interface ResolvedTimelineClip extends TimelineClip {
+interface ResolvedClipProperties extends TimelineClip {
   duration: RationalTime;
   timelineEnd: RationalTime;
   trackIndex: number;
   trackType: 'video' | 'audio';
-  /** Metadata-free visual assets are conservatively classified as video. */
-  kind: 'video' | 'audio' | 'image';
   visual: {
     [Key in keyof NonNullable<TimelineClip['visual']>]-?: NonNullable<
       NonNullable<TimelineClip['visual']>[Key]
@@ -28,25 +26,36 @@ export interface ResolvedTimelineClip extends TimelineClip {
   audioPresence: 'present' | 'absent' | 'unknown';
 }
 
+export type ResolvedMediaClip = ResolvedClipProperties & {
+  assetId: string;
+  /** Metadata-free visual assets are conservatively classified as video. */
+  kind: 'video' | 'audio' | 'image';
+};
+export type ResolvedTextClip = ResolvedClipProperties & {
+  text: NonNullable<TimelineClip['text']>;
+  kind: 'text';
+};
+export type ResolvedTimelineClip = ResolvedMediaClip | ResolvedTextClip;
+
 /** Shared resolution for point evaluation and offline render compilation. */
 export function resolveTimeline(project: Project) {
   const timeline = listTimeline(project);
   const assets = new Map(project.assets.map((asset) => [asset.id, asset]));
   const clips: ResolvedTimelineClip[] = timeline.tracks.flatMap(
     (track, trackIndex) =>
-      track.clips.map((clip) => {
-        const asset = assets.get(clip.assetId)!;
+      track.clips.map((clip): ResolvedTimelineClip => {
+        const asset =
+          clip.assetId === undefined ? undefined : assets.get(clip.assetId);
         const kind =
           track.type === 'audio'
             ? 'audio'
-            : asset.metadata?.kind === 'image'
+            : asset?.metadata?.kind === 'image'
               ? 'image'
               : 'video';
         return {
           ...clip,
           trackIndex,
           trackType: track.type,
-          kind,
           visual: {
             x: clip.visual?.x ?? 0,
             y: clip.visual?.y ?? 0,
@@ -57,23 +66,26 @@ export function resolveTimeline(project: Project) {
           volume: clip.volume ?? 1,
           muted: clip.muted ?? false,
           audioPresence:
-            kind === 'image' || asset.metadata?.hasAudio === false
+            clip.text || kind === 'image' || asset?.metadata?.hasAudio === false
               ? 'absent'
-              : asset.metadata
+              : asset?.metadata
                 ? 'present'
                 : 'unknown',
+          ...(clip.text
+            ? { kind: 'text', text: clip.text }
+            : { kind, assetId: clip.assetId! }),
         };
       }),
   );
   return { duration: timeline.duration, clips };
 }
 
-export interface EvaluatedTimelineClip extends ResolvedTimelineClip {
+export type EvaluatedTimelineClip = ResolvedTimelineClip & {
   sourceTime: RationalTime;
   /** Opacity-based eligibility, not occlusion or decoded-alpha detection. */
   visible: boolean;
   effectiveVolume: number;
-}
+};
 
 export interface TimelineEvaluation {
   time: RationalTime;

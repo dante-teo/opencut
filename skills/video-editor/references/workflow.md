@@ -107,7 +107,7 @@ range and keep its endpoint within the intended final duration.
 Probe recordings first. Keep text and cursor activity legible and preserve the
 full screen with `contain` where needed. Preview around edits that remove
 pauses to check the action and audio still make sense. Place a camera inset or
-a pre-rendered title image on a higher video track. Check that it leaves menus
+an editable title on a higher video track. Check that it leaves menus
 and captions visible. Set music gain below the primary narration and listen
 to an overlap in a short preview. For variable frame rate sources, examine
 actual composited frames around cuts while keeping edit times on the project grid.

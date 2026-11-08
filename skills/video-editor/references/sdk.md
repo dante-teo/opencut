@@ -29,6 +29,11 @@ then review the draft. A per-save dry run keeps the editor usable. Opening or
 creating an editor with `{ dryRun: true }` makes every save simulated and
 disables previews and renders on that handle.
 
+Use `project.apply({ type: 'text.add', at: 30, duration: 90, text: { content: 'OpenCut\n中文字幕' } })`
+to stage editable text. The SDK exports `TextLayer` for typed style data.
+Use `text.set` to revise an existing layer. See the
+[CLI batch reference](cli.md#edit-safely) for the shared fields and units.
+
 Preview calls resolve to the output `path`, `width` and `height`. The sheet
 result also includes its grid and tile dimensions. Keep your explicit frame
 list alongside the result when you need to associate each tile with a frame.

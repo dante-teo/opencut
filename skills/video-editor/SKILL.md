@@ -1,6 +1,6 @@
 ---
 name: video-editor
-description: Edit local videos with OpenCut using its CLI or TypeScript SDK. Use when a user wants to assemble a rough cut, trim or split footage, layer images or music, inspect an edited timeline, or export and verify a playable MP4 from media files or an OpenCut project.
+description: Edit local videos with OpenCut using its CLI or TypeScript SDK. Use when a user wants to assemble a rough cut, trim or split footage, add editable text, layer images or music, inspect an edited timeline, or export and verify a playable MP4 from media files or an OpenCut project.
 ---
 
 # Edit videos with OpenCut
@@ -21,12 +21,14 @@ scripts need the supplied `@opencut/sdk` package.
 3. **Plan and apply.** Use stable IDs from inspection and integer project-frame
    indices, including source in/out. The out point is exclusive. Dry-run a
    revision-guarded CLI batch or stage edits with the SDK and dry-run its save.
+   Add editable titles with `text.add` and change them with `text.set`.
    Re-read the project after publication. On a revision conflict, inspect the
    newer edits and rebuild the plan against them.
 4. **Review what the viewer will see.** Use `timeline inspect` to confirm active
    layers and source mappings. Open the rendered PNGs or contact sheet at cuts
    and overlay boundaries. Use a short preview clip to review motion and sound
-   when playback is available. Match the reviewed revision to the export.
+   when playback is available. Check text wrapping, alignment, legibility and
+   glyph coverage in the rendered frame. Match the reviewed revision to the export.
 5. **Export and verify.** Choose a new MP4 path in an existing directory.
    For CLI rendering, require exit 0 and a terminal `completed` JSONL event.
    Probe the published file for the expected streams, dimensions and duration.

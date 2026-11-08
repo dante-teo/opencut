@@ -1,4 +1,8 @@
-import { getApplicationInfo, inspectionJsonSchemas } from '@opencut/core';
+import {
+  editTransactionJsonSchema,
+  getApplicationInfo,
+  inspectionJsonSchemas,
+} from '@opencut/core';
 
 type Option = {
   type: 'boolean' | 'string';
@@ -418,7 +422,7 @@ const definitions: Definition[] = [
   {
     name: 'edit apply',
     description:
-      'Apply atomic batch JSON with required expectedRevision and operations (optional label); see command help.',
+      'Apply atomic batch JSON with required expectedRevision and operations (optional label), including text.add and text.set.',
     args: ['project-file', 'batch.json'],
     options: edit,
     mutates: true,
@@ -618,6 +622,21 @@ export function discovery(scope: string[] = [], help = '') {
         package: '@opencut/sdk',
         activeProjectSessions: true,
       },
+      textLayers: {
+        status: 'supported',
+        operations: [
+          'text.add',
+          'text.set',
+          'clip.move',
+          'clip.trim',
+          'clip.split',
+          'clip.visual',
+          'clip.remove',
+        ],
+        transactionSchema: 'edit apply input',
+        sizing: 'project pixels',
+        defaultFont: 'Noto Sans SC',
+      },
       mcp: { status: 'unavailable' },
     },
     limits: {
@@ -628,7 +647,8 @@ export function discovery(scope: string[] = [], help = '') {
         evenDimensions: true,
         maxSide: 3840,
         maxPixels: 3840 * 2160,
-        requiresVideoOrImageClip: true,
+        requiresVisualClip: true,
+        requiresVideoOrImageClip: false,
       },
       previewClipSeconds: 30,
       contactSheetSamples: 16,
@@ -671,6 +691,7 @@ export function discovery(scope: string[] = [], help = '') {
     },
     schemas: {
       ...inspectionJsonSchemas,
+      'edit apply input': editTransactionJsonSchema(),
       run: {
         $schema: 'https://json-schema.org/draft/2020-12/schema',
         type: 'object',

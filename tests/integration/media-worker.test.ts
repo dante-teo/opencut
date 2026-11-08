@@ -7,11 +7,13 @@ const mock = vi.hoisted(() => ({
   generateProxy: vi.fn(),
   status: vi.fn(),
   waveform: vi.fn(),
+  rasterizeTextLayer: vi.fn(),
 }));
 vi.mock('node:worker_threads', () => ({
   parentPort: { on: mock.on, postMessage: mock.postMessage },
 }));
 vi.mock('../../packages/media/dist/index.js', () => ({
+  rasterizeTextLayer: mock.rasterizeTextLayer,
   ThumbnailCache: class {
     clear = vi.fn();
   },
@@ -66,6 +68,38 @@ async function request(method: string, input: Record<string, unknown> = {}) {
   if (reply.error) throw new Error(reply.error);
   return reply.value;
 }
+
+it('keeps an export raster alive across preview invalidation and aborts it on request', async () => {
+  const signals: AbortSignal[] = [];
+  mock.rasterizeTextLayer.mockImplementation(
+    (_width, _height, _text, _visual, signal: AbortSignal) =>
+      new Promise((_resolve, reject) => {
+        signals.push(signal);
+        signal.addEventListener(
+          'abort',
+          () => reject(new Error('Raster cancelled')),
+          { once: true },
+        );
+      }),
+  );
+  message({ id: 11, method: 'export-text' });
+  message({ id: 12, method: 'text' });
+  await request('cancel');
+  expect(signals.map(({ aborted }) => aborted)).toEqual([false, false]);
+  await request('invalidate');
+  expect(signals.map(({ aborted }) => aborted)).toEqual([false, true]);
+  expect(mock.postMessage).toHaveBeenCalledWith({
+    id: 12,
+    error: expect.stringContaining('Raster cancelled'),
+  });
+  message({ id: 11, method: 'abort' });
+  await vi.waitFor(() =>
+    expect(mock.postMessage).toHaveBeenCalledWith({
+      id: 11,
+      error: expect.stringContaining('Raster cancelled'),
+    }),
+  );
+});
 
 it('restarts active and queued automatic proxies on a fresh selection after project invalidation', async () => {
   await request('select', { path: '/a.mp4', auto: true });

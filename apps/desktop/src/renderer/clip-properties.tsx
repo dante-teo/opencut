@@ -11,7 +11,7 @@ import type { TimelineOperation } from '../bridge.js';
 import { frameIndex } from './timeline-geometry.js';
 
 /** Exact frame fields must never silently round an imported off-grid boundary. */
-function frames(time: RationalTime, project: Project): number | null {
+export function frames(time: RationalTime, project: Project): number | null {
   const index = Number(frameIndex(time, project.settings.frameRate));
   if (!Number.isSafeInteger(index)) return null;
   try {

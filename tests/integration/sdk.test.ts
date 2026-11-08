@@ -47,6 +47,100 @@ async function seedOffline() {
 }
 
 describe('public SDK', () => {
+  it('shares asset-free text layers, frame timing and persistent history with the CLI', async () => {
+    const editor = await createProject(path, { name: 'Text layers' });
+    await editor.save();
+    const batch = join(directory, 'text.json');
+    const content = 'OpenCut\n中文字幕 😀';
+    const run = (...args: string[]) =>
+      JSON.parse(
+        execFileSync(process.execPath, [cli, ...args, '--json'], {
+          encoding: 'utf8',
+        }),
+      );
+    await writeFile(
+      batch,
+      JSON.stringify({
+        expectedRevision: 0,
+        operations: [
+          {
+            type: 'text.add',
+            id: 'title',
+            at: 3,
+            duration: 6,
+            text: {
+              content,
+              fontWeight: 700,
+              background: { color: '#11223388', padding: 8 },
+            },
+            visual: { x: 11, y: -13, scale: 1.25 },
+          },
+        ],
+      }),
+    );
+    expect(run('edit', 'apply', path, batch, '--dry-run')).toMatchObject({
+      changed: true,
+      dryRun: true,
+    });
+    expect((await openProject(path)).project.inspect().clips).toEqual([]);
+    expect(run('edit', 'apply', path, batch)).toMatchObject({ revision: 1 });
+    expect(run('timeline', 'inspect', path, '--frame', '3')).toMatchObject({
+      visualClips: [
+        {
+          id: 'title',
+          kind: 'text',
+          text: { content },
+          visual: { x: 11, y: -13 },
+        },
+      ],
+      audioClips: [],
+    });
+    const reopened = await openProject(path);
+    expect(reopened.project.inspect().assets).toEqual([]);
+    expect(reopened.project.inspectTimeline(2).activeClips).toEqual([]);
+    expect(reopened.project.inspectTimeline(9).activeClips).toEqual([]);
+    expect(await reopened.project.checkMedia()).toEqual([]);
+    expect(() =>
+      reopened.project.apply(
+        { type: 'track.add', id: 'audio', name: 'Audio', mediaType: 'audio' },
+        { type: 'clip.move', id: 'title', trackId: 'audio' },
+      ),
+    ).toThrow('Text requires a video track');
+    expect(reopened.project.inspect().tracks).toHaveLength(1);
+    expect(() =>
+      reopened.project.apply({ type: 'clip.audio', id: 'title', volume: 0 }),
+    ).toThrow('no clip audio');
+    reopened.project.apply(
+      {
+        type: 'text.set',
+        id: 'title',
+        at: 5,
+        duration: 8,
+        text: { rotation: 15, background: null },
+      },
+      { type: 'clip.split', id: 'title', at: 9, rightId: 'title-right' },
+      { type: 'clip.visual', id: 'title-right', opacity: 0.5 },
+    );
+    await reopened.save();
+    const split = run('timeline', 'inspect', path, '--frame', '9');
+    expect(split.visualClips).toMatchObject([
+      {
+        id: 'title-right',
+        kind: 'text',
+        text: { content, rotation: 15, background: null },
+        visual: { opacity: 0.5 },
+      },
+    ]);
+    run('edit', 'undo', path);
+    expect(
+      (await openProject(path)).project.inspect().clips.map((clip) => clip.id),
+    ).toEqual(['title']);
+    run('edit', 'redo', path);
+    expect(
+      (await openProject(path)).project.inspect().clips.map((clip) => clip.id),
+    ).toEqual(['title', 'title-right']);
+  });
+
   it('stages exact edits and persists one history step, with dry-run and undo/redo', async () => {
     await seedOffline();
     const initial = await readFile(path, 'utf8');

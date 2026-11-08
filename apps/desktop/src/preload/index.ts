@@ -14,6 +14,7 @@ import {
   TIMELINE_PREVIEW_CHANNEL,
   MEDIA_CACHE_CHANNEL,
   TIMELINE_FRAME_CHANNEL,
+  TIMELINE_TEXT_CHANNEL,
   TIMELINE_ARTWORK_CHANNEL,
   CANCEL_TIMELINE_ARTWORK_CHANNEL,
   type DesktopAPI,
@@ -85,6 +86,7 @@ const api: DesktopAPI = {
     ipcRenderer.invoke(TIMELINE_PREVIEW_CHANNEL, input),
   mediaCache: (input) => ipcRenderer.invoke(MEDIA_CACHE_CHANNEL, input),
   timelineFrame: (input) => ipcRenderer.invoke(TIMELINE_FRAME_CHANNEL, input),
+  timelineText: (input) => ipcRenderer.invoke(TIMELINE_TEXT_CHANNEL, input),
   timelineArtwork: (id, input) =>
     ipcRenderer.invoke(TIMELINE_ARTWORK_CHANNEL, id, input),
   cancelTimelineArtwork: (id) =>

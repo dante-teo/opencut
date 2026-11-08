@@ -1,10 +1,95 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { serializeProject } from '@opencut/core';
+import { createProject, serializeProject } from '@opencut/core';
 import { auditProjects } from '../../scripts/t21-projects.js';
 import { runMediaTool } from '../../packages/media/src/process.js';
 import { launchDesktop } from './helpers.js';
+import { openComposition } from './t26-fixtures.js';
+
+test('shares identical decoded text and defers other layers until the preview budget allows them', async () => {
+  const root = resolve('tests/fixtures/generated');
+  await mkdir(root, { recursive: true });
+  const directory = await mkdtemp(join(root, 't33-text-budget-'));
+  const cacheDirectory = join(directory, 'cache');
+  const { MediaCache } = await import('../../packages/media/src/index.js');
+  await new MediaCache(cacheDirectory).configure({
+    diskBytes: 8 * 1024 ** 2,
+    memoryBytes: 1024 ** 2,
+  });
+  const project = createProject({
+    name: 'Text budget',
+    settings: {
+      width: 640,
+      height: 360,
+      frameRate: { numerator: 30, denominator: 1 },
+    },
+  });
+  project.tracks = ['first', 'duplicate', 'third'].map((id) => ({
+    id,
+    name: id,
+    type: 'video',
+  }));
+  project.clips = project.tracks.map(({ id }) => ({
+    id: 'clip-' + id,
+    trackId: id,
+    timelineStart: { numerator: 0, denominator: 1 },
+    sourceIn: { numerator: 0, denominator: 1 },
+    sourceOut: { numerator: id === 'third' ? 2 : 1, denominator: 1 },
+    text: {
+      content: id === 'third' ? 'Other\n字\n幕' : 'Same\n字\n幕',
+      wrapWidth: 640,
+      fontSize: 120,
+      background: { color: '#000000', padding: 0 },
+    },
+  }));
+  const { application, page } = await launchDesktop({
+    OPENCUT_MEDIA_CACHE: cacheDirectory,
+  });
+  try {
+    await openComposition(application, page, directory, project);
+    const canvas = page.locator('#project-viewer canvas');
+    const warning = page.getByText(
+      'Some text layers exceed the preview memory budget.',
+      { exact: true },
+    );
+    await expect(warning).toBeVisible();
+    await expect(canvas).toHaveAttribute(
+      'data-presented-layers',
+      '["clip-first","clip-duplicate"]',
+    );
+
+    const seek = page.getByRole('slider', {
+      name: 'Seek timeline',
+      exact: true,
+    });
+    await seek.fill('30');
+    await expect(canvas).toHaveAttribute(
+      'data-presented-layers',
+      '["clip-third"]',
+    );
+    await expect(warning).toHaveCount(0);
+    await seek.fill('0');
+    await expect(canvas).toHaveAttribute(
+      'data-presented-layers',
+      '["clip-first","clip-duplicate"]',
+    );
+    await page.evaluate(() =>
+      window.opencut.mediaCache({
+        action: 'configure',
+        limits: { diskBytes: 8 * 1024 ** 2, memoryBytes: 2 * 1024 ** 2 },
+      }),
+    );
+    await expect(canvas).toHaveAttribute(
+      'data-presented-layers',
+      '["clip-first","clip-duplicate","clip-third"]',
+    );
+    await expect(warning).toHaveCount(0);
+  } finally {
+    await application.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test('proxy preview preserves trimmed source mapping, toggles safely and falls back after loss', async () => {
   test.setTimeout(90000);

@@ -21,6 +21,15 @@ export type TimelineArtworkInput = HistoryInput & {
 } & ({ kind: 'frame'; count: number; interval: number } | { kind: 'waveform' });
 export type TimelineArtworkResult = string | Uint8Array | null;
 export const TIMELINE_FRAME_CHANNEL = 'media:frame';
+export const TIMELINE_TEXT_CHANNEL = 'media:text';
+export interface TimelineTextImage {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  url: string | null;
+  warning: string | null;
+}
 export type MediaCacheAction =
   | { action: 'status' | 'cancel' | 'clear' | 'cleanup' }
   | { action: 'configure'; limits: CacheLimits }
@@ -110,7 +119,9 @@ export type TimelineOperation = Extract<
       | 'clip.split'
       | 'clip.remove'
       | 'clip.audio'
-      | 'clip.visual';
+      | 'clip.visual'
+      | 'text.add'
+      | 'text.set';
   }
 >;
 export interface TimelineEditInput extends HistoryInput {
@@ -170,6 +181,7 @@ export interface ExportState {
     durationSeconds: number;
     codec: string;
   } | null;
+  warnings: string[];
   error: string;
 }
 export interface DesktopAPI {
@@ -205,6 +217,9 @@ export interface DesktopAPI {
   timelineFrame(
     input: HistoryInput & { assetId: string; timestamp: number },
   ): Promise<string | null>;
+  timelineText(
+    input: HistoryInput & { clipId: string },
+  ): Promise<TimelineTextImage | null>;
   timelineArtwork(
     id: number,
     input: TimelineArtworkInput,

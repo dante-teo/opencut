@@ -75,6 +75,41 @@ const propose = (
   );
 
 describe('shared-core GUI edit proposals', () => {
+  it('rejects a text left trim that would round an off-grid right edge', () => {
+    const project = fixture();
+    const clip = {
+      id: 'title',
+      trackId: 'v1',
+      timelineStart: frameTime(60, rate),
+      sourceIn: frameTime(0, rate),
+      sourceOut: { numerator: 61, denominator: 60 },
+      text: { content: 'Title' },
+    };
+    project.clips[0] = clip;
+    const proposal = propose(project, 'left', 1n);
+    expect(proposal.error).toMatch(/align the text clip end/i);
+    expect(proposal.operations).toEqual([]);
+    expect(clipTimelineEnd(proposal.clip)).toEqual(clipTimelineEnd(clip));
+  });
+  it('extends a text clip to the left without a media source bound', () => {
+    const project = fixture();
+    project.clips[0] = {
+      id: 'title',
+      trackId: 'v1',
+      timelineStart: frameTime(60, rate),
+      sourceIn: frameTime(0, rate),
+      sourceOut: frameTime(90, rate),
+      text: { content: 'Title\n字幕' },
+    };
+    const next = propose(project, 'left', -15n);
+    expect(next.error).toBeNull();
+    expect(next.clip.timelineStart).toEqual(frameTime(45, rate));
+    expect(clipTimelineEnd(next.clip)).toEqual(frameTime(150, rate));
+    expect(next.clip.text).toEqual(project.clips[0].text);
+    expect(next.operations).toEqual([
+      { type: 'text.set', id: 'title', at: 45, duration: 105 },
+    ]);
+  });
   it('moves clips between compatible tracks, validates overlap/type rules and preserves the original', () => {
     const project = fixture();
     const before = serializeProject(project);

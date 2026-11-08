@@ -59,7 +59,11 @@ T31 delivers the portable [OpenCut Agent Skill](../skills/video-editor/SKILL.md)
 and [black-box agent validation](#external-agent-validation). The Skill uses
 only the public CLI and TypeScript SDK.
 
-Select a clip to edit **Timeline position**, **Duration**, **Source in/out** in
+T32 adds [timeline filmstrips and waveforms](TIMELINE_PLAYBACK.md#timeline-clip-artwork).
+T33 adds [editable text layers](PRODUCT.md#text-layers-t33) with shared typography
+in the Project viewer, CLI previews, and exports.
+
+Select a media clip to edit **Timeline position**, **Duration**, **Source in/out** in
 whole project frames, **Volume** (linear 0–1), **Mute**, and video **Position X/Y**
 (pixels), **Scale** (0.01–4), and **Opacity** (0–1). Enter or leave a numeric field
 to apply; Escape discards its draft. Sliders apply on release as one undo entry.
@@ -69,7 +73,7 @@ Core validation rejects overlaps, invalid source ranges and invalid values witho
 changing the project. Off-grid or unrepresentable timing remains visible as exact
 stored times but cannot be silently rounded through the numeric editor.
 Source preview plays original media. Project viewer applies clip volume/mute and
-mixes overlapping audio and composites ordered video/image layers with clip transforms.
+mixes overlapping audio and composites ordered video, image and text layers.
 
 Outside text fields and native controls, **Space** toggles the active viewer,
 **Command+Z / Command+Shift+Z** undo/redo, **Command+S** saves, **S** splits at the
@@ -205,6 +209,8 @@ sequence zero or the playhead. **Snap px** configures the screen-pixel radius
 (default 8), independent of zoom; disable Snap for frame-only positioning. Edited
 boundaries use integer project frames. Edge trimming requires frame-aligned clip
 start and source-in; off-grid legacy clips must be aligned through the CLI first.
+Trimming the left edge of a text clip also requires its right edge to be on a
+project frame. Adjust the right edge first if the clip end falls between frames.
 **Split at playhead** (S) splits the selected clip; **Delete clip**
 (Delete/Backspace) removes it. **Undo** / **Redo** and Ctrl/Command+Z / Shift+Z
 restore shared CLI/GUI history, including after save/reopen.
@@ -225,6 +231,12 @@ locked while dragging. Successful edits and undo/redo pause and unlink source pr
 retaining the project playhead. Transitions and keyframes remain unavailable.
 Use **Export** to render the edited project.
 
+Use **Add text** to create a clip of about three seconds at the playhead on a
+new text track. Edit its content, timing, typography and effects in the
+Inspector, then choose **Apply text** to commit the fields as one undo step.
+Use the Project viewer to check the result. The CLI and SDK use the same
+[text operations](CLI.md#text-layers-t33).
+
 Select a video clip and click **Preview selected clip** to link source playback.
 This explicit action sets the playhead to the clip start and opens its source-in.
 Ruler seeks within the linked clip seek the matching source time. Source playback
@@ -232,9 +244,9 @@ updates the playhead, clamped to the clip range, while the source transport reta
 its full-source bounds. Selecting another clip only changes the inspector; the
 source link stays with the explicitly previewed clip. Seeking outside the linked
 range switches to Project viewer and pauses/unlinks the source. Library selection
-and **Open video** also unlink. Audio/image clips have no linked source preview;
+and **Open video** also unlink. Audio, image and text clips have no linked source preview;
 linked source playback stays within that source. Project viewer provides edited
-timeline cuts/gaps, audio mixing and ordered video/image compositing.
+timeline cuts/gaps, audio mixing and ordered video, image and text compositing.
 Very long timelines use a proportional scrollbar to stay within browser layout
 limits; scrollbar precision becomes coarser at extreme durations.
 

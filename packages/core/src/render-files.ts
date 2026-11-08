@@ -1,7 +1,7 @@
 import type { Project } from './project.js';
 import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { RenderControls } from '@opencut/media';
+import type { RenderControls, VisualTimelineClip } from '@opencut/media';
 import { renderVideoTimeline, RenderCancelledError } from '@opencut/media';
 import {
   canonicalProjectFilePath,
@@ -52,7 +52,7 @@ export async function resolveProjectRender(
 ) {
   const plan = planProjectRender(project);
   const assets = new Map(project.assets.map((asset) => [asset.id, asset]));
-  const visualClips = [];
+  const visualClips: VisualTimelineClip[] = [];
   const checked = new Set<string>();
   const resolveSource = async (clip: { assetId: string; clipId: string }) => {
     const asset = assets.get(clip.assetId)!;
@@ -68,7 +68,9 @@ export async function resolveProjectRender(
     return sourcePath;
   };
   for (const clip of plan.visualClips)
-    visualClips.push({ ...clip, path: await resolveSource(clip) });
+    visualClips.push(
+      clip.text ? clip : { ...clip, path: await resolveSource(clip) },
+    );
   const audioClips = [];
   for (const clip of plan.audioClips)
     audioClips.push({ ...clip, path: await resolveSource(clip) });

@@ -55,6 +55,12 @@ Progress shows processed output frames, elapsed time and an approximate remainin
 encoding time when FFmpeg has enough information. Preflight and verification have
 no remaining-time estimate. A 100% encoding counter can still be verifying;
 **Export complete** appears only after independent output checks and publication.
+If a title requests a font family unavailable on the export machine, OpenCut
+uses bundled Noto Sans SC and lists the substitution in the completed job's
+status. Export renders all active text layers from the captured project,
+including layers deferred by the viewer's memory budget. See the
+[typography contract](PREVIEW_EXPORT_CONSISTENCY.md#text-layers-t33).
+
 Progress events are bounded to at most five updates per second. One foreground
 export is supported; there is no persistent queue or background service.
 

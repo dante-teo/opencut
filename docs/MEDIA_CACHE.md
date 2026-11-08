@@ -103,7 +103,13 @@ Cached images bridge paused seeks; ready native decoders take precedence. The
 renderer retains decoded PNGs within the configured memory allowance and releases
 them on seek, playback start or disposal. Lowering the limit trims them immediately.
 The worker applies the memory limit to encoded playback PNGs and waveform
-peaks. The renderer applies the same limit separately to decoded playback PNGs.
+peaks. The renderer shares its decoded image allowance between playback PNGs
+and text rasters. Text clips with the same content, style and transform share
+one decoded raster. Active text takes priority over upcoming text and cached
+fallback frames. If active text exceeds the allowance, the viewer defers layers
+and shows a warning. They can appear when other layers end or when you increase
+**Memory MiB** in **Proxy & cache**. The [export job](EXPORT.md) renders active
+text from the captured project.
 No unbounded decoded video-frame sequence or full-file PCM lives in JavaScript.
 
 Chromium owns native decoder buffers outside these cache budgets. The player

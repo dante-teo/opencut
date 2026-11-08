@@ -27,7 +27,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 and [architecture decisions](adr/0012-realtime-layer-composition.md) define their
 current contracts and validation boundaries.
 
-## Implemented milestones through T31
+## Implemented milestones through T33
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -292,3 +292,17 @@ measurements rather than raw JSON; machine-readable reports remain available to
 automated checks. The inspector presents frame-aligned timing as project timecode
 and preserves exact rational source-range values when either endpoint is off-grid.
 These refinements add no CLI commands, editing operations or export formats.
+
+### Text layers (T33)
+
+Use **Add text** at the timeline playhead. Select the resulting clip to edit
+its content, font, color, alignment, wrapping, position, scale, opacity and
+rotation in the Inspector. Expand **Effects** for stroke, shadow and
+background. **Apply text** commits the fields together as one undo step.
+The timeline supports moving, trimming and splitting text clips.
+
+The CLI and TypeScript SDK apply the same text operations and history. The
+desktop viewer and FFmpeg exports share text shaping and rasterization,
+including bundled English and Chinese typography and an emoji fallback.
+See [text layer commands](CLI.md#text-layers-t33) and the
+[preview/export gate](PREVIEW_EXPORT_CONSISTENCY.md#text-layers-t33).

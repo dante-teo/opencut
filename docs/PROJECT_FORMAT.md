@@ -89,14 +89,14 @@ existing assets without recorded metadata remain valid.
 
 ## Fields and invariants
 
-| Entity   | Fields and constraints                                                                                                                                                                                                                                                                            |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Project  | Required `schemaVersion`, `metadata`, `settings`, `assets`, `tracks`, `clips`. Empty collections are valid.                                                                                                                                                                                       |
-| Metadata | Stable `id`, nonblank `name`, UTC `createdAt` and `updatedAt` timestamps with millisecond precision. `updatedAt` must not precede `createdAt`.                                                                                                                                                    |
-| Settings | Positive safe-integer pixel `width` and `height`; positive rational `frameRate` in frames per second. Optional `backgroundColor` in #RRGGBB/#RRGGBBAA or transparent. These are project settings, independent of any export codec restrictions.                                                   |
-| Asset    | Stable `id`, nonblank `name`, `file` reference, nonempty unique `mediaTypes` containing `video`, `audio` or both. Optional positive rational `duration` in seconds and optional probe `metadata`. Omit unknown duration.                                                                          |
-| Track    | Stable `id`, nonblank `name`, `type` of `video` or `audio`.                                                                                                                                                                                                                                       |
-| Clip     | Stable `id`, `assetId`, `trackId`, and rational `timelineStart`, `sourceIn`, `sourceOut` in seconds. The referenced asset must contain the track's media type. Optional `volume` (linear 0–1, default 1) and `muted` (boolean, default false), plus optional `visual` transforms on video tracks. |
+| Entity   | Fields and constraints                                                                                                                                                                                                                                                 |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Project  | Required `schemaVersion`, `metadata`, `settings`, `assets`, `tracks`, `clips`. Empty collections are valid.                                                                                                                                                            |
+| Metadata | Stable `id`, nonblank `name`, UTC `createdAt` and `updatedAt` timestamps with millisecond precision. `updatedAt` must not precede `createdAt`.                                                                                                                         |
+| Settings | Positive safe-integer pixel `width` and `height`; positive rational `frameRate` in frames per second. Optional `backgroundColor` in #RRGGBB/#RRGGBBAA or transparent. These are project settings, independent of any export codec restrictions.                        |
+| Asset    | Stable `id`, nonblank `name`, `file` reference, nonempty unique `mediaTypes` containing `video`, `audio` or both. Optional positive rational `duration` in seconds and optional probe `metadata`. Omit unknown duration.                                               |
+| Track    | Stable `id`, nonblank `name`, `type` of `video` or `audio`.                                                                                                                                                                                                            |
+| Clip     | Stable `id`, `trackId`, and rational `timelineStart`, `sourceIn`, `sourceOut` in seconds. Media clips reference a compatible `assetId` and support optional `volume` and `muted`. Text clips carry a `text` object. Video tracks support optional `visual` transforms. |
 
 IDs start with an ASCII letter or digit and contain only letters, digits,
 underscores and hyphens. They must be unique across metadata, assets, tracks and
@@ -204,6 +204,20 @@ the desktop inspector. It adds no schema fields or version changes. GUI property
 changes use the same transactions/history as CLI edits and persist with Save;
 source preview does not apply clip audio/visual settings. Numeric timing editors
 require exact, safely representable project-frame boundaries.
+
+T33 adds asset-free text clips in version 1. A clip has exactly one of
+`assetId` or `text`. `text` stores the content and optional typography,
+rotation and effects. The clip's `visual` stores x/y/scale/opacity. Text is
+valid on video tracks and follows their stacking and overlap rules. Clip audio
+and `visual.fit` apply to media clips. The text range uses the existing
+`sourceOut - sourceIn` duration with a source in point of zero on creation.
+Trimming or splitting can produce a nonzero source in point. It changes
+timing while the same static text stays visible.
+
+Existing project and history data load without a migration. Earlier readers
+reject projects containing text clips. No asset entry, file reference or
+generated raster is persisted for a text clip. See
+[text layer fields](CLI.md#text-layers-t33).
 
 ## Media references and portability
 
