@@ -39,8 +39,8 @@ The example assumes the source contains at least 30 project frames. `at`, `in`
 and `out` are integer project frames. `at` is an absolute timeline position
 and `out` is an exclusive source boundary. Inspection returns exact rational
 seconds. The `EditOperation` union provides autocomplete for track add/remove,
-clip add/move/trim/split/remove, clip audio/visual settings, text and subtitle edits, and
-canvas settings.
+clip add/move/trim/split/remove, clip audio/visual settings, track audio, text
+and subtitle edits, and canvas settings.
 See the [batch command reference](CLI.md#transactions-undo-and-redo) for
 operation fields and validation. Pass explicit IDs to refer to a new track or
 clip later in the same group. Inspect the draft for generated IDs.
@@ -72,6 +72,29 @@ An editor's signal cancels a local save before publication or an Electron save
 before submission. A session disconnect during commit can leave the outcome
 unknown. Read back project content and history before retrying. See the
 [project session decision](adr/0011-shared-project-session.md) for live session limits.
+
+## Audio
+
+Use the existing typed operations on the draft, then save the mix as one edit.
+
+```ts
+editor.project.apply(
+  {
+    type: 'clip.audio',
+    id: 'music-clip',
+    volume: 0.5,
+    fadeIn: 15,
+    fadeOut: 30,
+  },
+  { type: 'track.audio', id: 'music-track', volume: 0.5, muted: false },
+);
+await editor.save({ label: 'Mix music' });
+```
+
+The fade lengths are project frames. Set a length to zero to clear the fade.
+Lengths must fit within the clip together. The two gains multiply and either
+mute silences the clip. `project.inspectTimeline(frame)` returns the effective
+gain at that frame. To measure audible output, decode the rendered audio.
 
 ## Preview and render
 

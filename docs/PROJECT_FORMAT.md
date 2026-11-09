@@ -181,6 +181,23 @@ version 1 projects and history snapshots round trip without inserted defaults.
 Muting overrides gain without changing the stored volume. These fields affect
 both original video audio and audio-track clips. Splits copy them; trims/moves
 preserve them. They are included in transaction snapshots and undo/redo.
+T35 extends the same `volume` and `muted` fields to video and audio tracks.
+Track and clip gains multiply, and either mute silences the clip. Video track
+controls affect original audio independently of picture. Media clips may store
+optional `fadeIn` and `fadeOut` objects with a positive rational `duration` in
+seconds. Both durations together must fit the clip's source range. Gain ramps
+are linear. The default `from` and `to` amplitudes are 0 to 1 for a fade in and 1
+to 0 for a fade out. A split inside a ramp stores the partial endpoint gains
+on both pieces to preserve the envelope. When a ramp meets the clip body, its
+gain is 1 there. A trim re-anchors fades with standard endpoints and reduces
+the fade on the trimmed edge first if they no longer fit. When both source
+points change together, the fade in is reduced first.
+
+All T35 fields are optional in version 1. Missing fields keep existing defaults
+without changing saved bytes on a read. Earlier strict readers reject the new
+fields. The editor, CLI and SDK share transactions, undo and redo for these
+settings. Meter readings are transient.
+
 T12 adds optional settings `backgroundColor` (default black; `#RRGGBB`,
 `#RRGGBBAA` or `transparent` as of T26) and clip
 `visual: { x?, y?, scale?, opacity?, fit? }` on video tracks. x/y are finite pixel

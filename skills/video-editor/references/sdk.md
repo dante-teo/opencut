@@ -126,3 +126,11 @@ with `subtitle.*` operations, and publish via the editor's `save()`.
 `await project.exportSubtitles('new.vtt')` writes the current draft as a
 sidecar. `project.render('new.mp4')` burns visible cues into the video by
 default. Set `{ burnSubtitles: false }` for clean video at the same duration.
+
+For a music clip, stage
+`editor.project.apply({ type: 'clip.audio', id: musicClipId, volume: 0.5, fadeIn: 15, fadeOut: 30 })`.
+Use `{ type: 'track.audio', id: musicTrackId, volume: 0.5, muted: false }`
+to set the containing track's gain and mute. Fade durations are project frames,
+must fit within the clip together, and clear at zero. Both gains multiply and
+either mute silences the clip. Save the edits together and inspect the draft or
+reopen the project to verify the settings.

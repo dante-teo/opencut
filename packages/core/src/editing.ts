@@ -1,11 +1,7 @@
 import { z } from 'zod';
-import {
-  canvasShape,
-  clipAudioShape,
-  clipVisualSchema,
-  validateProject,
-} from './project.js';
+import { canvasShape, clipVisualSchema, validateProject } from './project.js';
 import type { HistoryEntry, Project, ProjectSnapshot } from './project.js';
+import { trackAudioShape } from './audio.js';
 import { frameTime } from './time.js';
 import { textLayerSchema } from './text-style.js';
 import { editSubtitles, subtitleOperations } from './subtitles.js';
@@ -19,6 +15,7 @@ import {
   splitClip,
   trimClip,
   setClipAudio,
+  setTrackAudio,
   setClipVisual,
   setText,
   setCanvas,
@@ -26,6 +23,11 @@ import {
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/);
 const frame = z.int().nonnegative();
+const clipAudioOptions = {
+  ...trackAudioShape,
+  fadeIn: frame.optional(),
+  fadeOut: frame.optional(),
+};
 const name = z
   .string()
   .refine((value) => value.trim().length > 0, 'Must not be blank.');
@@ -54,6 +56,7 @@ const operationSchema = z.discriminatedUnion('type', [
     mediaType: z.enum(['video', 'audio']),
   }),
   z.strictObject({ type: z.literal('track.remove'), id }),
+  z.strictObject({ type: z.literal('track.audio'), id, ...trackAudioShape }),
   z.strictObject({
     type: z.literal('clip.add'),
     id: id.optional(),
@@ -62,7 +65,7 @@ const operationSchema = z.discriminatedUnion('type', [
     at: frame,
     in: frame,
     out: frame,
-    ...clipAudioShape,
+    ...clipAudioOptions,
     visual: clipVisualSchema.optional(),
   }),
   z.strictObject({
@@ -84,7 +87,7 @@ const operationSchema = z.discriminatedUnion('type', [
     rightId: id.optional(),
   }),
   z.strictObject({ type: z.literal('clip.remove'), id }),
-  z.strictObject({ type: z.literal('clip.audio'), id, ...clipAudioShape }),
+  z.strictObject({ type: z.literal('clip.audio'), id, ...clipAudioOptions }),
   z.strictObject({
     type: z.literal('clip.visual'),
     id,
@@ -270,10 +273,25 @@ export function previewTransaction(project: Project, input: EditTransaction) {
             type: operation.mediaType,
           });
           break;
+        case 'track.audio':
+          changed = setTrackAudio(next, operation.id, operation);
+          break;
         case 'track.remove':
           changed = removeTrack(next, operation.id);
           break;
         case 'clip.add':
+        case 'clip.audio': {
+          const { volume, muted, fadeIn, fadeOut } = operation;
+          const audio = {
+            volume,
+            muted,
+            fadeIn: fadeIn === undefined ? undefined : time(fadeIn),
+            fadeOut: fadeOut === undefined ? undefined : time(fadeOut),
+          };
+          if (operation.type === 'clip.audio') {
+            changed = setClipAudio(next, operation.id, audio);
+            break;
+          }
           changed = addClip(next, {
             ...(operation.id !== undefined ? { id: operation.id } : {}),
             assetId: operation.assetId,
@@ -281,11 +299,11 @@ export function previewTransaction(project: Project, input: EditTransaction) {
             timelineStart: time(operation.at),
             sourceIn: time(operation.in),
             sourceOut: time(operation.out),
-            volume: operation.volume,
-            muted: operation.muted,
+            ...audio,
             visual: operation.visual,
           });
           break;
+        }
         case 'text.add':
           changed = addText(next, {
             id: operation.id,
@@ -353,9 +371,6 @@ export function previewTransaction(project: Project, input: EditTransaction) {
             height: operation.height,
             backgroundColor: operation.backgroundColor,
           });
-          break;
-        case 'clip.audio':
-          changed = setClipAudio(next, operation.id, operation);
           break;
       }
       const { project: updated, ...result } = changed;

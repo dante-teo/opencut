@@ -84,7 +84,7 @@ describe('agent CLI discovery and offline inspection', () => {
     expect(result.stderr).toBe('');
     const catalog = JSON.parse(result.stdout);
     expect(catalog.discoveryVersion).toBe(1);
-    expect(catalog.commands).toHaveLength(42);
+    expect(catalog.commands).toHaveLength(43);
     expect(
       new Set(catalog.commands.map((command: { name: string }) => command.name))
         .size,

@@ -235,11 +235,12 @@ errors include a usage hint.
 - `timeline inspect <project-file> --frame <n> [--json]`: evaluate active layers, audio candidates and exact source-time mappings.
 - `preview frame|contact-sheet|clip <project-file> --output <new.png|new.mp4> [options]`: generate headless composited inspection media; see [selection, quality and resource limits](#agent-discovery-and-visual-inspection-t29).
 - `track add <project-file> --type <video|audio> --name <name> [--json]`: append a track.
+- `track audio <project-file> <track-id> [--volume <0..1>] [--muted <true|false>] [--json]` controls the sound on a video or audio track.
 - `track remove <project-file> <track-id> [--json]`: remove an empty track.
 - `clip add <project-file> <asset-id> --track <track-id> --at <frame> --in <frame> --out <frame> [--json]`: place an asset range.
 - `clip move <project-file> <clip-id> [--track <track-id>] [--at <frame>] [--json]`: move without changing source points.
 - `clip trim <project-file> <clip-id> [--in <frame>] [--out <frame>] [--json]`: change source points with a fixed timeline start.
-- `clip audio <project-file> <clip-id> [--volume <0..1>] [--muted <true|false>] [--json]`: configure clip audio. `clip add` accepts the same optional audio flags.
+- `clip audio <project-file> <clip-id> [--volume <0..1>] [--muted <true|false>] [--fade-in <frames>] [--fade-out <frames>] [--json]` configures clip audio. `clip add` accepts the same optional audio flags.
 - `clip split <project-file> <clip-id> --at <frame> [--json]`: split strictly inside a clip.
 - `clip remove <project-file> <clip-id> [--json]`: remove only that clip.
 - `clip visual <project-file> <clip-id> [--x <px>] [--y <px>] [--scale <n>] [--opacity <0..1>] [--fit <contain|cover|stretch>] [--json]`: configure a visual clip. `clip add` accepts these flags too.
@@ -492,12 +493,14 @@ node apps/cli/dist/index.js track remove /work/demo.opencut.json TRACK_ID --json
   Removing a populated track fails with its clip IDs; explicitly move or remove them first.
 - `clip add` requires an existing asset and compatible track plus all three time
   options. Video tracks accept video/image assets; audio tracks require audio.
-- `clip add` optionally accepts `--volume` and `--muted`. `clip audio` updates
-  an existing video or audio clip and requires at least one of these flags.
-  Volume is decimal linear amplitude gain from 0 to 1, default 1; 0 is silence,
-  0.5 halves amplitude and 1 is unchanged. `--muted true|false` defaults to false;
-  mute overrides gain without changing the stored volume. Omitted properties
-  remain omitted in old files. Split copies both properties; trim/move retain them.
+- `clip add` optionally accepts `--volume`, `--muted`, `--fade-in`, and `--fade-out`.
+  `clip audio` updates an existing media clip and requires at least one of these flags.
+  `track audio` requires at least one of `--volume` and `--muted`.
+  Gains are decimal linear amplitude from 0 to 1 and default to 1. Clip and track
+  gains multiply. Either mute silences the clip and keeps the stored gain.
+  Fade lengths use whole project frames. Zero clears a fade. The sum of both
+  fade lengths must fit the clip. Moving carries fades with the clip. Trimming
+  re-anchors fades and shortens them as needed. Splitting preserves the envelope.
   Audio edits support the same history, dry-run and revision guards as other edits.
   An AV asset may be placed independently on either type. No linked clip is created.
 - `clip move` requires `--track`, `--at` or both. Omitted values stay unchanged.
@@ -543,6 +546,7 @@ Mutation JSON results are:
 | -------------------------- | -------------------------- |
 | `track add`                | `{ path, track }`          |
 | `track remove`             | `{ path, removedTrackId }` |
+| `track audio`              | `{ path, track }`          |
 | `clip add/move/trim/audio` | `{ path, clip }`           |
 | `clip split`               | `{ path, left, right }`    |
 | `clip remove`              | `{ path, removedClipId }`  |
@@ -615,22 +619,23 @@ Batch objects allow only `expectedRevision`, optional nonblank `label`, and
 `operations`. Operation objects are strict; unknown fields/types fail. All IDs
 follow the project ID rules. Time fields are nonnegative safe integer **project
 frame indices**, including source points; the same exact rational conversion and
-T08 validation apply. No media probing, source changes or rendering occurs.
+T08 validation apply. `fadeIn` and `fadeOut` are project-frame durations. No media probing, source changes or rendering occurs.
 
-| Operation `type` | Required fields besides `type`                | Optional fields                                     |
-| ---------------- | --------------------------------------------- | --------------------------------------------------- |
-| `track.add`      | `name`, `mediaType` (`video` or `audio`)      | `id`                                                |
-| `track.remove`   | `id`                                          | —                                                   |
-| `clip.add`       | `assetId`, `trackId`, `at`, `in`, `out`       | `id`, `volume`, `muted`, `visual`                   |
-| `clip.audio`     | `id`                                          | `volume`, `muted` (at least one)                    |
-| `clip.visual`    | `id`                                          | `x`, `y`, `scale`, `opacity`, `fit` (at least one)  |
-| `text.add`       | `at`, `duration`, `text` (requires `content`) | `id`, `trackId`, `visual` (x/y/scale/opacity)       |
-| `text.set`       | `id`                                          | `text` patch, `at`, `duration` (at least one)       |
-| `canvas.set`     | —                                             | `width`, `height`, `backgroundColor` (at least one) |
-| `clip.move`      | `id`, at least one of `trackId` / `at`        | remaining destination field                         |
-| `clip.trim`      | `id`, at least one of `in` / `out`            | remaining source field                              |
-| `clip.split`     | `id`, `at`                                    | `rightId`                                           |
-| `clip.remove`    | `id`                                          | —                                                   |
+| Operation `type` | Required fields besides `type`                | Optional fields                                        |
+| ---------------- | --------------------------------------------- | ------------------------------------------------------ |
+| `track.add`      | `name`, `mediaType` (`video` or `audio`)      | `id`                                                   |
+| `track.audio`    | `id`                                          | `volume`, `muted` (at least one)                       |
+| `track.remove`   | `id`                                          | —                                                      |
+| `clip.add`       | `assetId`, `trackId`, `at`, `in`, `out`       | `id`, `volume`, `muted`, `fadeIn`, `fadeOut`, `visual` |
+| `clip.audio`     | `id`                                          | `volume`, `muted`, `fadeIn`, `fadeOut` (at least one)  |
+| `clip.visual`    | `id`                                          | `x`, `y`, `scale`, `opacity`, `fit` (at least one)     |
+| `text.add`       | `at`, `duration`, `text` (requires `content`) | `id`, `trackId`, `visual` (x/y/scale/opacity)          |
+| `text.set`       | `id`                                          | `text` patch, `at`, `duration` (at least one)          |
+| `canvas.set`     | —                                             | `width`, `height`, `backgroundColor` (at least one)    |
+| `clip.move`      | `id`, at least one of `trackId` / `at`        | remaining destination field                            |
+| `clip.trim`      | `id`, at least one of `in` / `out`            | remaining source field                                 |
+| `clip.split`     | `id`, `at`                                    | `rightId`                                              |
+| `clip.remove`    | `id`                                          | —                                                      |
 
 Omitted new IDs become UUIDs. Supply explicit IDs when later operations in the
 same batch must reference a newly added track/clip or the right side of a split.
@@ -1067,11 +1072,14 @@ independent audio clip, mute the corresponding video clip with
 `clip audio PROJECT VIDEO_CLIP_ID --muted true --json`. Audio settings and edits
 apply to each clip independently, even when clips reference the same asset.
 
-Per-clip `volume` is linear amplitude gain in [0, 1], default 1; `muted` is boolean,
-default false. Configure either on `clip add` or later with
-`clip audio PROJECT CLIP_ID --volume 0.25 --muted false --json`. Use
-`--muted true` to silence original video audio or independent audio clips. JSON
-batch `clip.add` and `clip.audio` use numeric `volume` and boolean `muted`.
+Clip and track `volume` are linear amplitude gains from 0 to 1, with 1 as the
+default. At 30 fps, `clip audio PROJECT CLIP_ID --fade-in 15 --fade-out 30 --volume 0.5 --json`
+sets a half-second fade in, a one-second fade out and half amplitude.
+`track audio PROJECT TRACK_ID --volume 0.5 --json` sets the track gain, producing
+quarter amplitude on that clip outside its fades. Both levels support
+`--muted true` and default to unmuted. Fades multiply the resulting gain using
+linear ramps from the edited clip's edges, after applying the source trim.
+FFmpeg evaluates the ramps on the 48 kHz export sample grid.
 Mixing sums gains without automatic normalization as tracks enter/leave. The
 existing T03 safety limiter caps peaks at 0.95 with latency compensation; dense
 mixes can therefore reduce loud peaks. A silent 48 kHz stereo AAC stream is
@@ -1182,7 +1190,7 @@ height, backgroundColor, reduced frameRate, total frameCount, and ordered
 `visualClips` / `audioClips`. Visual entries contain clipId, assetId or text,
 timelineStartFrame, sourceStartFrame, frameCount, x/y, scale, opacity and fit;
 array order is bottom to top. Audio entries contain the same identity/time fields,
-plus volume, muted and required (true for audio-track clips).
+plus combined volume, combined mute, optional resolved fade durations and gain endpoints, and required (true for audio-track clips).
 `renderProjectFile(absoluteProjectPath, output, controls?)` from `@opencut/core/node` resolves
 asset references and executes the plan without saving the project.
 `renderVideoTimeline(options)` from `@opencut/media` takes resolved paths in place

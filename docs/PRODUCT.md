@@ -27,7 +27,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 and [architecture decisions](adr/0012-realtime-layer-composition.md) define their
 current contracts and validation boundaries.
 
-## Implemented milestones through T34
+## Implemented milestones through T35
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -322,3 +322,13 @@ shared style for all cues. Each action creates its own undo step when it
 changes the project and preserves the other form's pending edits. Projects
 retain exact cue timing and undo history. The viewer and burned-in exports
 share the title rasterizer. See [subtitle editing and export](CLI.md#editable-subtitles-t34).
+
+### Audio fades, volume and metering (T35)
+
+Set clip volume, mute and linear fade durations in the inspector. Fade lines
+show on timeline clips and their handles adjust the durations in project
+frames. Video and audio track headers have their own gain and mute controls.
+The Project viewer shows left and right playback peaks from the mixed signal.
+Preview and export use the same gain and fade envelope. The CLI and TypeScript
+SDK edit the same saved settings and history. See
+[desktop audio controls](TIMELINE_PLAYBACK.md#audio-editing-and-meters).

@@ -18,6 +18,8 @@ const resolvedClip = clipSchema.extend({
   kind: z.enum(['video', 'audio', 'image', 'text']),
   volume: z.number(),
   muted: z.boolean(),
+  trackVolume: z.number().optional(),
+  trackMuted: z.boolean().optional(),
   visual: z.strictObject({
     x: z.number(),
     y: z.number(),

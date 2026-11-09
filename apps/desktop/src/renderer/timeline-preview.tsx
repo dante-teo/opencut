@@ -1,5 +1,6 @@
 import { Play, Pause, StepBack, StepForward } from 'lucide-react';
 import type { DesktopCacheStatus } from '../bridge.js';
+import { gainDb } from './clip-properties.js';
 import { MediaCacheControls } from './media-cache.js';
 import {
   useEffect,
@@ -177,6 +178,33 @@ export function TimelinePreview({
         </p>
       )}
       <div className="viewer-utilities">
+        <div className="audio-meters" role="group" aria-label="Playback peaks">
+          {(['Left', 'Right'] as const).map((channel, i) => {
+            const peak = diagnostics?.audioPeaks[i] ?? 0;
+            const db =
+              peak > 0
+                ? Math.max(-60, Math.min(0, 20 * Math.log10(peak)))
+                : -60;
+            return (
+              <label
+                key={channel}
+                title={`${channel} peak · ${gainDb(peak)}FS`}
+              >
+                <span aria-hidden="true">{channel[0]}</span>
+                <meter
+                  aria-label={`${channel} audio peak`}
+                  aria-valuetext={`${gainDb(peak)}FS`}
+                  min={-60}
+                  max={0}
+                  low={-18}
+                  high={-3}
+                  optimum={-24}
+                  value={db}
+                />
+              </label>
+            );
+          })}
+        </div>
         <MediaCacheControls project={project} onStatus={onCacheStatus} />
         <details name="viewer-utilities" className="timeline-diagnostics">
           <summary>Playback diagnostics</summary>

@@ -91,8 +91,10 @@ Image metadata identifies stills; absent metadata conservatively means video.
 Stills retain their logical source time/range for trim/split consistency; decoders
 hold the still image regardless of that time. The project model has no stored visibility flag.
 
-Volume defaults to 1, mute to false. Effective volume is zero for mute or known
-absent audio. Opacity does not mute audio. `audioPresence` uses saved metadata;
+Clip and track volumes default to 1 and mute defaults to false.
+`effectiveVolume` is the product of clip gain, track gain and the linear fade
+at the queried clip-relative time. It is zero when either level is muted or
+audio is known absent. Opacity affects picture independently. `audioPresence` uses saved metadata;
 missing metadata means unknown, even when mediaTypes only lists video (legacy
 video assets can carry original audio). `audioClips` includes present/unknown
 sources, including muted sources; `mixingSources` further excludes zero effective

@@ -4,7 +4,7 @@ import { ffmpeg, probeFrameTimestamps } from './t27-comparison.js';
 const sampleRate = 48000;
 const frequencies = [440, 880] as const;
 
-export function decodeAudio(path: string) {
+export function decodeAudio(path: string, channel: 0 | 1 = 0) {
   const timestamps = probeFrameTimestamps(path, 'a:0');
   if (timestamps.sampleRate !== sampleRate)
     throw new Error(
@@ -53,7 +53,7 @@ export function decodeAudio(path: string) {
     );
   return {
     samples: Float32Array.from({ length: sampleCount }, (_, i) =>
-      pcm.readFloatLE(i * 8),
+      pcm.readFloatLE(i * 8 + channel * 4),
     ),
     startSeconds: (frames[0]!.pts! * numerator) / denominator,
     decodedFrames: frames.length,

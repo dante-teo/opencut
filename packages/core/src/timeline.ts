@@ -2,6 +2,7 @@ import type { Project, TimelineClip, Track } from './project.js';
 import { validateProject } from './project.js';
 import { addTimes, compareTimes, subtractTimes } from './time.js';
 import type { RationalTime } from './time.js';
+import { audioFadeEdges, sliceAudioFades } from './audio.js';
 
 export class TimelineError extends Error {
   override name = 'TimelineError';
@@ -125,10 +126,10 @@ export function removeTrack(project: Project, id: string) {
   return { project: finish(next), removedTrackId: id };
 }
 
-export interface AddClipOptions extends Omit<
-  TimelineClip,
-  'id' | 'assetId' | 'text'
-> {
+export interface AddClipOptions
+  extends
+    Omit<TimelineClip, 'id' | 'assetId' | 'text' | keyof ClipAudioOptions>,
+    ClipAudioOptions {
   id?: string;
   assetId: string;
 }
@@ -144,9 +145,8 @@ export function addClip(project: Project, options: AddClipOptions) {
     sourceIn: options.sourceIn,
     sourceOut: options.sourceOut,
     ...(options.visual !== undefined ? { visual: options.visual } : {}),
-    ...(options.volume !== undefined ? { volume: options.volume } : {}),
-    ...(options.muted !== undefined ? { muted: options.muted } : {}),
   };
+  applyClipAudioSettings(clip, options);
   next.clips.push(clip);
   const updated = finish(next);
   return { project: updated, clip: requireClip(updated, clip.id) };
@@ -270,7 +270,69 @@ export interface TrimClipOptions {
   sourceOut?: RationalTime;
 }
 
-export type ClipAudioOptions = Pick<TimelineClip, 'volume' | 'muted'>;
+export type TrackAudioOptions = Pick<Track, 'volume' | 'muted'>;
+export type ClipAudioOptions = TrackAudioOptions & {
+  fadeIn?: RationalTime | undefined;
+  fadeOut?: RationalTime | undefined;
+};
+
+function applyAudioSettings(
+  target: TrackAudioOptions,
+  options: TrackAudioOptions,
+) {
+  if (options.volume !== undefined) target.volume = options.volume;
+  if (options.muted !== undefined) target.muted = options.muted;
+}
+
+function applyClipAudioSettings(clip: TimelineClip, options: ClipAudioOptions) {
+  applyAudioSettings(clip, options);
+  for (const edge of audioFadeEdges) {
+    const duration = options[edge];
+    if (duration === undefined) continue;
+    if (compareTimes(duration, { numerator: 0, denominator: 1 }) === 0)
+      delete clip[edge];
+    else {
+      const current = clip[edge];
+      if (
+        !current ||
+        current.from !== undefined ||
+        current.to !== undefined ||
+        compareTimes(current.duration, duration) !== 0
+      )
+        clip[edge] = { duration };
+    }
+  }
+}
+
+export function setTrackAudio(
+  project: Project,
+  id: string,
+  options: TrackAudioOptions,
+) {
+  const next = copyProject(project);
+  const track = next.tracks.find((track) => track.id === id);
+  if (!track)
+    throw new TimelineError(
+      'TRACK_NOT_FOUND',
+      `Track '${id}' does not exist. Use timeline list to find its stable ID.`,
+    );
+  if (options.volume === undefined && options.muted === undefined)
+    throw new TimelineError(
+      'INVALID_EDIT',
+      'Specify volume or muted when configuring track audio.',
+    );
+  if (
+    (options.volume === undefined || options.volume === track.volume) &&
+    (options.muted === undefined || options.muted === track.muted)
+  )
+    return { project: next, track };
+  applyAudioSettings(track, options);
+  const updated = finish(next);
+  return {
+    project: updated,
+    track: updated.tracks.find((track) => track.id === id)!,
+  };
+}
 
 /** Applies to original video audio as well as independent audio clips. */
 export function setClipAudio(
@@ -280,18 +342,21 @@ export function setClipAudio(
 ) {
   const next = copyProject(project);
   const clip = requireClip(next, id);
-  if (options.volume === undefined && options.muted === undefined)
+  if (
+    options.volume === undefined &&
+    options.muted === undefined &&
+    options.fadeIn === undefined &&
+    options.fadeOut === undefined
+  )
     throw new TimelineError(
       'INVALID_EDIT',
-      'Specify volume or muted when configuring clip audio.',
+      'Specify volume, muted or a fade duration when configuring clip audio.',
     );
-  if (
-    (options.volume === undefined || options.volume === clip.volume) &&
-    (options.muted === undefined || options.muted === clip.muted)
-  )
-    return { project: next, clip };
-  if (options.volume !== undefined) clip.volume = options.volume;
-  if (options.muted !== undefined) clip.muted = options.muted;
+  if (clip.text)
+    throw new TimelineError('INVALID_EDIT', 'Text has no clip audio.');
+  const previous = JSON.stringify(clip);
+  applyClipAudioSettings(clip, options);
+  if (JSON.stringify(clip) === previous) return { project: next, clip };
   const updated = finish(next);
   return { project: updated, clip: requireClip(updated, id) };
 }
@@ -364,14 +429,35 @@ export function trimClip(
       'INVALID_EDIT',
       'Specify a source in or exclusive source out point when trimming a clip.',
     );
-  const unchanged =
-    (options.sourceIn === undefined ||
-      compareTimes(options.sourceIn, clip.sourceIn) === 0) &&
+  const startChanged =
+    options.sourceIn !== undefined &&
+    compareTimes(options.sourceIn, clip.sourceIn) !== 0;
+  if (
+    !startChanged &&
     (options.sourceOut === undefined ||
-      compareTimes(options.sourceOut, clip.sourceOut) === 0);
-  if (unchanged) return { project: next, clip };
+      compareTimes(options.sourceOut, clip.sourceOut) === 0)
+  )
+    return { project: next, clip };
   if (options.sourceIn !== undefined) clip.sourceIn = options.sourceIn;
   if (options.sourceOut !== undefined) clip.sourceOut = options.sourceOut;
+  if (
+    (clip.fadeIn || clip.fadeOut) &&
+    compareTimes(clip.sourceOut, clip.sourceIn) > 0
+  ) {
+    // Re-anchor the fades to the new clip edges, shortening the edited edge first.
+    let available = clipDuration(clip);
+    for (const edge of startChanged
+      ? (['fadeOut', 'fadeIn'] as const)
+      : audioFadeEdges) {
+      const fade = clip[edge];
+      if (!fade) continue;
+      const duration =
+        compareTimes(fade.duration, available) > 0 ? available : fade.duration;
+      if (duration.numerator === 0) delete clip[edge];
+      else clip[edge] = { duration };
+      available = subtractTimes(available, duration);
+    }
+  }
   const updated = finish(next);
   return { project: updated, clip: requireClip(updated, id) };
 }
@@ -393,16 +479,30 @@ export function splitClip(
       'SPLIT_BOUNDS',
       `Split position must be strictly inside clip '${id}' on the timeline, excluding its start and end.`,
     );
-  const sourceSplit = addTimes(
-    clip.sourceIn,
-    subtractTimes(at, clip.timelineStart),
-  );
+  const offset = subtractTimes(at, clip.timelineStart);
+  const sourceSplit = addTimes(clip.sourceIn, offset);
   const right: TimelineClip = {
     ...clip,
     id: newId(next, rightId),
     timelineStart: at,
     sourceIn: sourceSplit,
   };
+  if (clip.fadeIn || clip.fadeOut) {
+    const duration = clipDuration(clip);
+    const leftFades = sliceAudioFades(
+      clip,
+      duration,
+      { numerator: 0, denominator: 1 },
+      offset,
+    );
+    const rightFades = sliceAudioFades(clip, duration, offset, duration);
+    for (const edge of audioFadeEdges) {
+      delete clip[edge];
+      delete right[edge];
+    }
+    Object.assign(clip, leftFades);
+    Object.assign(right, rightFades);
+  }
   clip.sourceOut = sourceSplit;
   next.clips.splice(next.clips.indexOf(clip) + 1, 0, right);
   const updated = finish(next);

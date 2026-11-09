@@ -1,4 +1,5 @@
 import type { Project, TimelineClip } from './project.js';
+import { audioFadeGain, baseAudioGain } from './audio.js';
 import { listTimeline } from './timeline.js';
 import { subtitleTextLayers } from './subtitles.js';
 import {
@@ -23,6 +24,8 @@ interface ResolvedClipProperties extends TimelineClip {
   };
   volume: number;
   muted: boolean;
+  trackVolume?: number | undefined;
+  trackMuted?: boolean | undefined;
   /** Unknown means the decoder must inspect the actual source. */
   audioPresence: 'present' | 'absent' | 'unknown';
 }
@@ -67,6 +70,8 @@ export function resolveTimeline(project: Project) {
           },
           volume: clip.volume ?? 1,
           muted: clip.muted ?? false,
+          ...(track.volume === undefined ? {} : { trackVolume: track.volume }),
+          ...(track.muted === undefined ? {} : { trackMuted: track.muted }),
           audioPresence:
             clip.text || kind === 'image' || asset?.metadata?.hasAudio === false
               ? 'absent'
@@ -176,17 +181,22 @@ export function createTimelineEvaluator(
         else high = middle;
       }
       const clip = entries[low];
-      if (clip && compareTimes(clip.timelineStart, at) <= 0)
+      if (clip && compareTimes(clip.timelineStart, at) <= 0) {
+        const offset =
+          clip.kind === 'text' && clip.subtitle
+            ? { numerator: 0, denominator: 1 }
+            : subtractTimes(at, clip.timelineStart);
         activeClips.push({
           ...structuredClone(clip),
           sourceTime:
             clip.kind === 'text' && clip.subtitle
               ? { ...clip.sourceIn }
-              : addTimes(clip.sourceIn, subtractTimes(at, clip.timelineStart)),
+              : addTimes(clip.sourceIn, offset),
           visible: clip.trackType === 'video' && clip.visual.opacity > 0,
           effectiveVolume:
-            clip.muted || clip.audioPresence === 'absent' ? 0 : clip.volume,
+            baseAudioGain(clip) * audioFadeGain(clip, clip.duration, offset),
         });
+      }
     }
     const visualClips = activeClips.filter(
       (clip) => clip.trackType === 'video',

@@ -487,6 +487,7 @@ export class ProjectSession {
                     'clip.split',
                     'clip.remove',
                     'clip.audio',
+                    'track.audio',
                     'clip.visual',
                     'text.add',
                     'text.set',

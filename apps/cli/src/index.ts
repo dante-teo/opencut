@@ -71,7 +71,7 @@ Commands:
   media remove <project-file> <asset-id> Remove an unreferenced asset, keeping its file
   subtitle <import|list|export>         Work with timed subtitle cues and sidecar files
   timeline list <project-file>          Inspect tracks, clips and exact timing
-  track add|remove <project-file>       Manage video/audio tracks (track --help)
+  track add|remove|audio <project-file>       Manage video/audio tracks (track --help)
   clip add|move|trim|split|remove|audio|visual <project-file>
                                        Edit clips (clip --help; time arguments are frames)
   canvas set <project-file>            Configure dimensions and background (canvas --help)
@@ -117,7 +117,7 @@ const projectHelp = {
 
 Composite ordered video, image, text and subtitle layers and mix audio to H.264/AAC MP4 at project settings.
 Visual gaps use the canvas background; audio gaps are silent. Original audio is preserved by default.
-Use clip audio --volume <0..1> --muted <true|false> to configure gains and muting.
+Use clip audio and track audio to set linear gains and mute. Clip fades use --fade-in/--fade-out <frames>.
 Use clip visual for position/scale/opacity/contain/cover/stretch and canvas set for dimensions/background.
 Later video tracks draw above earlier tracks. Images and text use their explicit clip duration.
 Regular clip times must align to project frames. Subtitles use exact seconds and burn in by default.
@@ -293,6 +293,8 @@ async function runCli(args: string[]): Promise<void> {
       'music-volume': { type: 'string' },
       volume: { type: 'string' },
       muted: { type: 'string' },
+      'fade-in': { type: 'string' },
+      'fade-out': { type: 'string' },
       x: { type: 'string' },
       y: { type: 'string' },
       scale: { type: 'string' },
@@ -396,6 +398,8 @@ async function runCli(args: string[]): Promise<void> {
     'out',
     'volume',
     'muted',
+    'fade-in',
+    'fade-out',
     'x',
     'y',
     'scale',

@@ -109,41 +109,62 @@ beforeEach(async () => {
 afterEach(async () => rm(directory, { recursive: true, force: true }));
 
 describe('video timeline executor safety', () => {
-  it('uses stream offsets, sample trims/delays, stable gains and the selected audio stream', async () => {
-    const audio = {
-      ...stream,
-      index: 4,
-      type: 'audio',
-      codec: 'aac',
-      startTimeSeconds: 0.25,
-    };
-    vi.mocked(probeMedia).mockImplementation(async (path) =>
-      path.endsWith('render.mp4')
-        ? { ...verified, path }
-        : { ...source, path, audio },
-    );
-    options.audioClips = [
-      {
-        clipId: 'clip',
-        path: source.path,
-        timelineStartFrame: 2,
-        sourceStartFrame: 3,
-        frameCount: 10,
-        volume: 0.25,
-        muted: false,
-        required: false,
-      },
-    ];
-    await renderVideoTimeline(options);
-    const args = vi.mocked(runMediaTool).mock.calls[0]![1];
-    const graph = args[args.indexOf('-filter_complex') + 1]!;
-    expect(args.filter((arg) => arg === '-i')).toHaveLength(1);
-    expect(graph).toContain('[0:4]asetpts=PTS-STARTPTS+(0.250000000)/TB');
-    expect(graph).toContain('atrim=start_sample=4805:end_sample=20821');
-    expect(graph).toContain('volume=0.25,adelay=3203S:all=1');
-    expect(graph).toContain('normalize=0');
-    expect(graph).toContain('latency=1');
-  });
+  it.each([false, true])(
+    'uses stream offsets, exact sample positions and stable gain (with fades: %s)',
+    async (faded) => {
+      const audio = {
+        ...stream,
+        index: 4,
+        type: 'audio',
+        codec: 'aac',
+        startTimeSeconds: 0.25,
+      };
+      vi.mocked(probeMedia).mockImplementation(async (path) =>
+        path.endsWith('render.mp4')
+          ? { ...verified, path }
+          : { ...source, path, audio },
+      );
+      options.audioClips = [
+        {
+          clipId: 'clip',
+          path: source.path,
+          timelineStartFrame: 2,
+          sourceStartFrame: 3,
+          frameCount: 10,
+          volume: 0.25,
+          ...(faded && {
+            fadeIn: {
+              duration: { numerator: 4004, denominator: 30000 },
+              from: 0,
+              to: 1,
+            },
+            fadeOut: {
+              duration: { numerator: 1001, denominator: 30000 },
+              from: 1,
+              to: 0,
+            },
+          }),
+          muted: false,
+          required: false,
+        },
+      ];
+      await renderVideoTimeline(options);
+      const args = vi.mocked(runMediaTool).mock.calls[0]![1];
+      const graph = args[args.indexOf('-filter_complex') + 1]!;
+      expect(args.filter((arg) => arg === '-i')).toHaveLength(1);
+      expect(graph).toContain('[0:4]asetpts=PTS-STARTPTS+(0.250000000)/TB');
+      expect(graph).toContain('atrim=start_sample=4805:end_sample=20821');
+      expect(graph).toContain('volume=0.25,adelay=3203S:all=1');
+      if (faded) {
+        // Round the absolute fade boundaries before subtracting the clip start.
+        expect(graph).toContain(
+          'asetpts=N/SR/TB,afade=t=in:ss=0:ns=6407:c=tri:silence=0:unity=1,afade=t=out:ss=14415:ns=1601:c=tri:silence=0:unity=1,volume=0.25',
+        );
+      }
+      expect(graph).toContain('normalize=0');
+      expect(graph).toContain('latency=1');
+    },
+  );
 
   it('rejects invalid positioned visual plans before probing or encoding', async () => {
     const base = { ...options };
@@ -194,6 +215,16 @@ describe('video timeline executor safety', () => {
       { frameCount: 13 },
       { sourceStartFrame: -1 },
       { timelineStartFrame: 0.5 },
+      {
+        fadeIn: { duration: { numerator: 1, denominator: 1 }, from: 0, to: 1 },
+      },
+      {
+        fadeOut: {
+          duration: { numerator: 1, denominator: 10 },
+          from: 0.5,
+          to: 0,
+        },
+      },
     ]) {
       await expect(
         renderVideoTimeline({

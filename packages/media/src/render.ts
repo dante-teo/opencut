@@ -63,6 +63,12 @@ export interface RenderControls {
   onProgress?: (progress: RenderProgress) => void;
 }
 
+interface RenderAudioFade {
+  duration: { numerator: number; denominator: number };
+  from: number;
+  to: number;
+}
+
 export interface VideoTimelineOptions extends RenderControls {
   /** Allow a desktop host to do text shaping off its main thread. */
   rasterizeText?: typeof rasterizeTextLayer;
@@ -91,6 +97,8 @@ export interface VideoTimelineOptions extends RenderControls {
     frameCount: number;
     volume: number;
     muted: boolean;
+    fadeIn?: RenderAudioFade;
+    fadeOut?: RenderAudioFade;
     required: boolean;
   }>;
   output: string;
@@ -194,12 +202,54 @@ function validateOptions(options: VideoTimelineOptions): void {
         clip.volume < 0 ||
         clip.volume > 1 ||
         typeof clip.muted !== 'boolean' ||
-        typeof clip.required !== 'boolean',
+        typeof clip.required !== 'boolean' ||
+        !validAudioFades(clip, numerator, denominator),
     )
   )
     throw new MediaError(
       'Invalid video render plan: use positive integer frame counts, even sides up to 3840 (at most 3840x2160 pixels), 1–120 fps, at most 64 non-subtitle visual/audio clips (or 128 legacy segments), valid transforms and #RRGGBB[AA]/transparent background, and 600 seconds.',
     );
+}
+
+function validAudioFades(
+  {
+    fadeIn,
+    fadeOut,
+    frameCount,
+  }: NonNullable<VideoTimelineOptions['audioClips']>[number],
+  numerator: number,
+  denominator: number,
+): boolean {
+  const fades = [fadeIn, fadeOut];
+  for (const fade of fades) {
+    if (fade === undefined) continue;
+    if (
+      !fade?.duration ||
+      !Number.isSafeInteger(fade.duration.numerator) ||
+      fade.duration.numerator <= 0 ||
+      !Number.isSafeInteger(fade.duration.denominator) ||
+      fade.duration.denominator <= 0 ||
+      ![fade.from, fade.to].every(
+        (gain) => Number.isFinite(gain) && gain >= 0 && gain <= 1,
+      )
+    )
+      return false;
+  }
+  const a = BigInt(fadeIn?.duration.numerator ?? 0);
+  const b = BigInt(fadeIn?.duration.denominator ?? 1);
+  const c = BigInt(fadeOut?.duration.numerator ?? 0);
+  const d = BigInt(fadeOut?.duration.denominator ?? 1);
+  const frames = BigInt(frameCount) * BigInt(denominator);
+  const rate = BigInt(numerator);
+  return (
+    (a * d + c * b) * rate <= frames * b * d &&
+    (!fadeIn ||
+      (fadeIn.from <= fadeIn.to &&
+        (fadeIn.to === 1 || a * rate === frames * b))) &&
+    (!fadeOut ||
+      (fadeOut.from >= fadeOut.to &&
+        (fadeOut.from === 1 || c * rate === frames * d)))
+  );
 }
 
 function sameFrameRate(
@@ -553,10 +603,19 @@ async function prepareTimeline(
   }
   // Round absolute project boundaries to the nearest 48 kHz sample. Never sum
   // independently rounded durations: fractional frame rates must not accumulate drift.
-  const sample = (frame: number, rate = frameRate) => {
-    const { numerator, denominator } = rate;
-    const n = BigInt(frame) * BigInt(denominator) * 48000n;
-    return Number((2n * n + BigInt(numerator)) / (2n * BigInt(numerator)));
+  const sample = (
+    frame: number,
+    rate = frameRate,
+    offset?: RenderAudioFade['duration'],
+    sign = 1n,
+  ) => {
+    const scale = BigInt(offset?.denominator ?? 1);
+    const divisor = BigInt(rate.numerator) * scale;
+    const n =
+      (BigInt(frame) * BigInt(rate.denominator) * scale +
+        sign * BigInt(offset?.numerator ?? 0) * BigInt(rate.numerator)) *
+      48000n;
+    return Number((2n * n + divisor) / (2n * divisor));
   };
   const totalSamples = options.range
     ? sample(frameCount)
@@ -604,13 +663,32 @@ async function prepareTimeline(
       args.push('-threads', '1', '-i', source.path);
     }
     const start = sample(clip.timelineStartFrame);
-    const count = sample(clip.timelineStartFrame + clip.frameCount) - start;
+    const endFrame = clip.timelineStartFrame + clip.frameCount;
+    const count = sample(endFrame) - start;
     const sourceStart = sample(clip.sourceStartFrame);
+    const fades: string[] = [];
+    if (clip.fadeIn) {
+      const length =
+        sample(clip.timelineStartFrame, frameRate, clip.fadeIn.duration) -
+        start;
+      if (length > 0)
+        fades.push(
+          `afade=t=in:ss=0:ns=${length}:c=tri:silence=${clip.fadeIn.from}:unity=${clip.fadeIn.to},`,
+        );
+    }
+    if (clip.fadeOut) {
+      const offset =
+        sample(endFrame, frameRate, clip.fadeOut.duration, -1n) - start;
+      if (count > offset)
+        fades.push(
+          `afade=t=out:ss=${offset}:ns=${count - offset}:c=tri:silence=${clip.fadeOut.to}:unity=${clip.fadeOut.from},`,
+        );
+    }
     filters.push(
       `[${audioInput}:${audio.index}]asetpts=PTS-STARTPTS+(${offset.toFixed(9)})/TB,` +
         'aresample=48000:async=1:min_hard_comp=0:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,' +
         `apad,atrim=start_sample=${sourceStart}:end_sample=${sourceStart + count},asetpts=N/SR/TB,` +
-        `volume=${clip.volume},adelay=${start}S:all=1[a${index}]`,
+        `${fades.join('')}volume=${clip.volume},adelay=${start}S:all=1[a${index}]`,
     );
     audioLabels.push(`[a${index}]`);
   }

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  audioFadeEdges,
   clipDuration,
+  subtractTimes,
   compareTimes,
   frameTime,
   type Project,
@@ -8,7 +10,7 @@ import {
   type TimelineClip,
 } from '@opencut/core';
 import type { TimelineOperation } from '../bridge.js';
-import { frameIndex } from './timeline-geometry.js';
+import { frameIndex, ZERO } from './timeline-geometry.js';
 
 /** Exact frame fields must never silently round an imported off-grid boundary. */
 export function frames(time: RationalTime, project: Project): number | null {
@@ -24,13 +26,20 @@ export function frames(time: RationalTime, project: Project): number | null {
   }
 }
 
-function NumberProperty({
+export function gainDb(gain: number): string {
+  return gain > 0 ? `${(20 * Math.log10(gain)).toFixed(1)} dB` : '−∞ dB';
+}
+
+export function NumberProperty({
   label,
   value,
   min,
   max,
   step = 1,
   slider = false,
+  decibels = false,
+  compact = false,
+  disabled = false,
   onCommit,
 }: {
   label: string;
@@ -39,6 +48,9 @@ function NumberProperty({
   max: number;
   step?: number;
   slider?: boolean;
+  decibels?: boolean;
+  compact?: boolean;
+  disabled?: boolean;
   onCommit: (value: number) => Promise<void>;
 }) {
   const [draft, setDraft] = useState(String(value));
@@ -83,7 +95,7 @@ function NumberProperty({
   }
   return (
     <div
-      className="clip-property"
+      className={compact ? 'track-volume' : 'clip-property'}
       onBlur={() => void commit()}
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
@@ -92,34 +104,44 @@ function NumberProperty({
         }
       }}
     >
-      <label>
-        <span>{label}</span>
-        <input
-          type="number"
-          aria-label={label}
-          value={draft}
-          min={min}
-          max={max}
-          step={step}
-          readOnly={submitted}
-          aria-busy={submitted}
-          aria-invalid={!!error}
-          onChange={(event) => change(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              void commit();
-            }
-          }}
-        />
-      </label>
+      {!compact && (
+        <label>
+          <span>
+            {label}
+            {decibels && (
+              <small className="gain-decibels"> {gainDb(Number(draft))}</small>
+            )}
+          </span>
+          <input
+            type="number"
+            aria-label={label}
+            value={draft}
+            min={min}
+            max={max}
+            step={step}
+            readOnly={submitted}
+            aria-busy={submitted}
+            aria-invalid={!!error}
+            onChange={(event) => change(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                void commit();
+              }
+            }}
+          />
+        </label>
+      )}
       {slider && (
         <input
           type="range"
+          disabled={disabled}
           onPointerDown={(event) =>
             event.currentTarget.setPointerCapture(event.pointerId)
           }
-          aria-label={`${label} slider`}
+          aria-label={compact ? label : `${label} slider`}
+          aria-valuetext={decibels ? gainDb(Number(draft)) : undefined}
+          title={compact ? `${label} · ${gainDb(Number(draft))}` : undefined}
           min={min}
           max={max}
           step={step}
@@ -182,6 +204,7 @@ export function ClipProperties({
     operation: (value: number) => TimelineOperation,
     step = 1,
     slider = false,
+    decibels = false,
   ) => (
     <NumberProperty
       key={label}
@@ -191,6 +214,7 @@ export function ClipProperties({
       max={max}
       step={step}
       slider={slider}
+      decibels={decibels}
       onCommit={(value) =>
         onEdit([operation(value)], `Set ${label.toLowerCase()}`)
       }
@@ -241,6 +265,7 @@ export function ClipProperties({
         (volume) => ({ type: 'clip.audio', id: clip.id, volume }),
         0.01,
         true,
+        true,
       )}
       <label className="clip-mute">
         <input
@@ -262,6 +287,26 @@ export function ClipProperties({
         />{' '}
         Mute
       </label>
+      {audioFadeEdges.map((edge) => {
+        const fade = frames(clip[edge]?.duration ?? ZERO, project);
+        const other =
+          clip[edge === 'fadeIn' ? 'fadeOut' : 'fadeIn']?.duration ?? ZERO;
+        const limit = frameIndex(
+          subtractTimes(clipDuration(clip), other),
+          project.settings.frameRate,
+        );
+        const label =
+          edge === 'fadeIn' ? 'Fade in (frames)' : 'Fade out (frames)';
+        return fade === null || limit > BigInt(maximum) ? (
+          <p key={edge}>{label} · off-grid</p>
+        ) : (
+          field(label, fade, 0, Number(limit), (value) => ({
+            type: 'clip.audio',
+            id: clip.id,
+            [edge]: value,
+          }))
+        );
+      })}
       {video && (
         <>
           <h3>Transform</h3>
@@ -301,8 +346,7 @@ export function ClipProperties({
         </>
       )}
       <p className="property-preview-note">
-        Project viewer applies clip transforms, volume and mute. Source preview
-        plays original media.
+        Source preview plays original media.
       </p>
     </fieldset>
   );

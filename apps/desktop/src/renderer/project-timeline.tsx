@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, PointerEvent } from 'react';
 import {
   compareTimes,
+  audioFadeEdges,
+  resolveAudioFade,
   sortSubtitleCues,
   type SubtitleFormat,
   projectRevision,
@@ -10,7 +12,16 @@ import {
   type RationalTime,
   type TimelineClip,
 } from '@opencut/core';
-import { Scissors, Trash2, Clapperboard, Type, Captions } from 'lucide-react';
+import {
+  Scissors,
+  Trash2,
+  Clapperboard,
+  Type,
+  Captions,
+  Volume2,
+  VolumeX,
+} from 'lucide-react';
+import { NumberProperty } from './clip-properties.js';
 import { ClipArtwork } from './clip-artwork.js';
 import { ASSET_DRAG_TYPE, readAssetDrag } from './media-library.js';
 import type { AssetClipInput, TimelineOperation } from '../bridge.js';
@@ -88,6 +99,8 @@ export function ProjectTimeline({
     moved: boolean;
   } | null>(null);
   const [proposal, setProposal] = useState<EditProposal | null>(null);
+  const editingFade =
+    gesture.current?.kind === 'fadeIn' || gesture.current?.kind === 'fadeOut';
   const [editError, setEditError] = useState('');
   const [snapPixels, setSnapPixels] = useState(8);
   const [snapping, setSnapping] = useState(true);
@@ -138,7 +151,8 @@ export function ProjectTimeline({
     compareTimes(position, selectedClip.timelineStart) > 0 &&
     compareTimes(position, clipTimelineEnd(selectedClip)) < 0;
   function commit(operations: TimelineOperation[], label: string) {
-    if (!disabled && !gesture.current && onEdit) void onEdit(operations, label);
+    if (operations.length && !disabled && !gesture.current && onEdit)
+      void onEdit(operations, label);
   }
   function splitSelected() {
     if (selectedClip && canSplit)
@@ -184,7 +198,7 @@ export function ProjectTimeline({
     return () => window.removeEventListener('blur', cancelGesture);
   }, []);
   function beginEdit(
-    event: PointerEvent<SVGGElement | SVGRectElement>,
+    event: PointerEvent<SVGElement>,
     clip: TimelineClip,
     kind: GestureKind,
   ) {
@@ -300,6 +314,8 @@ export function ProjectTimeline({
     if (!next.error) commit(next.operations, editLabel(kind, clip));
   }
   function editLabel(kind: GestureKind, clip: TimelineClip) {
+    if (kind === 'fadeIn' || kind === 'fadeOut')
+      return kind === 'fadeIn' ? 'Set fade in' : 'Set fade out';
     const action = kind === 'move' ? 'Move' : 'Trim';
     return `${action} ${isSubtitleLane(clip.trackId) ? 'subtitle' : 'clip'}`;
   }
@@ -842,10 +858,55 @@ export function ProjectTimeline({
                       `${track.type === 'video' ? 'V' : 'A'}${trackIndex + 1}`
                     )}
                   </span>
-                  <span>
+                  <div className="track-name">
                     <strong>{track.name}</strong>
-                    {track.type !== 'subtitle' && <small>{track.type}</small>}
-                  </span>
+                    {track.type !== 'subtitle' && (
+                      <div className="track-audio-controls">
+                        <NumberProperty
+                          label={`${track.name} track volume`}
+                          value={track.volume ?? 1}
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          slider
+                          compact
+                          decibels
+                          disabled={disabled || !onEdit}
+                          onCommit={(volume) =>
+                            onEdit?.(
+                              [{ type: 'track.audio', id: track.id, volume }],
+                              'Set track volume',
+                            ) ?? Promise.resolve()
+                          }
+                        />
+                        <button
+                          type="button"
+                          aria-label={`Mute ${track.name} track`}
+                          title={track.muted ? 'Unmute track' : 'Mute track'}
+                          aria-pressed={track.muted ?? false}
+                          disabled={disabled || !onEdit}
+                          onClick={() =>
+                            commit(
+                              [
+                                {
+                                  type: 'track.audio',
+                                  id: track.id,
+                                  muted: !track.muted,
+                                },
+                              ],
+                              'Set track mute',
+                            )
+                          }
+                        >
+                          {track.muted ? (
+                            <VolumeX size={13} aria-hidden="true" />
+                          ) : (
+                            <Volume2 size={13} aria-hidden="true" />
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <svg
                   className="track-lane"
@@ -1039,6 +1100,100 @@ export function ProjectTimeline({
                               />
                             );
                           })}
+                          {!clip.text &&
+                            (track.type === 'audio' ||
+                              (track.type === 'video' &&
+                                asset?.metadata?.hasAudio !== false)) &&
+                            audioFadeEdges.map((edge) => {
+                              const left = edge === 'fadeIn';
+                              const direction = left ? 1 : -1;
+                              const fade =
+                                editingFade &&
+                                proposal?.clip.id === clip.id &&
+                                !proposal.error
+                                  ? proposal.clip[edge]
+                                  : clip[edge];
+                              const boundary = left ? clipLeft : clipRight;
+                              const fadeX = fade
+                                ? boundary +
+                                  direction *
+                                    relativePixels(fade.duration, ZERO, zoom)
+                                : boundary;
+                              // Clamp line geometry at the viewport and interpolate its height there.
+                              const clipped = (x: number) =>
+                                Math.max(-2, Math.min(width + 2, x));
+                              const bounds =
+                                fade && resolveAudioFade(edge, fade);
+                              const outer =
+                                (left ? bounds?.from : bounds?.to) ?? 0;
+                              const inner =
+                                (left ? bounds?.to : bounds?.from) ?? 1;
+                              const y = (x: number) =>
+                                55 -
+                                30 *
+                                  (outer +
+                                    (inner - outer) *
+                                      (boundary === fadeX
+                                        ? 0
+                                        : (x - boundary) / (fadeX - boundary)));
+                              const handle = fade
+                                ? fadeX
+                                : boundary +
+                                  direction *
+                                    Math.min(13, (clipRight - clipLeft) / 2);
+                              const label = `${left ? 'Fade in' : 'Fade out'} of ${clip.id}`;
+                              return (
+                                <g key={edge} className="clip-fade">
+                                  {fade && (
+                                    <line
+                                      data-fade={edge}
+                                      x1={clipped(boundary)}
+                                      y1={y(clipped(boundary))}
+                                      x2={clipped(fadeX)}
+                                      y2={y(clipped(fadeX))}
+                                    />
+                                  )}
+                                  {selected === clip.id &&
+                                    !disabled &&
+                                    clipWidth >= 13 &&
+                                    handle >= 0 &&
+                                    handle <= width && (
+                                      <circle
+                                        className="fade-handle"
+                                        data-fade-handle={edge}
+                                        role="button"
+                                        tabIndex={0}
+                                        aria-label={label}
+                                        cx={handle}
+                                        cy={left ? 29 : 43}
+                                        r="5"
+                                        onPointerDown={(event) =>
+                                          beginEdit(event, clip, edge)
+                                        }
+                                        onKeyDown={(event) => {
+                                          if (
+                                            ![
+                                              'ArrowLeft',
+                                              'ArrowRight',
+                                            ].includes(event.key)
+                                          )
+                                            return;
+                                          event.preventDefault();
+                                          event.stopPropagation();
+                                          keyboardEdit(
+                                            clip,
+                                            edge,
+                                            (event.key === 'ArrowLeft'
+                                              ? -1n
+                                              : 1n) *
+                                              (event.shiftKey ? 10n : 1n),
+                                          );
+                                        }}
+                                      />
+                                    )}
+                                </g>
+                              );
+                            })}
                         </g>
                       );
                     },
@@ -1048,6 +1203,7 @@ export function ProjectTimeline({
             );
           })}
           {proposal &&
+            !editingFade &&
             (() => {
               const row = index.rows.findIndex(
                 (track) => track.id === proposal.clip.trackId,

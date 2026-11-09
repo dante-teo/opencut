@@ -64,9 +64,10 @@ T33 adds [editable text layers](PRODUCT.md#text-layers-t33) with shared typograp
 in the Project viewer, CLI previews, and exports.
 T34 adds [editable subtitles](PRODUCT.md#editable-subtitles-t34) with exact cue
 timing, shared styles, SRT/WebVTT import and export, and optional MP4 burn-in.
+T35 adds [audio fades, track controls, and stereo peak meters](TIMELINE_PLAYBACK.md#audio-editing-and-meters).
 
 Select a media clip to edit **Timeline position**, **Duration**, **Source in/out** in
-whole project frames, **Volume** (linear 0–1), **Mute**, and video **Position X/Y**
+whole project frames, **Volume** (linear 0–1), **Mute**, **Fade in/out**, and video **Position X/Y**
 (pixels), **Scale** (0.01–4), and **Opacity** (0–1). Enter or leave a numeric field
 to apply; Escape discards its draft. Sliders apply on release as one undo entry.
 Typing in another field while an edit finishes preserves that field's draft.

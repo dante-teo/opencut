@@ -1,9 +1,9 @@
-# Edited timeline playback (T24–T26)
+# Edited timeline playback
 
 **Project viewer** plays the edited timeline. **Source preview** plays original media
 independently; **Preview selected clip** still links that source transport to one
-clip. Select Project viewer to hear clip volume/mute and all overlapping audio
-tracks. Play/Pause, the project seek slider, ruler, Space and frame steps operate
+clip. Select Project viewer to hear clip and track gains, mutes, fades and all
+overlapping audio tracks. Play/Pause, the project seek slider, ruler, Space and frame steps operate
 on the edited timeline. Seeks pause playback. End stops at the exact timeline end;
 Play at end restarts at zero. Selection does not change playback.
 
@@ -14,8 +14,13 @@ the canvas background. Transparent image/video pixels reveal lower layers.
 Canvas colors accept `#RRGGBB`, `#RRGGBBAA` or `transparent` (default black).
 Preview retains canvas alpha; H.264 export flattens it over black.
 Audio from every eligible clip, including original video audio, is summed
-through individual linear gain nodes. Mute silences that clip. A browser compressor
-protects the summed output; it is not the offline FFmpeg limiter.
+through individual linear gain nodes. Clip and track gains multiply and either
+mute silences the clip. Linear fades are scheduled on the audio device clock,
+including their remaining ramps after a seek. Contiguous splits keep both their
+decoder and gain envelope. At a split inside a fade, or where fade-in and
+fade-out meet, the adjoining gain events share one audio-clock timestamp.
+Preview uses Chromium's compressor for loud sums. Export uses FFmpeg's peak
+limiter, so peaks can differ when protection engages.
 
 ## Clock, scheduling and lifetime
 
@@ -82,6 +87,26 @@ released when unused and revoked after edits/project replacement. There are at
 most 128 simultaneous timeline grants. T25 also accepts an original-only retry flag and separately validates bounded cached-frame requests. Missing or failed proxies retry original media through a new grant, never by mixing different file bytes in one response. CORS is enabled only to allow these media
 capabilities into Web Audio and origin-clean Canvas composition/readback; renderer fetch and filesystem privileges stay blocked
 by CSP and the sandbox.
+
+## Audio editing and meters
+
+Select a media clip to set **Volume**, **Mute**, **Fade in (frames)** and
+**Fade out (frames)**. Volume is linear with a dB readout. Fade lengths use the
+project frame rate, and zero clears a fade. The two lengths may meet without
+overlapping. On a selected timeline clip, drag the fade handles toward the
+center to lengthen a fade or toward an edge to shorten it. Focus a handle and
+press Left or Right for a one-frame adjustment, or hold Shift for ten frames.
+A drag previews the fade line. Releasing commits one undo step when the
+duration changes. A handle adjustment that leaves the duration unchanged
+preserves the existing curve and history, including partial fades from a split.
+The track header's slider and speaker button adjust that track's gain and mute.
+
+The Project viewer's **L** and **R** meters show post-mix sample peaks in dBFS.
+A pair of Web Audio analysers observes the protected stereo output. The UI
+reads them at most 20 times a second using one reused 4,096-sample buffer.
+The rolling window is about 85 ms at 48 kHz. The meters reset on pause, and
+silence displays at the −60 dBFS floor. These are digital sample peaks and can
+miss transients if rendering stalls for longer than the window.
 
 ## Timeline clip artwork
 

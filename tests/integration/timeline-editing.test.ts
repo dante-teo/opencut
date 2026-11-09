@@ -7,11 +7,14 @@ import {
   projectRevision,
   projectSnapshot,
   serializeProject,
+  setClipAudio,
+  splitClip,
   type Project,
 } from '@opencut/core';
 import {
   proposeEdit,
   createTimelinePreview,
+  type GestureKind,
 } from '../../apps/desktop/src/renderer/timeline-editing.js';
 
 const rate = { numerator: 30000, denominator: 1001 };
@@ -56,7 +59,7 @@ function fixture(): Project {
 }
 const propose = (
   project: Project,
-  kind: 'move' | 'left' | 'right',
+  kind: GestureKind,
   delta: bigint,
   track = 'v1',
   zoom = 80,
@@ -75,6 +78,36 @@ const propose = (
   );
 
 describe('shared-core GUI edit proposals', () => {
+  it('preserves a split fade when the handle cannot extend or moves only vertically', () => {
+    const project = fixture();
+    const faded = setClipAudio(project, 'clip', {
+      fadeIn: frameTime(24, rate),
+    }).project;
+    const split = splitClip(
+      faded,
+      'clip',
+      frameTime(72, rate),
+      'right',
+    ).project;
+    expect(split.clips[0]!.fadeIn).toEqual({
+      duration: frameTime(12, rate),
+      to: 0.5,
+    });
+    for (const delta of [0n, 1n]) {
+      const result = propose(split, 'fadeIn', delta);
+      expect(result).toMatchObject({
+        operations: [],
+        clip: split.clips[0],
+        error: null,
+      });
+    }
+    const shorter = propose(split, 'fadeIn', -1n);
+    expect(shorter.operations).toEqual([
+      { type: 'clip.audio', id: 'clip', fadeIn: 11 },
+    ]);
+    expect(shorter.clip.fadeIn).toEqual({ duration: frameTime(11, rate) });
+  });
+
   it('rejects a text left trim that would round an off-grid right edge', () => {
     const project = fixture();
     const clip = {

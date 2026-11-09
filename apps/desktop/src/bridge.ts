@@ -122,6 +122,7 @@ export type TimelineOperation = Extract<
       | 'clip.split'
       | 'clip.remove'
       | 'clip.audio'
+      | 'track.audio'
       | 'clip.visual'
       | 'text.add'
       | 'text.set'

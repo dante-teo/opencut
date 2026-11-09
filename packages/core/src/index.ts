@@ -41,6 +41,7 @@ export {
   moveClip,
   trimClip,
   setClipAudio,
+  setTrackAudio,
   setClipVisual,
   setText,
   setCanvas,
@@ -57,6 +58,7 @@ export type {
   MoveClipOptions,
   TrimClipOptions,
   ClipAudioOptions,
+  TrackAudioOptions,
   ClipVisualOptions,
 } from './timeline.js';
 
@@ -84,6 +86,14 @@ export type {
   VisualRenderClip,
   AudioRenderClip,
 } from './render-plan.js';
+
+export {
+  audioFadeEdges,
+  audioFadeGain,
+  baseAudioGain,
+  resolveAudioFade,
+} from './audio.js';
+export type { AudioFade, AudioFadeEdge } from './audio.js';
 
 export { addAssetClip } from './library.js';
 

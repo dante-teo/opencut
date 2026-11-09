@@ -47,6 +47,67 @@ async function seedOffline() {
 }
 
 describe('public SDK', () => {
+  it('shares fades and track gain with the public CLI, including history and validation', async () => {
+    await seedOffline();
+    const editor = await openProject(path);
+    editor.project.apply(videoTrack, {
+      type: 'clip.add',
+      id: 'clip',
+      assetId: 'offline',
+      trackId: 'video',
+      at: 10,
+      in: 20,
+      out: 80,
+      volume: 0.8,
+      fadeIn: 20,
+    });
+    await editor.save();
+    const run = (...args: string[]) =>
+      spawnSync(process.execPath, [cli, ...args, '--json'], {
+        encoding: 'utf8',
+      });
+    const track = run(
+      'track',
+      'audio',
+      path,
+      'video',
+      '--volume',
+      '0.5',
+      '--muted',
+      'false',
+    );
+    expect(track.status, track.stderr).toBe(0);
+    const clip = run('clip', 'audio', path, 'clip', '--fade-out', '15');
+    expect(clip.status, clip.stderr).toBe(0);
+    const bytes = await readFile(path, 'utf8');
+    expect(run('clip', 'audio', path, 'clip', '--fade-in', '46').status).toBe(
+      1,
+    );
+    expect(
+      run('track', 'audio', path, 'video', '--fade-out', '12').status,
+    ).toBe(2);
+    expect(await readFile(path, 'utf8')).toBe(bytes);
+    const reopened = await openProject(path);
+    expect(reopened.project.inspect().tracks[0]).toMatchObject({
+      volume: 0.5,
+      muted: false,
+    });
+    expect(reopened.project.inspectTimeline(20).audioClips[0]).toMatchObject({
+      effectiveVolume: 0.2,
+      fadeIn: { duration: { numerator: 2, denominator: 3 } },
+      fadeOut: { duration: { numerator: 1, denominator: 2 } },
+    });
+    reopened.project.undo();
+    await reopened.save();
+    expect(
+      (await openProject(path)).project.inspect().clips[0]!.fadeOut,
+    ).toBeUndefined();
+    reopened.project.redo();
+    await reopened.save();
+    expect(
+      (await openProject(path)).project.inspect().clips[0]!.fadeOut,
+    ).toBeDefined();
+  });
   it('shares asset-free text layers, frame timing and persistent history with the CLI', async () => {
     const editor = await createProject(path, { name: 'Text layers' });
     await editor.save();

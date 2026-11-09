@@ -52,19 +52,25 @@ Supply explicit new IDs to refer to a track or clip later in the batch.
 | Operation      | Fields besides `type`                                                                                                                   |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `track.add`    | `name`, `mediaType` (`video` or `audio`), optional `id`                                                                                 |
+| `track.audio`  | `id` and at least one of `volume` (linear 0–1), `muted` (boolean)                                                                       |
 | `track.remove` | `id` of an empty track                                                                                                                  |
-| `clip.add`     | `assetId`, `trackId`, `at`, `in`, `out`; optional `id`, `volume`, `muted`, `visual`                                                     |
+| `clip.add`     | `assetId`, `trackId`, `at`, `in`, `out`; optional `id`, `volume`, `muted`, `fadeIn`, `fadeOut`, `visual`                                |
 | `clip.move`    | `id` and `at`, `trackId`, or both                                                                                                       |
 | `clip.trim`    | `id` and `in`, `out`, or both                                                                                                           |
 | `clip.split`   | `id`, `at`, optional `rightId`                                                                                                          |
 | `clip.remove`  | `id`                                                                                                                                    |
-| `clip.audio`   | `id` and at least one of `volume` (linear 0–1), `muted` (boolean)                                                                       |
+| `clip.audio`   | `id` and at least one of `volume`, `muted`, `fadeIn`, `fadeOut`                                                                         |
 | `clip.visual`  | `id` and at least one of `x`, `y` (pixel offsets from center), `scale` (0.01–4), `opacity` (0–1), `fit` (`contain`, `cover`, `stretch`) |
 | `text.add`     | `at`, positive `duration`, `text` with `content`; optional `id`, video `trackId`, `visual` (x/y/scale/opacity)                          |
 | `text.set`     | `id` and at least one of `text` patch, `at`, `duration`                                                                                 |
 | `canvas.set`   | At least one of `width`, `height`, `backgroundColor`                                                                                    |
 
-For `clip.add`, nest visual fields in `visual`. Every intermediate operation
+For `clip.add`, nest visual fields in `visual`. Set fade durations in project
+frames with `fadeIn` and `fadeOut` in a batch, or `--fade-in` and `--fade-out`
+on `clip add` and `clip audio`. Zero clears a fade. The sum of both durations
+must fit the clip. Clip and track gains multiply, and either mute silences the
+clip. Use `timeline inspect` to read effective gain and a decoded preview clip
+or export to check the resulting audio. Every intermediate operation
 must be valid. A dry run validates the whole batch without saving. Its revision
 and generated IDs are provisional. Use the same batch for the commit. Check
 `changed` and re-inspect. Use `edit history` to identify the next undo/redo entry

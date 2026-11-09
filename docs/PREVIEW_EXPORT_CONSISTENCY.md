@@ -141,3 +141,18 @@ overlapping cues, including boundaries between project frames.
 The test checks muxed timestamps and compares a second MP4 rendered with
 `--no-subtitles` to verify that disabling burn-in omits cue pixels while
 keeping the same frame count. See [cue sampling and export limits](CLI.md#editable-subtitles-t34).
+
+## Audio envelopes (T35)
+
+Run `pnpm exec playwright test audio-fades.spec.ts` after `pnpm build`.
+The Electron suite observes separate channels at the production Web Audio
+output and compares them with decoded stereo AAC. It exercises duration
+fields, fade handles, volume, mute, undo and redo, two splits and a seek
+inside ramps, trimmed source offsets, silent media, mix peaks and A/V marker
+timing. The split case uses a boundary where rounding separate time calculations
+can reorder gain events. Keyboard and pointer adjustments that leave a fade
+unchanged preserve the partial ramp, undo history and saved project bytes.
+
+The headless playback tests also check event timestamps where two fades meet.
+On macOS the Electron suite plays a synthesized speech recording with a
+generated music bed and checks the effect of track mute in preview and export.

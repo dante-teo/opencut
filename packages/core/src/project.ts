@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { canvasColorPattern } from '@opencut/shared';
 import { textLayerSchema } from './text-style.js';
 import { subtitleTrackSchema } from './subtitles.js';
+import { clipAudioShape, resolveAudioFade, trackAudioShape } from './audio.js';
 import {
   addTimes,
   compareTimes,
@@ -81,12 +82,12 @@ const assetSchema = z.strictObject({
     .optional(),
   metadata: assetMetadataSchema.optional(),
 });
-const trackSchema = z.strictObject({ id, name, type: mediaType });
-/** Linear amplitude gain: 0 is silence, 1 is unchanged. Omission preserves old files. */
-export const clipAudioShape = {
-  volume: z.number().finite().min(0).max(1).optional(),
-  muted: z.boolean().optional(),
-};
+const trackSchema = z.strictObject({
+  id,
+  name,
+  type: mediaType,
+  ...trackAudioShape,
+});
 export const clipVisualSchema = z.strictObject({
   x: z.number().finite().min(-32768).max(32768).optional(),
   y: z.number().finite().min(-32768).max(32768).optional(),
@@ -305,6 +306,8 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
       if (
         clip.volume !== undefined ||
         clip.muted !== undefined ||
+        clip.fadeIn !== undefined ||
+        clip.fadeOut !== undefined ||
         clip.visual?.fit !== undefined
       )
         add(
@@ -327,10 +330,56 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
       );
     if (compareTimes(clip.sourceOut, clip.sourceIn) > 0) {
       try {
-        const end = addTimes(
-          clip.timelineStart,
-          subtractTimes(clip.sourceOut, clip.sourceIn),
-        );
+        const duration = subtractTimes(clip.sourceOut, clip.sourceIn);
+        const end = addTimes(clip.timelineStart, duration);
+        const attack = clip.fadeIn && resolveAudioFade('fadeIn', clip.fadeIn);
+        const release =
+          clip.fadeOut && resolveAudioFade('fadeOut', clip.fadeOut);
+        if (attack || release) {
+          const zero = { numerator: 0, denominator: 1 };
+          const attackDuration = attack?.duration ?? zero;
+          const releaseDuration = release?.duration ?? zero;
+          if (
+            compareTimes(attackDuration, duration) > 0 ||
+            compareTimes(
+              releaseDuration,
+              subtractTimes(duration, attackDuration),
+            ) > 0
+          ) {
+            add(
+              location + '/fadeIn',
+              'fade_bounds',
+              'Fade durations must fit within the clip without overlapping.',
+            );
+          } else if (
+            (attack &&
+              (attack.from > attack.to ||
+                (attack.to !== 1 &&
+                  compareTimes(attack.duration, duration) !== 0))) ||
+            (release &&
+              (release.from < release.to ||
+                (release.from !== 1 &&
+                  compareTimes(release.duration, duration) !== 0)))
+          ) {
+            add(
+              location + '/fadeIn',
+              'fade_gain',
+              'Fade gain endpoints must form a continuous envelope within the clip.',
+            );
+          } else if (release) {
+            // The release start is used as a clip-relative edit boundary.
+            try {
+              subtractTimes(duration, release.duration);
+            } catch (error) {
+              if (!(error instanceof RangeError)) throw error;
+              add(
+                location + '/fadeOut',
+                'time_overflow',
+                'The fade-out boundary exceeds the supported rational time precision.',
+              );
+            }
+          }
+        }
         const entries = intervals.get(clip.trackId) ?? [];
         entries.push({ index, clip, end });
         intervals.set(clip.trackId, entries);

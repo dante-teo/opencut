@@ -24,7 +24,8 @@ Operations: track.add/remove, clip.add/move/trim/split/remove/audio/visual, text
 Subtitle operations: subtitle.import/add/set/move/split/merge/remove/style. Subtitle times are exact { numerator, denominator } seconds.
 text.add takes at, duration, text { content, ...style }, optional id/trackId/visual.
 text.set takes id and optional text patch, at and duration. Use clip.visual for position/scale/opacity.
-clip.add and clip.audio accept volume (linear 0–1, default 1) and muted (boolean, default false).
+clip.add and clip.audio accept volume, muted, fadeIn and fadeOut (project-frame durations; 0 clears).
+track.audio accepts volume and muted. Linear gains (0–1, default 1) multiply; either mute silences the clip.
 clip.add accepts a visual object; clip.visual accepts x/y/scale/opacity/fit. canvas.set accepts width/height/backgroundColor.
 Times (at/in/out) and text duration use whole PROJECT frames.
 Use explicit IDs to reference newly added tracks/clips later in the same batch.

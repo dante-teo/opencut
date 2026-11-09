@@ -4,9 +4,13 @@ import {
   createTimelineEvaluator,
   evaluateTimeline,
   frameTime,
+  resolveTimeline,
+  setClipAudio,
+  splitClip,
 } from '@opencut/core';
 import {
   TimelineClock,
+  TimelinePlayback,
   inPlaybackLookahead,
 } from '../../apps/desktop/src/renderer/timeline-playback.js';
 import { auditProjects } from '../../scripts/t21-projects.js';
@@ -56,6 +60,71 @@ describe('authoritative timeline playback clock', () => {
     expect(empty.playing).toBe(false);
   });
 });
+
+it.each(['split', 'touching'] as const)(
+  'schedules the outgoing ramp and incoming gain at the same timestamp for %s fades',
+  (boundary) => {
+    const project = createProject({ name: 'Fade boundary' });
+    const at = (frame: number) => frameTime(frame, project.settings.frameRate);
+    project.assets = [
+      {
+        id: 'audio',
+        name: 'Audio',
+        mediaTypes: ['audio'],
+        file: { type: 'relative', path: 'tone.wav' },
+      },
+    ];
+    project.tracks = [{ id: 'track', name: 'Audio', type: 'audio' }];
+    project.clips = [
+      {
+        id: 'left',
+        assetId: 'audio',
+        trackId: 'track',
+        timelineStart: at(3),
+        sourceIn: at(0),
+        sourceOut: at(12),
+      },
+    ];
+    const faded = setClipAudio(
+      project,
+      'left',
+      boundary === 'split'
+        ? { fadeIn: at(12) }
+        : { fadeIn: at(6), fadeOut: at(6) },
+    ).project;
+    const input =
+      boundary === 'split'
+        ? splitClip(faded, 'left', at(9), 'right').project
+        : faded;
+    const run = resolveTimeline(input).clips;
+    const active = evaluateTimeline(input, at(3)).audioClips[0]!;
+    const events: { type: 'set' | 'ramp'; gain: number; time: number }[] = [];
+    const param = {
+      cancelScheduledValues() {},
+      setValueAtTime(gain: number, time: number) {
+        events.push({ type: 'set', gain, time });
+      },
+      linearRampToValueAtTime(gain: number, time: number) {
+        events.push({ type: 'ramp', gain, time });
+      },
+    };
+    // Exercise the production scheduler with a fixed audio clock. A live
+    // clock can round away the original mismatch when adding its current time.
+    Reflect.apply(
+      Reflect.get(TimelinePlayback.prototype, 'scheduleGain'),
+      {
+        context: { currentTime: 0.125 },
+        runs: new Map([['left', run]]),
+        action: 1,
+      },
+      [{ key: 'left', gain: { gain: param } }, active, at(3)],
+    );
+    const [, attackEnd, followingGain] = events;
+    const gain = boundary === 'split' ? 0.5 : 1;
+    expect(attackEnd).toMatchObject({ type: 'ramp', gain });
+    expect(followingGain).toEqual({ type: 'set', gain, time: attackEnd!.time });
+  },
+);
 
 it('prepared T23 evaluation agrees at cuts, gaps and every mixing frame and isolates snapshots', () => {
   for (const project of Object.values(auditProjects())) {

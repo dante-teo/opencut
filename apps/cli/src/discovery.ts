@@ -150,7 +150,7 @@ const options: Record<string, Option> = {
   },
   volume: {
     type: 'string',
-    description: 'Linear clip gain.',
+    description: 'Linear amplitude gain for a clip or track.',
     minimum: 0,
     maximum: 1,
   },
@@ -158,6 +158,18 @@ const options: Record<string, Option> = {
     type: 'string',
     description: 'Mute without changing gain.',
     enum: ['true', 'false'],
+  },
+  'fade-in': {
+    type: 'string',
+    description: 'Linear fade-in duration in project frames; zero clears it.',
+    unit: 'project frames',
+    minimum: 0,
+  },
+  'fade-out': {
+    type: 'string',
+    description: 'Linear fade-out duration in project frames; zero clears it.',
+    unit: 'project frames',
+    minimum: 0,
   },
   x: {
     type: 'string',
@@ -234,7 +246,8 @@ const options: Record<string, Option> = {
 };
 const edit = ['dry-run', 'expected-revision'];
 const visual = ['x', 'y', 'scale', 'opacity', 'fit'];
-const audio = ['volume', 'muted'];
+const trackAudio = ['volume', 'muted'];
+const audio = [...trackAudio, 'fade-in', 'fade-out'];
 type Definition = {
   name: string;
   description: string;
@@ -377,6 +390,13 @@ const definitions: Definition[] = [
     mutates: true,
   },
   {
+    name: 'track audio',
+    description: 'Set track volume and/or mute; requires at least one.',
+    args: ['project-file', 'track-id'],
+    options: [...trackAudio, ...edit],
+    mutates: true,
+  },
+  {
     name: 'track remove',
     description: 'Remove an empty track.',
     args: ['project-file', 'track-id'],
@@ -425,7 +445,8 @@ const definitions: Definition[] = [
   },
   {
     name: 'clip audio',
-    description: 'Set volume and/or muted; requires at least one.',
+    description:
+      'Set clip volume, mute and/or fade durations; requires at least one.',
     args: ['project-file', 'clip-id'],
     options: [...audio, ...edit],
     mutates: true,

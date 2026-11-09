@@ -11,10 +11,15 @@ import {
   splitClip,
   trimClip,
   setClipAudio,
+  setTrackAudio,
   setClipVisual,
   setCanvas,
 } from '@opencut/core';
-import type { ClipVisualOptions } from '@opencut/core';
+import type {
+  ClipAudioOptions,
+  ClipVisualOptions,
+  TrackAudioOptions,
+} from '@opencut/core';
 import { readProjectFile, updateProjectFile } from '@opencut/core/node';
 
 export class UsageError extends Error {}
@@ -47,13 +52,14 @@ const hasControlCharacters = (value: string) =>
 
 export const timelineHelp = `Usage: opencut timeline list <project-file> [--json]
        opencut track add <project-file> --type <video|audio> --name <name> [--json]
+       opencut track audio <project-file> <track-id> [--volume <0..1>] [--muted <true|false>] [--json]
        opencut track remove <project-file> <track-id> [--json]
        opencut clip add <project-file> <asset-id> --track <track-id> --at <frame> --in <frame> --out <frame> [--json]
        opencut clip move <project-file> <clip-id> [--track <track-id>] [--at <frame>] [--json]
        opencut clip trim <project-file> <clip-id> [--in <frame>] [--out <frame>] [--json]
        opencut canvas set <project-file> [--width <px>] [--height <px>] [--background-color <#RRGGBB|#RRGGBBAA|transparent>] [--json]
        opencut clip visual <project-file> <clip-id> [--x <px>] [--y <px>] [--scale <n>] [--opacity <0..1>] [--fit <contain|cover|stretch>] [--json]
-       opencut clip audio <project-file> <clip-id> [--volume <0..1>] [--muted <true|false>] [--json]
+       opencut clip audio <project-file> <clip-id> [--volume <0..1>] [--muted <true|false>] [--fade-in <frames>] [--fade-out <frames>] [--json]
        opencut clip split <project-file> <clip-id> --at <frame> [--json]
        opencut clip remove <project-file> <clip-id> [--json]
 
@@ -68,8 +74,8 @@ Visual defaults: x/y 0 (pixel offsets from centered fitted rectangle), scale 1, 
 Scale multiplies the canvas fitting rectangle (0.01–4); contain preserves aspect, cover crops centrally, stretch fills.
 Clip add accepts the same visual flags. Use --x=-20 or --y=-20 for negative offsets.
 Canvas defaults to black; color uses #RRGGBB, #RRGGBBAA or transparent. Gaps and transparent margins reveal lower layers/background.
-Clip add also accepts --volume <0..1> and --muted <true|false>. Defaults: 1 and false.
-Volume is linear amplitude (0 = silence, 1 = unchanged); mute overrides volume without changing it.
+Clip add accepts the same audio flags. Fade durations are project frames; 0 removes a fade.
+Clip and track linear gains multiply (0 = silence, 1 = unchanged). Either mute silences the clip.
 Known source durations are enforced. Unknown durations/images require explicit ranges with no inferred bound.
 Offline editing needs no media tools; stored metadata is not refreshed or decoded.
 Mutations create undo/redo history; --dry-run previews; --expected-revision <n> guards stale edits.
@@ -77,26 +83,28 @@ Mutations use guarded atomic updates; project-file symlinks/hard links are refus
 Errors are structured JSON on stderr with --json. Exit codes: 0 success, 1 invalid edit/data/file, 2 invalid arguments.
 `;
 
+const trackAudioFlags = ['volume', 'muted'];
+const clipAudioFlags = [...trackAudioFlags, 'fade-in', 'fade-out'];
 const optionsForCommand: Record<string, readonly string[]> = {
   'timeline list': [],
   'canvas set': ['width', 'height', 'background-color'],
   'clip visual': ['x', 'y', 'scale', 'opacity', 'fit'],
   'track add': ['type', 'name'],
   'track remove': [],
+  'track audio': trackAudioFlags,
   'clip add': [
     'track',
     'at',
     'in',
     'out',
-    'volume',
-    'muted',
+    ...clipAudioFlags,
     'x',
     'y',
     'scale',
     'opacity',
     'fit',
   ],
-  'clip audio': ['volume', 'muted'],
+  'clip audio': clipAudioFlags,
   'clip move': ['track', 'at'],
   'clip trim': ['in', 'out'],
   'clip split': ['at'],
@@ -117,7 +125,7 @@ export async function runTimelineCommand(
       (['timeline list', 'track add', 'canvas set'].includes(command) ? 3 : 4)
   )
     throw new UsageError(
-      'Expected a timeline list, track add/remove or clip add/move/trim/split/remove/audio/visual or canvas set command. Run opencut timeline --help for usage.',
+      'Expected a timeline list, track add/remove/audio or clip add/move/trim/split/remove/audio/visual or canvas set command. Run opencut timeline --help for usage.',
     );
   const allowedOptions = [
     'json',
@@ -167,7 +175,7 @@ export async function runTimelineCommand(
   )
     throw new UsageError('clip trim requires --in or --out (or both).');
   if (values.track !== undefined) required('track');
-  const audio: { volume?: number; muted?: boolean } = {};
+  const audio: TrackAudioOptions = {};
   if (values.volume !== undefined) {
     const value = required('volume');
     if (
@@ -186,8 +194,18 @@ export async function runTimelineCommand(
       throw new UsageError('--muted requires true or false.');
     audio.muted = value === 'true';
   }
-  if (command === 'clip audio' && Object.keys(audio).length === 0)
-    throw new UsageError('clip audio requires --volume or --muted (or both).');
+  if (
+    command === 'track audio' &&
+    !trackAudioFlags.some((key) => values[key] !== undefined)
+  )
+    throw new UsageError('track audio requires --volume or --muted (or both).');
+  if (
+    command === 'clip audio' &&
+    !clipAudioFlags.some((key) => values[key] !== undefined)
+  )
+    throw new UsageError(
+      'clip audio requires --volume, --muted, --fade-in or --fade-out.',
+    );
   const visual: ClipVisualOptions = {};
   for (const key of ['x', 'y', 'scale', 'opacity'] as const) {
     if (values[key] === undefined) continue;
@@ -237,8 +255,9 @@ export async function runTimelineCommand(
   }
   if (command === 'canvas set' && Object.keys(canvas).length === 0)
     throw new UsageError('canvas set requires at least one canvas option.');
-  const frames: Partial<Record<'at' | 'in' | 'out', number>> = {};
-  for (const key of ['at', 'in', 'out'] as const) {
+  const frameFlags = ['at', 'in', 'out', 'fade-in', 'fade-out'] as const;
+  const frames: Partial<Record<(typeof frameFlags)[number], number>> = {};
+  for (const key of frameFlags) {
     if (values[key] === undefined) continue;
     const value = required(key);
     const number = Number(value);
@@ -259,11 +278,11 @@ export async function runTimelineCommand(
       `Frame rate: ${result.frameRate.numerator}/${result.frameRate.denominator}`,
       `Duration: ${time(result.duration)}`,
       ...result.tracks.flatMap((track) => [
-        `Track: ${track.id} (${track.type}, ${track.name})`,
+        `Track: ${track.id} (${track.type}, ${track.name}); volume ${track.volume ?? 1}; muted ${track.muted ?? false}`,
         ...track.clips.map((clip) =>
           clip.text
             ? `  Text: ${clip.id}; timeline [${time(clip.timelineStart)}, ${time(clip.timelineEnd)}); text ${JSON.stringify(clip.text)}; visual ${JSON.stringify(clip.visual ?? {})}`
-            : `  Clip: ${clip.id}; asset ${clip.assetId}; timeline [${time(clip.timelineStart)}, ${time(clip.timelineEnd)}); source [${time(clip.sourceIn)}, ${time(clip.sourceOut)}); volume ${clip.volume ?? 1}; muted ${clip.muted ?? false}; visual ${JSON.stringify(clip.visual ?? {})}`,
+            : `  Clip: ${clip.id}; asset ${clip.assetId}; timeline [${time(clip.timelineStart)}, ${time(clip.timelineEnd)}); source [${time(clip.sourceIn)}, ${time(clip.sourceOut)}); volume ${clip.volume ?? 1}; muted ${clip.muted ?? false}; fade in ${clip.fadeIn ? time(clip.fadeIn.duration) : '0s'}; fade out ${clip.fadeOut ? time(clip.fadeOut.duration) : '0s'}; visual ${JSON.stringify(clip.visual ?? {})}`,
         ),
       ]),
       '',
@@ -276,8 +295,14 @@ export async function runTimelineCommand(
   const result = await updateProjectFile(
     path,
     async (project, canonicalPath) => {
-      const time = (key: 'at' | 'in' | 'out') =>
+      const time = (key: (typeof frameFlags)[number]) =>
         frameTime(frames[key]!, project.settings.frameRate);
+      const clipAudio: ClipAudioOptions = {
+        ...audio,
+        fadeIn: frames['fade-in'] === undefined ? undefined : time('fade-in'),
+        fadeOut:
+          frames['fade-out'] === undefined ? undefined : time('fade-out'),
+      };
       let changed;
       switch (command) {
         case 'track add':
@@ -285,6 +310,9 @@ export async function runTimelineCommand(
             type: values.type as 'video' | 'audio',
             name: values.name as string,
           });
+          break;
+        case 'track audio':
+          changed = setTrackAudio(project, id!, audio);
           break;
         case 'track remove':
           changed = removeTrack(project, id!);
@@ -296,7 +324,7 @@ export async function runTimelineCommand(
             timelineStart: time('at'),
             sourceIn: time('in'),
             sourceOut: time('out'),
-            ...audio,
+            ...clipAudio,
             ...(Object.keys(visual).length ? { visual } : {}),
           });
           break;
@@ -327,7 +355,7 @@ export async function runTimelineCommand(
           changed = setClipVisual(project, id!, visual);
           break;
         case 'clip audio':
-          changed = setClipAudio(project, id!, audio);
+          changed = setClipAudio(project, id!, clipAudio);
           break;
         default:
           throw new UsageError('Unknown timeline operation.');

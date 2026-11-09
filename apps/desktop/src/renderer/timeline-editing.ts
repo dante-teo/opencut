@@ -11,6 +11,7 @@ import {
   type Project,
   type RationalTime,
   type TimelineClip,
+  type AudioFadeEdge,
 } from '@opencut/core';
 import type { TimelineOperation } from '../bridge.js';
 import {
@@ -20,7 +21,7 @@ import {
   ZERO,
 } from './timeline-geometry.js';
 
-export type GestureKind = 'move' | 'left' | 'right';
+export type GestureKind = 'move' | 'left' | 'right' | AudioFadeEdge;
 export interface EditProposal {
   operations: TimelineOperation[];
   clip: TimelineClip;
@@ -42,6 +43,24 @@ export function createTimelinePreview(project: Project) {
   return projectSnapshot(content);
 }
 
+function previewClipEdit(
+  project: Project,
+  clip: TimelineClip,
+  operations: TimelineOperation[],
+  snap: RationalTime | null,
+): EditProposal {
+  const preview = previewTransaction(project, {
+    expectedRevision: projectRevision(project),
+    operations,
+  }).project;
+  return {
+    operations,
+    clip: preview.clips.find((entry) => entry.id === clip.id)!,
+    error: null,
+    snap,
+  };
+}
+
 /** UI coordinate policy only. The core validates and produces every proposed clip. */
 export function proposeEdit(
   project: Project,
@@ -57,6 +76,30 @@ export function proposeEdit(
   let snap: RationalTime | null = null;
   try {
     const rate = project.settings.frameRate;
+    if (kind === 'fadeIn' || kind === 'fadeOut') {
+      const unchanged = { operations, clip, error: null, snap };
+      if (delta === 0n) return unchanged;
+      const previous = clip[kind]?.duration ?? ZERO;
+      const other =
+        clip[kind === 'fadeIn' ? 'fadeOut' : 'fadeIn']?.duration ?? ZERO;
+      const current = frameIndex(previous, rate, true);
+      const maximum = frameIndex(
+        subtractTimes(clipDuration(clip), other),
+        rate,
+      );
+      const target = current + (kind === 'fadeIn' ? delta : -delta);
+      const duration = safeFrame(
+        target < 0n ? 0n : target > maximum ? maximum : target,
+      );
+      if (compareTimes(frameTime(duration, rate), previous) === 0)
+        return unchanged;
+      const operation: TimelineOperation = {
+        type: 'clip.audio',
+        id: clip.id,
+        [kind]: duration,
+      };
+      return previewClipEdit(project, clip, [operation], null);
+    }
     const start = frameIndex(clip.timelineStart, rate, true);
     const sourceIn = frameIndex(clip.sourceIn, rate, true);
     const sourceOut = frameIndex(clip.sourceOut, rate, true);
@@ -156,16 +199,7 @@ export function proposeEdit(
       // remains valid against neighbours, and the batch is a single undo step.
       operations = change >= 0n ? [trim, move] : [move, trim];
     }
-    const preview = previewTransaction(project, {
-      expectedRevision: projectRevision(project),
-      operations,
-    }).project;
-    return {
-      operations,
-      clip: preview.clips.find((entry) => entry.id === clip.id)!,
-      error: null,
-      snap,
-    };
+    return previewClipEdit(project, clip, operations, snap);
   } catch (error) {
     return {
       operations,
@@ -188,6 +222,8 @@ export function proposeSubtitleEdit(
 ): EditProposal {
   let snap: RationalTime | null = null;
   try {
+    if (kind === 'fadeIn' || kind === 'fadeOut')
+      throw new Error('Subtitles have no audio.');
     const end = clipTimelineEnd(clip);
     const edge = kind === 'right' ? end : clip.timelineStart;
     let target = backwards

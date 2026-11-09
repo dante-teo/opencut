@@ -1,5 +1,6 @@
 import type { Project, TimelineClip } from './project.js';
 import { resolveTimeline } from './evaluation.js';
+import { resolveAudioFade } from './audio.js';
 import { compareTimes } from './time.js';
 import type { FrameRate, RationalTime } from './time.js';
 
@@ -48,6 +49,8 @@ export interface AudioRenderClip {
   frameCount: number;
   volume: number;
   muted: boolean;
+  fadeIn?: ReturnType<typeof resolveAudioFade>;
+  fadeOut?: ReturnType<typeof resolveAudioFade>;
   /** Audio tracks require an audio stream; video clips may provide silence. */
   required: boolean;
 }
@@ -172,8 +175,12 @@ export function planProjectRender(
         timelineStartFrame: start,
         sourceStartFrame: sourceStart,
         frameCount: count,
-        volume: clip.volume,
-        muted: clip.muted,
+        volume: clip.volume * (clip.trackVolume ?? 1),
+        muted: clip.muted || (clip.trackMuted ?? false),
+        ...(clip.fadeIn && { fadeIn: resolveAudioFade('fadeIn', clip.fadeIn) }),
+        ...(clip.fadeOut && {
+          fadeOut: resolveAudioFade('fadeOut', clip.fadeOut),
+        }),
         required: clip.trackType === 'audio',
       });
     if (clip.trackType === 'video') {

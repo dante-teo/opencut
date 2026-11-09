@@ -1,6 +1,9 @@
 import { fittingBox, visualGeometry } from '@opencut/shared';
 import {
   addTimes,
+  subtractTimes,
+  baseAudioGain,
+  resolveAudioFade,
   compareTimes,
   createTimelineEvaluator,
   projectRevision,
@@ -97,6 +100,7 @@ export interface TimelineDiagnostics {
   maxTickGapMs: number;
   unavailable: string[];
   activeAudio: number;
+  audioPeaks: readonly [number, number];
   position: RationalTime;
   playing: boolean;
   outputLatencyMs: number;
@@ -149,10 +153,12 @@ export class TimelinePlayback {
   private readonly evaluate;
   private readonly context: AudioContext;
   private readonly master: GainNode;
+  private readonly meters: readonly [AnalyserNode, AnalyserNode];
+  private readonly meterSamples = new Float32Array(4096);
   private readonly entries = new Map<string, Entry>();
   private readonly aspects = new Map<string, number>();
   private readonly keys = new Map<string, string>();
-  private readonly runs = new Map<string, ResolvedTimelineClip[]>();
+  private readonly runs = new Map<string, ResolvedMediaClip[]>();
   private readonly upcoming: ResolvedTimelineClip[];
   private readonly grants = new Map<string, Promise<PreviewSource>>();
   private readonly originalGrants = new Map<string, Promise<PreviewSource>>();
@@ -234,12 +240,23 @@ export class TimelinePlayback {
     this.master.gain.value = 0;
     // Protect the live sum; this browser compressor is not export's FFmpeg limiter.
     const limiter = this.context.createDynamicsCompressor();
+    limiter.channelCountMode = 'explicit';
     limiter.threshold.value = -1;
     limiter.knee.value = 0;
     limiter.ratio.value = 20;
     limiter.attack.value = 0.003;
     limiter.release.value = 0.05;
     this.master.connect(limiter).connect(this.context.destination);
+    const stereo = this.context.createChannelSplitter(2);
+    limiter.connect(stereo);
+    this.meters = [
+      this.context.createAnalyser(),
+      this.context.createAnalyser(),
+    ];
+    this.meters.forEach((meter, channel) => {
+      meter.fftSize = this.meterSamples.length;
+      stereo.connect(meter, channel);
+    });
     this.clock = new TimelineClock(
       this.evaluate(ZERO).duration,
       () => this.context.currentTime,
@@ -268,6 +285,7 @@ export class TimelinePlayback {
       maxTickGapMs: 0,
       unavailable: [],
       activeAudio: 0,
+      audioPeaks: [0, 0],
       position: ZERO,
       playing: false,
       outputLatencyMs:
@@ -287,7 +305,7 @@ export class TimelinePlayback {
     if (entry.disposed || this.disposed) return;
     entry.failed = true;
     entry.media?.pause();
-    if (entry.gain) entry.gain.gain.value = 0;
+    this.resetGain(entry);
     const warning = `${entry.clip.assetId}: ${message}`;
     if (!this.diagnostics.unavailable.includes(warning))
       this.diagnostics.unavailable.push(warning);
@@ -688,12 +706,66 @@ export class TimelinePlayback {
         });
     }
   }
+  private resetGain(entry: Entry) {
+    if (!entry.gain || entry.scheduledAction === -1) return;
+    const now = this.context.currentTime;
+    entry.gain.gain.cancelScheduledValues(now);
+    entry.gain.gain.setValueAtTime(0, now);
+    entry.scheduledAction = -1;
+  }
+  private scheduleGain(
+    entry: Entry,
+    clip: EvaluatedTimelineClip,
+    time: RationalTime,
+  ) {
+    const param = entry.gain!.gain;
+    const now = this.context.currentTime;
+    const playhead = seconds(time);
+    const at = (t: number) => now + Math.max(0, t - playhead);
+    param.cancelScheduledValues(now);
+    const run = this.runs.get(entry.key)!;
+    for (const next of run) {
+      if (compareTimes(next.timelineEnd, time) <= 0) continue;
+      const current = next.id === clip.id;
+      const start = seconds(next.timelineStart);
+      const end = seconds(next.timelineEnd);
+      const gain = baseAudioGain(next);
+      const attack = next.fadeIn && resolveAudioFade('fadeIn', next.fadeIn);
+      const release = next.fadeOut && resolveAudioFade('fadeOut', next.fadeOut);
+      param.setValueAtTime(
+        current ? clip.effectiveVolume : gain * (attack?.from ?? 1),
+        at(start),
+      );
+      if (attack) {
+        // At a split, anchor a full-length ramp to the same clip boundary
+        // used by the next piece's setValueAtTime.
+        const attackEnd =
+          compareTimes(attack.duration, next.duration) === 0
+            ? end
+            : start + seconds(attack.duration);
+        if (attackEnd > playhead)
+          param.linearRampToValueAtTime(gain * attack.to, at(attackEnd));
+      }
+      if (release) {
+        // Use the same clip-relative calculation as the attack when the
+        // two fades touch. Subtract their durations before rounding.
+        const fadeStart =
+          start + seconds(subtractTimes(next.duration, release.duration));
+        if (fadeStart > playhead)
+          param.setValueAtTime(gain * release.from, at(fadeStart));
+        param.linearRampToValueAtTime(gain * release.to, at(end));
+      }
+    }
+    // Continuous splits share their source decoder and have no intermediate gate.
+    param.setValueAtTime(0, at(seconds(run.at(-1)!.timelineEnd)));
+    entry.scheduledAction = this.action;
+  }
   private silence() {
     this.master.gain.value = 0;
     for (const entry of this.entries.values()) {
       entry.media?.pause();
       entry.playPending = false;
-      if (entry.gain) entry.gain.gain.value = 0;
+      this.resetGain(entry);
     }
   }
   pause() {
@@ -792,6 +864,7 @@ export class TimelinePlayback {
       this.clock.play();
       this.lastTick = performance.now();
       this.master.gain.value = 1;
+      this.render();
     } catch (error) {
       if (action === this.action && !this.disposed) {
         this.diagnostics.unavailable.push(String(error));
@@ -801,7 +874,17 @@ export class TimelinePlayback {
       if (action === this.action) this.starting = false;
     }
   }
+  private meterPeak(meter: AnalyserNode) {
+    meter.getFloatTimeDomainData(this.meterSamples);
+    let peak = 0;
+    for (const sample of this.meterSamples)
+      peak = Math.max(peak, Math.abs(sample));
+    return peak;
+  }
   private publish() {
+    this.diagnostics.audioPeaks = this.clock.playing
+      ? [this.meterPeak(this.meters[0]), this.meterPeak(this.meters[1])]
+      : [0, 0];
     this.diagnostics.position = this.clock.read();
     this.diagnostics.playing = this.clock.playing;
     this.report(this.diagnostics.position, {
@@ -844,7 +927,7 @@ export class TimelinePlayback {
     const needed = evaluation.activeClips.filter(
       (c): c is EvaluatedTimelineClip & ResolvedMediaClip =>
         c.kind !== 'text' &&
-        (visualKeys.has(this.keys.get(c.id)!) || c.effectiveVolume > 0),
+        (visualKeys.has(this.keys.get(c.id)!) || baseAudioGain(c) > 0),
     );
     const active = new Map(needed.map((c) => [this.keys.get(c.id)!, c]));
     const keep = new Set(active.keys());
@@ -893,11 +976,7 @@ export class TimelinePlayback {
         }
         continue;
       }
-      if (
-        !this.visible(clip) &&
-        (clip.muted || clip.volume === 0 || clip.audioPresence === 'absent')
-      )
-        continue;
+      if (!this.visible(clip) && baseAudioGain(clip) === 0) continue;
       const asset = this.project.assets.find(
         (asset) => asset.id === clip.assetId,
       );
@@ -934,7 +1013,7 @@ export class TimelinePlayback {
       const media = entry.media;
       if (!clip || entry.failed) {
         media?.pause();
-        if (entry.gain) entry.gain.gain.value = 0;
+        this.resetGain(entry);
         continue;
       }
       if (!media || !media.readyState) continue;
@@ -965,33 +1044,9 @@ export class TimelinePlayback {
       )
         media.currentTime = decoderSeekTime(clip.sourceTime);
       if (entry.gain) {
-        const param = entry.gain.gain;
-        const audioNow = this.context.currentTime;
-        if (!this.clock.playing || media.seeking) {
-          param.cancelScheduledValues(audioNow);
-          param.setValueAtTime(0, audioNow);
-          entry.scheduledAction = -1;
-        } else if (entry.scheduledAction !== this.action) {
-          param.cancelScheduledValues(audioNow);
-          param.setValueAtTime(clip.effectiveVolume, audioNow);
-          // Schedule a continuous run once. Splits never insert an end-gate gap,
-          // and their individual gain/mute changes land on the same audio clock.
-          const run = this.runs.get(entry.key)!;
-          for (const next of run) {
-            if (compareTimes(next.timelineStart, time) <= 0) continue;
-            param.setValueAtTime(
-              next.muted || next.audioPresence === 'absent' ? 0 : next.volume,
-              audioNow +
-                Math.max(0, seconds(next.timelineStart) - seconds(time)),
-            );
-          }
-          param.setValueAtTime(
-            0,
-            audioNow +
-              Math.max(0, seconds(run.at(-1)!.timelineEnd) - seconds(time)),
-          );
-          entry.scheduledAction = this.action;
-        }
+        if (!this.clock.playing || media.seeking) this.resetGain(entry);
+        else if (entry.scheduledAction !== this.action)
+          this.scheduleGain(entry, clip, time);
       }
       if (this.clock.playing && media.paused && !entry.playPending) {
         entry.playPending = true;
