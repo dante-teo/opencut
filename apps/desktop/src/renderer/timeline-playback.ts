@@ -3,9 +3,11 @@ import {
   addTimes,
   subtractTimes,
   baseAudioGain,
+  clipSpeed,
   resolveAudioFade,
   compareTimes,
   createTimelineEvaluator,
+  continuesMediaRun,
   projectRevision,
   resolveTimeline,
   type ResolvedTimelineClip,
@@ -208,15 +210,11 @@ export class TimelinePlayback {
         continue;
       }
       // A split with contiguous source points shares its decoder and never restarts audio.
-      const continuous =
-        previous &&
-        previous.trackId === clip.trackId &&
-        previous.assetId === clip.assetId &&
-        compareTimes(previous.timelineEnd, clip.timelineStart) === 0 &&
-        compareTimes(previous.sourceOut, clip.sourceIn) === 0;
       this.keys.set(
         clip.id,
-        continuous ? this.keys.get(previous!.id)! : clip.id,
+        previous && continuesMediaRun(previous, clip)
+          ? this.keys.get(previous.id)!
+          : clip.id,
       );
       const key = this.keys.get(clip.id)!;
       const run = this.runs.get(key) ?? [];
@@ -372,6 +370,10 @@ export class TimelinePlayback {
         media.dataset.proxy = String(!!source.proxy);
         media.crossOrigin = 'anonymous';
         media.preload = 'auto';
+        media.defaultPlaybackRate = media.playbackRate = seconds(
+          clipSpeed(clip),
+        );
+        media.preservesPitch = true;
         media.playsInline = true;
         media.setAttribute('aria-hidden', 'true');
         this.host.append(media);
@@ -458,8 +460,9 @@ export class TimelinePlayback {
             if (now > item.settleUntil)
               this.diagnostics.maxPresentedSkewMs = Math.max(
                 this.diagnostics.maxPresentedSkewMs,
-                Math.abs(metadata.mediaTime - seconds(active.sourceTime)) *
-                  1000,
+                (Math.abs(metadata.mediaTime - seconds(active.sourceTime)) *
+                  1000) /
+                  seconds(clipSpeed(active)),
               );
           }
           item.callback = media.requestVideoFrameCallback(observe);
@@ -849,6 +852,7 @@ export class TimelinePlayback {
           const entry = this.entries.get(this.keys.get(clip.id)!);
           if (!entry?.media || entry.failed) return;
           entry.media.currentTime = decoderSeekTime(clip.sourceTime);
+          entry.media.playbackRate = entry.media.defaultPlaybackRate;
           entry.settleUntil = performance.now() + 250;
           try {
             await entry.media.play();
@@ -1018,7 +1022,8 @@ export class TimelinePlayback {
       }
       if (!media || !media.readyState) continue;
       const target = seconds(clip.sourceTime);
-      const error = target - media.currentTime;
+      const rate = seconds(clipSpeed(clip));
+      const error = (target - media.currentTime) / rate;
       if (this.clock.playing && !media.seeking && now > entry.settleUntil) {
         this.diagnostics.maxMediaSkewMs = Math.max(
           this.diagnostics.maxMediaSkewMs,
@@ -1034,13 +1039,18 @@ export class TimelinePlayback {
           entry.settleUntil = now + 250;
           this.diagnostics.clockCorrections++;
         } else
-          media.playbackRate =
-            Math.abs(error) > 0.015 ? (error > 0 ? 1.02 : 0.98) : 1;
+          media.playbackRate = Math.min(
+            4,
+            Math.max(
+              0.25,
+              rate * (Math.abs(error) > 0.015 ? (error > 0 ? 1.02 : 0.98) : 1),
+            ),
+          );
       } else if (
         !this.clock.playing &&
         !this.starting &&
         !media.seeking &&
-        Math.abs(error) > 0.001
+        Math.abs(target - media.currentTime) > 0.001
       )
         media.currentTime = decoderSeekTime(clip.sourceTime);
       if (entry.gain) {
@@ -1115,7 +1125,9 @@ export class TimelinePlayback {
           (entry.media &&
             !entry.media.seeking &&
             Math.abs(entry.media.currentTime - seconds(visual.sourceTime)) <
-              (this.clock.playing ? 0.15 : 0.001)));
+              (this.clock.playing
+                ? 0.15 * seconds(clipSpeed(visual))
+                : 0.001)));
       const cached =
         !nativeReady && !this.clock.playing
           ? this.cachedFrames.get(

@@ -4,7 +4,7 @@ import {
   visualGeometry,
   sourceColorMatrix,
 } from '@opencut/shared';
-import type { TextLayer } from '@opencut/shared';
+import type { RenderTimeMapping, TextLayer } from '@opencut/shared';
 import {
   access,
   link,
@@ -30,6 +30,7 @@ interface VisualTimelineProperties {
   timelineStartFrame: number;
   sourceStartFrame: number;
   frameCount: number;
+  retiming?: RenderTimeMapping & { sourceOriginNs: number };
   x?: number;
   y?: number;
   scale?: number;
@@ -95,6 +96,8 @@ export interface VideoTimelineOptions extends RenderControls {
     timelineStartFrame: number;
     sourceStartFrame: number;
     frameCount: number;
+    retiming?: RenderTimeMapping;
+    tempoRunId?: string;
     volume: number;
     muted: boolean;
     fadeIn?: RenderAudioFade;
@@ -169,6 +172,9 @@ function validateOptions(options: VideoTimelineOptions): void {
             clip.sourceStartFrame < 0 ||
             !Number.isSafeInteger(clip.frameCount) ||
             clip.frameCount <= 0 ||
+            (clip.retiming !== undefined &&
+              (!validRetiming(clip.retiming) ||
+                !Number.isInteger(clip.retiming.sourceOriginNs))) ||
             !Number.isSafeInteger(clip.sourceStartFrame + clip.frameCount) ||
             !Number.isSafeInteger(clip.timelineStartFrame + clip.frameCount) ||
             clip.timelineStartFrame + clip.frameCount > frameCount ||
@@ -195,7 +201,8 @@ function validateOptions(options: VideoTimelineOptions): void {
         !Number.isSafeInteger(clip.sourceStartFrame) ||
         clip.sourceStartFrame < 0 ||
         !Number.isSafeInteger(clip.frameCount) ||
-        clip.frameCount <= 0 ||
+        clip.frameCount < (clip.retiming ? 0 : 1) ||
+        (clip.retiming !== undefined && !validRetiming(clip.retiming)) ||
         !Number.isSafeInteger(clip.sourceStartFrame + clip.frameCount) ||
         clip.timelineStartFrame + clip.frameCount > frameCount ||
         !Number.isFinite(clip.volume) ||
@@ -211,11 +218,54 @@ function validateOptions(options: VideoTimelineOptions): void {
     );
 }
 
+type Rational = RenderTimeMapping['sourceIn'];
+
+function validRational(time: Rational | undefined): time is Rational {
+  return (
+    !!time &&
+    Number.isSafeInteger(time.numerator) &&
+    time.numerator >= 0 &&
+    Number.isSafeInteger(time.denominator) &&
+    time.denominator > 0
+  );
+}
+
+function seconds(time: Rational): number {
+  return time.numerator / time.denominator;
+}
+
+function timeDifference(a: Rational, b: Rational): bigint {
+  return (
+    BigInt(a.numerator) * BigInt(b.denominator) -
+    BigInt(b.numerator) * BigInt(a.denominator)
+  );
+}
+
+function validRetiming(timing: RenderTimeMapping): boolean {
+  return (
+    !!timing &&
+    [
+      timing.timelineStart,
+      timing.timelineEnd,
+      timing.sourceIn,
+      timing.sourceOut,
+      timing.speed,
+    ].every(validRational) &&
+    timeDifference(timing.speed, { numerator: 1, denominator: 4 }) >= 0n &&
+    timeDifference(timing.speed, { numerator: 4, denominator: 1 }) <= 0n &&
+    timeDifference(timing.timelineStart, timing.timelineEnd) < 0n &&
+    timeDifference(timing.timelineEnd, { numerator: 600, denominator: 1 }) <=
+      0n &&
+    timeDifference(timing.sourceIn, timing.sourceOut) < 0n
+  );
+}
+
 function validAudioFades(
   {
     fadeIn,
     fadeOut,
     frameCount,
+    retiming,
   }: NonNullable<VideoTimelineOptions['audioClips']>[number],
   numerator: number,
   denominator: number,
@@ -224,11 +274,8 @@ function validAudioFades(
   for (const fade of fades) {
     if (fade === undefined) continue;
     if (
-      !fade?.duration ||
-      !Number.isSafeInteger(fade.duration.numerator) ||
-      fade.duration.numerator <= 0 ||
-      !Number.isSafeInteger(fade.duration.denominator) ||
-      fade.duration.denominator <= 0 ||
+      !validRational(fade?.duration) ||
+      fade.duration.numerator === 0 ||
       ![fade.from, fade.to].every(
         (gain) => Number.isFinite(gain) && gain >= 0 && gain <= 1,
       )
@@ -239,8 +286,15 @@ function validAudioFades(
   const b = BigInt(fadeIn?.duration.denominator ?? 1);
   const c = BigInt(fadeOut?.duration.numerator ?? 0);
   const d = BigInt(fadeOut?.duration.denominator ?? 1);
-  const frames = BigInt(frameCount) * BigInt(denominator);
-  const rate = BigInt(numerator);
+  const { timelineStart: start, timelineEnd: end } = retiming ?? {};
+  const frames =
+    start && end
+      ? timeDifference(end, start)
+      : BigInt(frameCount) * BigInt(denominator);
+  const rate =
+    start && end
+      ? BigInt(start.denominator) * BigInt(end.denominator)
+      : BigInt(numerator);
   return (
     (a * d + c * b) * rate <= frames * b * d &&
     (!fadeIn ||
@@ -548,11 +602,14 @@ async function prepareTimeline(
         ? null
         : source.durationSeconds - offset);
     const sourceEnd = clip.sourceStartFrame + clip.frameCount;
+    const sourceOutSeconds = clip.retiming
+      ? seconds(clip.retiming.sourceOut)
+      : (sourceEnd * denominator) / numerator;
     if (
       !still &&
       (duration === null ||
         duration <= 0 ||
-        (sourceEnd * denominator) / numerator > duration + 0.000001)
+        sourceOutSeconds > duration + 0.000001)
     )
       throw new MediaError(
         `Clip '${clip.clipId}' source out exceeds the current video duration or its duration is unknown. Re-import the media and trim to a known video range.`,
@@ -562,10 +619,21 @@ async function prepareTimeline(
     // Sample before trimming so source selection is invariant under splitting.
     // A source frame first covers the project tick at or after its PTS.
     // Rounding down or to nearest can show a frame before its presentation time.
+    const { retiming } = clip;
+    const frameSampling = `fps=${rate}:start_time=0:round=${retiming ? 'near' : 'up'}:eof_action=pass,tpad=stop_mode=clone:stop=1,`;
+    // Pick an absolute project frame before shifting to this piece's local clock.
+    // Two source ns cover PTS rounding and truncation of the shared source origin.
+    const frameNs = `(1000000000*${denominator}/${numerator})`;
     const sampling = still
       ? `loop=loop=-1:size=1:start=0,trim=end_frame=${clip.frameCount}`
-      : `setpts=PTS-STARTPTS,fps=${rate}:start_time=0:round=up:eof_action=pass,tpad=stop_mode=clone:stop=1,` +
-        `trim=start_frame=${clip.sourceStartFrame}:end_frame=${sourceEnd}`;
+      : retiming
+        ? 'setpts=PTS-STARTPTS,settb=1/1000000000,' +
+          `setpts=(ceil((PTS-(${retiming.sourceOriginNs})-2)*${retiming.speed.denominator}/${retiming.speed.numerator}/${frameNs})-${clip.timelineStartFrame})*${frameNs},` +
+          frameSampling +
+          `trim=end_frame=${clip.frameCount}`
+        : 'setpts=PTS-STARTPTS,' +
+          frameSampling +
+          `trim=start_frame=${clip.sourceStartFrame}:end_frame=${sourceEnd}`;
     filters.push(
       `[${input++}:${video.index}]${sampling},` +
         `${fitVisual(geometry, matrix)},format=rgba,` +
@@ -617,20 +685,90 @@ async function prepareTimeline(
       48000n;
     return Number((2n * n + divisor) / (2n * divisor));
   };
+  const sampleTime = (time: Rational, offset?: Rational, sign = 1n) =>
+    sample(
+      time.numerator,
+      { numerator: time.denominator, denominator: 1 },
+      offset,
+      sign,
+    );
   const totalSamples = options.range
     ? sample(frameCount)
     : sample(outputFrameCount, outputRate);
   const audioLabels = ['[silence]'];
   filters.push(
-    `anullsrc=r=48000:cl=stereo,atrim=end_sample=${totalSamples},asetpts=N/SR/TB[silence]`,
+    `anullsrc=r=48000:cl=stereo,atrim=end_sample=${totalSamples},asettb=1/48000,asetpts=N[silence]`,
   );
-  for (const [index, clip] of (options.audioClips ?? []).entries()) {
-    const source = await readSource(clip);
+  type AudioClip = NonNullable<VideoTimelineOptions['audioClips']>[number];
+  const timelineSample = (
+    clip: AudioClip,
+    edge: 'start' | 'end',
+    fade?: Rational,
+  ) => {
+    const sign = edge === 'start' ? 1n : -1n;
+    if (clip.retiming) {
+      const time =
+        edge === 'start'
+          ? clip.retiming.timelineStart
+          : clip.retiming.timelineEnd;
+      return sampleTime(time, fade, sign);
+    }
+    const frame =
+      clip.timelineStartFrame + (edge === 'start' ? 0 : clip.frameCount);
+    return sample(frame, frameRate, fade, sign);
+  };
+  const effects = (clip: AudioClip, start: number, end: number) => {
+    const filters: string[] = [];
+    if (clip.fadeIn) {
+      const length =
+        timelineSample(clip, 'start', clip.fadeIn.duration) - start;
+      if (length > 0)
+        filters.push(
+          `afade=t=in:ss=0:ns=${length}:c=tri:silence=${clip.fadeIn.from}:unity=${clip.fadeIn.to}`,
+        );
+    }
+    if (clip.fadeOut) {
+      const release = timelineSample(clip, 'end', clip.fadeOut.duration);
+      if (end > release)
+        filters.push(
+          `afade=t=out:ss=${release - start}:ns=${end - release}:c=tri:silence=${clip.fadeOut.to}:unity=${clip.fadeOut.from}`,
+        );
+    }
+    filters.push(`volume=${clip.muted ? 0 : clip.volume}`);
+    return filters.join(',');
+  };
+  const runs: AudioClip[][] = [];
+  for (const clip of options.audioClips ?? []) {
+    const run = runs.at(-1);
+    const previous = run?.at(-1);
+    if (
+      run &&
+      previous?.retiming &&
+      clip.retiming &&
+      clip.tempoRunId !== undefined &&
+      clip.tempoRunId === previous.tempoRunId &&
+      clip.path === previous.path &&
+      clip.required === previous.required &&
+      timeDifference(
+        previous.retiming.timelineEnd,
+        clip.retiming.timelineStart,
+      ) === 0n &&
+      timeDifference(previous.retiming.sourceOut, clip.retiming.sourceIn) ===
+        0n &&
+      timeDifference(previous.retiming.speed, clip.retiming.speed) === 0n
+    )
+      run.push(clip);
+    else runs.push([clip]);
+  }
+  for (const [index, run] of runs.entries()) {
+    const first = run[0]!;
+    const last = run.at(-1)!;
+    const source = await readSource(first);
     const { audio, video } = source;
     if (!audio) {
-      if (clip.required)
+      if (first.required)
         throw new MediaError(
-          `Clip '${clip.clipId}' requires an audio stream. Re-import or relink the audio asset.`,
+          `Clip '${first.clipId}' requires an audio stream. Re-import or relink the audio asset.`,
         );
       continue;
     }
@@ -648,55 +786,100 @@ async function prepareTimeline(
             (origin - (source.startTimeSeconds ?? origin))
         : audio.durationSeconds + offset;
     if (
-      clip.required &&
+      last.required &&
       (duration === null ||
-        ((clip.sourceStartFrame + clip.frameCount) * denominator) / numerator >
+        (last.retiming
+          ? seconds(last.retiming.sourceOut)
+          : ((last.sourceStartFrame + last.frameCount) * denominator) /
+            numerator) >
           duration + 0.000001)
     )
       throw new MediaError(
-        `Clip '${clip.clipId}' source out exceeds the current audio duration or its duration is unknown. Re-import the media and trim to a known audio range.`,
+        `Clip '${last.clipId}' source out exceeds the current audio duration or its duration is unknown. Re-import the media and trim to a known audio range.`,
       );
-    if (clip.muted || clip.volume === 0) continue;
-    let audioInput = inputs.get(clip.clipId);
+    const pieces = run
+      .map((clip) => ({
+        clip,
+        start: timelineSample(clip, 'start'),
+        end: timelineSample(clip, 'end'),
+      }))
+      .filter(({ start, end }) => end > start);
+    if (!pieces.some(({ clip }) => !clip.muted && clip.volume > 0)) continue;
+
+    const start = pieces[0]!.start;
+    const count = pieces.at(-1)!.end - start;
+    const sourceStart = first.retiming
+      ? sampleTime(first.retiming.sourceIn)
+      : sample(first.sourceStartFrame);
+    const sourceEnd = last.retiming
+      ? sampleTime(last.retiming.sourceOut)
+      : sourceStart + count;
+    if (sourceEnd <= sourceStart) continue;
+    let audioInput = inputs.get(first.clipId);
     if (audioInput === undefined) {
       audioInput = input++;
       args.push('-threads', '1', '-i', source.path);
     }
-    const start = sample(clip.timelineStartFrame);
-    const endFrame = clip.timelineStartFrame + clip.frameCount;
-    const count = sample(endFrame) - start;
-    const sourceStart = sample(clip.sourceStartFrame);
-    const fades: string[] = [];
-    if (clip.fadeIn) {
-      const length =
-        sample(clip.timelineStartFrame, frameRate, clip.fadeIn.duration) -
-        start;
-      if (length > 0)
-        fades.push(
-          `afade=t=in:ss=0:ns=${length}:c=tri:silence=${clip.fadeIn.from}:unity=${clip.fadeIn.to},`,
-        );
-    }
-    if (clip.fadeOut) {
-      const offset =
-        sample(endFrame, frameRate, clip.fadeOut.duration, -1n) - start;
-      if (count > offset)
-        fades.push(
-          `afade=t=out:ss=${offset}:ns=${count - offset}:c=tri:silence=${clip.fadeOut.to}:unity=${clip.fadeOut.from},`,
-        );
-    }
-    filters.push(
+    const speed = first.retiming ? seconds(first.retiming.speed) : 1;
+    // Keep one tempo filter across contiguous pieces. Only the run tail needs
+    // padding to drain the tempo window, and each atempo pass stays within 0.5–2.
+    const tempo =
+      speed === 1
+        ? ''
+        : 'apad=pad_len=4800,' +
+          (speed < 0.5
+            ? `atempo=0.5,atempo=${speed * 2},`
+            : speed > 2
+              ? `atempo=2,atempo=${speed / 2},`
+              : `atempo=${speed},`);
+    const fitDuration = first.retiming
+      ? `apad,atrim=end_sample=${count},asettb=1/48000,asetpts=N,`
+      : '';
+    const inputFilter =
       `[${audioInput}:${audio.index}]asetpts=PTS-STARTPTS+(${offset.toFixed(9)})/TB,` +
-        'aresample=48000:async=1:min_hard_comp=0:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,' +
-        `apad,atrim=start_sample=${sourceStart}:end_sample=${sourceStart + count},asetpts=N/SR/TB,` +
-        `${fades.join('')}volume=${clip.volume},adelay=${start}S:all=1[a${index}]`,
-    );
+      'aresample=48000:async=1:min_hard_comp=0:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,' +
+      `apad,atrim=start_sample=${sourceStart}:end_sample=${sourceEnd},asettb=1/48000,asetpts=N,` +
+      tempo +
+      fitDuration;
+    const delay = `adelay=${start}S:all=1[a${index}]`;
+    if (pieces.length === 1) {
+      const piece = pieces[0]!;
+      filters.push(
+        inputFilter + effects(piece.clip, piece.start, piece.end) + ',' + delay,
+      );
+    } else {
+      // Route each sample to its piece once, apply that piece's envelope, then
+      // join on the sample clock before mixing with other tracks.
+      const labels = pieces.map((_, i) => `[run${index}p${i}]`);
+      const boundaries = pieces.slice(1).map((piece) => piece.start - start);
+      filters.push(
+        inputFilter +
+          `asegment=samples=${boundaries.join('|')}` +
+          labels.join(''),
+      );
+      const adjusted = pieces.map((piece, i) => {
+        const label = `[run${index}g${i}]`;
+        filters.push(
+          labels[i]! +
+            'asettb=1/48000,asetpts=N,' +
+            effects(piece.clip, piece.start, piece.end) +
+            label,
+        );
+        return label;
+      });
+      filters.push(
+        adjusted.join('') +
+          `concat=n=${pieces.length}:v=0:a=1,asettb=1/48000,asetpts=N,` +
+          delay,
+      );
+    }
     audioLabels.push(`[a${index}]`);
   }
   // Stable linear gains, independent of the number of active sources. Match the
   // existing composer limiter, including latency compensation for sync markers.
   filters.push(
     `${audioLabels.join('')}amix=inputs=${audioLabels.length}:duration=first:normalize=0,` +
-      `alimiter=limit=0.95:level=0:latency=1,atrim=start_sample=${sample(startFrame)}:end_sample=${options.range ? sample(endFrame) : totalSamples},asetpts=N/SR/TB[audio]`,
+      `alimiter=limit=0.95:level=0:latency=1,atrim=start_sample=${sample(startFrame)}:end_sample=${options.range ? sample(endFrame) : totalSamples},asettb=1/48000,asetpts=N[audio]`,
   );
   checkRenderSignal(options.signal);
   args.push(

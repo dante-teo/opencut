@@ -27,7 +27,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 and [architecture decisions](adr/0012-realtime-layer-composition.md) define their
 current contracts and validation boundaries.
 
-## Implemented milestones through T35
+## Implemented milestones through T36
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -332,3 +332,11 @@ The Project viewer shows left and right playback peaks from the mixed signal.
 Preview and export use the same gain and fade envelope. The CLI and TypeScript
 SDK edit the same saved settings and history. See
 [desktop audio controls](TIMELINE_PLAYBACK.md#audio-editing-and-meters).
+
+### Clip playback speed (T36)
+
+Set a video or audio clip to a constant speed from 0.25× to 4×. The clip
+occupies the duration implied by its unchanged source selection, and its
+timeline label shows the multiplier. The editor, CLI and SDK share source-time
+mapping, validation, history and persistence. See
+[playback speed](TIMELINE_PLAYBACK.md#playback-speed-t36).

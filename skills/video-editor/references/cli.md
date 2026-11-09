@@ -56,14 +56,26 @@ Supply explicit new IDs to refer to a track or clip later in the batch.
 | `track.remove` | `id` of an empty track                                                                                                                  |
 | `clip.add`     | `assetId`, `trackId`, `at`, `in`, `out`; optional `id`, `volume`, `muted`, `fadeIn`, `fadeOut`, `visual`                                |
 | `clip.move`    | `id` and `at`, `trackId`, or both                                                                                                       |
-| `clip.trim`    | `id` and `in`, `out`, or both                                                                                                           |
+| `clip.trim`    | `id` and at least one of `in`, `out`, `inTime`, `outTime`                                                                               |
 | `clip.split`   | `id`, `at`, optional `rightId`                                                                                                          |
 | `clip.remove`  | `id`                                                                                                                                    |
+| `clip.speed`   | `id` and `speed` with integer `numerator` and `denominator`, from 1/4 to 4                                                              |
 | `clip.audio`   | `id` and at least one of `volume`, `muted`, `fadeIn`, `fadeOut`                                                                         |
 | `clip.visual`  | `id` and at least one of `x`, `y` (pixel offsets from center), `scale` (0.01–4), `opacity` (0–1), `fit` (`contain`, `cover`, `stretch`) |
 | `text.add`     | `at`, positive `duration`, `text` with `content`; optional `id`, video `trackId`, `visual` (x/y/scale/opacity)                          |
 | `text.set`     | `id` and at least one of `text` patch, `at`, `duration`                                                                                 |
 | `canvas.set`   | At least one of `width`, `height`, `backgroundColor`                                                                                    |
+
+Use `clip speed PROJECT CLIP_ID --speed 1.5 --json` to retime an existing
+video or audio clip. Speed changes preserve source points, clip start, timeline
+fade lengths and subtitle cue positions. A slower clip can collide with its
+neighbor on the same track and the edit will fail. A faster clip can leave a gap.
+For off-grid source trims, pass `inTime` or `outTime` as rational seconds in a
+batch, or use `clip trim --in-time` and `--out-time` in the CLI. Use only one
+format per edge. Exact trims render at default speed too. After retiming,
+inspect both sides of a cut and review motion and sound in an exported preview.
+Contiguous same-source, same-speed pieces on one track share a tempo pass.
+Their individual fades, gain and mute still apply.
 
 For `clip.add`, nest visual fields in `visual`. Set fade durations in project
 frames with `fadeIn` and `fadeOut` in a batch, or `--fade-in` and `--fade-out`
@@ -138,7 +150,7 @@ source file in seconds and is useful for checking source or exported media.
 `preview frame` composites the project in project frames.
 
 `project validate` checks project data and source readability. Rendering also
-checks media decoding, timeline alignment and export constraints. Use even
+checks media decoding, title clip alignment and export constraints. Use even
 canvas dimensions for MP4. Previews and exports use original media. Preview
 outputs and SDK renders require fresh paths. Keep the CLI render default of
 refusing replacement. Parse render stdout line by line and require a final

@@ -1,14 +1,9 @@
 import type { Project, TimelineClip } from './project.js';
 import { audioFadeGain, baseAudioGain } from './audio.js';
+import { clipSpeed, sampleClipSourceTime } from './clip-timing.js';
 import { listTimeline } from './timeline.js';
 import { subtitleTextLayers } from './subtitles.js';
-import {
-  addTimes,
-  compareTimes,
-  frameTime,
-  subtractTimes,
-  timeSchema,
-} from './time.js';
+import { compareTimes, frameTime, subtractTimes, timeSchema } from './time.js';
 import type { RationalTime } from './time.js';
 
 /** Derived intent only: no decoded frames, stream offsets, or media availability. */
@@ -35,6 +30,20 @@ export type ResolvedMediaClip = ResolvedClipProperties & {
   /** Metadata-free visual assets are conservatively classified as video. */
   kind: 'video' | 'audio' | 'image';
 };
+/** Adjacent pieces with the same mapping can share one decoder or tempo filter. */
+export function continuesMediaRun(
+  previous: ResolvedMediaClip,
+  clip: ResolvedMediaClip,
+): boolean {
+  return (
+    previous.trackId === clip.trackId &&
+    previous.assetId === clip.assetId &&
+    compareTimes(previous.timelineEnd, clip.timelineStart) === 0 &&
+    compareTimes(previous.sourceOut, clip.sourceIn) === 0 &&
+    compareTimes(clipSpeed(previous), clipSpeed(clip)) === 0
+  );
+}
+
 export type ResolvedTextClip = ResolvedClipProperties & {
   text: NonNullable<TimelineClip['text']>;
   kind: 'text';
@@ -182,19 +191,24 @@ export function createTimelineEvaluator(
       }
       const clip = entries[low];
       if (clip && compareTimes(clip.timelineStart, at) <= 0) {
-        const offset =
-          clip.kind === 'text' && clip.subtitle
-            ? { numerator: 0, denominator: 1 }
-            : subtractTimes(at, clip.timelineStart);
+        const gain = baseAudioGain(clip);
+        const effectiveVolume =
+          clip.fadeIn || clip.fadeOut
+            ? gain *
+              audioFadeGain(
+                clip,
+                clip.duration,
+                subtractTimes(at, clip.timelineStart),
+              )
+            : gain;
         activeClips.push({
           ...structuredClone(clip),
           sourceTime:
             clip.kind === 'text' && clip.subtitle
               ? { ...clip.sourceIn }
-              : addTimes(clip.sourceIn, offset),
+              : sampleClipSourceTime(clip, at),
           visible: clip.trackType === 'video' && clip.visual.opacity > 0,
-          effectiveVolume:
-            baseAudioGain(clip) * audioFadeGain(clip, clip.duration, offset),
+          effectiveVolume,
         });
       }
     }

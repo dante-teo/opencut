@@ -389,9 +389,6 @@ test('native T10 saved timeline rendering', async (t) => {
         p = structuredClone(base);
         p.clips.push({ ...p.clips[0]!, id: 'overlap' });
         cases.push([p, /overlaps/]);
-        p = structuredClone(base);
-        p.clips[0]!.sourceIn = { numerator: 1, denominator: 1000 };
-        cases.push([p, /between project frames/]);
         for (const [index, [project, error]] of cases.entries()) {
           await writeFile(projectFile, JSON.stringify(project));
           const output = join(directory, `invalid${index}.mp4`);

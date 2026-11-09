@@ -65,6 +65,7 @@ in the Project viewer, CLI previews, and exports.
 T34 adds [editable subtitles](PRODUCT.md#editable-subtitles-t34) with exact cue
 timing, shared styles, SRT/WebVTT import and export, and optional MP4 burn-in.
 T35 adds [audio fades, track controls, and stereo peak meters](TIMELINE_PLAYBACK.md#audio-editing-and-meters).
+T36 adds [constant clip playback speed and time remapping](TIMELINE_PLAYBACK.md#playback-speed-t36).
 
 Select a media clip to edit **Timeline position**, **Duration**, **Source in/out** in
 whole project frames, **Volume** (linear 0–1), **Mute**, **Fade in/out**, and video **Position X/Y**
@@ -210,10 +211,12 @@ atomically for named projects; errors retain the last valid session.
 **Snap** aligns either moving edge or the trimmed edge to other clips' boundaries,
 sequence zero or the playhead. **Snap px** configures the screen-pixel radius
 (default 8), independent of zoom; disable Snap for frame-only positioning. Edited
-boundaries use integer project frames. Edge trimming requires frame-aligned clip
-start and source-in; off-grid legacy clips must be aligned through the CLI first.
-Trimming the left edge of a text clip also requires its right edge to be on a
-project frame. Adjust the right edge first if the clip end falls between frames.
+boundaries use integer project frames. On a clip with a stored playback speed,
+edge trims map those positions to exact source times. For clips using the
+implicit 1× default, edge trims require a frame-aligned clip start and source-in.
+Use `clip trim --in-time` or `--out-time` to edit exact source seconds at any
+speed. Before trimming the left edge of a title, align its right edge to a
+project frame.
 **Split at playhead** (S) splits the selected clip; **Delete clip**
 (Delete/Backspace) removes it. **Undo** / **Redo** and Ctrl/Command+Z / Shift+Z
 restore shared CLI/GUI history, including after save/reopen.

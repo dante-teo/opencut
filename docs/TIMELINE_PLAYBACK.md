@@ -108,6 +108,22 @@ The rolling window is about 85 ms at 48 kHz. The meters reset on pause, and
 silence displays at the −60 dBFS floor. These are digital sample peaks and can
 miss transients if rendering stalls for longer than the window.
 
+## Playback speed (T36)
+
+Select a video or audio clip and enter a multiplier from **0.25** to **4** in
+**Speed (×)**. Press Enter to apply. The timeline shows the multiplier on
+retimed clips. The clip start and selected source range stay fixed, so slowing
+down lengthens the clip and speeding up shortens it. A change that would
+overlap another clip on the same track or invalidate the clip’s fades is
+rejected. The edit supports undo and redo.
+
+Clip-edge drags and splits map project-frame positions back to the source at
+the selected speed. Fade lengths stay in timeline frames and subtitles stay at
+their own timeline positions. Filmstrips and waveforms follow the retimed
+source range. The Project viewer plays timed media at the selected rate and
+uses Chromium’s pitch preservation. The Source viewer plays at the original
+rate.
+
 ## Timeline clip artwork
 
 Visible video clips display source thumbnails and, when audio is present, a

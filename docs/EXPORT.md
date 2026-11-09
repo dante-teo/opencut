@@ -44,7 +44,7 @@ Edits accepted after capture affect later exports. Original source files are
 referenced in place; do not move or externally modify them during a render.
 
 Before encoding, validation checks timeline references, supported project bounds,
-frame alignment, required source streams and current source duration/readability,
+title clip alignment, required source streams and current source duration/readability,
 output extension/directory/conflicts, and required FFmpeg encoders. Only assets
 referenced by the timeline need to be available. Validation errors are separate
 from failures during rendering or verification. Repair the problem or choose a
@@ -77,6 +77,19 @@ replacement or another process creates the file during export. Failed and
 cancelled jobs leave existing files intact. The destination filesystem must
 support hard links. Forced termination or power loss can leave temporary files;
 normal cancellation and failure remove them.
+
+### Retimed clips
+
+Export samples the same clip source-time mapping as the Project viewer.
+Exact media trims can fall between project frames at any speed. Video uses
+the project frame grid, and audio uses the clip's exact interval rounded to
+the 48 kHz sample grid. The container duration rounds up to a full output
+frame. Splitting a retimed clip preserves which source frame appears at each
+project tick. Clips on one track that touch in both timeline and source time
+share a tempo pass when their asset and speed match. Export applies each
+piece's gain, mute and fades after tempo processing. FFmpeg and Chromium use different pitch-preserving
+algorithms, so at extreme speeds and around short cuts they can differ in
+transient placement or sound quality.
 
 ### Subtitles in video and sidecars
 

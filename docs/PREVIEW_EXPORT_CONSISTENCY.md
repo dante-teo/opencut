@@ -156,3 +156,20 @@ unchanged preserve the partial ramp, undo history and saved project bytes.
 The headless playback tests also check event timestamps where two fades meet.
 On macOS the Electron suite plays a synthesized speech recording with a
 generated music bed and checks the effect of track mute in preview and export.
+
+## Clip playback speed (T36)
+
+Run `pnpm test:desktop clip-speed.spec.ts` to build and run the T36 cases.
+The fixtures use synthetic 30 fps video, timed tones and subtitles. The suite
+changes speed through the Inspector, checks undo and redo, and compares
+paused Chromium Canvas frames with decoded H.264 at 0.25×, 0.5×, 1.5×, 2×
+and 4×. It also reads video and audio timestamps from the MP4 and observes
+the production Web Audio output during playback to check pitch and A/V timing.
+
+The split case checks a 0.25× transition on project frame 8 in both the split
+and unsplit exports and checks decoded PCM for a steady tone across the join.
+The 1× trim case saves exact source seconds through the CLI and a batch edit,
+then checks the sampled picture and the audio cutoff. These cases cover
+synthetic SDR footage and stereo audio. Chromium and FFmpeg use different
+pitch-preserving algorithms, and short transients can land differently,
+especially at extreme speeds. See [retimed export timing](EXPORT.md#retimed-clips).

@@ -21,6 +21,17 @@ export type {
 } from './project.js';
 export { addTimes, compareTimes, frameTime, subtractTimes } from './time.js';
 export type { FrameRate, RationalTime } from './time.js';
+export {
+  clipDuration,
+  clipTimelineEnd,
+  clipSpeed,
+  clipSourceTime,
+  clipSourcePosition,
+  clipTimelinePosition,
+  parseClipSpeed,
+  timelineToSourceOffset,
+} from './clip-timing.js';
+export type { ClipSpeed } from './clip-timing.js';
 
 /** Shared application identity, introduced in T01. */
 export interface ApplicationInfo {
@@ -41,6 +52,7 @@ export {
   moveClip,
   trimClip,
   setClipAudio,
+  setClipSpeed,
   setTrackAudio,
   setClipVisual,
   setText,
@@ -48,8 +60,6 @@ export {
   splitClip,
   removeClip,
   listTimeline,
-  clipDuration,
-  clipTimelineEnd,
 } from './timeline.js';
 export type {
   AddTrackOptions,
@@ -102,6 +112,7 @@ export {
   evaluateTimelineFrame,
   createTimelineEvaluator,
   resolveTimeline,
+  continuesMediaRun,
 } from './evaluation.js';
 export type {
   TimelineEvaluation,

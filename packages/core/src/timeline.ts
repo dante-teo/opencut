@@ -2,6 +2,14 @@ import type { Project, TimelineClip, Track } from './project.js';
 import { validateProject } from './project.js';
 import { addTimes, compareTimes, subtractTimes } from './time.js';
 import type { RationalTime } from './time.js';
+import {
+  clipDuration,
+  clipSpeed,
+  clipSpeedSchema,
+  clipTimelineEnd,
+  clipSourceTime,
+} from './clip-timing.js';
+import type { ClipSpeed } from './clip-timing.js';
 import { audioFadeEdges, sliceAudioFades } from './audio.js';
 
 export class TimelineError extends Error {
@@ -55,14 +63,6 @@ function requireClip(project: Project, id: string): TimelineClip {
       `Clip '${id}' does not exist. Use timeline list to find its stable ID.`,
     );
   return clip;
-}
-
-export function clipDuration(clip: TimelineClip): RationalTime {
-  return subtractTimes(clip.sourceOut, clip.sourceIn);
-}
-
-export function clipTimelineEnd(clip: TimelineClip): RationalTime {
-  return addTimes(clip.timelineStart, clipDuration(clip));
 }
 
 /** Track insertion order, then exact timeline start order. No media access or mutation. */
@@ -128,7 +128,10 @@ export function removeTrack(project: Project, id: string) {
 
 export interface AddClipOptions
   extends
-    Omit<TimelineClip, 'id' | 'assetId' | 'text' | keyof ClipAudioOptions>,
+    Omit<
+      TimelineClip,
+      'id' | 'assetId' | 'text' | 'speed' | keyof ClipAudioOptions
+    >,
     ClipAudioOptions {
   id?: string;
   assetId: string;
@@ -266,8 +269,8 @@ export function moveClip(
 }
 
 export interface TrimClipOptions {
-  sourceIn?: RationalTime;
-  sourceOut?: RationalTime;
+  sourceIn?: RationalTime | undefined;
+  sourceOut?: RationalTime | undefined;
 }
 
 export type TrackAudioOptions = Pick<Track, 'volume' | 'muted'>;
@@ -416,7 +419,28 @@ export function setCanvas(
   return { project: updated, settings: updated.settings };
 }
 
-/** Keep timeline start fixed; changing the source range changes duration at 1x. */
+/** Preserve timeline start, source bounds and fade times. Validation rejects collisions. */
+export function setClipSpeed(project: Project, id: string, speed: ClipSpeed) {
+  const next = copyProject(project);
+  const clip = requireClip(next, id);
+  if (
+    clip.text ||
+    next.assets.find((asset) => asset.id === clip.assetId)?.metadata?.kind ===
+      'image'
+  )
+    throw new TimelineError(
+      'INVALID_EDIT',
+      'Playback speed requires a video or audio clip.',
+    );
+  clipSpeedSchema.parse(speed);
+  if (compareTimes(clipSpeed(clip), speed) === 0)
+    return { project: next, clip };
+  clip.speed = speed;
+  const updated = finish(next);
+  return { project: updated, clip: requireClip(updated, id) };
+}
+
+/** Keep timeline start fixed and preserve playback speed when changing source bounds. */
 export function trimClip(
   project: Project,
   id: string,
@@ -480,7 +504,7 @@ export function splitClip(
       `Split position must be strictly inside clip '${id}' on the timeline, excluding its start and end.`,
     );
   const offset = subtractTimes(at, clip.timelineStart);
-  const sourceSplit = addTimes(clip.sourceIn, offset);
+  const sourceSplit = clipSourceTime(clip, at);
   const right: TimelineClip = {
     ...clip,
     id: newId(next, rightId),

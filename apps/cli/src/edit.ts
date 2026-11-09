@@ -20,10 +20,11 @@ export const editHelp = `Usage: opencut edit apply <project-file> <batch.json> [
 Batch JSON: { "expectedRevision": 0, "label": "Optional description", "operations": [
   { "type": "track.add", "id": "v1", "name": "Video", "mediaType": "video" }
 ] }
-Operations: track.add/remove, clip.add/move/trim/split/remove/audio/visual, text.add/set, canvas.set.
+Operations: track.add/remove, clip.add/move/trim/split/remove/audio/visual/speed, text.add/set, canvas.set.
 Subtitle operations: subtitle.import/add/set/move/split/merge/remove/style. Subtitle times are exact { numerator, denominator } seconds.
 text.add takes at, duration, text { content, ...style }, optional id/trackId/visual.
 text.set takes id and optional text patch, at and duration. Use clip.visual for position/scale/opacity.
+clip.speed takes id and speed { numerator, denominator }. clip.trim accepts inTime/outTime in rational seconds as alternatives to in/out.
 clip.add and clip.audio accept volume, muted, fadeIn and fadeOut (project-frame durations; 0 clears).
 track.audio accepts volume and muted. Linear gains (0–1, default 1) multiply; either mute silences the clip.
 clip.add accepts a visual object; clip.visual accepts x/y/scale/opacity/fit. canvas.set accepts width/height/backgroundColor.

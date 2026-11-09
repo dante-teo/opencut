@@ -11,12 +11,18 @@ import {
   splitClip,
   trimClip,
   setClipAudio,
+  setClipSpeed,
+  parseClipSpeed,
+  parseSubtitleTime,
+  clipSpeed,
   setTrackAudio,
   setClipVisual,
   setCanvas,
 } from '@opencut/core';
 import type {
   ClipAudioOptions,
+  ClipSpeed,
+  RationalTime,
   ClipVisualOptions,
   TrackAudioOptions,
 } from '@opencut/core';
@@ -56,15 +62,17 @@ export const timelineHelp = `Usage: opencut timeline list <project-file> [--json
        opencut track remove <project-file> <track-id> [--json]
        opencut clip add <project-file> <asset-id> --track <track-id> --at <frame> --in <frame> --out <frame> [--json]
        opencut clip move <project-file> <clip-id> [--track <track-id>] [--at <frame>] [--json]
-       opencut clip trim <project-file> <clip-id> [--in <frame>] [--out <frame>] [--json]
+       opencut clip trim <project-file> <clip-id> [--in <frame>|--in-time <seconds>] [--out <frame>|--out-time <seconds>] [--json]
        opencut canvas set <project-file> [--width <px>] [--height <px>] [--background-color <#RRGGBB|#RRGGBBAA|transparent>] [--json]
        opencut clip visual <project-file> <clip-id> [--x <px>] [--y <px>] [--scale <n>] [--opacity <0..1>] [--fit <contain|cover|stretch>] [--json]
        opencut clip audio <project-file> <clip-id> [--volume <0..1>] [--muted <true|false>] [--fade-in <frames>] [--fade-out <frames>] [--json]
+       opencut clip speed <project-file> <clip-id> --speed <decimal|ratio> [--json]
        opencut clip split <project-file> <clip-id> --at <frame> [--json]
        opencut clip remove <project-file> <clip-id> [--json]
 
 All time arguments are nonnegative safe integer frame indices at the PROJECT frame rate,
-including source in/out (not source-file frame indices). Out points are exclusive.
+including source in/out (not source-file frame indices). --in-time and --out-time use exact seconds. Out points are exclusive.
+Speed accepts a decimal or ratio from 0.25 to 4. It changes duration while preserving source and timeline start.
 --at is an absolute timeline position, including for split. Move/trim need at least one change option.
 Trim keeps the timeline start fixed; move preserves source in/out. No implicit ripple or snapping.
 Same-track overlaps fail; touching ends and cross-track overlaps are allowed.
@@ -106,7 +114,8 @@ const optionsForCommand: Record<string, readonly string[]> = {
   ],
   'clip audio': clipAudioFlags,
   'clip move': ['track', 'at'],
-  'clip trim': ['in', 'out'],
+  'clip trim': ['in', 'out', 'in-time', 'out-time'],
+  'clip speed': ['speed'],
   'clip split': ['at'],
   'clip remove': [],
 };
@@ -125,7 +134,7 @@ export async function runTimelineCommand(
       (['timeline list', 'track add', 'canvas set'].includes(command) ? 3 : 4)
   )
     throw new UsageError(
-      'Expected a timeline list, track add/remove/audio or clip add/move/trim/split/remove/audio/visual or canvas set command. Run opencut timeline --help for usage.',
+      'Expected a timeline list, track add/remove/audio or clip add/move/trim/split/remove/audio/visual/speed or canvas set command. Run opencut timeline --help for usage.',
     );
   const allowedOptions = [
     'json',
@@ -170,10 +179,35 @@ export async function runTimelineCommand(
     throw new UsageError('clip move requires --track or --at (or both).');
   if (
     command === 'clip trim' &&
-    values.in === undefined &&
-    values.out === undefined
+    !['in', 'out', 'in-time', 'out-time'].some(
+      (key) => values[key] !== undefined,
+    )
   )
-    throw new UsageError('clip trim requires --in or --out (or both).');
+    throw new UsageError('clip trim requires a source in or out boundary.');
+  const trimTimes: Partial<Record<'in' | 'out', RationalTime>> = {};
+  for (const edge of ['in', 'out'] as const) {
+    const key = `${edge}-time`;
+    if (values[key] === undefined) continue;
+    if (values[edge] !== undefined)
+      throw new UsageError(`Specify --${edge} or --${key} once.`);
+    try {
+      trimTimes[edge] = parseSubtitleTime(required(key));
+    } catch {
+      throw new UsageError(
+        `--${key} requires nonnegative seconds (decimal, timestamp or ratio).`,
+      );
+    }
+  }
+  let speed: ClipSpeed | undefined;
+  if (command === 'clip speed') {
+    try {
+      speed = parseClipSpeed(required('speed'));
+    } catch (error) {
+      throw new UsageError(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
   if (values.track !== undefined) required('track');
   const audio: TrackAudioOptions = {};
   if (values.volume !== undefined) {
@@ -282,7 +316,7 @@ export async function runTimelineCommand(
         ...track.clips.map((clip) =>
           clip.text
             ? `  Text: ${clip.id}; timeline [${time(clip.timelineStart)}, ${time(clip.timelineEnd)}); text ${JSON.stringify(clip.text)}; visual ${JSON.stringify(clip.visual ?? {})}`
-            : `  Clip: ${clip.id}; asset ${clip.assetId}; timeline [${time(clip.timelineStart)}, ${time(clip.timelineEnd)}); source [${time(clip.sourceIn)}, ${time(clip.sourceOut)}); volume ${clip.volume ?? 1}; muted ${clip.muted ?? false}; fade in ${clip.fadeIn ? time(clip.fadeIn.duration) : '0s'}; fade out ${clip.fadeOut ? time(clip.fadeOut.duration) : '0s'}; visual ${JSON.stringify(clip.visual ?? {})}`,
+            : `  Clip: ${clip.id}; asset ${clip.assetId}; timeline [${time(clip.timelineStart)}, ${time(clip.timelineEnd)}); source [${time(clip.sourceIn)}, ${time(clip.sourceOut)}); speed ${clipSpeed(clip).numerator}/${clipSpeed(clip).denominator}×; volume ${clip.volume ?? 1}; muted ${clip.muted ?? false}; fade in ${clip.fadeIn ? time(clip.fadeIn.duration) : '0s'}; fade out ${clip.fadeOut ? time(clip.fadeOut.duration) : '0s'}; visual ${JSON.stringify(clip.visual ?? {})}`,
         ),
       ]),
       '',
@@ -336,10 +370,13 @@ export async function runTimelineCommand(
             ...(frames.at !== undefined ? { timelineStart: time('at') } : {}),
           });
           break;
+        case 'clip speed':
+          changed = setClipSpeed(project, id!, speed!);
+          break;
         case 'clip trim':
           changed = trimClip(project, id!, {
-            ...(frames.in !== undefined ? { sourceIn: time('in') } : {}),
-            ...(frames.out !== undefined ? { sourceOut: time('out') } : {}),
+            sourceIn: frames.in === undefined ? trimTimes.in : time('in'),
+            sourceOut: frames.out === undefined ? trimTimes.out : time('out'),
           });
           break;
         case 'clip split':

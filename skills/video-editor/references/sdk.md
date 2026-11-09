@@ -134,3 +134,13 @@ to set the containing track's gain and mute. Fade durations are project frames,
 must fit within the clip together, and clear at zero. Both gains multiply and
 either mute silences the clip. Save the edits together and inspect the draft or
 reopen the project to verify the settings.
+
+## Clip speed
+
+Import `parseClipSpeed` from `@opencut/sdk` and apply
+`{ type: 'clip.speed', id: clipId, speed: parseClipSpeed('3/2') }`.
+This keeps the source range and timeline start fixed. Check the resulting end
+and validate neighboring clips before saving. Fades retain their timeline
+durations and subtitle cues keep their positions. For exact off-grid source
+trims, use `clip.trim` with `inTime` or `outTime` in rational seconds.
+The same exact trim fields work at default speed.

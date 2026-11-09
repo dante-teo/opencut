@@ -6,8 +6,10 @@ Date: 2026-10-25
 
 T11's [ADR 0008](0008-positioned-audio-mixing.md) extends this plan with audio
 mixing and replaces the T10 audio-track rejection and video-only output limits.
-The video sampling decisions below remain in effect. T13's
-[ADR 0010](0010-foreground-render-lifecycle.md) retains exclusive publication by
+T36 extends sampling to rational media boundaries and constant clip speeds.
+The renderer still uses absolute project ticks for video and preserves the
+sampling phase across splits. See the [current export contract](../EXPORT.md#retimed-clips).
+T13's [ADR 0010](0010-foreground-render-lifecycle.md) retains exclusive publication by
 default and adds verified atomic replacement when explicitly requested, plus
 progress, cancellation and export presets.
 

@@ -5,6 +5,7 @@ import {
   createProject,
   frameTime,
   splitClip,
+  setClipSpeed,
   trimClip,
 } from './index.js';
 import { planProjectRender } from './render-plan.js';
@@ -100,19 +101,52 @@ describe('pure project render planning', () => {
     ).toBe(true);
   });
 
-  it.each(['timelineStart', 'sourceIn', 'sourceOut'] as const)(
-    'rejects subframe %s instead of rounding',
-    (field) => {
+  it.each([
+    ['timelineStart', 1, 30, -1_000_000],
+    ['sourceIn', 0, 30, 1_000_000],
+    ['sourceOut', 0, 15, 0],
+  ] as const)(
+    'samples subframe %s at default speed',
+    (field, timelineStartFrame, frameCount, sourceOriginNs) => {
       const project = clip(example(), 'a', 0, 0, 30);
       project.clips[0]![field] = {
         numerator: 1,
         denominator: field === 'sourceOut' ? 2 : 1000,
       };
-      expect(() => planProjectRender(project)).toThrow(
-        /between project frames/,
+      const plan = planProjectRender(project);
+      expect(plan.frameCount).toBe(timelineStartFrame + frameCount);
+      expect(plan.visualClips[0]).toMatchObject({
+        timelineStartFrame,
+        frameCount,
+        retiming: { speed: { numerator: 1, denominator: 1 }, sourceOriginNs },
+      });
+      expect(plan.audioClips[0]?.retiming?.[field]).toEqual(
+        project.clips[0]![field],
       );
     },
   );
+
+  it('shares a tempo run only when adjacent media pieces keep the same mapping', () => {
+    const base = clip(example(), 'a', 0, 15, 45);
+    const slow = setClipSpeed(base, 'a', {
+      numerator: 1,
+      denominator: 4,
+    }).project;
+    const split = splitClip(slow, 'a', at(8), 'b').project;
+    split.clips[1]!.muted = true;
+    const plan = planProjectRender(split);
+    expect(plan.audioClips.map(({ tempoRunId }) => tempoRunId)).toEqual([
+      'a',
+      'a',
+    ]);
+    expect(
+      plan.visualClips.map(({ retiming }) => retiming?.sourceOriginNs),
+    ).toEqual([500_500_000, 500_500_000]);
+    split.clips[1]!.timelineStart = at(9);
+    expect(
+      planProjectRender(split).audioClips.map(({ tempoRunId }) => tempoRunId),
+    ).toEqual(['a', 'b']);
+  });
 
   it('allows multiple and empty video/audio tracks, requiring at least one visual clip', () => {
     const project = clip(example(), 'a', 0, 0, 30);
@@ -174,7 +208,9 @@ describe('pure project render planning', () => {
       },
     ]);
     project.clips[1]!.sourceIn = { numerator: 1, denominator: 1000 };
-    expect(() => planProjectRender(project)).toThrow(/between project frames/);
+    expect(
+      planProjectRender(project).audioClips[0]?.retiming?.sourceIn,
+    ).toEqual(project.clips[1]!.sourceIn);
   });
 
   it('validates the project before compiling it', () => {

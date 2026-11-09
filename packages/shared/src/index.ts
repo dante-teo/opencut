@@ -139,3 +139,12 @@ export function sourceColorMatrix(
   // Untagged VP9 uses BT.709 in Chromium even at SD resolutions.
   return codec === 'vp9' || width >= 1280 || height > 576 ? 'bt709' : 'bt601';
 }
+
+/** Exact source and timeline boundaries passed from the evaluator to the renderer. */
+export interface RenderTimeMapping {
+  timelineStart: { numerator: number; denominator: number };
+  timelineEnd: { numerator: number; denominator: number };
+  sourceIn: { numerator: number; denominator: number };
+  sourceOut: { numerator: number; denominator: number };
+  speed: { numerator: number; denominator: number };
+}

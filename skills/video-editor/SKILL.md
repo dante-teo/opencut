@@ -1,6 +1,6 @@
 ---
 name: video-editor
-description: Edit local videos with OpenCut using its CLI or TypeScript SDK. Use when a user wants to assemble a rough cut, trim or split footage, add editable text or subtitles, layer images or music, mix and fade audio, inspect an edited timeline, or export and verify a playable MP4 from media files or an OpenCut project.
+description: Edit local videos with OpenCut using its CLI or TypeScript SDK. Use when a user wants to assemble a rough cut, trim, split or retime footage, add editable text or subtitles, layer images or music, mix and fade audio, inspect an edited timeline, or export and verify a playable MP4 from media files or an OpenCut project.
 ---
 
 # Edit videos with OpenCut
@@ -25,6 +25,10 @@ scripts need the supplied `@opencut/sdk` package.
    Add editable titles with `text.add` and change them with `text.set`. Use
    `subtitle import` for SRT or WebVTT, `subtitle list` for cue IDs, and
    `subtitle.*` batch operations with exact rational seconds for cue edits.
+   Set constant clip speed with `clip speed PROJECT CLIP_ID --speed 3/2` or
+   the `clip.speed` operation. Speeds range from 0.25× to 4×. Recheck the
+   new clip end and neighboring clips before applying. Use `clip trim --in-time`
+   or `--out-time` for exact source seconds, including at default speed.
    Set fades with `clip audio --fade-in/--fade-out` in project frames. Use
    `track audio` for a track's volume and mute. Clip and track linear gains
    multiply. Re-read the project after publication. On a revision conflict, inspect the

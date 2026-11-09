@@ -159,6 +159,26 @@ const options: Record<string, Option> = {
     description: 'Mute without changing gain.',
     enum: ['true', 'false'],
   },
+  speed: {
+    type: 'string',
+    description: 'Constant playback multiplier as a decimal or ratio.',
+    minimum: 0.25,
+    maximum: 4,
+  },
+  'in-time': {
+    type: 'string',
+    description:
+      'Exact source in time in seconds, as a decimal, timestamp or ratio. Alternative to --in.',
+    unit: 'seconds',
+    minimum: 0,
+  },
+  'out-time': {
+    type: 'string',
+    description:
+      'Exact exclusive source out time in seconds, as a decimal, timestamp or ratio. Alternative to --out.',
+    unit: 'seconds',
+    minimum: 0,
+  },
   'fade-in': {
     type: 'string',
     description: 'Linear fade-in duration in project frames; zero clears it.',
@@ -425,7 +445,16 @@ const definitions: Definition[] = [
     description:
       'Change source boundaries keeping timeline start fixed; requires in or out.',
     args: ['project-file', 'clip-id'],
-    options: ['in', 'out', ...edit],
+    options: ['in', 'out', 'in-time', 'out-time', ...edit],
+    mutates: true,
+  },
+  {
+    name: 'clip speed',
+    description:
+      'Set constant playback speed without moving the clip or changing source bounds.',
+    args: ['project-file', 'clip-id'],
+    options: ['speed', ...edit],
+    required: ['speed'],
     mutates: true,
   },
   {

@@ -117,10 +117,11 @@ const projectHelp = {
 
 Composite ordered video, image, text and subtitle layers and mix audio to H.264/AAC MP4 at project settings.
 Visual gaps use the canvas background; audio gaps are silent. Original audio is preserved by default.
+Use clip speed --speed <decimal|ratio> to set a playback multiplier from 0.25 to 4.
 Use clip audio and track audio to set linear gains and mute. Clip fades use --fade-in/--fade-out <frames>.
 Use clip visual for position/scale/opacity/contain/cover/stretch and canvas set for dimensions/background.
 Later video tracks draw above earlier tracks. Images and text use their explicit clip duration.
-Regular clip times must align to project frames. Subtitles use exact seconds and burn in by default.
+Media clips and subtitles accept exact times. Title clip boundaries use project frames. Subtitles burn in by default.
 Supports even sides up to 3840 (at most 3840x2160 pixels), 1–120 fps, 64 non-subtitle clips, up to 256 burned-in cues and 600 seconds.
 Requires FFmpeg 8+ and ffprobe. Output must be in an existing directory; replacement requires --overwrite.
 Balanced quality and project resolution are defaults; resolution presets fit the finished canvas, preserving orientation/aspect.
@@ -293,6 +294,9 @@ async function runCli(args: string[]): Promise<void> {
       'music-volume': { type: 'string' },
       volume: { type: 'string' },
       muted: { type: 'string' },
+      speed: { type: 'string' },
+      'in-time': { type: 'string' },
+      'out-time': { type: 'string' },
       'fade-in': { type: 'string' },
       'fade-out': { type: 'string' },
       x: { type: 'string' },
@@ -398,6 +402,9 @@ async function runCli(args: string[]): Promise<void> {
     'out',
     'volume',
     'muted',
+    'speed',
+    'in-time',
+    'out-time',
     'fade-in',
     'fade-out',
     'x',

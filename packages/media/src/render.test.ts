@@ -158,13 +158,82 @@ describe('video timeline executor safety', () => {
       if (faded) {
         // Round the absolute fade boundaries before subtracting the clip start.
         expect(graph).toContain(
-          'asetpts=N/SR/TB,afade=t=in:ss=0:ns=6407:c=tri:silence=0:unity=1,afade=t=out:ss=14415:ns=1601:c=tri:silence=0:unity=1,volume=0.25',
+          'asettb=1/48000,asetpts=N,afade=t=in:ss=0:ns=6407:c=tri:silence=0:unity=1,afade=t=out:ss=14415:ns=1601:c=tri:silence=0:unity=1,volume=0.25',
         );
       }
       expect(graph).toContain('normalize=0');
       expect(graph).toContain('latency=1');
     },
   );
+
+  it('fits a shared tempo run before applying independent piece gain and fades', async () => {
+    const audio = { ...verified.audio!, index: 4, durationSeconds: 2 };
+    vi.mocked(probeMedia).mockImplementation(async (path) =>
+      path.endsWith('render.mp4')
+        ? { ...verified, path }
+        : { ...source, path, audio },
+    );
+    const at = (ticks: number) => ({
+      numerator: ticks * 1001,
+      denominator: 30000,
+    });
+    const base = {
+      path: source.path,
+      tempoRunId: 'clip',
+      sourceStartFrame: 0,
+      frameCount: 5,
+      required: false,
+    };
+    const speed = { numerator: 1, denominator: 2 };
+    options.audioClips = [
+      {
+        ...base,
+        clipId: 'clip',
+        timelineStartFrame: 2,
+        volume: 0.25,
+        muted: false,
+        fadeIn: { duration: at(1), from: 0, to: 1 },
+        retiming: {
+          timelineStart: at(2),
+          timelineEnd: at(7),
+          sourceIn: at(1),
+          sourceOut: { numerator: 7007, denominator: 60000 },
+          speed,
+        },
+      },
+      {
+        ...base,
+        clipId: 'split',
+        timelineStartFrame: 7,
+        volume: 0.8,
+        muted: true,
+        retiming: {
+          timelineStart: at(7),
+          timelineEnd: at(12),
+          sourceIn: { numerator: 7007, denominator: 60000 },
+          sourceOut: at(6),
+          speed,
+        },
+      },
+    ];
+    await renderVideoTimeline(options);
+    const args = vi.mocked(runMediaTool).mock.calls[0]![1];
+    const graph = args[args.indexOf('-filter_complex') + 1]!;
+    expect(graph.match(/atempo=/g)).toHaveLength(1);
+    expect(graph).toContain(
+      'atrim=start_sample=1602:end_sample=9610,asettb=1/48000,asetpts=N,apad=pad_len=4800,atempo=0.5,apad,atrim=end_sample=16016',
+    );
+    expect(graph).toContain('asegment=samples=8008[run0p0][run0p1]');
+    expect(graph).toContain(
+      '[run0p0]asettb=1/48000,asetpts=N,afade=t=in:ss=0:ns=1602:c=tri:silence=0:unity=1,volume=0.25[run0g0]',
+    );
+    expect(graph).toContain(
+      '[run0p1]asettb=1/48000,asetpts=N,volume=0[run0g1]',
+    );
+    expect(graph).toContain(
+      '[run0g0][run0g1]concat=n=2:v=0:a=1,asettb=1/48000,asetpts=N,adelay=3203S:all=1[a0]',
+    );
+  });
 
   it('rejects invalid positioned visual plans before probing or encoding', async () => {
     const base = { ...options };

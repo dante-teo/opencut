@@ -10,7 +10,7 @@ import {
 } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createProject, openProject } from '@opencut/sdk';
+import { createProject, openProject, parseClipSpeed } from '@opencut/sdk';
 
 const root = resolve('tests/fixtures/generated');
 const cli = resolve('apps/cli/dist/index.js');
@@ -47,6 +47,62 @@ async function seedOffline() {
 }
 
 describe('public SDK', () => {
+  it('shares rational speed, split and trim timing with the public CLI', async () => {
+    await seedOffline();
+    const editor = await openProject(path);
+    editor.project.apply(videoTrack, {
+      type: 'clip.add',
+      id: 'clip',
+      assetId: 'offline',
+      trackId: 'video',
+      at: 3,
+      in: 15,
+      out: 136,
+    });
+    await editor.save();
+    const run = (...args: string[]) =>
+      spawnSync(process.execPath, [cli, ...args, '--json'], {
+        encoding: 'utf8',
+      });
+    const original = await readFile(path, 'utf8');
+    const preview = run(
+      'clip',
+      'speed',
+      path,
+      'clip',
+      '--speed',
+      '3/2',
+      '--dry-run',
+    );
+    expect(preview.status, preview.stderr).toBe(0);
+    expect(await readFile(path, 'utf8')).toBe(original);
+    const speed = parseClipSpeed('1.5');
+    editor.project.apply({ type: 'clip.speed', id: 'clip', speed });
+    expect(editor.project.inspect().clips[0]).toEqual(
+      JSON.parse(preview.stdout).clip,
+    );
+    await editor.save();
+    const invalid = run('clip', 'speed', path, 'clip', '--speed', '4.1');
+    expect(invalid.status, invalid.stderr).toBe(2);
+    const split = run('clip', 'split', path, 'clip', '--at', '4');
+    expect(split.status, split.stderr).toBe(0);
+    const { right } = JSON.parse(split.stdout);
+    expect(right.sourceIn).toEqual({ numerator: 11, denominator: 20 });
+    const trim = run('clip', 'trim', path, right.id, '--out-time', '181/60');
+    expect(trim.status, trim.stderr).toBe(0);
+    const reopened = await openProject(path);
+    expect(reopened.project.inspect().clips[1]).toMatchObject({
+      speed,
+      sourceIn: right.sourceIn,
+      sourceOut: { numerator: 181, denominator: 60 },
+    });
+    expect(
+      reopened.project.inspectTimeline(5).visualClips[0]?.sourceTime,
+    ).toEqual({
+      numerator: 3,
+      denominator: 5,
+    });
+  });
   it('shares fades and track gain with the public CLI, including history and validation', async () => {
     await seedOffline();
     const editor = await openProject(path);

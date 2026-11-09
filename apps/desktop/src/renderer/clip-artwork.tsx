@@ -1,6 +1,7 @@
 import { memo, useEffect, useState } from 'react';
 import {
   projectRevision,
+  clipSpeed,
   type Project,
   type MediaAsset,
   type TimelineClip,
@@ -179,6 +180,8 @@ export const ClipArtwork = memo(function ClipArtwork({
   zoom: number;
 }) {
   if (!asset || width <= 0) return null;
+  const speed = clipSpeed(clip);
+  const sourceZoom = (zoom * speed.denominator) / speed.numerator;
   const sourceIn = clip.sourceIn.numerator / clip.sourceIn.denominator;
   const sourceOut = clip.sourceOut.numerator / clip.sourceOut.denominator;
   const image = asset.metadata?.kind === 'image';
@@ -192,7 +195,7 @@ export const ClipArtwork = memo(function ClipArtwork({
   const filmstripHeight = hasAudio ? 22 : 32;
   const frames = audio
     ? []
-    : filmstripTiles(offset, width, zoom, sourceIn, sourceOut, image);
+    : filmstripTiles(offset, width, sourceZoom, sourceIn, sourceOut, image);
   // Leave room for the status text when only a sliver of the first atlas is visible.
   const labelIndex = Math.max(
     0,
@@ -229,7 +232,7 @@ export const ClipArtwork = memo(function ClipArtwork({
       )}
       {hasAudio && (
         <g className="waveform">
-          {waveformTiles(offset, width, zoom, sourceIn, sourceOut).map(
+          {waveformTiles(offset, width, sourceZoom, sourceIn, sourceOut).map(
             (tile, index) => (
               <ArtworkTile
                 key={tile.start}
@@ -240,7 +243,7 @@ export const ClipArtwork = memo(function ClipArtwork({
                 width={tile.width}
                 height={audio ? 32 : 10}
                 input={{ ...scope, kind: 'waveform', start: tile.start }}
-                waveform={{ tile, zoom }}
+                waveform={{ tile, zoom: sourceZoom }}
               />
             ),
           )}

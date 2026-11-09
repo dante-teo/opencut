@@ -53,6 +53,7 @@ export {
   parseSubtitles,
   serializeSubtitles,
   parseSubtitleTime,
+  parseClipSpeed,
 } from '@opencut/core';
 export { AssetError, ProjectFileError, SessionError } from '@opencut/core/node';
 export { MediaError, RenderCancelledError } from '@opencut/media';
@@ -60,6 +61,7 @@ export type {
   CreateProjectOptions,
   EditOperation,
   FrameRate,
+  ClipSpeed,
   MediaAsset,
   MediaReference,
   ProjectSettings,

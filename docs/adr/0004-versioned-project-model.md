@@ -4,6 +4,10 @@ Status: Accepted
 
 Date: 2026-10-25
 
+T36 extends version 1 with an optional clip speed. The model still derives
+duration from stored values and defaults omitted speed to 1×. See the
+[current project format](../PROJECT_FORMAT.md#exact-time).
+
 ## Context
 
 The shared headless core needs a serializable project model before editing

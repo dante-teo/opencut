@@ -8,6 +8,7 @@ import {
   projectSnapshot,
   serializeProject,
   setClipAudio,
+  setClipSpeed,
   splitClip,
   type Project,
 } from '@opencut/core';
@@ -78,6 +79,28 @@ const propose = (
   );
 
 describe('shared-core GUI edit proposals', () => {
+  it('maps both drag edges to exact source times at a fractional speed', () => {
+    const project = setClipSpeed(fixture(), 'clip', {
+      numerator: 3,
+      denominator: 2,
+    }).project;
+    const left = propose(project, 'left', 1n);
+    expect(left.error).toBeNull();
+    expect(left.clip.timelineStart).toEqual(frameTime(61, rate));
+    expect(left.clip.sourceIn).toEqual(
+      frameTime(63, { numerator: 60000, denominator: 1001 }),
+    );
+    expect(clipTimelineEnd(left.clip)).toEqual(
+      clipTimelineEnd(project.clips[0]!),
+    );
+    const right = propose(project, 'right', -1n);
+    expect(right.error).toBeNull();
+    expect(right.clip.sourceOut).toEqual(
+      frameTime(237, { numerator: 60000, denominator: 1001 }),
+    );
+    expect(clipTimelineEnd(right.clip)).toEqual(frameTime(119, rate));
+  });
+
   it('preserves a split fade when the handle cannot extend or moves only vertically', () => {
     const project = fixture();
     const faded = setClipAudio(project, 'clip', {

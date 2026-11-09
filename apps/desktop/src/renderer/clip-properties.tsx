@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import {
   audioFadeEdges,
   clipDuration,
+  clipSpeed,
+  parseClipSpeed,
+  addTimes,
+  timelineToSourceOffset,
   subtractTimes,
   compareTimes,
   frameTime,
@@ -192,7 +196,12 @@ export function ClipProperties({
   const start = frames(clip.timelineStart, project);
   const sourceIn = frames(clip.sourceIn, project);
   const sourceOut = frames(clip.sourceOut, project);
-  const duration = frames(clipDuration(clip), project);
+  const durationTime = clipDuration(clip);
+  const duration = frames(durationTime, project);
+  const speed = clipSpeed(clip);
+  const speedAvailable =
+    project.assets.find((asset) => asset.id === clip.assetId)?.metadata
+      ?.kind !== 'image';
   const video =
     project.tracks.find((track) => track.id === clip.trackId)?.type === 'video';
   const maximum = Number.MAX_SAFE_INTEGER;
@@ -231,12 +240,44 @@ export function ClipProperties({
           id: clip.id,
           at,
         }))}
+      {speedAvailable &&
+        field(
+          'Speed (×)',
+          speed.numerator / speed.denominator,
+          0.25,
+          4,
+          (value) => ({
+            type: 'clip.speed',
+            id: clip.id,
+            speed: parseClipSpeed(String(value)),
+          }),
+          0.05,
+        )}
+      {duration === null && clip.speed && (
+        <p>
+          Duration ·{' '}
+          {Number(
+            (durationTime.numerator / durationTime.denominator).toPrecision(6),
+          )}{' '}
+          s
+        </p>
+      )}
       {duration !== null &&
         sourceIn !== null &&
         field('Duration', duration, 1, maximum - sourceIn, (duration) => ({
           type: 'clip.trim',
           id: clip.id,
-          out: sourceIn + duration,
+          ...(clip.speed
+            ? {
+                outTime: addTimes(
+                  clip.sourceIn,
+                  timelineToSourceOffset(
+                    clip,
+                    frameTime(duration, project.settings.frameRate),
+                  ),
+                ),
+              }
+            : { out: sourceIn + duration }),
         }))}
       {sourceIn !== null &&
         field('Source in', sourceIn, 0, maximum, (value) => ({
@@ -250,10 +291,12 @@ export function ClipProperties({
           id: clip.id,
           out,
         }))}
-      {[start, duration, sourceIn, sourceOut].includes(null) && (
+      {[start, sourceIn, sourceOut, ...(clip.speed ? [] : [duration])].includes(
+        null,
+      ) && (
         <p>
-          Off-grid or out-of-range timing is read-only. Align it with the CLI to
-          edit in project frames.
+          Off-grid points can be trimmed on the timeline or set in seconds with
+          the CLI.
         </p>
       )}
       <h3>Audio</h3>
@@ -292,7 +335,7 @@ export function ClipProperties({
         const other =
           clip[edge === 'fadeIn' ? 'fadeOut' : 'fadeIn']?.duration ?? ZERO;
         const limit = frameIndex(
-          subtractTimes(clipDuration(clip), other),
+          subtractTimes(durationTime, other),
           project.settings.frameRate,
         );
         const label =

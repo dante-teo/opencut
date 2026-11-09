@@ -84,7 +84,7 @@ describe('agent CLI discovery and offline inspection', () => {
     expect(result.stderr).toBe('');
     const catalog = JSON.parse(result.stdout);
     expect(catalog.discoveryVersion).toBe(1);
-    expect(catalog.commands).toHaveLength(43);
+    expect(catalog.commands).toHaveLength(44);
     expect(
       new Set(catalog.commands.map((command: { name: string }) => command.name))
         .size,
@@ -99,6 +99,17 @@ describe('agent CLI discovery and offline inspection', () => {
       expect(help.status, help.stderr).toBe(0);
       expect(help.stdout).toContain('Usage:');
     }
+    const speed = catalog.commands.find(
+      (command: { name: string }) => command.name === 'clip speed',
+    );
+    expect(speed.options).toContainEqual(
+      expect.objectContaining({
+        name: '--speed',
+        required: true,
+        minimum: 0.25,
+        maximum: 4,
+      }),
+    );
     const frame = catalog.commands.find(
       (command: { name: string }) => command.name === 'preview frame',
     );

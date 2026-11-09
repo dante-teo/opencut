@@ -3,6 +3,7 @@ import {
   subtractTimes,
   clipDuration,
   clipTimelineEnd,
+  clipSourceTime,
   compareTimes,
   frameTime,
   previewTransaction,
@@ -110,6 +111,7 @@ export function proposeEdit(
     if (kind === 'move' && target < 0n) target = 0n;
     if (
       kind !== 'move' &&
+      !clip.speed &&
       (compareTimes(frameTime(safeFrame(start), rate), clip.timelineStart) !==
         0 ||
         compareTimes(frameTime(safeFrame(sourceIn), rate), clip.sourceIn) !== 0)
@@ -165,11 +167,7 @@ export function proposeEdit(
       operations = [
         { type: 'clip.move', id: clip.id, trackId, at: safeFrame(target) },
       ];
-    } else if (kind === 'right') {
-      operations = [
-        { type: 'clip.trim', id: clip.id, out: safeFrame(sourceOut + change) },
-      ];
-    } else if (clip.text) {
+    } else if (kind === 'left' && clip.text) {
       if (
         compareTimes(frameTime(safeFrame(durationFrame), rate), duration) !== 0
       )
@@ -185,19 +183,27 @@ export function proposeEdit(
         },
       ];
     } else {
-      const trim: TimelineOperation = {
-        type: 'clip.trim',
-        id: clip.id,
-        in: safeFrame(sourceIn + change),
-      };
-      const move: TimelineOperation = {
-        type: 'clip.move',
-        id: clip.id,
-        at: safeFrame(target),
-      };
-      // Shrink before moving inward; move before extending outward. Each primitive
-      // remains valid against neighbours, and the batch is a single undo step.
-      operations = change >= 0n ? [trim, move] : [move, trim];
+      const trim: TimelineOperation = { type: 'clip.trim', id: clip.id };
+      if (clip.speed) {
+        if (change === 0n) return { operations, clip, error: null, snap };
+        const at = frameTime(safeFrame(target), rate);
+        trim[kind === 'left' ? 'inTime' : 'outTime'] = clipSourceTime(clip, at);
+      } else {
+        const boundary = kind === 'left' ? sourceIn : sourceOut;
+        trim[kind === 'left' ? 'in' : 'out'] = safeFrame(boundary + change);
+      }
+      if (kind === 'right') {
+        operations = [trim];
+      } else {
+        const move: TimelineOperation = {
+          type: 'clip.move',
+          id: clip.id,
+          at: safeFrame(target),
+        };
+        // Shrink before moving inward; move before extending outward. Each primitive
+        // remains valid against neighbours, and the batch is a single undo step.
+        operations = change >= 0n ? [trim, move] : [move, trim];
+      }
     }
     return previewClipEdit(project, clip, operations, snap);
   } catch (error) {

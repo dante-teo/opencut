@@ -8,6 +8,7 @@ import {
   type SubtitleFormat,
   projectRevision,
   clipTimelineEnd,
+  clipSpeed,
   type Project,
   type RationalTime,
   type TimelineClip,
@@ -956,6 +957,11 @@ export function ProjectTimeline({
                             .slice(0, 100) ||
                           (track.type === 'subtitle' ? 'Subtitle' : 'Text')
                         : (asset?.name ?? 'Missing media');
+                      const speed = clipSpeed(clip);
+                      const speedLabel =
+                        speed.numerator === speed.denominator
+                          ? ''
+                          : `${Number((speed.numerator / speed.denominator).toPrecision(4))}× · `;
                       return (
                         <g
                           key={clip.id}
@@ -1025,8 +1031,9 @@ export function ProjectTimeline({
                           }}
                         >
                           <title>
-                            {clip.id} · {title} ·{' '}
-                            {exactTime(clip.timelineStart)} → {exactTime(end)}
+                            {clip.id} · {speedLabel}
+                            {title} · {exactTime(clip.timelineStart)} →{' '}
+                            {exactTime(end)}
                           </title>
                           <rect
                             x={x}
@@ -1054,6 +1061,7 @@ export function ProjectTimeline({
                               />
                             )}
                             <text className="clip-name" x="8" y="14">
+                              {speedLabel}
                               {title}
                             </text>
                           </svg>

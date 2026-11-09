@@ -114,10 +114,10 @@ export async function observeAudioOutput(page: Page) {
   });
 }
 
-export async function recordPreviewAudio(page: Page) {
+export async function recordPreviewAudio(page: Page, end = 3.37) {
   return page
     .locator('#project-viewer canvas')
-    .evaluate(async (canvas: HTMLCanvasElement) => {
+    .evaluate(async (canvas: HTMLCanvasElement, end) => {
       const ctx = canvas.getContext('2d')!;
       const trace: {
         time: number;
@@ -156,7 +156,7 @@ export async function recordPreviewAudio(page: Page) {
               hz880: amplitude(880),
             });
           }
-          if (time >= 3.37) resolve();
+          if (time >= end) resolve();
           else if (performance.now() - start > 10000)
             reject(new Error('Timed out recording the real-time preview mix'));
           else requestAnimationFrame(observe);
@@ -164,5 +164,5 @@ export async function recordPreviewAudio(page: Page) {
         requestAnimationFrame(observe);
       });
       return trace;
-    });
+    }, end);
 }

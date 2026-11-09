@@ -1,5 +1,7 @@
 import {
   clipTimelineEnd,
+  clipTimelinePosition,
+  clipSourcePosition,
   subtitleLanes,
   subtractTimes,
   type SubtitleCue,
@@ -255,25 +257,6 @@ export function rulerTicks(
   return ticks;
 }
 
-/** Translate between clocks without requiring intermediate fractions to fit JSON. */
-function translateTime(
-  time: RationalTime,
-  from: RationalTime,
-  to: RationalTime,
-) {
-  const timeDenominator = BigInt(time.denominator);
-  const fromDenominator = BigInt(from.denominator);
-  const toDenominator = BigInt(to.denominator);
-  return {
-    numerator:
-      (BigInt(time.numerator) * fromDenominator -
-        BigInt(from.numerator) * timeDenominator) *
-        toDenominator +
-      BigInt(to.numerator) * timeDenominator * fromDenominator,
-    denominator: timeDenominator * fromDenominator * toDenominator,
-  };
-}
-
 export function sourceToTimeline(
   clip: TimelineClip,
   seconds: number,
@@ -285,11 +268,7 @@ export function sourceToTimeline(
   };
   if (compareTimes(source, clip.sourceIn) < 0) return clip.timelineStart;
   if (compareTimes(source, clip.sourceOut) >= 0) return clipTimelineEnd(clip);
-  const { numerator, denominator } = translateTime(
-    source,
-    clip.sourceIn,
-    clip.timelineStart,
-  );
+  const { numerator, denominator } = clipTimelinePosition(clip, source);
   const clock = rate ?? { numerator: 1_000_000, denominator: 1 };
   const frameNumerator = numerator * BigInt(clock.numerator);
   const frameDenominator = denominator * BigInt(clock.denominator);
@@ -309,10 +288,6 @@ export function timelineToSource(
     compareTimes(time, clipTimelineEnd(clip)) >= 0
   )
     return undefined;
-  const { numerator, denominator } = translateTime(
-    time,
-    clip.timelineStart,
-    clip.sourceIn,
-  );
+  const { numerator, denominator } = clipSourcePosition(clip, time);
   return Number(numerator) / Number(denominator);
 }

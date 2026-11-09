@@ -73,6 +73,26 @@ before submission. A session disconnect during commit can leave the outcome
 unknown. Read back project content and history before retrying. See the
 [project session decision](adr/0011-shared-project-session.md) for live session limits.
 
+## Clip playback speed
+
+```ts
+import { parseClipSpeed } from '@opencut/sdk';
+
+editor.project.apply({
+  type: 'clip.speed',
+  id: 'clip-id',
+  speed: parseClipSpeed('3/2'),
+});
+await editor.save({ label: 'Set clip to 1.5×' });
+```
+
+The operation accepts a `ClipSpeed` ratio with integer `numerator` and
+`denominator` from 1/4 to 4. It preserves the clip's source bounds, timeline
+start and fade lengths. Use `clip.trim` with `inTime` or `outTime` (rational
+seconds) for source points between project frames, including at default
+speed. Splits use project-frame positions and preserve the exact source cut. Inspect the draft with
+`inspectTimeline(frame)` to check the mapped source time.
+
 ## Audio
 
 Use the existing typed operations on the draft, then save the mix as one edit.

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { canvasColorPattern } from '@opencut/shared';
 import { textLayerSchema } from './text-style.js';
 import { subtitleTrackSchema } from './subtitles.js';
+import { clipDuration, clipSpeedSchema } from './clip-timing.js';
 import { clipAudioShape, resolveAudioFade, trackAudioShape } from './audio.js';
 import {
   addTimes,
@@ -108,6 +109,7 @@ export const clipSchema = z.strictObject({
   timelineStart: timeSchema,
   sourceIn: timeSchema,
   sourceOut: timeSchema,
+  speed: clipSpeedSchema.optional(),
   ...clipAudioShape,
   visual: clipVisualSchema.optional(),
 });
@@ -296,6 +298,15 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
         'incompatible_visual',
         'Visual properties require a video track.',
       );
+    if (
+      clip.speed !== undefined &&
+      (clip.text || asset?.metadata?.kind === 'image')
+    )
+      add(
+        location + '/speed',
+        'incompatible_speed',
+        'Playback speed requires a video or audio clip.',
+      );
     if (clip.text !== undefined) {
       if (track?.type !== 'video')
         add(
@@ -330,7 +341,7 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
       );
     if (compareTimes(clip.sourceOut, clip.sourceIn) > 0) {
       try {
-        const duration = subtractTimes(clip.sourceOut, clip.sourceIn);
+        const duration = clipDuration(clip);
         const end = addTimes(clip.timelineStart, duration);
         const attack = clip.fadeIn && resolveAudioFade('fadeIn', clip.fadeIn);
         const release =

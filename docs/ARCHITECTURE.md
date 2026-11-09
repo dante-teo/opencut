@@ -83,7 +83,9 @@ Semantic validation checks globally unique stable IDs, asset/track references,
 media compatibility, timestamps and source bounds without inspecting media.
 Rational seconds preserve frame and sample boundaries at mixed rates; bigint
 intermediate arithmetic avoids rounding during frame conversion and comparison.
-Clips store source in/out points and timeline starts; duration is derived at 1×.
+Clips store source in/out points and timeline starts. T36 adds an optional
+rational speed to video and audio clips. Duration is the source range divided
+by speed, which defaults to 1×.
 
 The optional `@opencut/core/node` entry point owns project file reads/exclusive
 creation, portable path helpers, read-only media availability checks, atomic
@@ -657,6 +659,16 @@ See the [SDK contract](SDK.md) for the public surface.
 
 T23 shares exact clip timing, ordering and defaults between headless point queries
 and export planning. See [evaluation semantics and limitations](TIMELINE_EVALUATION.md).
+
+T36 uses the same rational time mapping for editing, playback and export.
+For video with retiming or off-grid clip boundaries, core supplies the source
+time at timeline zero. That reference is identical on both sides of a split, so
+FFmpeg can assign each source frame to an absolute project tick before
+positioning the piece. Contiguous pieces on one track that share an asset,
+speed and touching source points use one preview decoder. Export uses the
+same continuity rule to keep tempo processing together, then applies each
+piece's gain and fades on the 48 kHz sample grid.
+See [playback and export checks](PREVIEW_EXPORT_CONSISTENCY.md#clip-playback-speed-t36).
 
 ## Edited timeline playback and compositing (T24–T26)
 

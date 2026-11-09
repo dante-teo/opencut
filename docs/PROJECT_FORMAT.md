@@ -154,9 +154,13 @@ decimal frame durations.
 Source ranges are half open: `[sourceIn, sourceOut)`. `sourceOut` must be later
 than `sourceIn` and no later than an asset's recorded duration, when known.
 Source times are measured from the asset's logical start, not raw container PTS.
-Playback is implicitly 1×: clip duration is exactly `sourceOut - sourceIn`, and
-its timeline end is `timelineStart + duration`. Neither derived value is stored,
-so there is no redundant duration to drift out of sync.
+Video and audio clips can store an optional rational `speed`, for example
+`"speed": { "numerator": 3, "denominator": 2 }` for 1.5×. It ranges from 1/4 to 4
+and defaults to 1 when absent. The field is additive in schema version 1. Speed
+is constant for the clip. The derived duration is `(sourceOut - sourceIn) / speed`
+and the derived timeline end is `timelineStart + duration`. The source points
+stay in source seconds. Exact source points can fall between project frames
+at any speed, including the default 1×.
 
 Rational seconds support mixed frame rates, exact audio sample boundaries and
 subframe offsets. Validation does not round or snap to the project frame grid.
@@ -169,10 +173,10 @@ to validation, loading, serialization and every editing operation. Clip duration
 and timeline end must also be representable by safe rational components;
 arithmetic never rounds or silently overflows. Collection order is preserved;
 T12 rendering sorts clips by timeline position within each track, composites video
-tracks bottom to top in track array order, and mixes original audio with independent audio tracks. It requires
-project-frame-aligned times and defines source zero as the first video frame
-(or first audio sample for audio-only assets);
-see [the rendering contract](CLI.md#project-rendering).
+tracks bottom to top in track array order, and mixes original audio with
+independent audio tracks. Title clip boundaries align with project frames.
+Source zero is the first video frame or, for audio-only assets, the first
+audio sample. See [the rendering contract](CLI.md#project-rendering).
 
 T11 adds optional clip `volume` (finite linear amplitude gain 0–1, default 1) and
 `muted` (boolean, default false). Omission remains omission on load/save, so old
@@ -185,7 +189,7 @@ T35 extends the same `volume` and `muted` fields to video and audio tracks.
 Track and clip gains multiply, and either mute silences the clip. Video track
 controls affect original audio independently of picture. Media clips may store
 optional `fadeIn` and `fadeOut` objects with a positive rational `duration` in
-seconds. Both durations together must fit the clip's source range. Gain ramps
+seconds. Both fade durations are measured on the timeline and must fit the clip's timeline duration. Gain ramps
 are linear. The default `from` and `to` amplitudes are 0 to 1 for a fade in and 1
 to 0 for a fade out. A split inside a ramp stores the partial endpoint gains
 on both pieces to preserve the envelope. When a ramp meets the clip body, its
@@ -212,8 +216,7 @@ see the [CLI semantics](CLI.md#project-rendering) for rounding and render limits
 
 For example, add `"volume": 0.25, "muted": false` to a clip object. Schema version
 remains 1 as an additive prerelease extension; earlier readers reject these new
-fields. Rendering uses frame-aligned audio boundaries, rounds absolute positions
-to 48 kHz samples, fills gaps with silence and ends at the longest clip across
+fields. Rendering rounds absolute audio boundaries to 48 kHz samples, fills gaps with silence and ends at the longest clip across
 all tracks. Same-track overlap validation remains unchanged.
 
 T20 exposes these existing clip audio/visual fields and project-frame timing in

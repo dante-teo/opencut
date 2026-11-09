@@ -53,9 +53,11 @@ inactive. A following clip starting at second 4 alone owns that shared boundary.
 
 ## Time and ordering
 
-A clip occupies `[timelineStart, timelineStart + sourceOut - sourceIn)`.
-Its source time is `sourceIn + time - timelineStart`, at unit speed. Source out is
-exclusive. Trim leaves timeline start fixed; split assigns the boundary solely to
+A clip occupies `[timelineStart, timelineStart + (sourceOut - sourceIn) / speed)`.
+Its source time is `sourceIn + (time - timelineStart) × speed`. Omitted speed is 1.
+The same exact mapping determines split source points and the common source
+phase used for export. Sampling rounds to device precision when needed.
+Persisted edits retain exact fractions. Source out is exclusive. Trim leaves timeline start fixed; split assigns the boundary solely to
 the right clip; moving preserves source points. Same-track overlaps remain invalid;
 cross-track overlaps are evaluated together. Results follow track array order then
 exact timeline start. `trackIndex` includes audio and empty tracks; later video
@@ -110,13 +112,14 @@ Point evaluation and `planProjectRender` share resolved clip ranges, ordering an
 property defaults. Export still probes all referenced streams, including optional
 video audio, and keeps existing integer project-grid, dimensions, duration and
 clip-count limits. Evaluation itself has none of those export-specific limits.
-Export requires frame-aligned media and title boundaries. The Project viewer
-and export sample subtitle visibility at each project frame's start. The
-render plan places each cue boundary at the first project tick at or after
-its exact stored time.
+Export requires frame-aligned title boundaries. The render plan places
+media and subtitle boundaries at the first project tick at or after their
+exact stored times. The Project viewer and export sample subtitle
+visibility at each project frame's start.
 
-FFmpeg samples video at the project rate before trimming and loops still
-images. Export uses stream origins and rounds audio samples on a 48 kHz grid.
+FFmpeg samples video at the project rate and loops still images. Export
+uses stream origins and rounds audio boundaries on a 48 kHz grid. Contiguous
+pieces of a retimed clip share a tempo pass before their per-clip effects.
 T26 shares geometry and RGB composition between preview and export. See
 [the composition contract](TIMELINE_PLAYBACK.md#composition-and-export-agreement-t26).
 

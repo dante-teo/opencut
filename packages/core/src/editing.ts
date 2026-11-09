@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { canvasShape, clipVisualSchema, validateProject } from './project.js';
 import type { HistoryEntry, Project, ProjectSnapshot } from './project.js';
 import { trackAudioShape } from './audio.js';
-import { frameTime } from './time.js';
+import { frameTime, timeSchema } from './time.js';
+import { clipSpeedSchema } from './clip-timing.js';
 import { textLayerSchema } from './text-style.js';
 import { editSubtitles, subtitleOperations } from './subtitles.js';
 import {
@@ -15,6 +16,7 @@ import {
   splitClip,
   trimClip,
   setClipAudio,
+  setClipSpeed,
   setTrackAudio,
   setClipVisual,
   setText,
@@ -79,7 +81,10 @@ const operationSchema = z.discriminatedUnion('type', [
     id,
     in: frame.optional(),
     out: frame.optional(),
+    inTime: timeSchema.optional(),
+    outTime: timeSchema.optional(),
   }),
+  z.strictObject({ type: z.literal('clip.speed'), id, speed: clipSpeedSchema }),
   z.strictObject({
     type: z.literal('clip.split'),
     id,
@@ -335,16 +340,28 @@ export function previewTransaction(project: Project, input: EditTransaction) {
               : {}),
           });
           break;
-        case 'clip.trim':
+        case 'clip.speed':
+          changed = setClipSpeed(next, operation.id, operation.speed);
+          break;
+        case 'clip.trim': {
+          if (
+            (operation.in !== undefined && operation.inTime !== undefined) ||
+            (operation.out !== undefined && operation.outTime !== undefined)
+          )
+            throw new EditError(
+              'INVALID_TRANSACTION',
+              'Specify each trim boundary once, in frames or rational seconds.',
+            );
           changed = trimClip(next, operation.id, {
-            ...(operation.in !== undefined
-              ? { sourceIn: time(operation.in) }
-              : {}),
-            ...(operation.out !== undefined
-              ? { sourceOut: time(operation.out) }
-              : {}),
+            sourceIn:
+              operation.inTime ??
+              (operation.in === undefined ? undefined : time(operation.in)),
+            sourceOut:
+              operation.outTime ??
+              (operation.out === undefined ? undefined : time(operation.out)),
           });
           break;
+        }
         case 'clip.split':
           changed = splitClip(
             next,

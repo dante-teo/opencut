@@ -187,7 +187,7 @@ system sans-serif font; Sharp does not render timeline layers. Font availability
 and exact label appearance depend on the host.
 
 Export limits still apply to the whole project: at least one video, image, text or subtitle cue,
-frame-aligned media and title boundaries, at most 64 non-subtitle clips and 600 seconds, rational 1–120 fps,
+frame-aligned title boundaries, at most 64 non-subtitle clips and 600 seconds, rational 1–120 fps,
 even sides 2–3840 and at most 3840×2160 pixels. Referenced visual sources must be
 readable even outside the requested range; clips also validate referenced audio.
 Unused offline assets do not block rendering. Audio-only/empty projects remain
@@ -455,7 +455,7 @@ source-file availability is needed for editing. Asset metadata is a stored snaps
 Use `media import` first to obtain `asset.id`; track/clip creation returns stable
 UUIDs. Subsequent operations take those IDs, never array indices.
 
-All CLI time arguments (`--at`, `--in`, `--out`) are **nonnegative safe integer
+The `--at`, `--in` and `--out` arguments are **nonnegative safe integer
 frame indices at the project's frame rate**, including source in/out points.
 They are not source-file frame numbers or decimal seconds. At 30000/1001 fps,
 frame 30 is exactly 1001/1000 seconds. Integer seconds, sample positions or source
@@ -505,32 +505,38 @@ node apps/cli/dist/index.js track remove /work/demo.opencut.json TRACK_ID --json
   An AV asset may be placed independently on either type. No linked clip is created.
 - `clip move` requires `--track`, `--at` or both. Omitted values stay unchanged.
   Source points, duration, asset ID and clip ID are preserved.
-- `clip trim` requires `--in`, `--out` or both. Omitted points stay unchanged.
-  **Timeline start stays fixed**; changing the source range changes duration at 1x.
+- `clip trim` accepts `--in` and `--out` in project frames, or `--in-time` and
+  `--out-time` in exact source seconds (decimal, timestamp or fraction). Set at
+  least one boundary and use only one flag per boundary. Timeline start and
+  speed stay fixed while the source range changes. Exact source points render at any supported speed, including the default 1×.
   Extending a range is allowed within the asset bound and available track space.
 - `clip split --at` uses an **absolute timeline position**, strictly between the
   clip's timeline start and end. Left keeps the original ID; right gets a new UUID.
-  The exact source split is `sourceIn + (at - timelineStart)`. Both pieces reference
+  The exact source split is `sourceIn + (at - timelineStart) × speed`. Both pieces reference
   the same asset and track; their source ranges are contiguous, and total duration
   and timeline coverage are unchanged. The right entry is inserted after the left.
+- `clip speed PROJECT CLIP_ID --speed 3/2 --json` sets a constant multiplier on a
+  video or audio clip. Decimals such as `1.5` are also accepted. The range is
+  0.25× through 4×. The clip start, source in/out, and timeline fade durations
+  are preserved. Changes that collide with another clip on the same track or
+  invalidate existing fades are rejected. Use `--speed 1` to restore normal speed.
 - `clip remove` leaves a gap and preserves all assets, tracks and other clips.
 
-Clips play at 1x. Source ranges must be nonnegative, nonempty and end no later
+Clips default to 1×. Source ranges must be nonnegative, nonempty and end no later
 than the asset's recorded rational duration when known. **Unknown-duration assets,
 including images, require explicit ranges and have no inferred finite source bound.**
 Editing does not establish that unknown or stale ranges are decodable; validate
 media separately. Images use their selected range as a duration at the model level.
 
 **Same-track overlaps are forbidden for video and audio.** Touching exclusive
-boundaries, gaps, and overlap across different tracks are allowed. Add, move and
-trim reject collisions instead of shifting clips or choosing another position.
+boundaries, gaps, and overlap across different tracks are allowed. Add, move, trim and
+speed edits reject collisions instead of shifting clips or choosing another position.
 Splits create exactly adjacent pieces. Loading, saving and project validation
 apply the same overlap rule, including unsorted hand-edited documents. Pre-T08
 files with same-track overlaps are now invalid; resolve their positions/ranges in
 JSON before using edit commands. There is no silent migration. Derived durations
 and ends must fit safe rational JSON components; arithmetic overflow fails without
-rounding. These commands add no ripple edits, implicit track creation, speed
-changes or linked AV operations. Desktop editing uses the shared core operations
+rounding. These commands preserve other clips and use explicit track and source edits. Desktop editing uses the shared core operations
 and transactions; T09 history is described below.
 
 `timeline list` returns `{ path, frameRate, duration, tracks }`. All times are
@@ -538,23 +544,23 @@ and transactions; T09 history is described below.
 end, or zero for an empty timeline. Tracks retain insertion order and contain
 `id`, `name`, `type`, and `clips` ordered by timeline start. Each listed clip
 contains the stored `id`, `assetId` or `text`, `trackId`, `timelineStart`, `sourceIn`,
-`sourceOut`, plus derived `duration` and `timelineEnd`. Derived fields are not saved.
+`sourceOut`, optional `speed`, plus derived `duration` and `timelineEnd`. Derived fields are not saved.
 
 Mutation JSON results are:
 
-| Command                    | Result                     |
-| -------------------------- | -------------------------- |
-| `track add`                | `{ path, track }`          |
-| `track remove`             | `{ path, removedTrackId }` |
-| `track audio`              | `{ path, track }`          |
-| `clip add/move/trim/audio` | `{ path, clip }`           |
-| `clip split`               | `{ path, left, right }`    |
-| `clip remove`              | `{ path, removedClipId }`  |
+| Command                          | Result                     |
+| -------------------------------- | -------------------------- |
+| `track add`                      | `{ path, track }`          |
+| `track remove`                   | `{ path, removedTrackId }` |
+| `track audio`                    | `{ path, track }`          |
+| `clip add/move/trim/audio/speed` | `{ path, clip }`           |
+| `clip split`                     | `{ path, left, right }`    |
+| `clip remove`                    | `{ path, removedClipId }`  |
 
 `track` and `clip` use the stored model fields; mutations do not include derived
 timing. Mutation paths are canonical absolute paths; list retains the requested
 absolute path. Successful changes update `metadata.updatedAt` without going
-backwards; exact no-op moves/trims preserve bytes and timestamps. Read back
+backwards; exact no-op moves, trims and speed edits preserve bytes and timestamps. Read back
 `timeline list` after mutations. Inspection never writes. Mutations reuse the
 [asset atomic-save guarantees](#project-media-assets): writer lock, validation
 before publishing, synced temporary JSON and same-directory rename, refusal of
@@ -617,25 +623,26 @@ node apps/cli/dist/index.js edit redo /path/to/project.opencut.json --expected-r
 
 Batch objects allow only `expectedRevision`, optional nonblank `label`, and
 `operations`. Operation objects are strict; unknown fields/types fail. All IDs
-follow the project ID rules. Time fields are nonnegative safe integer **project
-frame indices**, including source points; the same exact rational conversion and
-T08 validation apply. `fadeIn` and `fadeOut` are project-frame durations. No media probing, source changes or rendering occurs.
+follow the project ID rules. Frame fields are nonnegative safe integer **project frame indices**.
+For rational source times, use `inTime` and `outTime` with integer
+`numerator` and `denominator` in seconds. `fadeIn` and `fadeOut` are project-frame durations. No media probing, source changes or rendering occurs.
 
-| Operation `type` | Required fields besides `type`                | Optional fields                                        |
-| ---------------- | --------------------------------------------- | ------------------------------------------------------ |
-| `track.add`      | `name`, `mediaType` (`video` or `audio`)      | `id`                                                   |
-| `track.audio`    | `id`                                          | `volume`, `muted` (at least one)                       |
-| `track.remove`   | `id`                                          | —                                                      |
-| `clip.add`       | `assetId`, `trackId`, `at`, `in`, `out`       | `id`, `volume`, `muted`, `fadeIn`, `fadeOut`, `visual` |
-| `clip.audio`     | `id`                                          | `volume`, `muted`, `fadeIn`, `fadeOut` (at least one)  |
-| `clip.visual`    | `id`                                          | `x`, `y`, `scale`, `opacity`, `fit` (at least one)     |
-| `text.add`       | `at`, `duration`, `text` (requires `content`) | `id`, `trackId`, `visual` (x/y/scale/opacity)          |
-| `text.set`       | `id`                                          | `text` patch, `at`, `duration` (at least one)          |
-| `canvas.set`     | —                                             | `width`, `height`, `backgroundColor` (at least one)    |
-| `clip.move`      | `id`, at least one of `trackId` / `at`        | remaining destination field                            |
-| `clip.trim`      | `id`, at least one of `in` / `out`            | remaining source field                                 |
-| `clip.split`     | `id`, `at`                                    | `rightId`                                              |
-| `clip.remove`    | `id`                                          | —                                                      |
+| Operation `type` | Required fields besides `type`                         | Optional fields                                        |
+| ---------------- | ------------------------------------------------------ | ------------------------------------------------------ |
+| `track.add`      | `name`, `mediaType` (`video` or `audio`)               | `id`                                                   |
+| `track.audio`    | `id`                                                   | `volume`, `muted` (at least one)                       |
+| `track.remove`   | `id`                                                   | —                                                      |
+| `clip.add`       | `assetId`, `trackId`, `at`, `in`, `out`                | `id`, `volume`, `muted`, `fadeIn`, `fadeOut`, `visual` |
+| `clip.speed`     | `id`, `speed` ratio from 1/4 to 4                      | —                                                      |
+| `clip.audio`     | `id`                                                   | `volume`, `muted`, `fadeIn`, `fadeOut` (at least one)  |
+| `clip.visual`    | `id`                                                   | `x`, `y`, `scale`, `opacity`, `fit` (at least one)     |
+| `text.add`       | `at`, `duration`, `text` (requires `content`)          | `id`, `trackId`, `visual` (x/y/scale/opacity)          |
+| `text.set`       | `id`                                                   | `text` patch, `at`, `duration` (at least one)          |
+| `canvas.set`     | —                                                      | `width`, `height`, `backgroundColor` (at least one)    |
+| `clip.move`      | `id`, at least one of `trackId` / `at`                 | remaining destination field                            |
+| `clip.trim`      | `id`, at least one of `in`, `out`, `inTime`, `outTime` | remaining source boundary                              |
+| `clip.split`     | `id`, `at`                                             | `rightId`                                              |
+| `clip.remove`    | `id`                                                   | —                                                      |
 
 Omitted new IDs become UUIDs. Supply explicit IDs when later operations in the
 same batch must reference a newly added track/clip or the right side of a split.
@@ -983,8 +990,7 @@ snapshot and composites video, image, text and subtitles with mixed audio to H.2
 with libx264 and standard filters, plus ffprobe on PATH. The project's resolution
 and exact rational frame rate determine the default output. Original video audio is preserved
 by default. Independent audio clips on any number of audio tracks can overlap
-original audio and each other across tracks. Transitions, audio effects,
-keyframes and fades remain outside the current editing model. Project viewer
+original audio and each other across tracks. Clip gains, mutes, fades and constant playback speed apply to the mix. Project viewer
 composites the same saved layer configuration; source preview plays originals.
 
 T28 [desktop export](EXPORT.md) also offers HEVC and output-frame-rate conversion.
@@ -1005,10 +1011,11 @@ by timeline start. Every visible layer is composited at each frame, including wh
 lower tracks have gaps. Gaps reveal lower layers or the canvas background.
 Duration ends at the last exclusive end across all clips and subtitle cues. Audio tails show
 the background. Muted, zero-volume and zero-opacity clips still contribute to duration.
-There is no separately stored trailing duration. Every regular clip timeline start and source
-in/out must align exactly with a project-frame boundary; subframe times are
-rejected with an alignment error. The CLI's existing frame-based edits satisfy
-this rule. Missing/unreadable media, invalid references/overlaps, unknown video
+Media clip boundaries can fall between project frames at any speed. The
+renderer samples their half-open intervals on the project frame grid, rounding
+each absolute visual boundary up to a frame tick. Title clip boundaries must
+align with project frames. Audio uses exact timeline and source boundaries
+rounded to 48 kHz samples. Missing/unreadable media, invalid references/overlaps, unknown video
 duration and source ranges exceeding freshly probed video bounds fail with
 clip/path diagnostics. Stored import metadata is not treated as proof that the
 current file still matches it.
@@ -1079,24 +1086,32 @@ sets a half-second fade in, a one-second fade out and half amplitude.
 quarter amplitude on that clip outside its fades. Both levels support
 `--muted true` and default to unmuted. Fades multiply the resulting gain using
 linear ramps from the edited clip's edges, after applying the source trim.
-FFmpeg evaluates the ramps on the 48 kHz export sample grid.
+FFmpeg evaluates the ramps on the 48 kHz export sample grid after applying
+pitch-preserving `atempo` to retimed audio. Contiguous clips on the same
+track with the same asset, speed and touching source points share one tempo
+pass. Export then applies each clip's own fades, gain and mute. Tempo
+processing can shift sharp transients and soften or shorten very short
+sounds, particularly near 0.25× and 4×. The resulting audio is trimmed or
+padded to the run's timeline interval. Subtitles retain their project times.
 Mixing sums gains without automatic normalization as tracks enter/leave. The
 existing T03 safety limiter caps peaks at 0.95 with latency compensation; dense
 mixes can therefore reduce loud peaks. A silent 48 kHz stereo AAC stream is
 exported even when no source has audio, preserving video-only T10 projects.
-Audio boundaries round absolute project-frame times to nearest 48 kHz samples
+Audio boundaries round absolute timeline times to nearest 48 kHz samples
 (half up), avoiding cumulative duration drift. Fractional frame/sample boundaries
 can differ by at most one sample at a split; AAC may add one decoded padding
 packet at EOF. MP4 timing excludes encoder delay and reports the planned duration
 within 1.1 ms. No sample-exact lossless audio guarantee is made for AAC.
 
 Source time zero is the selected video's first frame, as in T03 composition;
-container/stream start offsets are normalized. Source in/out are positions on the
-project-rate sampling grid, with an exclusive out point. Each source is converted
-to that grid with FFmpeg's `fps` filter before integer frame trimming. A source
-frame can first appear on the project tick at or after its presentation timestamp.
-A split therefore selects exactly the same sampled frames as the unsplit clip,
-even when source and project rates differ. The configured fit, scale and position
+container/stream start offsets are normalized. Source out is exclusive.
+For frame-aligned clips at the default speed, FFmpeg's `fps` filter samples
+each source before integer frame trimming. For retimed or off-grid clips,
+FFmpeg assigns source frames to absolute project ticks using the source time
+at timeline zero as a shared reference. A source frame first appears on the
+project tick at or after its mapped presentation timestamp, within the
+filter's nanosecond timestamp precision. A split preserves that reference
+and selects the same frames as the unsplit clip. The configured fit, scale and position
 are applied after sampling, preserving source alpha. At fractional EOF rounding, at most
 one cloned frame completes the last frame interval. Global output timestamps are
 regenerated from integer frame indices using the project's rational time base,
