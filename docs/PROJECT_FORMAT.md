@@ -85,7 +85,11 @@ schema version 1, project content or history.
 ```
 
 The camera asset illustrates T07 metadata. The music asset demonstrates that
-existing assets without recorded metadata remain valid.
+existing assets without recorded metadata remain valid. An online import adds
+optional asset `provenance` containing `provider` (`commons` or `openverse`),
+`creator` (a name or null), `sourceUrl`, `license`, and `licenseUrl`. Both URLs
+are HTTPS. The asset's `file` points to the downloaded media used for
+playback and export.
 
 ## Fields and invariants
 
@@ -204,9 +208,10 @@ settings. Meter readings are transient.
 
 T12 adds optional settings `backgroundColor` (default black; `#RRGGBB`,
 `#RRGGBBAA` or `transparent` as of T26) and clip
-`visual: { x?, y?, scale?, opacity?, fit? }` on video tracks. x/y are finite pixel
+`visual: { x?, y?, scale?, rotation?, opacity?, fit? }` on video tracks. x/y are finite pixel
 offsets [-32768, 32768] from centered placement; scale [0.01, 4] multiplies the
-canvas fitting rectangle; opacity [0, 1] multiplies source alpha. fit is contain
+canvas fitting rectangle. Rotation is clockwise degrees in [−36000, 36000],
+defaulting to 0, about the fitted rectangle center. Opacity [0, 1] multiplies source alpha. fit is contain
 (default), cover or stretch. Defaults x/y 0 and scale/opacity 1 are applied only
 during evaluation, preview and export. Transparent margins reveal lower tracks/background. Source ranges
 on still images specify static display duration. These optional fields preserve
@@ -227,7 +232,8 @@ require exact, safely representable project-frame boundaries.
 
 T33 adds asset-free text clips in version 1. A clip has exactly one of
 `assetId` or `text`. `text` stores the content and optional typography,
-rotation and effects. The clip's `visual` stores x/y/scale/opacity. Text is
+rotation and effects. The clip's `visual` stores x/y/scale/rotation/opacity.
+Title style rotation remains part of the typography and composes with clip rotation. Text is
 valid on video tracks and follows their stacking and overlap rules. Clip audio
 and `visual.fit` apply to media clips. The text range uses the existing
 `sourceOut - sourceIn` duration with a source in point of zero on creation.
@@ -238,6 +244,51 @@ Existing project and history data load without a migration. Earlier readers
 reject projects containing text clips. No asset entry, file reference or
 generated raster is persisted for a text clip. See
 [text layer fields](CLI.md#text-layers-t33).
+
+### Visual keyframes (T37)
+
+Video-track media and title clips can store a sparse `keyframes` object in
+schema version 1. Each present property holds a nonempty array in ascending time
+order, with unique times. Static values in `visual` supply the fallback for
+omitted channels and for projects saved before T37.
+
+```json
+{
+  "x": [
+    {
+      "time": { "numerator": 0, "denominator": 1 },
+      "value": -120,
+      "easing": "ease-in-out"
+    },
+    {
+      "time": { "numerator": 3, "denominator": 2 },
+      "value": 120,
+      "easing": "linear"
+    }
+  ]
+}
+```
+
+Allowed channels are `x`, `y`, `scale`, `rotation` and `opacity`, with the
+same value bounds as their static counterparts. Times are exact clip-local
+seconds from zero through duration, inclusive. An endpoint key can shape the
+last segment while the clip's active timeline interval remains half-open. The
+nearest key's value holds outside the channel's key span. Rotation interpolates
+the specified numbers directly, so 0 to 360 is one clockwise turn.
+
+Each key stores the easing for the segment to its right. For normalized time
+`t`, linear is `t`, ease-in is `t²`, ease-out is `1 − (1 − t)²`, and
+ease-in-out is quadratic on each half of the segment. A trimmed or split segment
+can store `curve: [from, to]`, a strictly increasing subdomain of `[0, 1]`.
+Sampling renormalizes the original easing within that subdomain to preserve
+its shape over the surviving interval.
+
+A clip move preserves local times. Source trims retain and rebase the animation
+over the surviving interval and synthesize cut keys where needed. Extensions
+hold the nearest surviving value. Undo restores removed keys. A split slices
+the same curve on both sides and rebases the right clip to zero. Speed changes
+multiply local times by old speed divided by new speed. Project history stores
+these changes in the same snapshots as other clip edits.
 
 ### Subtitle track
 
@@ -518,7 +569,7 @@ not automatically update other clips referencing the same asset. Muting and zero
 gain leave clip duration and timeline coverage unchanged.
 
 `setClipVisual(project, clipId, options)` accepts a nonempty subset of x, y,
-scale, opacity and fit, typed as `ClipVisualOptions`. The clip must be on a video
+scale, rotation, opacity and fit, typed as `ClipVisualOptions`. The clip must be on a video
 track. Omitted or explicitly undefined properties retain their stored values;
 `addClip` accepts the same properties inside its optional `visual` object. Splits
 copy the visual object; moves/trims preserve it. Setting opacity to zero leaves

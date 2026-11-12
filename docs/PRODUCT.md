@@ -27,7 +27,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 and [architecture decisions](adr/0012-realtime-layer-composition.md) define their
 current contracts and validation boundaries.
 
-## Implemented milestones through T36
+## Implemented milestones through T37
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -340,3 +340,19 @@ occupies the duration implied by its unchanged source selection, and its
 timeline label shows the multiplier. The editor, CLI and SDK share source-time
 mapping, validation, history and persistence. See
 [playback speed](TIMELINE_PLAYBACK.md#playback-speed-t36).
+
+### Keyframe animation (T37)
+
+Select a video, still image or title clip. In **Keyframes**, choose Position X,
+Position Y, Scale, Rotation or Opacity. Seek within the clip and choose **Add
+keyframe** to capture the current value. Edit the value, clip-local time and
+easing in the inspector, or delete the selected key. The colored diamonds on the
+clip select a property and seek to its key. Use the Project viewer to play or
+scrub the animation. Static transform controls set the fallback for channels
+without keys.
+
+Keys travel with the clip. Trimming keeps the animation over surviving source
+content and holds edge values on extensions. Splitting preserves the value and
+easing across the cut. Speed changes retime the keys with the source. Keyframe
+edits save with the project and participate in undo/redo. The CLI and TypeScript
+SDK use the same [keyframe transactions](CLI.md#keyframe-animation-t37).

@@ -201,3 +201,39 @@ one-second segments on a single track with one undo step. `review-and-export.ts`
 reports the composition at a selected frame, writes a PNG and exports the
 complete sequence. Add `--dry-run` before the separator to inspect the frame
 without producing either output.
+
+## Keyframe animation (T37)
+
+Use the typed `EditOperation` union with `editor.project.apply`. This stages
+the same operations as a CLI batch. Save to commit the draft to project history.
+
+```ts
+const start = { numerator: 0, denominator: 1 };
+const end = { numerator: 1, denominator: 1 };
+editor.project.apply(
+  {
+    type: 'clip.keyframe.add',
+    id: clipId,
+    property: 'scale',
+    time: start,
+    value: 0.5,
+    easing: 'ease-in-out',
+  },
+  {
+    type: 'clip.keyframe.add',
+    id: clipId,
+    property: 'scale',
+    time: end,
+    value: 1,
+  },
+);
+await editor.save({ label: 'Animate scale' });
+```
+
+Use `clip.keyframe.set` with `newTime` to move a key and optional `value` or
+`easing` to edit it. Use `clip.keyframe.remove` with the channel and exact time
+to delete it. `inspect()` returns stored keys, while `inspectTimeline(frame)`
+returns sampled transforms. `AnimatedProperty`, `KeyframeEasing`,
+`VisualKeyframe` and `VisualKeyframes` are exported types. The
+[CLI reference](CLI.md#keyframe-animation-t37) lists the operation fields and
+[project format](PROJECT_FORMAT.md#visual-keyframes-t37) defines timing.

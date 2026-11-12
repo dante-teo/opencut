@@ -47,6 +47,91 @@ async function seedOffline() {
 }
 
 describe('public SDK', () => {
+  it('shares keyframe transactions, inspection and history with the built CLI', async () => {
+    await seedOffline();
+    const editor = await openProject(path);
+    editor.project.apply(
+      videoTrack,
+      {
+        type: 'clip.add',
+        id: 'clip',
+        assetId: 'offline',
+        trackId: 'video',
+        at: 15,
+        in: 30,
+        out: 90,
+      },
+      {
+        type: 'clip.keyframe.add',
+        id: 'clip',
+        property: 'y',
+        time: { numerator: 0, denominator: 1 },
+        value: -40,
+        easing: 'ease-in-out',
+      },
+    );
+    const { revision } = await editor.save();
+    const end = { numerator: 2, denominator: 1 };
+    const moved = { numerator: 1, denominator: 1 };
+    const operations = [
+      {
+        type: 'clip.keyframe.add',
+        id: 'clip',
+        property: 'y',
+        time: end,
+        value: 40,
+      },
+      {
+        type: 'clip.keyframe.set',
+        id: 'clip',
+        property: 'y',
+        time: end,
+        newTime: moved,
+        value: 60,
+      },
+      {
+        type: 'clip.keyframe.add',
+        id: 'clip',
+        property: 'scale',
+        time: moved,
+        value: 0.8,
+      },
+      {
+        type: 'clip.keyframe.remove',
+        id: 'clip',
+        property: 'scale',
+        time: moved,
+      },
+    ] as const;
+    editor.project.apply(...operations);
+    const batch = join(directory, 'keyframes.json');
+    await writeFile(
+      batch,
+      JSON.stringify({ expectedRevision: revision, operations }),
+    );
+    const run = (...args: string[]) => {
+      const result = spawnSync(process.execPath, [cli, ...args, '--json'], {
+        encoding: 'utf8',
+      });
+      expect(result.status, result.stderr).toBe(0);
+      return JSON.parse(result.stdout);
+    };
+    run('edit', 'apply', path, batch);
+    expect(run('project', 'inspect', path).clips).toEqual(
+      editor.project.inspect().clips,
+    );
+    const at = run('timeline', 'inspect', path, '--frame', '30').visualClips[0];
+    expect(at.visual.y).toBe(10);
+    expect(at).toEqual(editor.project.inspectTimeline(30).visualClips[0]);
+    run('edit', 'undo', path);
+    expect(run('project', 'inspect', path).clips[0].keyframes.y).toHaveLength(
+      1,
+    );
+    run('edit', 'redo', path);
+    expect((await openProject(path)).project.inspect().clips).toEqual(
+      editor.project.inspect().clips,
+    );
+  });
   it('shares rational speed, split and trim timing with the public CLI', async () => {
     await seedOffline();
     const editor = await openProject(path);

@@ -1,3 +1,4 @@
+import { evaluateVisual, visualDefaults } from '@opencut/shared';
 import type { Project, TimelineClip } from './project.js';
 import { audioFadeGain, baseAudioGain } from './audio.js';
 import { clipSpeed, sampleClipSourceTime } from './clip-timing.js';
@@ -13,10 +14,10 @@ interface ResolvedClipProperties extends TimelineClip {
   trackIndex: number;
   trackType: 'video' | 'audio';
   visual: {
-    [Key in keyof NonNullable<TimelineClip['visual']>]-?: NonNullable<
-      NonNullable<TimelineClip['visual']>[Key]
-    >;
-  };
+    [
+      Key in Exclude<keyof NonNullable<TimelineClip['visual']>, 'rotation'>
+    ]-?: NonNullable<NonNullable<TimelineClip['visual']>[Key]>;
+  } & { rotation?: number };
   volume: number;
   muted: boolean;
   trackVolume?: number | undefined;
@@ -71,11 +72,14 @@ export function resolveTimeline(project: Project) {
           trackIndex,
           trackType: track.type,
           visual: {
-            x: clip.visual?.x ?? 0,
-            y: clip.visual?.y ?? 0,
-            scale: clip.visual?.scale ?? 1,
-            opacity: clip.visual?.opacity ?? 1,
+            x: clip.visual?.x ?? visualDefaults.x,
+            y: clip.visual?.y ?? visualDefaults.y,
+            scale: clip.visual?.scale ?? visualDefaults.scale,
+            opacity: clip.visual?.opacity ?? visualDefaults.opacity,
             fit: clip.visual?.fit ?? 'contain',
+            ...(clip.visual?.rotation !== undefined && {
+              rotation: clip.visual.rotation,
+            }),
           },
           volume: clip.volume ?? 1,
           muted: clip.muted ?? false,
@@ -122,23 +126,29 @@ export function resolveTimeline(project: Project) {
   return { duration: timeline.duration, clips };
 }
 
-export type EvaluatedTimelineClip = ResolvedTimelineClip & {
+type ClipSample = {
   sourceTime: RationalTime;
   /** Opacity-based eligibility, not occlusion or decoded-alpha detection. */
   visible: boolean;
   effectiveVolume: number;
 };
 
-export interface TimelineEvaluation {
+export type EvaluatedTimelineClip = ResolvedTimelineClip & ClipSample;
+export type PlaybackTimelineClip = (
+  Omit<ResolvedMediaClip, 'keyframes'> | Omit<ResolvedTextClip, 'keyframes'>
+) &
+  ClipSample & { animated: boolean };
+
+export interface TimelineEvaluation<Clip = EvaluatedTimelineClip> {
   time: RationalTime;
   duration: RationalTime;
   boundary: 'inside' | 'end' | 'after';
-  activeClips: EvaluatedTimelineClip[];
+  activeClips: Clip[];
   /** Bottom to top. Includes transparent clips, whose visible flag is false. */
-  visualClips: EvaluatedTimelineClip[];
+  visualClips: Clip[];
   /** Includes muted sources; unknown stream presence remains a candidate. */
-  audioClips: EvaluatedTimelineClip[];
-  mixingSources: EvaluatedTimelineClip[];
+  audioClips: Clip[];
+  mixingSources: Clip[];
   gap: boolean;
   visualGap: boolean;
   backgroundColor: string;
@@ -155,23 +165,46 @@ export function evaluateTimeline(
 /** Validate and resolve one snapshot once; recreate after edits. Results stay detached. */
 export function createTimelineEvaluator(
   project: Project,
-  sampleSubtitles = false,
+  sampleVisuals = false,
+) {
+  return createTimelineQuery(project, sampleVisuals, (clip) =>
+    structuredClone(clip),
+  );
+}
+
+/** Frame-sampled playback needs the sampled transform, but not the stored keys. */
+export function createPlaybackTimelineEvaluator(project: Project) {
+  return createTimelineQuery(project, true, ({ keyframes, ...clip }) => ({
+    ...structuredClone(clip),
+    animated: !!keyframes,
+  }));
+}
+
+function createTimelineQuery<
+  Clip extends
+    Omit<ResolvedMediaClip, 'keyframes'> | Omit<ResolvedTextClip, 'keyframes'>,
+>(
+  project: Project,
+  sampleVisuals: boolean,
+  copyClip: (clip: ResolvedTimelineClip) => Clip,
 ) {
   const timeline = resolveTimeline(project);
   const backgroundColor = project.settings.backgroundColor ?? '#000000';
   const rate = { ...project.settings.frameRate };
-  const needsSubtitleSampling =
-    sampleSubtitles && !!project.subtitles?.cues.length;
+  const needsFrameSampling =
+    sampleVisuals &&
+    (!!project.subtitles?.cues.length ||
+      timeline.clips.some((clip) => clip.keyframes));
   const tracks = new Map<string, ResolvedTimelineClip[]>();
   for (const clip of timeline.clips) {
     const entries = tracks.get(clip.trackId) ?? [];
     entries.push(clip);
     tracks.set(clip.trackId, entries);
   }
-  return (time: RationalTime): TimelineEvaluation => {
+  return (time: RationalTime): TimelineEvaluation<Clip & ClipSample> => {
     timeSchema.parse(time);
-    const activeClips: EvaluatedTimelineClip[] = [];
-    const frame = needsSubtitleSampling
+    const activeClips: (Clip & ClipSample)[] = [];
+    const frame = needsFrameSampling
       ? (BigInt(time.numerator) * BigInt(rate.numerator)) /
         (BigInt(time.denominator) * BigInt(rate.denominator))
       : null;
@@ -201,22 +234,31 @@ export function createTimelineEvaluator(
                 subtractTimes(at, clip.timelineStart),
               )
             : gain;
-        activeClips.push({
-          ...structuredClone(clip),
-          sourceTime:
-            clip.kind === 'text' && clip.subtitle
-              ? { ...clip.sourceIn }
-              : sampleClipSourceTime(clip, at),
-          visible: clip.trackType === 'video' && clip.visual.opacity > 0,
-          effectiveVolume,
-        });
+        const detached = copyClip(clip);
+        const visual = evaluateVisual(
+          detached.visual,
+          clip.keyframes,
+          sampled,
+          clip.timelineStart,
+        );
+        activeClips.push(
+          Object.assign(detached, {
+            sourceTime:
+              clip.kind === 'text' && clip.subtitle
+                ? { ...clip.sourceIn }
+                : sampleClipSourceTime(clip, at),
+            visual,
+            visible: clip.trackType === 'video' && visual.opacity > 0,
+            effectiveVolume,
+          }),
+        );
       }
     }
     const visualClips = activeClips.filter(
-      (clip) => clip.trackType === 'video',
+      (clip): boolean => clip.trackType === 'video',
     );
     const audioClips = activeClips.filter(
-      (clip) => clip.audioPresence !== 'absent',
+      (clip): boolean => clip.audioPresence !== 'absent',
     );
     const endComparison = compareTimes(time, timeline.duration);
     return {

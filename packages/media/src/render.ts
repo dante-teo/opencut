@@ -3,8 +3,14 @@ import {
   opaqueCanvasColor,
   visualGeometry,
   sourceColorMatrix,
+  usesLayerTransform,
+  maximumVisualScale,
 } from '@opencut/shared';
-import type { RenderTimeMapping, TextLayer } from '@opencut/shared';
+import type {
+  RenderTimeMapping,
+  TextLayer,
+  VisualAnimation,
+} from '@opencut/shared';
 import {
   access,
   link,
@@ -23,6 +29,8 @@ import { checkRenderSignal, MediaError, runMediaTool } from './process.js';
 import { renderProgress } from './render-progress.js';
 import type { RenderProgress } from './render-progress.js';
 import { fitVisual } from './video-filter.js';
+import { stageTransformLayer } from './transform-layer.js';
+import type { TransformLayerOptions } from './transform-layer.js';
 import { rasterizeTextLayer } from './text.js';
 
 interface VisualTimelineProperties {
@@ -35,6 +43,8 @@ interface VisualTimelineProperties {
   y?: number;
   scale?: number;
   opacity?: number;
+  rotation?: number;
+  animation?: VisualAnimation;
   fit?: 'contain' | 'cover' | 'stretch';
 }
 export type VisualTimelineClip = VisualTimelineProperties &
@@ -185,9 +195,12 @@ function validateOptions(options: VideoTimelineOptions): void {
             !Number.isFinite(clip.scale ?? 1) ||
             (clip.scale ?? 1) < 0.01 ||
             (clip.scale ?? 1) > 4 ||
+            !Number.isFinite(clip.rotation ?? 0) ||
+            Math.abs(clip.rotation ?? 0) > 36000 ||
             (!clip.text &&
-              (width * (clip.scale ?? 1) > 8192 ||
-                height * (clip.scale ?? 1) > 8192)) ||
+              Math.max(width, height) *
+                maximumVisualScale(clip, clip.animation?.keyframes) >
+                8192) ||
             !Number.isFinite(clip.opacity ?? 1) ||
             (clip.opacity ?? 1) < 0 ||
             (clip.opacity ?? 1) > 1 ||
@@ -320,12 +333,14 @@ function sameFrameRate(
   );
 }
 
-/** Execute an integer-frame plan without depending on projects, CLI or Electron. */
-async function prepareTimeline(
-  options: VideoTimelineOptions,
-  png = false,
-  stageText?: (index: number, bytes: Buffer) => Promise<string>,
-) {
+interface StagedInput {
+  filename: string;
+  argumentIndex: number;
+  write: (destination: string) => Promise<void>;
+}
+
+/** Compile and validate the complete render before writing intermediate layers. */
+async function prepareTimeline(options: VideoTimelineOptions, png = false) {
   checkRenderSignal(options.signal);
   validateOptions(options);
   const codec = options.codec ?? 'h264';
@@ -461,6 +476,8 @@ async function prepareTimeline(
     'pipe:1',
   ];
   const warnings: string[] = [];
+  const stagedInputs: StagedInput[] = [];
+  const encoders = new Set([codec === 'h264' ? 'libx264' : 'libx265', 'aac']);
   const prepared = {
     args,
     path,
@@ -473,6 +490,8 @@ async function prepareTimeline(
     frameCount: outputFrameCount,
     durationSeconds,
     warnings,
+    stagedInputs,
+    encoders,
   };
   const filters: string[] = [];
   const sources = new Map<string, MediaMetadata>();
@@ -517,6 +536,11 @@ async function prepareTimeline(
     return source;
   };
   let input = 0;
+  const registerInput = (filename: string, write: StagedInput['write']) => {
+    const argumentIndex = args.push('-threads', '1', '-i', filename) - 1;
+    stagedInputs.push({ filename, argumentIndex, write });
+    return input++;
+  };
   filters.push(
     `color=c=${opaqueCanvasColor(options.backgroundColor ?? '#000000')}:s=${width}x${height}:r=${rate},` +
       `format=rgba,trim=end_frame=${frameCount},settb=1/${numerator},setpts=N*${denominator}[canvas0]`,
@@ -532,33 +556,88 @@ async function prepareTimeline(
       'Burn-in supports up to 256 visible subtitle cues per render. Shorten the render range or export a sidecar.',
     );
   for (const [index, clip] of visibleClips.entries()) {
+    const transformed = usesLayerTransform(clip.rotation, !!clip.animation);
+    const first = Math.max(startFrame, clip.timelineStartFrame);
+    const last = Math.min(endFrame, clip.timelineStartFrame + clip.frameCount);
     const overlay = ({ x, y }: { x: number; y: number }, framesync: string) =>
       `[canvas${index}][layer${index}]overlay=x=${x}:y=${y}:${framesync}:` +
       `format=rgb:alpha=straight:enable='gte(n,${clip.timelineStartFrame})*lt(n,${clip.timelineStartFrame + clip.frameCount})'[canvas${index + 1}]`;
-    if (clip.text) {
-      checkRenderSignal(options.signal);
-      const raster = await (options.rasterizeText ?? rasterizeTextLayer)(
-        width,
-        height,
-        clip.text,
-        clip,
-        options.signal,
+    const overlayTransformed = (source: TransformLayerOptions['source']) => {
+      if (first >= last) {
+        filters.push(`[canvas${index}]null[canvas${index + 1}]`);
+        return;
+      }
+      encoders.add('ffv1');
+      const hold =
+        !clip.animation && (source.kind === 'text' || !source.sampling);
+      const layerInput = registerInput(`layer-${index}.nut`, (destination) =>
+        stageTransformLayer(
+          {
+            width,
+            height,
+            rate: frameRate,
+            startFrame: first,
+            frameCount: hold ? 1 : last - first,
+            visual: clip,
+            source,
+            ...(clip.animation && { animation: clip.animation }),
+            signal: options.signal,
+          },
+          destination,
+        ),
       );
+      filters.push(
+        `[${layerInput}:v]format=rgba,settb=1/${numerator},setpts=(N+${first})*${denominator}[layer${index}]`,
+        overlay(
+          { x: 0, y: 0 },
+          hold ? 'repeatlast=1' : 'eof_action=pass:repeatlast=0',
+        ),
+      );
+    };
+    if (clip.text) {
+      const text = clip.text;
+      const rasterize = () =>
+        (options.rasterizeText ?? rasterizeTextLayer)(
+          width,
+          height,
+          text,
+          clip,
+          options.signal,
+          transformed,
+        );
       checkRenderSignal(options.signal);
-      if (raster.warning)
-        warnings.push(`Clip '${clip.clipId}': ${raster.warning}`);
-      if (!raster.png) {
+      const { x, y, png, warning } = await rasterize();
+      checkRenderSignal(options.signal);
+      if (warning) warnings.push(`Clip '${clip.clipId}': ${warning}`);
+      if (!png) {
         filters.push(`[canvas${index}]null[canvas${index + 1}]`);
         continue;
       }
-      // One static image held from time zero; the project-frame interval gates the blend.
-      const textPath = stageText
-        ? await stageText(index, raster.png)
-        : 'text.png';
-      args.push('-threads', '1', '-i', textPath);
+      // Let the text raster cache own the bytes between preparation and staging.
+      const readRaster = async () => {
+        const { png } = await rasterize();
+        if (!png)
+          throw new MediaError(
+            `Clip '${clip.clipId}' lost its text raster during export.`,
+          );
+        return png;
+      };
+      if (transformed) {
+        overlayTransformed({ kind: 'text', rasterize: readRaster, x, y });
+        continue;
+      }
+      const textInput = registerInput(
+        `text-${index}.png`,
+        async (destination) =>
+          writeFile(destination, await readRaster(), {
+            flag: 'wx',
+            signal: options.signal,
+          }),
+      );
+      // Hold the static image from time zero and gate it to the clip interval.
       filters.push(
-        `[${input++}:v]format=rgba,settb=1/${numerator},setpts=0[layer${index}]`,
-        overlay(raster, 'repeatlast=1'),
+        `[${textInput}:v]format=rgba,settb=1/${numerator},setpts=0[layer${index}]`,
+        overlay({ x, y }, 'repeatlast=1'),
       );
       continue;
     }
@@ -586,13 +665,6 @@ async function prepareTimeline(
       video.height ?? 0,
       video.codec,
     );
-    const geometry = visualGeometry(
-      width,
-      height,
-      rotated ? displayHeight : displayWidth,
-      rotated ? displayWidth : displayHeight,
-      clip,
-    );
     const offset =
       (video.startTimeSeconds ?? source.startTimeSeconds ?? 0) -
       (source.startTimeSeconds ?? 0);
@@ -614,8 +686,6 @@ async function prepareTimeline(
       throw new MediaError(
         `Clip '${clip.clipId}' source out exceeds the current video duration or its duration is unknown. Re-import the media and trim to a known video range.`,
       );
-    args.push('-threads', '1', '-i', source.path);
-    inputs.set(clip.clipId, input);
     // Sample before trimming so source selection is invariant under splitting.
     // A source frame first covers the project tick at or after its PTS.
     // Rounding down or to nearest can show a frame before its presentation time.
@@ -634,6 +704,32 @@ async function prepareTimeline(
         : 'setpts=PTS-STARTPTS,' +
           frameSampling +
           `trim=start_frame=${clip.sourceStartFrame}:end_frame=${sourceEnd}`;
+    if (transformed) {
+      overlayTransformed({
+        kind: 'media',
+        path: source.path,
+        stream: video.index,
+        width: (rotated ? video.height : video.width) ?? width,
+        height: (rotated ? video.width : video.height) ?? height,
+        aspect: rotated
+          ? displayHeight / displayWidth
+          : displayWidth / displayHeight,
+        matrix,
+        ...(!still && {
+          sampling: `${sampling},trim=start_frame=${first - clip.timelineStartFrame}:end_frame=${last - clip.timelineStartFrame}`,
+        }),
+      });
+      continue;
+    }
+    const geometry = visualGeometry(
+      width,
+      height,
+      rotated ? displayHeight : displayWidth,
+      rotated ? displayWidth : displayHeight,
+      clip,
+    );
+    args.push('-threads', '1', '-i', source.path);
+    inputs.set(clip.clipId, input);
     filters.push(
       `[${input++}:${video.index}]${sampling},` +
         `${fitVisual(geometry, matrix)},format=rgba,` +
@@ -946,10 +1042,7 @@ export async function validateVideoTimeline(options: VideoTimelineOptions) {
       { signal: options.signal },
     )
   ).toString('utf8');
-  for (const encoder of [
-    prepared.codec === 'h264' ? 'libx264' : 'libx265',
-    'aac',
-  ]) {
+  for (const encoder of prepared.encoders) {
     if (!new RegExp(`\\b${encoder}\\b`).test(encoders))
       throw new MediaError(
         `Required encoder '${encoder}' is unavailable in this FFmpeg installation.`,
@@ -981,10 +1074,22 @@ function renderScratch(output: string, prefix: string) {
   };
   return {
     open,
-    async stageText(index: number, bytes: Buffer) {
-      const path = join(await open(), `text-${index}.png`);
-      await writeFile(path, bytes, { flag: 'wx' });
-      return path;
+    async stage(
+      { args, stagedInputs }: { args: string[]; stagedInputs: StagedInput[] },
+      signal?: AbortSignal,
+    ) {
+      for (const { filename, argumentIndex, write } of stagedInputs) {
+        checkRenderSignal(signal);
+        const destination = join(await open(), filename);
+        try {
+          await write(destination);
+        } catch (error) {
+          checkRenderSignal(signal);
+          throw error;
+        }
+        args[argumentIndex] = destination;
+      }
+      checkRenderSignal(signal);
     },
     async close() {
       if (temporary) await rm(temporary, { recursive: true, force: true });
@@ -998,6 +1103,8 @@ export async function renderVideoTimeline(
 ): Promise<VideoTimelineResult> {
   const scratch = renderScratch(options.output, '.opencut-render-');
   try {
+    const prepared = await prepareTimeline(options);
+    await scratch.stage(prepared, options.signal);
     const {
       args,
       path,
@@ -1010,7 +1117,7 @@ export async function renderVideoTimeline(
       frameCount,
       durationSeconds,
       warnings,
-    } = await prepareTimeline(options, false, scratch.stageText);
+    } = prepared;
     const { numerator, denominator } = frameRate;
     const rendered = join(await scratch.open(), 'render.mp4');
     args.push(rendered);
@@ -1120,7 +1227,8 @@ export async function renderVideoTimeline(
 export async function renderTimelineFrame(options: VideoTimelineOptions) {
   const scratch = renderScratch(options.output, '.opencut-frame-');
   try {
-    const prepared = await prepareTimeline(options, true, scratch.stageText);
+    const prepared = await prepareTimeline(options, true);
+    await scratch.stage(prepared, options.signal);
     const rendered = join(await scratch.open(), 'frame.png');
     await runMediaTool(
       'ffmpeg',

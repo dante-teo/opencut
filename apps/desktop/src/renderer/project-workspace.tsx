@@ -1,3 +1,4 @@
+import type { AnimatedProperty } from '@opencut/shared';
 import { useEffect, useRef, useState } from 'react';
 import { Undo2, Redo2, FolderOpen, Plus, Save } from 'lucide-react';
 import { ExportPanel } from './export-panel.js';
@@ -47,6 +48,8 @@ export function ProjectWorkspace() {
   const [previewRequest, setPreviewRequest] = useState(0);
   const [previewSession, setPreviewSession] = useState(0);
   const [timelineSession, setTimelineSession] = useState(0);
+  const [keyframeProperty, setKeyframeProperty] =
+    useState<AnimatedProperty>('x');
   const [playhead, setPlayhead] = useState<RationalTime>(ZERO);
   const [linkedClipId, setLinkedClipId] = useState<string | null>(null);
   const [previewPosition, setPreviewPosition] = useState<number | undefined>();
@@ -436,6 +439,19 @@ export function ProjectWorkspace() {
           selection={selection}
           revision={project ? projectRevision(project) : 0}
           onImport={() => importMedia()}
+          onOnlineImport={(resultId) => {
+            if (!project) return;
+            void run(
+              'Importing online media…',
+              () =>
+                window.opencut.importOnlineMedia({
+                  projectId: project.metadata.id,
+                  expectedRevision: projectRevision(stateRef.current!.project),
+                  resultId,
+                }),
+              true,
+            );
+          }}
           onDrop={importMedia}
           onRemove={(assetId) => {
             if (project)
@@ -562,6 +578,10 @@ export function ProjectWorkspace() {
         <ProjectInspector
           state={state}
           selection={selection}
+          position={playhead}
+          onSeek={seekTimeline}
+          keyframeProperty={keyframeProperty}
+          onKeyframeSelect={setKeyframeProperty}
           disabled={blocking}
           onEdit={(operations, label) => edit(operations, label, true)}
           onClear={() => setSelection(null)}
@@ -640,6 +660,11 @@ export function ProjectWorkspace() {
         }
         position={playhead}
         onSeek={seekTimeline}
+        onKeyframeSelect={(id, property, time) => {
+          setSelection({ kind: 'clip', id });
+          setKeyframeProperty(property);
+          seekTimeline(time);
+        }}
         linkedClipId={linkedClipId}
         onPreviewClip={(id) => {
           const clip = project?.clips.find((clip) => clip.id === id);

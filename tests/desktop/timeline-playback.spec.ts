@@ -15,7 +15,7 @@ import {
   type Page,
   type ElectronApplication,
 } from '@playwright/test';
-import { serializeProject, type Project } from '@opencut/core';
+import { frameTime, serializeProject, type Project } from '@opencut/core';
 import { auditMedia, auditProjects } from '../../scripts/t21-projects.js';
 import type { TimelineDiagnostics } from '../../apps/desktop/src/renderer/timeline-playback.js';
 import { launchDesktop } from './helpers.js';
@@ -381,6 +381,138 @@ for (const name of ['cuts', 'gaps', 'mixing'] as const)
       await application.close();
     }
   });
+
+test('visible and audible clips reclaim slots from hidden animated layers', async () => {
+  const { application, page } = await launchDesktop();
+  try {
+    const project = auditProjects().mixing!;
+    const rate = project.settings.frameRate;
+    const at = (frame: number) => frameTime(frame, rate);
+    const hiddenTracks = Array.from({ length: 16 }, (_, i) => ({
+      id: `hidden-${i}`,
+      name: `Hidden ${i}`,
+      type: 'video' as const,
+    }));
+    project.tracks.unshift(...hiddenTracks);
+    project.clips = [
+      ...hiddenTracks.map(({ id }) => ({
+        id: `clip-${id}`,
+        trackId: id,
+        assetId: 'asset-3',
+        timelineStart: at(0),
+        sourceIn: at(0),
+        sourceOut: at(180),
+        muted: true,
+        keyframes: {
+          opacity: [
+            { time: at(0), value: 1, easing: 'linear' as const },
+            { time: at(30), value: 0, easing: 'linear' as const },
+          ],
+        },
+      })),
+      {
+        id: 'priority-video',
+        trackId: 'v0',
+        assetId: 'asset-1',
+        timelineStart: at(120),
+        sourceIn: at(0),
+        sourceOut: at(60),
+        muted: true,
+      },
+      {
+        id: 'priority-audio',
+        trackId: 'a0',
+        assetId: 'asset-2',
+        timelineStart: at(120),
+        sourceIn: at(0),
+        sourceOut: at(60),
+      },
+    ];
+    await open(application, page, project, 'animated-decoder-priority');
+    const canvas = page.locator('#project-viewer canvas');
+    await expect.poll(async () => (await report(page)).decoders).toBe(16);
+    await seek(page, 120);
+    await expect(canvas).toHaveAttribute(
+      'data-presented-layers',
+      '["priority-video"]',
+    );
+    await expect.poll(async () => (await report(page)).activeAudio).toBe(1);
+    const state = await report(page);
+    expect(state.decoders).toBeLessThanOrEqual(16);
+    expect(state.unavailable).not.toContain(
+      'Preview decoder limit (16) reached.',
+    );
+  } finally {
+    await application.close();
+  }
+});
+
+test('samples dense keyframes in Electron without cloning their arrays', async () => {
+  const { application, page } = await launchDesktop();
+  try {
+    const project = auditProjects().cuts!;
+    const rate = project.settings.frameRate;
+    project.clips = [
+      {
+        id: 'dense',
+        trackId: 'v0',
+        assetId: 'asset-0',
+        timelineStart: frameTime(0, rate),
+        sourceIn: frameTime(0, rate),
+        sourceOut: frameTime(120, rate),
+        keyframes: {
+          x: Array.from({ length: 901 }, (_, index) => ({
+            time: { numerator: index, denominator: 300 },
+            value: index / 10,
+            easing: 'linear',
+          })),
+        },
+      },
+    ];
+    await open(application, page, project, 'dense-keyframe-playback');
+    await page.evaluate(() => {
+      const original = globalThis.structuredClone;
+      const counts = { samples: 0, arrays: 0 };
+      (window as unknown as { playbackClones: typeof counts }).playbackClones =
+        counts;
+      globalThis.structuredClone = (value, options) => {
+        if (
+          value &&
+          typeof value === 'object' &&
+          'id' in value &&
+          value.id === 'dense' &&
+          'timelineEnd' in value
+        ) {
+          counts.samples++;
+          if ('keyframes' in value && value.keyframes) counts.arrays++;
+        }
+        return original(value, options);
+      };
+    });
+    const viewer = page.locator('#project-viewer');
+    await viewer.getByRole('button', { name: 'Play', exact: true }).click();
+    await expect
+      .poll(async () => time(await report(page)))
+      .toBeGreaterThan(0.4);
+    await expect(viewer.locator('canvas')).toHaveAttribute(
+      'data-presented-layers',
+      '["dense"]',
+    );
+    await viewer.getByRole('button', { name: 'Pause', exact: true }).click();
+    const counts = await page.evaluate(
+      () =>
+        (
+          window as unknown as {
+            playbackClones: { samples: number; arrays: number };
+          }
+        ).playbackClones,
+    );
+    expect(counts.samples).toBeGreaterThan(10);
+    expect(counts.arrays).toBe(0);
+  } finally {
+    await application.close();
+  }
+});
 
 for (const interruption of ['pause', 'seek'] as const)
   test(`${interruption} during timeline startup preserves healthy media for replay`, async () => {

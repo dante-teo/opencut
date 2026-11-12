@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { canvasColorPattern } from '@opencut/shared';
 import { textLayerSchema } from './text-style.js';
 import { subtitleTrackSchema } from './subtitles.js';
+import { visualKeyframesSchema, visualValueSchema } from './keyframes.js';
 import { clipDuration, clipSpeedSchema } from './clip-timing.js';
 import { clipAudioShape, resolveAudioFade, trackAudioShape } from './audio.js';
 import {
@@ -82,6 +83,15 @@ const assetSchema = z.strictObject({
     .refine((value) => value.numerator > 0, 'Known duration must be positive.')
     .optional(),
   metadata: assetMetadataSchema.optional(),
+  provenance: z
+    .strictObject({
+      provider: z.enum(['commons', 'openverse']),
+      creator: z.string().min(1).max(300).nullable(),
+      sourceUrl: z.url({ protocol: /^https$/ }).max(4096),
+      license: z.string().min(1).max(100),
+      licenseUrl: z.url({ protocol: /^https$/ }).max(4096),
+    })
+    .optional(),
 });
 const trackSchema = z.strictObject({
   id,
@@ -90,10 +100,11 @@ const trackSchema = z.strictObject({
   ...trackAudioShape,
 });
 export const clipVisualSchema = z.strictObject({
-  x: z.number().finite().min(-32768).max(32768).optional(),
-  y: z.number().finite().min(-32768).max(32768).optional(),
-  scale: z.number().finite().min(0.01).max(4).optional(),
-  opacity: z.number().finite().min(0).max(1).optional(),
+  x: visualValueSchema('x').optional(),
+  y: visualValueSchema('y').optional(),
+  scale: visualValueSchema('scale').optional(),
+  opacity: visualValueSchema('opacity').optional(),
+  rotation: visualValueSchema('rotation').optional(),
   fit: z.enum(['contain', 'cover', 'stretch']).optional(),
 });
 export const canvasShape = {
@@ -112,6 +123,7 @@ export const clipSchema = z.strictObject({
   speed: clipSpeedSchema.optional(),
   ...clipAudioShape,
   visual: clipVisualSchema.optional(),
+  keyframes: visualKeyframesSchema.optional(),
 });
 const persistedClipSchema = clipSchema.refine(
   ({ assetId, text }) => (assetId === undefined) !== (text === undefined),
@@ -292,6 +304,12 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
         'incompatible_media',
         `Asset '${asset.id}' has no ${track.type} media for track '${track.id}'.`,
       );
+    if (clip.keyframes && track?.type !== 'video')
+      add(
+        location + '/keyframes',
+        'incompatible_visual',
+        'Keyframes require a video track.',
+      );
     if (clip.visual !== undefined && track?.type !== 'video')
       add(
         `${location}/visual`,
@@ -343,6 +361,39 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
       try {
         const duration = clipDuration(clip);
         const end = addTimes(clip.timelineStart, duration);
+        for (const [property, keys] of Object.entries(clip.keyframes ?? {})) {
+          if (!keys) continue;
+          const keyframesPath = location + '/keyframes/' + property;
+          if (
+            keys.some(
+              (key, index) =>
+                index > 0 && compareTimes(keys[index - 1]!.time, key.time) >= 0,
+            )
+          )
+            add(
+              keyframesPath,
+              'keyframe_order',
+              'Keyframe times must be strictly increasing within each property.',
+            );
+          if (keys.some((key) => compareTimes(key.time, duration) > 0))
+            add(
+              keyframesPath,
+              'keyframe_bounds',
+              'Keyframe times must be between zero and clip duration, inclusive.',
+            );
+          for (const [index, key] of keys.entries()) {
+            try {
+              addTimes(clip.timelineStart, key.time);
+            } catch (error) {
+              if (!(error instanceof RangeError)) throw error;
+              add(
+                keyframesPath + '/' + index + '/time',
+                'time_overflow',
+                'The keyframe position exceeds the supported rational time precision.',
+              );
+            }
+          }
+        }
         const attack = clip.fadeIn && resolveAudioFade('fadeIn', clip.fadeIn);
         const release =
           clip.fadeOut && resolveAudioFade('fadeOut', clip.fadeOut);

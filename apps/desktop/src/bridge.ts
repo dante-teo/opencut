@@ -8,6 +8,34 @@ import type {
   SubtitleFormat,
 } from '@opencut/core';
 
+export const ONLINE_MEDIA_CHANNELS = {
+  search: 'online-media:search',
+  openSource: 'online-media:open-source',
+} as const;
+export type OnlineMediaProvider = 'commons' | 'openverse';
+export type OnlineMediaKind = 'image' | 'audio' | 'video';
+export interface OnlineMediaSearch {
+  provider: OnlineMediaProvider;
+  kind: OnlineMediaKind;
+  query: string;
+  page?: string;
+}
+export interface OnlineMediaResult {
+  id: string;
+  title: string;
+  kind: OnlineMediaKind;
+  creator: string | null;
+  sourceUrl: string;
+  license: string;
+  licenseUrl: string;
+  previewUrl: string | null;
+  importable: boolean;
+}
+export interface OnlineMediaPage {
+  results: OnlineMediaResult[];
+  nextPage: string | null;
+}
+
 export const APP_INFO_CHANNEL = 'app:get-info';
 export const OPEN_PREVIEW_CHANNEL = 'preview:open';
 export const PREVIEW_METRICS_CHANNEL = 'preview:metrics';
@@ -82,6 +110,7 @@ export const PROJECT_CHANNELS = {
   undo: 'project:undo',
   redo: 'project:redo',
   import: 'project:import',
+  importOnline: 'project:import-online',
   importSubtitles: 'project:import-subtitles',
   exportSubtitles: 'project:export-subtitles',
   removeAsset: 'project:remove-asset',
@@ -125,6 +154,7 @@ export type TimelineOperation = Extract<
       | 'clip.speed'
       | 'track.audio'
       | 'clip.visual'
+      | `clip.keyframe.${string}`
       | 'text.add'
       | 'text.set'
       | Exclude<
@@ -203,6 +233,11 @@ export interface DesktopAPI {
     callback: (state: DesktopProject | null) => void,
   ): () => void;
   importMedia(input: HistoryInput): Promise<ProjectReply>;
+  searchOnlineMedia(input: OnlineMediaSearch): Promise<OnlineMediaPage>;
+  openOnlineMediaSource(id: string): Promise<void>;
+  importOnlineMedia(
+    input: HistoryInput & { resultId: string },
+  ): Promise<ProjectReply>;
   importSubtitles(input: HistoryInput): Promise<ProjectReply>;
   exportSubtitles(
     input: HistoryInput & { format: SubtitleFormat },

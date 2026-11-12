@@ -122,12 +122,29 @@ function parseStream(value: unknown): MediaStream {
 export async function probeMedia(
   file: string,
   signal?: AbortSignal,
+  options?: { localMediaOnly: boolean },
 ): Promise<MediaMetadata> {
   checkRenderSignal(signal);
   const path = await localFile(file);
   const output = await runMediaTool(
     'ffprobe',
-    ['-v', 'error', '-show_format', '-show_streams', '-of', 'json', path],
+    [
+      '-v',
+      'error',
+      ...(options?.localMediaOnly
+        ? [
+            '-protocol_whitelist',
+            'file',
+            '-format_whitelist',
+            'image2,jpeg_pipe,png_pipe,apng,gif,gif_pipe,webp_pipe,mp3,ogg,wav,flac,mov,matroska,webm',
+          ]
+        : []),
+      '-show_format',
+      '-show_streams',
+      '-of',
+      'json',
+      path,
+    ],
     undefined,
     undefined,
     signal ? { signal } : undefined,

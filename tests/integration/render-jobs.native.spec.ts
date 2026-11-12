@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import { writeFileSync } from 'node:fs';
 import {
   copyFile,
@@ -12,10 +13,12 @@ import {
 } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import {
   addClip,
   createProject,
+  editClipKeyframe,
   frameTime,
   serializeProject,
 } from '@opencut/core';
@@ -227,6 +230,81 @@ test('native T13 render jobs, progress, cancellation and publication', async (t)
           '-',
         ]);
         await clean();
+      },
+    );
+
+    await t.test(
+      'cancels while staging an animated layer and preserves the destination',
+      async () => {
+        const project = editClipKeyframe(
+          example(join(generated, 'still.png'), 1920, 1080, 900),
+          'clip',
+          {
+            type: 'clip.keyframe.add',
+            property: 'x',
+            time: frameTime(0, rate),
+            value: 20,
+          },
+        ).project;
+        await writeFile(projectFile, serializeProject(project));
+        const output = join(directory, 'cancel-staging.mp4');
+        await writeFile(output, 'preserved export');
+        const child = spawn(
+          process.execPath,
+          [
+            entry,
+            'project',
+            'render',
+            projectFile,
+            '--output',
+            output,
+            '--overwrite',
+            '--json',
+          ],
+          { stdio: ['ignore', 'pipe', 'pipe'] },
+        );
+        const closed = once(child, 'close');
+        let stdout = '';
+        let stderr = '';
+        child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+          stdout += chunk;
+        });
+        child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
+          stderr += chunk;
+        });
+        try {
+          const deadline = Date.now() + 15_000;
+          let staging = false;
+          while (!staging && Date.now() < deadline && child.exitCode === null) {
+            const scratch = (await readdir(directory)).find((name) =>
+              name.startsWith('.opencut-render-'),
+            );
+            if (scratch) {
+              const files: string[] = await readdir(
+                join(directory, scratch),
+              ).catch(() => []);
+              staging =
+                files.includes('layer-0.nut') && !files.includes('render.mp4');
+            }
+            if (!staging) await delay(25);
+          }
+          assert.ok(staging, stderr || 'No animated layer was staged');
+          assert.ok(child.kill('SIGINT'));
+          const timeout = setTimeout(() => child.kill('SIGKILL'), 10_000);
+          try {
+            const [code] = await closed;
+            assert.equal(code, 130, stderr);
+          } finally {
+            clearTimeout(timeout);
+          }
+          assert.equal(events(stdout).at(-1)!.event, 'cancelled');
+          assert.equal(await readFile(output, 'utf8'), 'preserved export');
+          await clean();
+        } finally {
+          if (child.exitCode === null && child.signalCode === null)
+            child.kill('SIGKILL');
+          await closed;
+        }
       },
     );
 

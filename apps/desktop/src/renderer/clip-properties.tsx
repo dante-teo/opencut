@@ -13,8 +13,21 @@ import {
   type RationalTime,
   type TimelineClip,
 } from '@opencut/core';
+import {
+  animatedProperties,
+  visualDefaults,
+  visualRanges,
+} from '@opencut/shared';
 import type { TimelineOperation } from '../bridge.js';
 import { frameIndex, ZERO } from './timeline-geometry.js';
+
+const transformLabels = {
+  x: 'Position X',
+  y: 'Position Y',
+  scale: 'Scale',
+  rotation: 'Rotation (°)',
+  opacity: 'Opacity',
+};
 
 /** Exact frame fields must never silently round an imported off-grid boundary. */
 export function frames(time: RationalTime, project: Project): number | null {
@@ -353,39 +366,22 @@ export function ClipProperties({
       {video && (
         <>
           <h3>Transform</h3>
-          {field(
-            'Position X',
-            clip.visual?.x ?? 0,
-            -32768,
-            32768,
-            (x) => ({ type: 'clip.visual', id: clip.id, x }),
-            0.01,
-          )}
-          {field(
-            'Position Y',
-            clip.visual?.y ?? 0,
-            -32768,
-            32768,
-            (y) => ({ type: 'clip.visual', id: clip.id, y }),
-            0.01,
-          )}
-          {field(
-            'Scale',
-            clip.visual?.scale ?? 1,
-            0.01,
-            4,
-            (scale) => ({ type: 'clip.visual', id: clip.id, scale }),
-            0.01,
-          )}
-          {field(
-            'Opacity',
-            clip.visual?.opacity ?? 1,
-            0,
-            1,
-            (opacity) => ({ type: 'clip.visual', id: clip.id, opacity }),
-            0.01,
-            true,
-          )}
+          {animatedProperties.map((property) => {
+            const [min, max] = visualRanges[property];
+            return field(
+              transformLabels[property],
+              clip.visual?.[property] ?? visualDefaults[property],
+              min,
+              max,
+              (value) => ({
+                type: 'clip.visual',
+                id: clip.id,
+                [property]: value,
+              }),
+              0.01,
+              property === 'opacity',
+            );
+          })}
         </>
       )}
       <p className="property-preview-note">

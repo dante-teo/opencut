@@ -114,6 +114,7 @@ export async function rasterizeTextLayer(
   text: TextLayer,
   visual: VisualTransform,
   signal?: AbortSignal,
+  neutral = false,
 ): Promise<TextRaster> {
   checkRenderSignal(signal);
   if (
@@ -128,8 +129,17 @@ export async function rasterizeTextLayer(
     throw new MediaError(
       'Text rendering requires a canvas up to 3840 pixels per side and 3840×2160 total pixels.',
     );
-  const { x = 0, y = 0, scale = 1, opacity = 1 } = visual;
-  const key = JSON.stringify([width, height, text, x, y, scale, opacity]);
+  const { x = 0, y = 0, scale = 1, opacity = 1 } = neutral ? {} : visual;
+  const key = JSON.stringify([
+    width,
+    height,
+    text,
+    x,
+    y,
+    scale,
+    opacity,
+    neutral,
+  ]);
   const cached = rasters.get(key);
   if (cached) return cached;
   const { createCanvas, GlobalFonts } = await loadEngine();
@@ -210,25 +220,29 @@ export async function rasterizeTextLayer(
   const blur = (shadow?.blur ?? 0) * scale;
   const bleed = Math.ceil(blur * 3) + 2;
   const x0 = Math.max(
-    0,
+    neutral ? -Infinity : 0,
     Math.floor(Math.min(...corners.map(([u]) => u)) + Math.min(0, shadowX)) -
       bleed,
   );
   const x1 = Math.min(
-    width,
+    neutral ? Infinity : width,
     Math.ceil(Math.max(...corners.map(([u]) => u)) + Math.max(0, shadowX)) +
       bleed,
   );
   const y0 = Math.max(
-    0,
+    neutral ? -Infinity : 0,
     Math.floor(Math.min(...corners.map(([, v]) => v)) + Math.min(0, shadowY)) -
       bleed,
   );
   const y1 = Math.min(
-    height,
+    neutral ? Infinity : height,
     Math.ceil(Math.max(...corners.map(([, v]) => v)) + Math.max(0, shadowY)) +
       bleed,
   );
+  if (x1 - x0 > 8192 || y1 - y0 > 8192 || (x1 - x0) * (y1 - y0) > 3840 * 2160)
+    throw new MediaError(
+      'Animated text raster exceeds 8192 pixels per side or 3840×2160 total pixels.',
+    );
   if (x1 <= x0 || y1 <= y0) {
     rasters.set(key, empty);
     return empty;

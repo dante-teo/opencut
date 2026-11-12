@@ -1,3 +1,4 @@
+import { animatedProperties, visualRanges } from '@opencut/shared';
 import {
   editTransactionJsonSchema,
   getApplicationInfo,
@@ -195,27 +196,33 @@ const options: Record<string, Option> = {
     type: 'string',
     description: 'Signed offset from centered fitted rectangle; use --x=-20.',
     unit: 'pixels',
-    minimum: -32768,
-    maximum: 32768,
+    minimum: visualRanges.x[0],
+    maximum: visualRanges.x[1],
   },
   y: {
     type: 'string',
     description: 'Signed offset from centered fitted rectangle; use --y=-20.',
     unit: 'pixels',
-    minimum: -32768,
-    maximum: 32768,
+    minimum: visualRanges.y[0],
+    maximum: visualRanges.y[1],
   },
   scale: {
     type: 'string',
     description: 'Scale the canvas-fitting rectangle.',
-    minimum: 0.01,
-    maximum: 4,
+    minimum: visualRanges.scale[0],
+    maximum: visualRanges.scale[1],
+  },
+  rotation: {
+    type: 'string',
+    description: 'Clockwise degrees around the fitted layer center.',
+    minimum: visualRanges.rotation[0],
+    maximum: visualRanges.rotation[1],
   },
   opacity: {
     type: 'string',
     description: 'Multiply source alpha; does not mute audio.',
-    minimum: 0,
-    maximum: 1,
+    minimum: visualRanges.opacity[0],
+    maximum: visualRanges.opacity[1],
   },
   fit: {
     type: 'string',
@@ -265,7 +272,7 @@ const options: Record<string, Option> = {
   regenerate: { type: 'boolean', description: 'Regenerate a preview proxy.' },
 };
 const edit = ['dry-run', 'expected-revision'];
-const visual = ['x', 'y', 'scale', 'opacity', 'fit'];
+const visual = [...animatedProperties, 'fit'];
 const trackAudio = ['volume', 'muted'];
 const audio = [...trackAudio, 'fade-in', 'fade-out'];
 type Definition = {
@@ -711,6 +718,16 @@ export function discovery(scope: string[] = [], help = '') {
         transactionSchema: 'edit apply input',
         sizing: 'project pixels',
         defaultFont: 'Noto Sans SC',
+      },
+      keyframes: {
+        status: 'supported',
+        operations: [
+          'clip.keyframe.add',
+          'clip.keyframe.set',
+          'clip.keyframe.remove',
+        ],
+        transactionSchema: 'edit apply input',
+        time: 'clip-local rational seconds',
       },
       subtitles: {
         status: 'supported',

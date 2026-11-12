@@ -1,6 +1,8 @@
+import { animatedProperties, type AnimatedProperty } from '@opencut/shared';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, PointerEvent } from 'react';
 import {
+  addTimes,
   compareTimes,
   audioFadeEdges,
   resolveAudioFade,
@@ -63,6 +65,7 @@ export function ProjectTimeline({
   onSelect,
   position = ZERO,
   onSeek,
+  onKeyframeSelect,
   onPreviewClip,
   linkedClipId,
   disabled = false,
@@ -78,6 +81,11 @@ export function ProjectTimeline({
   onSelect: (id: string) => void;
   position?: RationalTime;
   onSeek?: (time: RationalTime) => void;
+  onKeyframeSelect?: (
+    clipId: string,
+    property: AnimatedProperty,
+    at: RationalTime,
+  ) => void;
   onPreviewClip?: (id: string) => void;
   linkedClipId?: string | null;
   disabled?: boolean;
@@ -1108,6 +1116,49 @@ export function ProjectTimeline({
                               />
                             );
                           })}
+                          {clip.keyframes &&
+                            animatedProperties.flatMap((property, lane) =>
+                              (clip.keyframes?.[property] ?? []).map(
+                                ({ time }) => {
+                                  const at = addTimes(clip.timelineStart, time);
+                                  const x = relativePixels(at, origin, zoom);
+                                  if (x < 0 || x > width) return null;
+                                  const y = 25 + lane * 6;
+                                  const select = () => {
+                                    if (!disabled)
+                                      onKeyframeSelect?.(clip.id, property, at);
+                                  };
+                                  return (
+                                    <path
+                                      className="timeline-keyframe"
+                                      key={`${property}:${time.numerator}/${time.denominator}`}
+                                      d={`M ${x} ${y - 3} l 3 3 -3 3 -3 -3 z`}
+                                      role="button"
+                                      tabIndex={disabled ? -1 : 0}
+                                      aria-label={`${clip.id} ${property} keyframe at ${exactTime(time)}`}
+                                      aria-disabled={disabled}
+                                      onPointerDown={(event) =>
+                                        event.stopPropagation()
+                                      }
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        select();
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if (
+                                          event.key !== 'Enter' &&
+                                          event.key !== ' '
+                                        )
+                                          return;
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        select();
+                                      }}
+                                    />
+                                  );
+                                },
+                              ),
+                            )}
                           {!clip.text &&
                             (track.type === 'audio' ||
                               (track.type === 'video' &&

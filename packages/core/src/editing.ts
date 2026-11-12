@@ -3,6 +3,7 @@ import { canvasShape, clipVisualSchema, validateProject } from './project.js';
 import type { HistoryEntry, Project, ProjectSnapshot } from './project.js';
 import { trackAudioShape } from './audio.js';
 import { frameTime, timeSchema } from './time.js';
+import { keyframeEdits } from './keyframes.js';
 import { clipSpeedSchema } from './clip-timing.js';
 import { textLayerSchema } from './text-style.js';
 import { editSubtitles, subtitleOperations } from './subtitles.js';
@@ -19,6 +20,7 @@ import {
   setClipSpeed,
   setTrackAudio,
   setClipVisual,
+  editClipKeyframe,
   setText,
   setCanvas,
 } from './timeline.js';
@@ -35,6 +37,9 @@ const name = z
   .refine((value) => value.trim().length > 0, 'Must not be blank.');
 const operationSchema = z.discriminatedUnion('type', [
   ...subtitleOperations,
+  keyframeEdits.add.extend({ id }),
+  keyframeEdits.set.extend({ id }),
+  keyframeEdits.remove.extend({ id }),
   z.strictObject({
     type: z.literal('text.add'),
     id: id.optional(),
@@ -373,12 +378,18 @@ export function previewTransaction(project: Project, input: EditTransaction) {
         case 'clip.remove':
           changed = removeClip(next, operation.id);
           break;
+        case 'clip.keyframe.add':
+        case 'clip.keyframe.set':
+        case 'clip.keyframe.remove':
+          changed = editClipKeyframe(next, operation.id, operation);
+          break;
         case 'clip.visual':
           changed = setClipVisual(next, operation.id, {
             x: operation.x,
             y: operation.y,
             scale: operation.scale,
             opacity: operation.opacity,
+            rotation: operation.rotation,
             fit: operation.fit,
           });
           break;

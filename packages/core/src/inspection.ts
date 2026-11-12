@@ -25,6 +25,7 @@ const resolvedClip = clipSchema.extend({
     y: z.number(),
     scale: z.number(),
     opacity: z.number(),
+    rotation: z.number().optional(),
     fit: z.enum(['contain', 'cover', 'stretch']),
   }),
   audioPresence: z.enum(['present', 'absent', 'unknown']),

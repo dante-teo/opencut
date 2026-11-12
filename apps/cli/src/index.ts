@@ -119,7 +119,7 @@ Composite ordered video, image, text and subtitle layers and mix audio to H.264/
 Visual gaps use the canvas background; audio gaps are silent. Original audio is preserved by default.
 Use clip speed --speed <decimal|ratio> to set a playback multiplier from 0.25 to 4.
 Use clip audio and track audio to set linear gains and mute. Clip fades use --fade-in/--fade-out <frames>.
-Use clip visual for position/scale/opacity/contain/cover/stretch and canvas set for dimensions/background.
+Use clip visual for position/scale/rotation/opacity/contain/cover/stretch and canvas set for dimensions/background.
 Later video tracks draw above earlier tracks. Images and text use their explicit clip duration.
 Media clips and subtitles accept exact times. Title clip boundaries use project frames. Subtitles burn in by default.
 Supports even sides up to 3840 (at most 3840x2160 pixels), 1–120 fps, 64 non-subtitle clips, up to 256 burned-in cues and 600 seconds.
@@ -302,6 +302,7 @@ async function runCli(args: string[]): Promise<void> {
       x: { type: 'string' },
       y: { type: 'string' },
       scale: { type: 'string' },
+      rotation: { type: 'string' },
       opacity: { type: 'string' },
       fit: { type: 'string' },
       'background-color': { type: 'string' },
@@ -410,6 +411,7 @@ async function runCli(args: string[]): Promise<void> {
     'x',
     'y',
     'scale',
+    'rotation',
     'opacity',
     'fit',
     'background-color',

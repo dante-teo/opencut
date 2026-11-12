@@ -1954,3 +1954,139 @@ button {
   width: 0;
   height: 9px;
 }
+
+.keyframe-properties {
+  display: grid;
+  gap: 8px;
+  min-inline-size: 0;
+  margin: 0 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  padding: 8px;
+}
+
+.keyframe-properties form,
+.keyframe-properties label {
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.keyframe-properties input,
+.keyframe-properties select {
+  width: 100%;
+  min-width: 0;
+}
+
+.keyframe-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.timeline-keyframe {
+  fill: #ffcf72;
+  stroke: #302414;
+  cursor: pointer;
+}
+
+.timeline-keyframe:focus,
+.timeline-keyframe:hover {
+  fill: #fff;
+}
+
+.library-mode {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px 0;
+}
+.library-mode button {
+  flex: 1;
+  font-size: 11px;
+  padding: 5px;
+  background: transparent;
+  border-color: transparent;
+}
+.library-mode button[aria-pressed='true'] {
+  background: var(--badge-background);
+  border-color: var(--accent-border);
+}
+.online-search {
+  grid-template-columns: minmax(0, 1fr);
+  padding-top: 8px;
+}
+.online-search-row,
+.online-search-filters,
+.online-result-actions,
+.online-page-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.online-search-row input,
+.online-search-filters select:first-child {
+  flex: 1;
+}
+.online-search-filters select {
+  width: auto;
+}
+.online-search-row button,
+.online-result-actions button,
+.online-page-actions button {
+  font-size: 11px;
+  padding: 4px 6px;
+}
+.online-results {
+  padding: 0 12px;
+}
+.online-results p {
+  font-size: 11px;
+  color: var(--muted);
+}
+.online-results ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.online-results li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.online-results strong,
+.online-results small,
+.asset-credit span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.online-results small,
+.asset-credit {
+  color: var(--muted);
+  font-size: 11px;
+}
+.asset-credit {
+  padding: 4px 8px;
+  user-select: text;
+}
+.online-result-actions {
+  flex-wrap: wrap;
+  margin: 5px 0;
+}
+.online-page-actions {
+  justify-content: space-between;
+  padding: 8px 0;
+}
+.online-results img,
+.online-results video,
+.online-results audio {
+  display: block;
+  max-width: 100%;
+}
+.online-results img,
+.online-results video {
+  max-height: 160px;
+  border-radius: var(--radius-control);
+}
+.online-results audio {
+  width: 100%;
+}

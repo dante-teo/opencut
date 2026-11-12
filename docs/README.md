@@ -66,6 +66,7 @@ T34 adds [editable subtitles](PRODUCT.md#editable-subtitles-t34) with exact cue
 timing, shared styles, SRT/WebVTT import and export, and optional MP4 burn-in.
 T35 adds [audio fades, track controls, and stereo peak meters](TIMELINE_PLAYBACK.md#audio-editing-and-meters).
 T36 adds [constant clip playback speed and time remapping](TIMELINE_PLAYBACK.md#playback-speed-t36).
+T37 adds [clip keyframe animation](PRODUCT.md#keyframe-animation-t37).
 
 Select a media clip to edit **Timeline position**, **Duration**, **Source in/out** in
 whole project frames, **Volume** (linear 0–1), **Mute**, **Fade in/out**, and video **Position X/Y**
@@ -159,6 +160,26 @@ remain separate undo steps.
 Unsaved projects can import before their first save, using absolute references.
 Saving preserves those absolute references; it does not relocate the media or
 convert them to project-relative paths.
+
+With a project open, choose **Browse online** to search Wikimedia Commons for
+images, audio or video, or Openverse for images and audio. Search and previews
+use the providers' public services without an account, API key or OpenCut
+server. Results show the creator and reuse terms. **Open source** opens the
+provider's original listing. **Add to project** downloads the file into
+OpenCut's application data and imports it as one undoable edit. Imports support
+files up to 512 MiB. Wikimedia videos in formats that the editor cannot play,
+such as Ogg Theora, use the best available Wikimedia WebM rendition. When a
+result offers only **Open source**, download the file there and use the local
+importer. GIF and APNG results appear in image searches. On import, OpenCut
+classifies them as timed video when ffprobe reports a duration and as still
+images when it does not. Openverse direct downloads currently support Wikimedia
+Commons files and Flickr images.
+
+Imported media plays and exports offline. Keep the downloaded originals in
+place, including when restoring or moving a project to another machine. Select
+the imported asset in **Project** to read its source and credits. The project
+records the provider, creator, source and license. Verify reuse requirements on
+the source page before publishing, especially for ShareAlike works.
 
 Use **Search media** to filter filenames, and **Filter media type** to show video,
 audio or images. Filters combine, affect only the library view, and reset when

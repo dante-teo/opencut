@@ -173,3 +173,16 @@ then checks the sampled picture and the audio cutoff. These cases cover
 synthetic SDR footage and stereo audio. Chromium and FFmpeg use different
 pitch-preserving algorithms, and short transients can land differently,
 especially at extreme speeds. See [retimed export timing](EXPORT.md#retimed-clips).
+
+## Animated transforms (T37)
+
+The T37 case creates position, scale, rotation and opacity keyframes in
+Electron, moves and deletes a key, checks undo/redo, retimes a source-trimmed
+clip to 1.5× and splits it through the animated segment. It plays and seeks
+the Project viewer, exports through Electron, verifies the complete video PTS
+grid and compares seven native Canvas frames with decoded export pixels.
+Independent transform expectations cover the start, mid-curve samples, both
+sides of the split, the last key and the final active frame. The case also
+checks decoded color at known coordinates, verifies audio from the animated
+clip, and compares a CLI PNG with the corresponding MP4 frame. The same sample
+includes animated title opacity and rotation on an alpha-bearing still.

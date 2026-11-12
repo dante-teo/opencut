@@ -112,6 +112,7 @@ export async function prepareMediaAsset(
   original: Project,
   path: string,
   mediaFilePath: string,
+  options?: { localMediaOnly: boolean },
 ): Promise<{ project: Project; result: AssetImportResult }> {
   const project = structuredClone(original);
   const requested = resolve(mediaFilePath);
@@ -151,7 +152,7 @@ export async function prepareMediaAsset(
         },
       };
   }
-  const probed = await probeMedia(source);
+  const probed = await probeMedia(source, undefined, options);
   if (!probed.video && !probed.audio)
     throw new AssetError(
       'INVALID_MEDIA',

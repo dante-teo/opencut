@@ -1,4 +1,5 @@
-import type { RenderTimeMapping } from '@opencut/shared';
+import { maximumVisualScale } from '@opencut/shared';
+import type { RenderTimeMapping, VisualAnimation } from '@opencut/shared';
 import { clipSourcePosition, clipSpeed } from './clip-timing.js';
 import type { Project, TimelineClip } from './project.js';
 import { continuesMediaRun, resolveTimeline } from './evaluation.js';
@@ -21,6 +22,8 @@ interface VisualRenderProperties {
   y: number;
   scale: number;
   opacity: number;
+  rotation?: number;
+  animation?: VisualAnimation;
   fit: 'contain' | 'cover' | 'stretch';
 }
 
@@ -225,9 +228,10 @@ export function planProjectRender(
     }
     if (clip.trackType === 'video' && count > 0) {
       const visual = clip.visual;
+      const maxScale = maximumVisualScale(visual, clip.keyframes);
       if (
         clip.kind !== 'text' &&
-        (width * visual.scale > 8192 || height * visual.scale > 8192)
+        (width * maxScale > 8192 || height * maxScale > 8192)
       )
         throw new RenderError(
           `Clip '${clip.id}' scaled canvas exceeds 8192 pixels per side. Reduce scale.`,
@@ -247,6 +251,9 @@ export function planProjectRender(
           },
         }),
         ...visual,
+        ...(clip.keyframes && {
+          animation: { start: clip.timelineStart, keyframes: clip.keyframes },
+        }),
       });
     }
   }

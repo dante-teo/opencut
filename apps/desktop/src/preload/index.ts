@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import {
   APP_INFO_CHANNEL,
+  ONLINE_MEDIA_CHANNELS,
   EXPORT_CHANNELS,
   EXPORT_CHANGED_CHANNEL,
   PROJECT_CHANGED_CHANNEL,
@@ -45,6 +46,12 @@ const api: DesktopAPI = {
       ipcRenderer.removeListener(PROJECT_CHANGED_CHANNEL, listener);
     };
   },
+  searchOnlineMedia: (input) =>
+    ipcRenderer.invoke(ONLINE_MEDIA_CHANNELS.search, input),
+  openOnlineMediaSource: (id) =>
+    ipcRenderer.invoke(ONLINE_MEDIA_CHANNELS.openSource, id),
+  importOnlineMedia: (input) =>
+    ipcRenderer.invoke(PROJECT_CHANNELS.importOnline, input),
   importMedia: (input) =>
     ipcRenderer.invoke(PROJECT_CHANNELS.import, {
       projectId: input.projectId,

@@ -9,6 +9,7 @@ import {
   LoaderCircle,
 } from 'lucide-react';
 import { LibraryArtwork } from './studio-graphics.js';
+import { OnlineMediaLibrary } from './online-media-library.js';
 import type { MediaAsset } from '@opencut/core';
 import type { DesktopProject } from '../bridge.js';
 
@@ -80,6 +81,7 @@ export function MediaLibrary({
   selection,
   onSelect,
   onImport,
+  onOnlineImport,
   onDrop,
   onRemove,
   revision,
@@ -89,11 +91,13 @@ export function MediaLibrary({
   selection: { kind: string; id: string } | null;
   onSelect: (id: string) => void;
   onImport: () => void;
+  onOnlineImport: (id: string) => void;
   onDrop: (files: File[]) => void;
   onRemove: (id: string) => void;
   revision: number;
 }) {
   const [over, setOver] = useState(false);
+  const [online, setOnline] = useState(false);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
   const project = state?.project;
@@ -134,8 +138,10 @@ export function MediaLibrary({
       onDrop={(event) => {
         event.preventDefault();
         setOver(false);
-        if (!busy && project && event.dataTransfer.files.length)
+        if (!busy && project && event.dataTransfer.files.length) {
+          setOnline(false);
           onDrop(Array.from(event.dataTransfer.files));
+        }
       }}
     >
       <div className="panel-heading">
@@ -144,122 +150,151 @@ export function MediaLibrary({
           <span className="count-badge">{project?.assets.length ?? 0}</span>
         </h2>
       </div>
-      <div className="library-actions">
-        <button
-          className="import-button"
-          disabled={busy || !project}
-          onClick={onImport}
+      {project && (
+        <div
+          className="library-mode"
+          role="group"
+          aria-label="Media library view"
         >
-          <Upload aria-hidden="true" focusable="false" /> Import media
-        </button>
-        <button
-          aria-label="Remove asset"
-          className="remove-asset-button"
-          disabled={busy || !selectedAsset || referenced}
-          title={
-            referenced
-              ? 'Used by timeline clips'
-              : 'Remove selected asset from library'
-          }
-          onClick={() => selectedAsset && onRemove(selectedAsset.id)}
-        >
-          <Trash2 aria-hidden="true" focusable="false" />
-        </button>
-      </div>
-      <div className="library-search">
-        <input
-          type="search"
-          aria-label="Search media"
-          placeholder="Search your media…"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        <select
-          aria-label="Filter media type"
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-        >
-          <option value="all">All media</option>
-          <option value="video">Video</option>
-          <option value="audio">Audio</option>
-          <option value="image">Images</option>
-        </select>
-      </div>
-      <div className="library-content">
-        {!project?.assets.length ? (
-          <div className="library-empty">
-            <LibraryArtwork />
-            <h3>No media</h3>
-            {project && <p>Drop files here</p>}
-          </div>
-        ) : assets.length === 0 ? (
-          <div className="library-empty">
-            <h3>No matching media</h3>
+          <button aria-pressed={!online} onClick={() => setOnline(false)}>
+            Project
+          </button>
+          <button aria-pressed={online} onClick={() => setOnline(true)}>
+            Browse online
+          </button>
+        </div>
+      )}
+      {online && project ? (
+        <OnlineMediaLibrary busy={busy} onImport={onOnlineImport} />
+      ) : (
+        <>
+          <div className="library-actions">
             <button
-              onClick={() => {
-                setQuery('');
-                setFilter('all');
-              }}
+              className="import-button"
+              disabled={busy || !project}
+              onClick={onImport}
             >
-              Clear filters
+              <Upload aria-hidden="true" focusable="false" /> Import media
+            </button>
+            <button
+              aria-label="Remove asset"
+              className="remove-asset-button"
+              disabled={busy || !selectedAsset || referenced}
+              title={
+                referenced
+                  ? 'Used by timeline clips'
+                  : 'Remove selected asset from library'
+              }
+              onClick={() => selectedAsset && onRemove(selectedAsset.id)}
+            >
+              <Trash2 aria-hidden="true" focusable="false" />
             </button>
           </div>
-        ) : (
-          <ul className="asset-list">
-            {assets.map((asset) => {
-              const availability = state?.media.find(
-                (item) => item.assetId === asset.id,
-              );
-              const offline = availability?.status !== 'available';
-              const duration =
-                asset.metadata?.kind === 'image'
-                  ? 'Still · 5s default'
-                  : asset.duration
-                    ? `${(asset.duration.numerator / asset.duration.denominator).toFixed(2)}s`
-                    : 'Unknown duration';
-              return (
-                <li key={asset.id}>
-                  <button
-                    disabled={busy}
-                    draggable={!busy && !offline}
-                    onDragStart={(event) => {
-                      event.dataTransfer.effectAllowed = 'copy';
-                      event.dataTransfer.setData('text/plain', asset.name);
-                      event.dataTransfer.setData(
-                        ASSET_DRAG_TYPE,
-                        JSON.stringify({
-                          projectId: project.metadata.id,
-                          assetId: asset.id,
-                          revision,
-                        }),
-                      );
-                    }}
-                    aria-pressed={
-                      selection?.kind === 'asset' && selection.id === asset.id
-                    }
-                    onClick={() => onSelect(asset.id)}
-                  >
-                    <Thumbnail asset={asset} />
-                    <span className="asset-label">
-                      <strong>{asset.name}</strong>
-                      <small>
-                        {asset.metadata?.kind ?? asset.mediaTypes.join(', ')} ·{' '}
-                        {duration}
-                        {offline ? ' · Offline' : ''}
-                      </small>
-                    </span>
-                  </button>
-                  {offline && (
-                    <p className="asset-availability">
-                      {availability?.message}
-                    </p>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
+          <div className="library-search">
+            <input
+              type="search"
+              aria-label="Search media"
+              placeholder="Search your media…"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            <select
+              aria-label="Filter media type"
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+            >
+              <option value="all">All media</option>
+              <option value="video">Video</option>
+              <option value="audio">Audio</option>
+              <option value="image">Images</option>
+            </select>
+          </div>
+          <div className="library-content">
+            {!project?.assets.length ? (
+              <div className="library-empty">
+                <LibraryArtwork />
+                <h3>No media</h3>
+                {project && <p>Drop files here</p>}
+              </div>
+            ) : assets.length === 0 ? (
+              <div className="library-empty">
+                <h3>No matching media</h3>
+                <button
+                  onClick={() => {
+                    setQuery('');
+                    setFilter('all');
+                  }}
+                >
+                  Clear filters
+                </button>
+              </div>
+            ) : (
+              <ul className="asset-list">
+                {assets.map((asset) => {
+                  const availability = state?.media.find(
+                    (item) => item.assetId === asset.id,
+                  );
+                  const offline = availability?.status !== 'available';
+                  const selected = selectedAsset?.id === asset.id;
+                  const duration =
+                    asset.metadata?.kind === 'image'
+                      ? 'Still · 5s default'
+                      : asset.duration
+                        ? `${(asset.duration.numerator / asset.duration.denominator).toFixed(2)}s`
+                        : 'Unknown duration';
+                  return (
+                    <li key={asset.id}>
+                      <button
+                        disabled={busy}
+                        draggable={!busy && !offline}
+                        onDragStart={(event) => {
+                          event.dataTransfer.effectAllowed = 'copy';
+                          event.dataTransfer.setData('text/plain', asset.name);
+                          event.dataTransfer.setData(
+                            ASSET_DRAG_TYPE,
+                            JSON.stringify({
+                              projectId: project.metadata.id,
+                              assetId: asset.id,
+                              revision,
+                            }),
+                          );
+                        }}
+                        aria-pressed={selected}
+                        onClick={() => onSelect(asset.id)}
+                      >
+                        <Thumbnail asset={asset} />
+                        <span className="asset-label">
+                          <strong>{asset.name}</strong>
+                          <small>
+                            {asset.metadata?.kind ??
+                              asset.mediaTypes.join(', ')}{' '}
+                            · {duration}
+                            {offline ? ' · Offline' : ''}
+                          </small>
+                        </span>
+                      </button>
+                      {selected && asset.provenance && (
+                        <div className="asset-credit">
+                          <span>
+                            {asset.provenance.creator ?? 'Creator unavailable'}{' '}
+                            · {asset.provenance.license}
+                          </span>
+                          <span>{asset.provenance.sourceUrl}</span>
+                        </div>
+                      )}
+                      {offline && (
+                        <p className="asset-availability">
+                          {availability?.message}
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </>
+      )}
     </aside>
   );
 }

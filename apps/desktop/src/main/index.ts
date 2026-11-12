@@ -8,6 +8,7 @@ import {
   net,
   protocol,
   session,
+  shell,
 } from 'electron';
 import iconPath from '../../resources/opencut-icon.png?asset';
 import { randomUUID } from 'node:crypto';
@@ -26,6 +27,7 @@ import { ExportSession } from './export-session.js';
 import { MediaClient } from './media-client.js';
 import {
   APP_INFO_CHANNEL,
+  ONLINE_MEDIA_CHANNELS,
   EXPORT_CHANNELS,
   EXPORT_CHANGED_CHANNEL,
   PROJECT_CHANGED_CHANNEL,
@@ -49,6 +51,7 @@ import {
 import type { IpcMainInvokeEvent } from 'electron';
 import { servePreviewFile } from './preview-file.js';
 import { ProjectSession, type ProjectAction } from './project-session.js';
+import { OnlineMediaLibrary } from './online-media.js';
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -85,6 +88,7 @@ function revokeTimeline() {
 let openingPreview = false;
 let closingProject = false;
 let previewGeneration = 0;
+const onlineMedia = new OnlineMediaLibrary();
 const projectSession = new ProjectSession(
   {
     async open() {
@@ -194,6 +198,11 @@ const projectSession = new ProjectSession(
     revokeTimeline();
     mainWindow?.webContents.send(PROJECT_CHANGED_CHANNEL, state);
   },
+  {
+    source: (id) => onlineMedia.source(id),
+    download: (id) =>
+      onlineMedia.download(id, join(app.getPath('userData'), 'online-media')),
+  },
 );
 
 const exportSession = new ExportSession(
@@ -212,12 +221,12 @@ const exportSession = new ExportSession(
     if (!mainWindow?.isDestroyed())
       mainWindow?.webContents.send(EXPORT_CHANGED_CHANNEL, state);
   },
-  async (width, height, text, visual, signal) => {
+  async (width, height, text, visual, signal, neutral) => {
     const { png, ...raster } = await mediaClient!.request<
       Omit<import('@opencut/media').TextRaster, 'png'> & {
         png: Uint8Array | null;
       }
-    >('export-text', { width, height, text, visual }, signal);
+    >('export-text', { width, height, text, visual, neutral }, signal);
     return { ...raster, png: png ? Buffer.from(png) : null };
   },
 );
@@ -407,6 +416,8 @@ app
       try {
         const url = new URL(request.url);
         if (url.host === 'media') {
+          const online = /^\/online\/([0-9a-f-]{36})$/.exec(url.pathname);
+          if (online) return await onlineMedia.preview(online[1]!, request);
           const path =
             request.url === previewFile?.url
               ? previewFile.path
@@ -446,6 +457,25 @@ app
       assertSender(event);
       return getApplicationInfo();
     });
+    ipcMain.handle(
+      ONLINE_MEDIA_CHANNELS.search,
+      async (event, ...args: unknown[]) => {
+        assertSender(event);
+        if (args.length !== 1)
+          throw new Error('Invalid online search request.');
+        const results = await onlineMedia.search(args[0]);
+        assertSender(event);
+        return results;
+      },
+    );
+    ipcMain.handle(
+      ONLINE_MEDIA_CHANNELS.openSource,
+      (event, ...args: unknown[]) => {
+        assertSender(event);
+        if (args.length !== 1) throw new Error('Invalid media source request.');
+        return shell.openExternal(onlineMedia.source(args[0]).sourceUrl);
+      },
+    );
     for (const [action, channel] of Object.entries(PROJECT_CHANNELS)) {
       ipcMain.handle(channel, async (event, ...args: unknown[]) => {
         assertSender(event);
@@ -457,6 +487,7 @@ app
             'undo',
             'redo',
             'import',
+            'importOnline',
             'importSubtitles',
             'exportSubtitles',
             'removeAsset',

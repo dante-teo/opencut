@@ -86,6 +86,9 @@ distinguish an interior gap from completion.
 ## Visual and audio intent
 
 Visual defaults are centered pixel offsets x/y 0, scale/opacity 1 and contain fit.
+Omitted rotation means 0 degrees. For each keyed channel, the evaluator replaces
+the static value with the exact clip-local sample at the query time. `visible`
+uses evaluated opacity.
 The existing renderer defines fitting, source alpha and canvas clipping. `visible`
 means a video-track clip has positive opacity; it does not test offscreen geometry,
 occlusion, missing media or decoded alpha. Transparent clips remain in visualClips.
@@ -115,7 +118,7 @@ clip-count limits. Evaluation itself has none of those export-specific limits.
 Export requires frame-aligned title boundaries. The render plan places
 media and subtitle boundaries at the first project tick at or after their
 exact stored times. The Project viewer and export sample subtitle
-visibility at each project frame's start.
+visibility and animated transforms at each project frame's start.
 
 FFmpeg samples video at the project rate and loops still images. Export
 uses stream origins and rounds audio boundaries on a 48 kHz grid. Contiguous
@@ -126,16 +129,18 @@ T26 shares geometry and RGB composition between preview and export. See
 `evaluateTimeline` and `evaluateTimelineFrame` validate and resolve a fresh snapshot
 on each call. `createTimelineEvaluator(project)` instead validates and resolves
 once, then returns a timestamp-query function with identical results. Pass
-`true` as the second argument to sample subtitle visibility on the project
-frame grid, as the desktop viewer does. The function binary-searches each
-nonoverlapping lane and returns detached values. Recreate it after
+`true` as the second argument to sample subtitle visibility and animated transforms
+on the project frame grid. The function binary-searches each nonoverlapping lane
+and returns detached values, including stored keyframes. Recreate it after
 edits; mutating the original project or an earlier result does not update it.
 `resolveTimeline(project)` also exposes validated ordered clip ranges/defaults
 without a point query for adapters that need lookahead.
 
-The desktop [T24–T26 playback/composition adapter](TIMELINE_PLAYBACK.md) uses this prepared
-T23 evaluator as its authoritative mapping. Decoding, clock and audio routing
-stay in desktop; evaluation itself remains headless and does no I/O or playback.
+The desktop [playback adapter](TIMELINE_PLAYBACK.md) uses
+`createPlaybackTimelineEvaluator(project)`. It shares the same frame-sampled
+evaluation and returns the sampled transforms and an `animated` flag for each
+clip. It omits the stored keyframe arrays from playback results to avoid copying
+them on each query. The desktop adapter handles decoding, clock and audio routing.
 
 T29 exposes exact point evaluation through `timeline inspect PROJECT --frame N --json`.
 See [CLI inspection and previews](CLI.md#agent-discovery-and-visual-inspection-t29)

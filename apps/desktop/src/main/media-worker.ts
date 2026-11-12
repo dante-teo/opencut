@@ -110,6 +110,7 @@ parentPort!.on(
     height?: number;
     text?: TextLayer;
     visual?: VisualTransform;
+    neutral?: boolean;
   }) => {
     if (request.method === 'abort') {
       requests.get(request.id)?.controller.abort();
@@ -199,6 +200,7 @@ parentPort!.on(
           request.text!,
           request.visual!,
           controller.signal,
+          request.neutral,
         );
         requests.set(request.id, {
           controller,

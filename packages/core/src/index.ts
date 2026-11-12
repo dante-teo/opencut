@@ -55,6 +55,7 @@ export {
   setClipSpeed,
   setTrackAudio,
   setClipVisual,
+  editClipKeyframe,
   setText,
   setCanvas,
   splitClip,
@@ -87,6 +88,7 @@ export {
   getEditHistory,
 } from './editing.js';
 export type { EditOperation, EditTransaction } from './editing.js';
+export type { KeyframeEdit } from './keyframes.js';
 export type { TextLayer } from '@opencut/shared';
 export type { ProjectSnapshot, HistoryEntry } from './project.js';
 
@@ -111,12 +113,14 @@ export {
   evaluateTimeline,
   evaluateTimelineFrame,
   createTimelineEvaluator,
+  createPlaybackTimelineEvaluator,
   resolveTimeline,
   continuesMediaRun,
 } from './evaluation.js';
 export type {
   TimelineEvaluation,
   EvaluatedTimelineClip,
+  PlaybackTimelineClip,
   ResolvedTimelineClip,
   ResolvedMediaClip,
   ResolvedTextClip,
@@ -153,3 +157,10 @@ export type {
   SubtitleStyle,
   SubtitleTrack,
 } from './subtitles.js';
+
+export type {
+  AnimatedProperty,
+  KeyframeEasing,
+  VisualKeyframe,
+  VisualKeyframes,
+} from '@opencut/shared';

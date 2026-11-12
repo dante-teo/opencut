@@ -1,4 +1,8 @@
-import { canvasColorPattern } from '@opencut/shared';
+import {
+  animatedProperties,
+  canvasColorPattern,
+  visualRanges,
+} from '@opencut/shared';
 import { resolve } from 'node:path';
 import {
   addClip,
@@ -64,7 +68,7 @@ export const timelineHelp = `Usage: opencut timeline list <project-file> [--json
        opencut clip move <project-file> <clip-id> [--track <track-id>] [--at <frame>] [--json]
        opencut clip trim <project-file> <clip-id> [--in <frame>|--in-time <seconds>] [--out <frame>|--out-time <seconds>] [--json]
        opencut canvas set <project-file> [--width <px>] [--height <px>] [--background-color <#RRGGBB|#RRGGBBAA|transparent>] [--json]
-       opencut clip visual <project-file> <clip-id> [--x <px>] [--y <px>] [--scale <n>] [--opacity <0..1>] [--fit <contain|cover|stretch>] [--json]
+       opencut clip visual <project-file> <clip-id> [--x <px>] [--y <px>] [--scale <n>] [--rotation <degrees>] [--opacity <0..1>] [--fit <contain|cover|stretch>] [--json]
        opencut clip audio <project-file> <clip-id> [--volume <0..1>] [--muted <true|false>] [--fade-in <frames>] [--fade-out <frames>] [--json]
        opencut clip speed <project-file> <clip-id> --speed <decimal|ratio> [--json]
        opencut clip split <project-file> <clip-id> --at <frame> [--json]
@@ -78,9 +82,9 @@ Trim keeps the timeline start fixed; move preserves source in/out. No implicit r
 Same-track overlaps fail; touching ends and cross-track overlaps are allowed.
 Remove clips explicitly before removing a populated track. Split keeps the left ID and creates a right ID.
 Later video tracks draw above earlier tracks; new tracks append on top.
-Visual defaults: x/y 0 (pixel offsets from centered fitted rectangle), scale 1, opacity 1, fit contain.
+Visual defaults: x/y 0 (pixel offsets from centered fitted rectangle), scale 1, rotation 0, opacity 1, fit contain.
 Scale multiplies the canvas fitting rectangle (0.01–4); contain preserves aspect, cover crops centrally, stretch fills.
-Clip add accepts the same visual flags. Use --x=-20 or --y=-20 for negative offsets.
+Use edit apply for clip.keyframe.add/set/remove. Clip add accepts the same visual flags. Use --x=-20 or --y=-20 for negative offsets.
 Canvas defaults to black; color uses #RRGGBB, #RRGGBBAA or transparent. Gaps and transparent margins reveal lower layers/background.
 Clip add accepts the same audio flags. Fade durations are project frames; 0 removes a fade.
 Clip and track linear gains multiply (0 = silence, 1 = unchanged). Either mute silences the clip.
@@ -96,7 +100,7 @@ const clipAudioFlags = [...trackAudioFlags, 'fade-in', 'fade-out'];
 const optionsForCommand: Record<string, readonly string[]> = {
   'timeline list': [],
   'canvas set': ['width', 'height', 'background-color'],
-  'clip visual': ['x', 'y', 'scale', 'opacity', 'fit'],
+  'clip visual': [...animatedProperties, 'fit'],
   'track add': ['type', 'name'],
   'track remove': [],
   'track audio': trackAudioFlags,
@@ -106,10 +110,7 @@ const optionsForCommand: Record<string, readonly string[]> = {
     'in',
     'out',
     ...clipAudioFlags,
-    'x',
-    'y',
-    'scale',
-    'opacity',
+    ...animatedProperties,
     'fit',
   ],
   'clip audio': clipAudioFlags,
@@ -241,12 +242,11 @@ export async function runTimelineCommand(
       'clip audio requires --volume, --muted, --fade-in or --fade-out.',
     );
   const visual: ClipVisualOptions = {};
-  for (const key of ['x', 'y', 'scale', 'opacity'] as const) {
+  for (const key of animatedProperties) {
     if (values[key] === undefined) continue;
     const value = required(key);
     const number = Number(value);
-    const min = key === 'scale' ? 0.01 : key === 'opacity' ? 0 : -32768;
-    const max = key === 'scale' ? 4 : key === 'opacity' ? 1 : 32768;
+    const [min, max] = visualRanges[key];
     if (
       !/^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value) ||
       !Number.isFinite(number) ||

@@ -509,7 +509,7 @@ an entire multi-file batch on a private project copy, checks availability, then
 records one `commitEdit`; failures retain the original session. Imports before a
 project's first save use absolute references, which saving preserves. Imports into
 a saved project use T07's reference policy: prefer project-relative paths where
-valid, otherwise retain absolute paths. No source file is copied or modified. The core `addAssetClip` builds
+valid, otherwise retain absolute paths. Local sources are referenced in place. The core `addAssetClip` builds
 ordinary track/clip operations with whole project-frame source bounds and a
 five-second still default. New tracks and clips commit together with T09 history.
 
@@ -520,6 +520,14 @@ revision and strict shape checks. Import progress is an event with a removable
 listener. Library drags have a distinct MIME type with project ID, revision and
 asset ID, while external Files are accepted only in the library. Timeline drop
 coordinates reuse the virtual scrollbar, track geometry and exact frame helpers.
+
+Online search and streaming stay in the main process. The renderer receives
+opaque result IDs and a preview URL on the app's media protocol. Each provider
+normalizes its result URLs and license metadata before issuing a result ID.
+The session downloads an accepted result to application storage, then uses
+the same project import transaction as a picker or file drop. The asset keeps
+its attribution with the local media reference. A failed import removes its
+download.
 
 Video library thumbnails and timeline filmstrips use the headless JPEG
 cache through the media worker. Nearby timeline samples share an atlas.
@@ -669,6 +677,12 @@ speed and touching source points use one preview decoder. Export uses the
 same continuity rule to keep tempo processing together, then applies each
 piece's gain and fades on the 48 kHz sample grid.
 See [playback and export checks](PREVIEW_EXPORT_CONSISTENCY.md#clip-playback-speed-t36).
+
+T37 stores clip-local visual keyframes in the project model. Core maintains the
+curves through timeline edits, and the shared sampler evaluates preview and
+export at the project frame tick. Animated media uses the shared Canvas drawing
+routine for layer geometry. Export stages animated alpha layers before the
+existing FFmpeg composition and audio mix. See [animated export](EXPORT.md#animated-transforms-t37).
 
 ## Edited timeline playback and compositing (T24–T26)
 

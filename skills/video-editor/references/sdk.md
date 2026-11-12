@@ -144,3 +144,35 @@ and validate neighboring clips before saving. Fades retain their timeline
 durations and subtitle cues keep their positions. For exact off-grid source
 trims, use `clip.trim` with `inTime` or `outTime` in rational seconds.
 The same exact trim fields work at default speed.
+
+## Keyframe animation
+
+Stage keyframe operations with `project.apply` and save them with the existing
+revision guard and history.
+
+```ts
+project.apply(
+  {
+    type: 'clip.keyframe.add',
+    id: clipId,
+    property: 'opacity',
+    time: { numerator: 0, denominator: 1 },
+    value: 0,
+    easing: 'ease-in',
+  },
+  {
+    type: 'clip.keyframe.add',
+    id: clipId,
+    property: 'opacity',
+    time: { numerator: 1, denominator: 2 },
+    value: 1,
+  },
+);
+```
+
+Use `clip.keyframe.set` with the original clip-local `time` and `newTime` to
+move a key, or supply `value` or `easing` to edit it. Use
+`clip.keyframe.remove` with `id`, `property` and `time` to delete it.
+`inspect()` exposes stored keys and `inspectTimeline(frame)` exposes sampled
+visual transforms. Check the sampled values and render representative frames
+from the same revision.

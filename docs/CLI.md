@@ -243,7 +243,7 @@ errors include a usage hint.
 - `clip audio <project-file> <clip-id> [--volume <0..1>] [--muted <true|false>] [--fade-in <frames>] [--fade-out <frames>] [--json]` configures clip audio. `clip add` accepts the same optional audio flags.
 - `clip split <project-file> <clip-id> --at <frame> [--json]`: split strictly inside a clip.
 - `clip remove <project-file> <clip-id> [--json]`: remove only that clip.
-- `clip visual <project-file> <clip-id> [--x <px>] [--y <px>] [--scale <n>] [--opacity <0..1>] [--fit <contain|cover|stretch>] [--json]`: configure a visual clip. `clip add` accepts these flags too.
+- `clip visual <project-file> <clip-id> [--x <px>] [--y <px>] [--scale <n>] [--rotation <degrees>] [--opacity <0..1>] [--fit <contain|cover|stretch>] [--json]`: configure a visual clip. `clip add` accepts these flags too.
 - `canvas set <project-file> [--width <px>] [--height <px>] [--background-color <#RRGGBB|#RRGGBBAA|transparent>] [--json]`: configure the canvas.
 - `timeline|track|clip|canvas --help`: show editing usage and time semantics.
 - `edit apply <project-file> <batch.json> [--dry-run] [--expected-revision <n>] [--json]`: commit an atomic batch.
@@ -627,22 +627,22 @@ follow the project ID rules. Frame fields are nonnegative safe integer **project
 For rational source times, use `inTime` and `outTime` with integer
 `numerator` and `denominator` in seconds. `fadeIn` and `fadeOut` are project-frame durations. No media probing, source changes or rendering occurs.
 
-| Operation `type` | Required fields besides `type`                         | Optional fields                                        |
-| ---------------- | ------------------------------------------------------ | ------------------------------------------------------ |
-| `track.add`      | `name`, `mediaType` (`video` or `audio`)               | `id`                                                   |
-| `track.audio`    | `id`                                                   | `volume`, `muted` (at least one)                       |
-| `track.remove`   | `id`                                                   | —                                                      |
-| `clip.add`       | `assetId`, `trackId`, `at`, `in`, `out`                | `id`, `volume`, `muted`, `fadeIn`, `fadeOut`, `visual` |
-| `clip.speed`     | `id`, `speed` ratio from 1/4 to 4                      | —                                                      |
-| `clip.audio`     | `id`                                                   | `volume`, `muted`, `fadeIn`, `fadeOut` (at least one)  |
-| `clip.visual`    | `id`                                                   | `x`, `y`, `scale`, `opacity`, `fit` (at least one)     |
-| `text.add`       | `at`, `duration`, `text` (requires `content`)          | `id`, `trackId`, `visual` (x/y/scale/opacity)          |
-| `text.set`       | `id`                                                   | `text` patch, `at`, `duration` (at least one)          |
-| `canvas.set`     | —                                                      | `width`, `height`, `backgroundColor` (at least one)    |
-| `clip.move`      | `id`, at least one of `trackId` / `at`                 | remaining destination field                            |
-| `clip.trim`      | `id`, at least one of `in`, `out`, `inTime`, `outTime` | remaining source boundary                              |
-| `clip.split`     | `id`, `at`                                             | `rightId`                                              |
-| `clip.remove`    | `id`                                                   | —                                                      |
+| Operation `type` | Required fields besides `type`                         | Optional fields                                                |
+| ---------------- | ------------------------------------------------------ | -------------------------------------------------------------- |
+| `track.add`      | `name`, `mediaType` (`video` or `audio`)               | `id`                                                           |
+| `track.audio`    | `id`                                                   | `volume`, `muted` (at least one)                               |
+| `track.remove`   | `id`                                                   | —                                                              |
+| `clip.add`       | `assetId`, `trackId`, `at`, `in`, `out`                | `id`, `volume`, `muted`, `fadeIn`, `fadeOut`, `visual`         |
+| `clip.speed`     | `id`, `speed` ratio from 1/4 to 4                      | —                                                              |
+| `clip.audio`     | `id`                                                   | `volume`, `muted`, `fadeIn`, `fadeOut` (at least one)          |
+| `clip.visual`    | `id`                                                   | `x`, `y`, `scale`, `rotation`, `opacity`, `fit` (at least one) |
+| `text.add`       | `at`, `duration`, `text` (requires `content`)          | `id`, `trackId`, `visual` (x/y/scale/rotation/opacity)         |
+| `text.set`       | `id`                                                   | `text` patch, `at`, `duration` (at least one)                  |
+| `canvas.set`     | —                                                      | `width`, `height`, `backgroundColor` (at least one)            |
+| `clip.move`      | `id`, at least one of `trackId` / `at`                 | remaining destination field                                    |
+| `clip.trim`      | `id`, at least one of `in`, `out`, `inTime`, `outTime` | remaining source boundary                                      |
+| `clip.split`     | `id`, `at`                                             | `rightId`                                                      |
+| `clip.remove`    | `id`                                                   | —                                                              |
 
 Omitted new IDs become UUIDs. Supply explicit IDs when later operations in the
 same batch must reference a newly added track/clip or the right side of a split.
@@ -691,8 +691,7 @@ Use an existing video `trackId` to control stacking. The layer shows on
 `[at, at + duration)` in project frames. `text.set` can update start,
 duration and style together. Omitted fields keep their values. Supply `null`
 to clear stroke, shadow, background or wrapping. Move, split and remove the
-layer with the normal clip commands. Use `clip visual` for x, y, scale
-and opacity. Text supports no media fitting mode or clip audio.
+layer with the normal clip commands. Use `clip visual` for x, y, scale, rotation and opacity. Text supports no media fitting mode or clip audio.
 
 Font size (1–512), wrap width (1–3840), stroke width (0–64), shadow
 offsets (±128), shadow blur (0–64) and background padding (0–128) use
@@ -776,6 +775,54 @@ An interval with no sampled frame is preserved in sidecars. Video burn-in
 supports up to 256 sampled, nonempty cues in the requested render range.
 `--no-subtitles` leaves cue imagery out while preserving the project duration.
 Sidecar export works without FFmpeg.
+
+### Keyframe animation (T37)
+
+Use `edit apply PROJECT BATCH --json` for animation edits. Read the current
+revision and clip IDs with `project inspect PROJECT --json`. The batch schema
+is available from `help edit apply --json`.
+
+| Operation              | Required fields besides `type`    | Optional fields              |
+| ---------------------- | --------------------------------- | ---------------------------- |
+| `clip.keyframe.add`    | `id`, `property`, `time`, `value` | `easing`                     |
+| `clip.keyframe.set`    | `id`, `property`, `time`          | `newTime`, `value`, `easing` |
+| `clip.keyframe.remove` | `id`, `property`, `time`          |                              |
+
+`property` is `x`, `y`, `scale`, `rotation` or `opacity`. `time` and
+`newTime` are clip-local `{ numerator, denominator }` seconds, including zero
+and the exact clip duration. Duplicate times in one channel are rejected. The
+allowed easings are `linear` (default), `ease-in`, `ease-out`, and
+`ease-in-out`. Easing belongs to the outgoing segment. An explicit easing on
+`clip.keyframe.set` replaces the current curve with the full easing domain.
+
+```json
+{
+  "expectedRevision": 4,
+  "label": "Slide into position",
+  "operations": [
+    {
+      "type": "clip.keyframe.add",
+      "id": "c1",
+      "property": "x",
+      "time": { "numerator": 0, "denominator": 1 },
+      "value": -120,
+      "easing": "ease-out"
+    },
+    {
+      "type": "clip.keyframe.add",
+      "id": "c1",
+      "property": "x",
+      "time": { "numerator": 1, "denominator": 1 },
+      "value": 0
+    }
+  ]
+}
+```
+
+Use `timeline inspect PROJECT --frame N --json` to read the evaluated `visual`
+values and `preview frame` or `preview clip` to check the composited result.
+`project inspect` and `timeline list --json` expose the stored keys. Use
+`edit undo` and `edit redo` to restore prior snapshots.
 
 ### Undo and redo
 
@@ -1031,11 +1078,11 @@ node apps/cli/dist/index.js clip visual PROJECT CLIP_ID --fit contain --scale 0.
 Use 1080×1920 (9:16), 1920×1080 (16:9) or 1080×1080 (1:1), or other supported
 even dimensions. `backgroundColor` accepts `#RRGGBB`, `#RRGGBBAA` or `transparent`, default `#000000`.
 Preview retains canvas alpha. H.264 flattens the composition over black.
-`clip visual` accepts any nonempty subset of `--x`, `--y`, `--scale`, `--opacity`
+`clip visual` accepts any nonempty subset of `--x`, `--y`, `--scale`, `--rotation`, `--opacity`
 and `--fit`; `clip add` accepts the same flags. These mutations support dry-run,
 revision guards, atomic save and undo/redo. Omitted properties retain stored values.
 
-Visual defaults are x/y 0, scale 1, opacity 1, fit `contain`. Coordinates are pixel
+Visual defaults are x/y 0, scale 1, rotation 0, opacity 1, fit `contain`. Coordinates are pixel
 offsets from the centered fitted layer: positive x moves right, positive y down.
 Negative offsets use `--x=-120` / `--y=-80`. Before pixel-grid quantization, the fitted layer top left is
 `(canvas.width - layer.width)/2 + x`, `(canvas.height - layer.height)/2 + y`.
@@ -1055,9 +1102,9 @@ on video tracks. Their positive `out - in` range specifies a static display dura
 with no inferred source duration; a nonzero in point still selects the same image.
 Splits retain the image and transforms. Animated GIF/APNG files with a known
 duration are treated as timed video. Attached cover artwork on audio files is
-not a visual source. No keyframes, transitions or GUI canvas controls are included.
+not a visual source. See [keyframe animation](#keyframe-animation-t37) for animating visual transforms.
 
-JSON clips accept an optional `visual` object containing x/y/scale/opacity/fit.
+JSON clips accept an optional `visual` object containing x/y/scale/rotation/opacity/fit.
 `clip.add` batches accept that object; `clip.visual` batches take its properties
 alongside `id`, for example `{ "type": "clip.visual", "id": "c1", "x": 20 }`.
 `canvas.set` batches accept width/height/backgroundColor. Empty visual/canvas

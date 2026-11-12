@@ -31,19 +31,23 @@ player framework or native decoder dependency is unnecessary for this scope.
 
 `AudioContext.currentTime` is the sole running timeline clock. Pause/seek anchors
 remain exact rationals; elapsed audio time is converted once to microseconds and
-added to the anchor without accumulating per-frame deltas. T23's
-`createTimelineEvaluator` validates/indexes a snapshot once and performs exact
-half-open interval queries. No timeline/source arithmetic is duplicated in playback.
+added to the anchor without accumulating per-frame deltas. The shared
+`createPlaybackTimelineEvaluator` validates and indexes each snapshot once,
+queries exact half-open intervals and samples animated transforms on the project
+frame grid.
 The UI reports at most 20 times per second; painting follows animation frames.
 
 Each nearby timed audio/video run gets a media element routed through its own
 GainNode. Still-image runs use native image elements.
-Two seconds of upcoming clips are loaded and pre-seeked. T25 caps this at four
-speculative runs within an estimated frame-memory allowance, and 16 owned
-source-run entries (including still images);
-excess active runs produce a diagnostic instead of unbounded allocation. Persisted
-limits apply on the first cache-status response. Subsequent budget changes adjust
-lookahead while playing without restarting active clips. Contiguous source ranges
+Current visible layers and audio with nonzero gain before fades get first access
+to the 16 source-run slots, which include still images. Playback can reclaim slots
+from preloaded runs. Active animated layers with zero sampled opacity and no
+audible audio share up to four speculative slots with clips starting within the
+next two seconds, subject to the estimated frame-memory allowance. Playback
+startup waits for the current visible and audible runs. If those runs alone exceed
+the limit, playback reports a diagnostic. Persisted limits apply on the first
+cache-status response. Subsequent budget changes adjust lookahead while playing
+without restarting active clips. Contiguous source ranges
 on one track share a decoder across splits. Noncontiguous cuts switch between
 preloaded decoders. Media positions are compared with the audio clock: errors over
 15 ms use 0.98/1.02 rate correction; errors over 120 ms seek to the authoritative
@@ -259,10 +263,12 @@ retain source alpha, so alpha-bearing videos stay original. Image alpha is
 multiplied by clip opacity; unavailable upper layers leave lower layers visible.
 This is SDR parity, not HDR/wide-gamut color management.
 
-Only current T23-visible layers are painted. Zero-opacity or entirely offscreen
-silent clips are not decoded; audible invisible clips retain audio. Decoder
-lookahead is bounded and yields to active clips at the 16-source-run limit. Geometric
-occlusion by upper layers is deliberately not inferred from unknown source alpha.
+Only current T23-visible layers are painted. Audible invisible clips retain
+audio. Currently visible and audible clips have first claim on the 16
+source-run slots. Hidden animated clips and upcoming clips share a budget of
+four preload slots, subject to the memory limit. The player samples keyframes
+at each project tick and carries only the sampled transform into playback.
+Geometric occlusion by upper layers is deliberately not inferred from unknown source alpha.
 Each seek invalidates cached-frame generations and immediately clears stale
 content. Pending grants/images/frames cannot paint after snapshot disposal.
 Editing pauses and reconstructs the current snapshot at the retained playhead.

@@ -49,22 +49,22 @@ For a group of timeline edits, write a batch JSON with `expectedRevision` from
 the latest inspection, a nonempty `operations` array, and an optional `label`.
 Supply explicit new IDs to refer to a track or clip later in the batch.
 
-| Operation      | Fields besides `type`                                                                                                                   |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `track.add`    | `name`, `mediaType` (`video` or `audio`), optional `id`                                                                                 |
-| `track.audio`  | `id` and at least one of `volume` (linear 0–1), `muted` (boolean)                                                                       |
-| `track.remove` | `id` of an empty track                                                                                                                  |
-| `clip.add`     | `assetId`, `trackId`, `at`, `in`, `out`; optional `id`, `volume`, `muted`, `fadeIn`, `fadeOut`, `visual`                                |
-| `clip.move`    | `id` and `at`, `trackId`, or both                                                                                                       |
-| `clip.trim`    | `id` and at least one of `in`, `out`, `inTime`, `outTime`                                                                               |
-| `clip.split`   | `id`, `at`, optional `rightId`                                                                                                          |
-| `clip.remove`  | `id`                                                                                                                                    |
-| `clip.speed`   | `id` and `speed` with integer `numerator` and `denominator`, from 1/4 to 4                                                              |
-| `clip.audio`   | `id` and at least one of `volume`, `muted`, `fadeIn`, `fadeOut`                                                                         |
-| `clip.visual`  | `id` and at least one of `x`, `y` (pixel offsets from center), `scale` (0.01–4), `opacity` (0–1), `fit` (`contain`, `cover`, `stretch`) |
-| `text.add`     | `at`, positive `duration`, `text` with `content`; optional `id`, video `trackId`, `visual` (x/y/scale/opacity)                          |
-| `text.set`     | `id` and at least one of `text` patch, `at`, `duration`                                                                                 |
-| `canvas.set`   | At least one of `width`, `height`, `backgroundColor`                                                                                    |
+| Operation      | Fields besides `type`                                                                                                                                                   |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `track.add`    | `name`, `mediaType` (`video` or `audio`), optional `id`                                                                                                                 |
+| `track.audio`  | `id` and at least one of `volume` (linear 0–1), `muted` (boolean)                                                                                                       |
+| `track.remove` | `id` of an empty track                                                                                                                                                  |
+| `clip.add`     | `assetId`, `trackId`, `at`, `in`, `out`; optional `id`, `volume`, `muted`, `fadeIn`, `fadeOut`, `visual`                                                                |
+| `clip.move`    | `id` and `at`, `trackId`, or both                                                                                                                                       |
+| `clip.trim`    | `id` and at least one of `in`, `out`, `inTime`, `outTime`                                                                                                               |
+| `clip.split`   | `id`, `at`, optional `rightId`                                                                                                                                          |
+| `clip.remove`  | `id`                                                                                                                                                                    |
+| `clip.speed`   | `id` and `speed` with integer `numerator` and `denominator`, from 1/4 to 4                                                                                              |
+| `clip.audio`   | `id` and at least one of `volume`, `muted`, `fadeIn`, `fadeOut`                                                                                                         |
+| `clip.visual`  | `id` and at least one of `x`, `y` (pixel offsets from center), `scale` (0.01–4), `rotation` (clockwise degrees), `opacity` (0–1), `fit` (`contain`, `cover`, `stretch`) |
+| `text.add`     | `at`, positive `duration`, `text` with `content`; optional `id`, video `trackId`, `visual` (x/y/scale/rotation/opacity)                                                 |
+| `text.set`     | `id` and at least one of `text` patch, `at`, `duration`                                                                                                                 |
+| `canvas.set`   | At least one of `width`, `height`, `backgroundColor`                                                                                                                    |
 
 Use `clip speed PROJECT CLIP_ID --speed 1.5 --json` to retime an existing
 video or audio clip. Speed changes preserve source points, clip start, timeline
@@ -105,7 +105,7 @@ in degrees on `text`. Effects are `stroke: {color,width}`,
 `shadow: {color,x,y,blur}` and `background: {color,padding}`. Use `null`
 in a patch to clear an effect or wrap width. Sizes and offsets use project
 pixels. Colors accept `#RRGGBB`, `#RRGGBBAA` or `transparent`. Set
-position, scale and opacity with `clip.visual`. Use the bundled default
+position, scale, clip rotation and opacity with `clip.visual`. Use the bundled default
 Noto Sans SC for portable English and Chinese layout. Missing font families
 use this fallback. Check the final `completed` event's optional `warnings`
 array for substitutions and report any that affect the requested typography.
@@ -175,3 +175,19 @@ Most `--json` successes are one stdout document. `project render` and
 progress or script logs may precede the final diagnostic. Failed renders can
 also emit a terminal stdout event, and failed validation can return a report
 on stdout. Keep source media and existing project history intact during recovery.
+
+## Keyframe operations
+
+In an `edit apply` batch, use `clip.keyframe.add` with `id`, `property`,
+`time`, `value` and optional `easing`. Use `clip.keyframe.set` with `id`,
+`property`, `time` and optional `newTime`, `value` or `easing`.
+`clip.keyframe.remove` takes `id`, `property` and `time`.
+
+Properties are `x`, `y`, `scale`, `rotation` and `opacity`. Use exact
+`{ numerator, denominator }` seconds relative to the clip start. Zero and the
+clip duration are valid key times. The outgoing easing is `linear`,
+`ease-in`, `ease-out`, or `ease-in-out`. A channel holds its nearest key
+outside its key span and uses the static value once all its keys are deleted.
+Trims discard cut keys, splits preserve the curve over both pieces, and a speed
+change rescales the local times. Use `timeline inspect` for sampled values and
+decode the rendered output to confirm placement and opacity.

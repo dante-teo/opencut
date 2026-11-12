@@ -1,3 +1,4 @@
+import { usesLayerTransform } from '@opencut/shared';
 import { isAbsolute, resolve, basename } from 'node:path';
 import {
   createProject,
@@ -38,6 +39,7 @@ import type {
   AssetClipInput,
   HistoryInput,
 } from '../bridge.js';
+import type { OnlineMediaLibrary } from './online-media.js';
 
 export interface ProjectDialogs {
   open(): Promise<string | null>;
@@ -57,6 +59,7 @@ export type ProjectAction =
   | 'undo'
   | 'redo'
   | 'import'
+  | 'importOnline'
   | 'importSubtitles'
   | 'exportSubtitles'
   | 'removeAsset'
@@ -82,6 +85,10 @@ export class ProjectSession {
     private readonly onChange: (
       state: DesktopProject | null,
     ) => void = () => {},
+    private readonly onlineMedia?: {
+      source: OnlineMediaLibrary['source'];
+      download: (id: string) => ReturnType<OnlineMediaLibrary['download']>;
+    },
   ) {}
 
   /** Also used on shutdown; OS ownership is released automatically after a crash. */
@@ -163,7 +170,13 @@ export class ProjectSession {
     const clip = project.clips.find((entry) => entry.id === input.clipId);
     const { width, height } = project.settings;
     if (clip?.text)
-      return { width, height, text: clip.text, visual: clip.visual ?? {} };
+      return {
+        width,
+        height,
+        text: clip.text,
+        visual: clip.visual ?? {},
+        neutral: usesLayerTransform(clip.visual?.rotation, !!clip.keyframes),
+      };
     let layers = this.subtitleText.get(project);
     if (!layers) {
       layers = new Map(
@@ -240,6 +253,7 @@ export class ProjectSession {
       };
     this.busy = true;
     const priorState = this.state;
+    let discardDownload: (() => Promise<void>) | undefined;
     try {
       let canceled = false;
       let notice: string | undefined;
@@ -306,6 +320,7 @@ export class ProjectSession {
           break;
         }
         case 'import':
+        case 'importOnline':
         case 'removeAsset':
         case 'addAssetClip': {
           const state = this.state;
@@ -315,9 +330,11 @@ export class ProjectSession {
             'expectedRevision',
             ...(action === 'import'
               ? ['paths']
-              : action === 'removeAsset'
-                ? ['assetId']
-                : ['assetId', 'trackId', 'mediaType', 'at']),
+              : action === 'importOnline'
+                ? ['resultId']
+                : action === 'removeAsset'
+                  ? ['assetId']
+                  : ['assetId', 'trackId', 'mediaType', 'at']),
           ];
           if (
             !input ||
@@ -334,56 +351,104 @@ export class ProjectSession {
           checkProjectRevision(state.project, request.expectedRevision);
           const path = state.path ?? resolve('Untitled.opencut.json');
           let project = state.project;
-          if (action === 'import') {
-            const paths =
-              request.paths === undefined
-                ? await this.dialogs.importMedia?.()
-                : request.paths;
-            if (paths == null && request.paths === undefined) {
-              canceled = true;
-              break;
+          if (action === 'import' || action === 'importOnline') {
+            const online = action === 'importOnline';
+            let download:
+              Awaited<ReturnType<OnlineMediaLibrary['download']>> | undefined;
+            let paths: unknown;
+            if (online) {
+              if (typeof request.resultId !== 'string' || !this.onlineMedia)
+                throw new Error('Choose an online search result.');
+              const { title, sourceUrl } = this.onlineMedia.source(
+                request.resultId,
+              );
+              const existing = project.assets.find(
+                (asset) =>
+                  asset.name === title &&
+                  asset.provenance?.sourceUrl === sourceUrl,
+              );
+              if (
+                existing &&
+                (await this.libraryAsset(existing.id).catch(() => null))
+              ) {
+                notice = 'Media is already in the project.';
+                break;
+              }
+              download = await this.onlineMedia.download(request.resultId);
+              discardDownload = download.discard;
+              paths = [download.path];
+            } else {
+              paths =
+                request.paths === undefined
+                  ? await this.dialogs.importMedia?.()
+                  : request.paths;
+              if (paths == null && request.paths === undefined) {
+                canceled = true;
+                break;
+              }
             }
             if (
               !Array.isArray(paths) ||
               paths.length < 1 ||
               paths.length > 500 ||
-              paths.some(
-                (path) =>
-                  typeof path !== 'string' ||
-                  !isAbsolute(path) ||
-                  path.length > 32768,
+              !paths.every(
+                (source): source is string =>
+                  typeof source === 'string' &&
+                  isAbsolute(source) &&
+                  source.length <= 32768,
               )
             )
               throw new Error('Choose between 1 and 500 local media files.');
+
             let imported = 0;
             for (const [index, source] of paths.entries()) {
-              this.onProgress({
-                completed: index,
+              const progress = !online && {
                 total: paths.length,
-                name: basename(source as string),
-              });
+                name: basename(source),
+              };
+              if (progress) this.onProgress({ completed: index, ...progress });
               const prepared = await prepareMediaAsset(
                 project,
                 path,
-                source as string,
+                source,
+                download && { localMediaOnly: true },
               );
               project = prepared.project;
-              // Unsaved projects store absolute references so the first save can be anywhere.
-              if (!state.path && prepared.result.imported) {
-                prepared.result.asset.file = {
-                  type: 'absolute',
-                  path: prepared.result.source.path,
-                };
+              if (prepared.result.imported) {
+                const { asset } = prepared.result;
+                if (download) {
+                  const metadata = asset.metadata;
+                  const timedImage =
+                    download.kind === 'image' &&
+                    metadata?.kind === 'video' &&
+                    (metadata.formatName === 'gif' ||
+                      metadata.formatName === 'apng');
+                  if (metadata?.kind !== download.kind && !timedImage)
+                    throw new Error(
+                      'The downloaded file does not match the selected media type.',
+                    );
+                  asset.name = download.title;
+                  asset.provenance = download.provenance;
+                }
+                // Unsaved projects store absolute references so the first save can be anywhere.
+                if (!state.path)
+                  asset.file = {
+                    type: 'absolute',
+                    path: prepared.result.source.path,
+                  };
+                imported++;
               }
-              if (prepared.result.imported) imported++;
-              this.onProgress({
-                completed: index + 1,
-                total: paths.length,
-                name: basename(source as string),
-              });
+              if (progress)
+                this.onProgress({ completed: index + 1, ...progress });
             }
-            project = commitEdit(state.project, project, 'Import media');
-            notice = `${imported} imported, ${paths.length - imported} already in library.`;
+            project = commitEdit(
+              state.project,
+              project,
+              online ? 'Import online media' : 'Import media',
+            );
+            notice = online
+              ? 'Online media added to the project.'
+              : `${imported} imported, ${paths.length - imported} already in library.`;
           } else {
             if (typeof request.assetId !== 'string')
               throw new Error('Expected an asset ID.');
@@ -488,6 +553,9 @@ export class ProjectSession {
                     'clip.remove',
                     'clip.audio',
                     'clip.speed',
+                    'clip.keyframe.add',
+                    'clip.keyframe.set',
+                    'clip.keyframe.remove',
                     'track.audio',
                     'clip.visual',
                     'text.add',
@@ -546,12 +614,14 @@ export class ProjectSession {
         ...(notice ? { notice } : {}),
       };
     } catch (error) {
+      await discardDownload?.().catch(() => {});
       if (
         [
           'edit',
           'undo',
           'redo',
           'import',
+          'importOnline',
           'importSubtitles',
           'removeAsset',
           'addAssetClip',

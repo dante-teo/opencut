@@ -109,6 +109,7 @@ export function TextProperties({
         };
         if (start !== null) textEdit.at = amount('Start frame');
         if (duration !== null) textEdit.duration = amount('Duration frames');
+        const rotation = amount('Clip rotation');
         void onEdit(
           [
             textEdit,
@@ -119,6 +120,9 @@ export function TextProperties({
               y: amount('Y'),
               scale: amount('Scale'),
               opacity: amount('Opacity'),
+              ...(visual.rotation !== undefined || rotation !== 0
+                ? { rotation }
+                : {}),
             },
           ],
           'Edit text',
@@ -185,6 +189,7 @@ export function TextProperties({
             {number('Scale', visual.scale ?? 1, 0.01, 4)}
             {number('Opacity', visual.opacity ?? 1, 0, 1)}
             {number('Rotation', text.rotation ?? 0, -360, 360)}
+            {number('Clip rotation', visual.rotation ?? 0, -36000, 36000)}
           </div>
           <h3>Timing</h3>
           <div className="text-fields">

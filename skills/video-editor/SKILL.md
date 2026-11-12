@@ -1,6 +1,6 @@
 ---
 name: video-editor
-description: Edit local videos with OpenCut using its CLI or TypeScript SDK. Use when a user wants to assemble a rough cut, trim, split or retime footage, add editable text or subtitles, layer images or music, mix and fade audio, inspect an edited timeline, or export and verify a playable MP4 from media files or an OpenCut project.
+description: Edit local videos with OpenCut using its CLI or TypeScript SDK. Use when a user wants to assemble a rough cut, trim, split or retime footage, animate clip transforms, add editable text or subtitles, layer images or music, mix and fade audio, inspect an edited timeline, or export and verify a playable MP4 from media files or an OpenCut project.
 ---
 
 # Edit videos with OpenCut
@@ -18,7 +18,10 @@ scripts need the supplied `@opencut/sdk` package.
    revision, canvas, tracks, assets, clips and duration. Check `media list` for
    availability and `probe` for new footage. Create a project at a fresh path
    when starting from media alone. Import references to the original files.
-   Keep those files in place and leave their contents unchanged.
+   Keep those files in place and leave their contents unchanged. Desktop
+   **Browse online** imports from Wikimedia Commons and Openverse into local
+   application storage. Preserve those files and the asset provenance when
+   using the CLI or SDK to edit the resulting project.
 3. **Plan and apply.** Use stable IDs from inspection and integer project-frame
    indices, including source in/out. The out point is exclusive. Dry-run a
    revision-guarded CLI batch or stage edits with the SDK and dry-run its save.
@@ -29,6 +32,10 @@ scripts need the supplied `@opencut/sdk` package.
    the `clip.speed` operation. Speeds range from 0.25× to 4×. Recheck the
    new clip end and neighboring clips before applying. Use `clip trim --in-time`
    or `--out-time` for exact source seconds, including at default speed.
+   Animate position, scale, rotation or opacity with `clip.keyframe.add`,
+   `clip.keyframe.set` and `clip.keyframe.remove`. Use exact clip-local seconds.
+   Verify sampled transforms around keys, trims and splits with `timeline inspect`
+   and inspect decoded preview frames.
    Set fades with `clip audio --fade-in/--fade-out` in project frames. Use
    `track audio` for a track's volume and mute. Clip and track linear gains
    multiply. Re-read the project after publication. On a revision conflict, inspect the

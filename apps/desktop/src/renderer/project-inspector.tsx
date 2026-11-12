@@ -1,5 +1,7 @@
+import type { AnimatedProperty } from '@opencut/shared';
 import { SlidersHorizontal } from 'lucide-react';
 import { ClipProperties } from './clip-properties.js';
+import { KeyframeProperties } from './keyframe-properties.js';
 import { TextProperties } from './text-properties.js';
 import { SubtitleProperties } from './subtitle-properties.js';
 import { CanvasArtwork } from './studio-graphics.js';
@@ -42,12 +44,20 @@ export function ProjectInspector({
   state,
   selection,
   onClear,
+  position,
+  onSeek,
+  keyframeProperty,
+  onKeyframeSelect,
   disabled,
   onEdit,
 }: {
   state: DesktopProject | null;
   selection: { kind: 'asset' | 'clip'; id: string } | null;
   onClear: () => void;
+  position: RationalTime;
+  onSeek: (time: RationalTime) => void;
+  keyframeProperty: AnimatedProperty;
+  onKeyframeSelect: (property: AnimatedProperty) => void;
   disabled: boolean;
   onEdit: (operations: TimelineOperation[], label: string) => Promise<void>;
 }) {
@@ -106,6 +116,21 @@ export function ProjectInspector({
                 onEdit={onEdit}
               />
             )}
+            {clip &&
+              project?.tracks.some(
+                (track) => track.id === clip.trackId && track.type === 'video',
+              ) && (
+                <KeyframeProperties
+                  key={`${project.metadata.id}:${clip.id}`}
+                  clip={clip}
+                  position={position}
+                  onSeek={onSeek}
+                  property={keyframeProperty}
+                  onPropertyChange={onKeyframeSelect}
+                  disabled={disabled}
+                  onEdit={onEdit}
+                />
+              )}
             {clip && !clip.text && (
               <>
                 <h3>Clip details</h3>

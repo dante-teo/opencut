@@ -120,5 +120,24 @@ Current limits include 64 non-subtitle timeline clips, 600 seconds, even canvas
 sides from 2 to 3840 and at most 3840 × 2160 pixels, and project rates from 1 to
 120 fps. Browser
 preview codec support can differ from FFmpeg export support. HDR, transitions,
-keyframes, distribution/signing, persistent queues and cloud rendering are outside
+distribution/signing, persistent queues and cloud rendering are outside
 the current scope.
+
+## Animated transforms (T37)
+
+The Electron Project viewer and export evaluate animated clip properties on the
+same project frame grid. Frame-rate presets resample the finished composition.
+Animated and rotated layers use the same fitted geometry, crop, pivot and
+opacity rules as the viewer. After preparing the render plan, export streams
+original-source frames through a headless Canvas and stages alpha-preserving
+FFV1 layers beside the output
+before the final FFmpeg blend and encode. This requires FFV1 support and
+temporary disk space that grows with the number, size and duration of these
+layers. The final encode's frame progress starts after layer staging.
+
+Transformed source rasters and animated text rasters are bounded to 8192
+pixels per side and 3840×2160 total pixels. Larger sources are scaled down
+for staging, and animated text exceeding that bound produces a validation
+error. Fitted media retains the existing even-pixel alignment. Compressed
+output and edge antialiasing can differ from live Canvas. [The T27 harness](PREVIEW_EXPORT_CONSISTENCY.md) checks representative
+encoded frames against the production Electron Canvas.

@@ -1,3 +1,7 @@
+import { animatedProperties } from '@opencut/shared';
+import type { VisualKeyframe } from '@opencut/shared';
+import { retimeKeyframes, trimKeyframes } from './keyframes.js';
+import type { KeyframeEdit } from './keyframes.js';
 import type { Project, TimelineClip, Track } from './project.js';
 import { validateProject } from './project.js';
 import { addTimes, compareTimes, subtractTimes } from './time.js';
@@ -231,9 +235,12 @@ export function setText(
     compareTimes(end, clip.sourceOut) === 0
   )
     return { project: next, clip };
+  const previous = { ...clip };
   clip.text = text;
   clip.timelineStart = start;
   clip.sourceOut = end;
+  if (compareTimes(previous.sourceOut, end) !== 0)
+    trimKeyframes(previous, clip);
   const updated = finish(next);
   return { project: updated, clip: requireClip(updated, id) };
 }
@@ -435,7 +442,9 @@ export function setClipSpeed(project: Project, id: string, speed: ClipSpeed) {
   clipSpeedSchema.parse(speed);
   if (compareTimes(clipSpeed(clip), speed) === 0)
     return { project: next, clip };
+  const previous = { ...clip };
   clip.speed = speed;
+  retimeKeyframes(previous, clip);
   const updated = finish(next);
   return { project: updated, clip: requireClip(updated, id) };
 }
@@ -462,8 +471,10 @@ export function trimClip(
       compareTimes(options.sourceOut, clip.sourceOut) === 0)
   )
     return { project: next, clip };
+  const previous = { ...clip };
   if (options.sourceIn !== undefined) clip.sourceIn = options.sourceIn;
   if (options.sourceOut !== undefined) clip.sourceOut = options.sourceOut;
+  trimKeyframes(previous, clip);
   if (
     (clip.fadeIn || clip.fadeOut) &&
     compareTimes(clip.sourceOut, clip.sourceIn) > 0
@@ -527,7 +538,10 @@ export function splitClip(
     Object.assign(clip, leftFades);
     Object.assign(right, rightFades);
   }
+  const previous = { ...clip };
   clip.sourceOut = sourceSplit;
+  trimKeyframes(previous, clip);
+  trimKeyframes(previous, right);
   next.clips.splice(next.clips.indexOf(clip) + 1, 0, right);
   const updated = finish(next);
   return {
@@ -542,4 +556,55 @@ export function removeClip(project: Project, id: string) {
   requireClip(next, id);
   next.clips = next.clips.filter((clip) => clip.id !== id);
   return { project: finish(next), removedClipId: id };
+}
+
+/** Edit one exact clip-local timestamp, keeping all other channels unchanged. */
+export function editClipKeyframe(
+  project: Project,
+  id: string,
+  edit: KeyframeEdit,
+) {
+  const next = copyProject(project);
+  const clip = requireClip(next, id);
+  const { property, time } = edit;
+  const keys = clip.keyframes?.[property] ?? [];
+  const index = keys.findIndex((key) => compareTimes(key.time, time) === 0);
+  const exists = index >= 0;
+  if ((edit.type === 'clip.keyframe.add') === exists)
+    throw new TimelineError(
+      'INVALID_EDIT',
+      exists
+        ? 'A keyframe already exists at this property and time.'
+        : 'No keyframe exists at this property and time.',
+    );
+  if (edit.type === 'clip.keyframe.add') {
+    keys.push({ time, value: edit.value, easing: edit.easing ?? 'linear' });
+  } else if (edit.type === 'clip.keyframe.remove') {
+    keys.splice(index, 1);
+  } else {
+    const old = keys[index]!;
+    const replacement: VisualKeyframe = {
+      time: edit.newTime ?? old.time,
+      value: edit.value ?? old.value,
+      easing: edit.easing ?? old.easing,
+      ...(old.curve && edit.easing === undefined && { curve: old.curve }),
+    };
+    if (
+      compareTimes(replacement.time, old.time) === 0 &&
+      replacement.value === old.value &&
+      replacement.easing === old.easing &&
+      replacement.curve === old.curve
+    )
+      return { project: next, clip };
+    keys[index] = replacement;
+  }
+  const keyframes = clip.keyframes ?? {};
+  if (keys.length)
+    keyframes[property] = keys.sort((a, b) => compareTimes(a.time, b.time));
+  else delete keyframes[property];
+  if (animatedProperties.some((name) => keyframes[name]))
+    clip.keyframes = keyframes;
+  else delete clip.keyframes;
+  const updated = finish(next);
+  return { project: updated, clip: requireClip(updated, id) };
 }

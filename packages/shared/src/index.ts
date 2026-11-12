@@ -1,3 +1,5 @@
+export * from './keyframes.js';
+
 export const WAVEFORM_CHUNK_SECONDS = 16;
 export const WAVEFORM_BINS_PER_SECOND = 100;
 
@@ -7,6 +9,7 @@ export interface VisualTransform {
   y?: number;
   scale?: number;
   opacity?: number;
+  rotation?: number;
   fit?: 'contain' | 'cover' | 'stretch';
 }
 
@@ -99,9 +102,19 @@ export function visualGeometry(
   const grid = (n: number) => Math.floor(Math.trunc(n) / 2) * 2;
   const x = grid((width - layerWidth) / 2 + (visual.x ?? 0));
   const y = grid((height - layerHeight) / 2 + (visual.y ?? 0));
+  const angle = (((visual.rotation ?? 0) % 360) * Math.PI) / 180;
+  const centerX = x + layerWidth / 2;
+  const centerY = y + layerHeight / 2;
+  const cos = Math.abs(Math.cos(angle));
+  const sin = Math.abs(Math.sin(angle));
+  const radiusX = (layerWidth * cos + layerHeight * sin) / 2;
+  const radiusY = (layerWidth * sin + layerHeight * cos) / 2;
   return {
     x,
     y,
+    angle,
+    centerX,
+    centerY,
     scaledWidth,
     scaledHeight,
     layerWidth,
@@ -111,10 +124,10 @@ export function visualGeometry(
     opacity: visual.opacity ?? 1,
     visible:
       (visual.opacity ?? 1) > 0 &&
-      x < width &&
-      y < height &&
-      x + layerWidth > 0 &&
-      y + layerHeight > 0,
+      centerX - radiusX < width &&
+      centerY - radiusY < height &&
+      centerX + radiusX > 0 &&
+      centerY + radiusY > 0,
   };
 }
 
@@ -147,4 +160,72 @@ export interface RenderTimeMapping {
   sourceIn: { numerator: number; denominator: number };
   sourceOut: { numerator: number; denominator: number };
   speed: { numerator: number; denominator: number };
+}
+
+/** Draw a fitted layer with the same crop, rotation pivot and alpha in both Canvas engines. */
+export function drawMediaLayer<Image>(
+  ctx: {
+    save(): void;
+    restore(): void;
+    translate(x: number, y: number): void;
+    rotate(angle: number): void;
+    beginPath(): void;
+    rect(x: number, y: number, width: number, height: number): void;
+    clip(): void;
+    globalAlpha: number;
+    drawImage(
+      image: Image,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+    ): void;
+  },
+  image: Image,
+  geometry: ReturnType<typeof visualGeometry>,
+) {
+  const {
+    x,
+    y,
+    layerWidth,
+    layerHeight,
+    scaledWidth,
+    scaledHeight,
+    cropX,
+    cropY,
+    opacity,
+  } = geometry;
+  ctx.save();
+  const { angle, centerX, centerY } = geometry;
+  if (angle) {
+    ctx.translate(centerX, centerY);
+    ctx.rotate(angle);
+    ctx.translate(-centerX, -centerY);
+  }
+  ctx.globalAlpha = opacity;
+  ctx.beginPath();
+  ctx.rect(x, y, layerWidth, layerHeight);
+  ctx.clip();
+  ctx.drawImage(image, x - cropX, y - cropY, scaledWidth, scaledHeight);
+  ctx.restore();
+}
+
+/** Move a neutral text raster around the original text layout origin. */
+export function transformTextLayer(
+  ctx: {
+    translate(x: number, y: number): void;
+    rotate(angle: number): void;
+    scale(x: number, y: number): void;
+    globalAlpha: number;
+  },
+  width: number,
+  height: number,
+  visual: VisualTransform,
+) {
+  const { x = 0, y = 0, rotation = 0, scale = 1, opacity = 1 } = visual;
+  ctx.globalAlpha = opacity;
+  ctx.translate(width / 2 + x, height / 2 + y);
+  ctx.rotate(((rotation % 360) * Math.PI) / 180);
+  ctx.scale(scale, scale);
+  ctx.translate(-width / 2, -height / 2);
 }

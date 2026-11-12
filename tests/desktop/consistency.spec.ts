@@ -1271,3 +1271,308 @@ test('T34 edited multilingual subtitle cues match Chromium Canvas and burned-in 
     compareRgb(cleanFrames.get(13)!, burnedFrames.get(13)!, tolerance).passed,
   ).toBe(false);
 });
+
+test('T37 Electron keyframes survive edits and match encoded animation', async () => {
+  const width = 320;
+  const height = 180;
+  const project = createProject({
+    name: 'T37 keyframe animation',
+    settings: { width, height, frameRate: { numerator: 30, denominator: 1 } },
+  });
+  const file = 't37-source.mp4';
+  ffmpeg([
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=red:s=160x90:r=30:d=4,drawbox=x=4:y=8:w=28:h=42:c=white:t=fill',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=440:sample_rate=48000:duration=4',
+    '-vf',
+    "drawbox=x=70:y=32:w=30:h=20:c=blue:t=fill:enable='gte(n,48)'",
+    '-c:v',
+    'libx264',
+    '-threads',
+    '1',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:a',
+    'aac',
+    join(directory, file),
+  ]);
+  const still = 't37-still.png';
+  ffmpeg([
+    '-f',
+    'lavfi',
+    '-i',
+    "nullsrc=s=72x32,format=rgba,geq=r=30:g=230:b=30:a='if(lt(X,36),0,160)'",
+    '-frames:v',
+    '1',
+    '-threads',
+    '1',
+    join(directory, still),
+  ]);
+  project.assets = [
+    {
+      id: 'asset',
+      name: 'Animation source',
+      file: { type: 'relative', path: file },
+      mediaTypes: ['video', 'audio'],
+    },
+    {
+      id: 'image',
+      name: 'Alpha still',
+      file: { type: 'relative', path: still },
+      mediaTypes: ['video'],
+      metadata: {
+        kind: 'image',
+        formatName: 'png_pipe',
+        durationSeconds: null,
+        width: 72,
+        height: 32,
+        videoCodec: 'png',
+        audioCodec: null,
+        frameRate: null,
+        frameRateRatio: null,
+        hasAudio: false,
+      },
+    },
+  ];
+  project.tracks = [
+    { id: 'video', name: 'Video', type: 'video' },
+    { id: 'text', name: 'Title', type: 'video' },
+    { id: 'still', name: 'Still', type: 'video' },
+  ];
+  project.clips = [
+    {
+      id: 'animated',
+      assetId: 'asset',
+      trackId: 'video',
+      timelineStart: time(0),
+      sourceIn: time(12),
+      sourceOut: time(102),
+    },
+    {
+      id: 'title',
+      trackId: 'text',
+      timelineStart: time(0),
+      sourceIn: time(0),
+      sourceOut: time(60),
+      text: { content: 'T37', fontSize: 36 },
+      visual: { y: 60 },
+      keyframes: {
+        opacity: [
+          { time: time(0), value: 0, easing: 'linear' },
+          { time: time(60), value: 1, easing: 'linear' },
+        ],
+      },
+    },
+    {
+      id: 'still-clip',
+      assetId: 'image',
+      trackId: 'still',
+      timelineStart: time(12),
+      sourceIn: time(0),
+      sourceOut: time(48),
+      visual: { x: -100, y: -58, scale: 0.25, fit: 'cover' },
+      keyframes: {
+        rotation: [
+          { time: time(0), value: -25, easing: 'ease-in-out' },
+          { time: time(48), value: 25, easing: 'linear' },
+        ],
+      },
+    },
+  ];
+
+  const expected = [
+    { frame: 0, x: -80, y: -12, scale: 0.5, opacity: 0.3, rotation: 0 },
+    {
+      frame: 10,
+      x: -62.2222222222,
+      y: -4,
+      scale: 0.7777777778,
+      opacity: 0.5333333333,
+      rotation: 15,
+    },
+    {
+      frame: 19,
+      x: -15.8222222222,
+      y: 3.2,
+      scale: 0.9327777778,
+      opacity: 0.7433333333,
+      rotation: 28.5,
+    },
+    {
+      frame: 20,
+      x: -8.8888888889,
+      y: 4,
+      scale: 0.9444444444,
+      opacity: 0.7666666667,
+      rotation: 30,
+    },
+    { frame: 30, x: 80, y: 12, scale: 1, opacity: 1, rotation: 30 },
+    { frame: 44, x: 80, y: 12, scale: 1, opacity: 1, rotation: 30 },
+    { frame: 59, x: 80, y: 12, scale: 1, opacity: 1, rotation: 30 },
+  ];
+  await compareScenario(
+    't37-keyframe-animation',
+    project,
+    expected.map(({ frame }) => ({ frame })),
+    undefined,
+    {
+      guiExport: true,
+      fontWarning: false,
+      edit: async (_application, page, path) => {
+        const seek = page.getByRole('slider', {
+          name: 'Seek timeline',
+          exact: true,
+        });
+        await page
+          .getByRole('button', { name: 'Inspect clip animated', exact: true })
+          .locator(':scope > rect')
+          .first()
+          .click();
+        const property = page.getByRole('combobox', {
+          name: 'Animated property',
+        });
+        const add = page.getByRole('button', {
+          name: 'Add keyframe',
+          exact: true,
+        });
+        const apply = page.getByRole('button', {
+          name: 'Apply keyframe',
+          exact: true,
+        });
+        const value = page.getByRole('spinbutton', { name: 'Keyframe value' });
+        const saved = async () =>
+          deserializeProject(await readFile(path, 'utf8'));
+        const key = async (
+          channel: 'x' | 'y' | 'scale' | 'opacity' | 'rotation',
+          frame: number,
+          next: number,
+          easing = 'linear',
+        ) => {
+          await property.selectOption(channel);
+          await seek.fill(String(frame));
+          await add.click();
+          await expect(add).toBeDisabled();
+          await value.fill(String(next));
+          await page
+            .getByRole('combobox', { name: 'Keyframe easing' })
+            .selectOption(easing);
+          await apply.click();
+          await expect
+            .poll(
+              async () =>
+                (await saved()).clips[0]?.keyframes?.[channel]?.at(-1)?.value,
+            )
+            .toBe(next);
+        };
+        await key('x', 0, -80, 'ease-in');
+        await key('x', 45, 80);
+        await key('y', 0, -12);
+        await key('y', 45, 12);
+        await key('scale', 0, 0.5, 'ease-out');
+        await key('scale', 45, 1);
+        await key('opacity', 0, 0.3);
+        await key('opacity', 45, 1);
+        await key('rotation', 0, 0);
+        await key('rotation', 45, 45);
+        await page
+          .getByRole('button', { name: 'animated rotation keyframe at 3/2 s' })
+          .click();
+        await expect(property).toHaveValue('rotation');
+        await page.getByRole('textbox', { name: 'Keyframe time' }).fill('1');
+        await value.fill('30');
+        await apply.click();
+        await expect
+          .poll(async () =>
+            (await saved()).clips[0]?.keyframes?.rotation?.at(-1),
+          )
+          .toMatchObject({ time: time(30), value: 30 });
+        await page
+          .getByRole('button', { name: 'Delete keyframe', exact: true })
+          .click();
+        const rotationCount = () =>
+          expect.poll(
+            async () => (await saved()).clips[0]?.keyframes?.rotation?.length,
+          );
+        await rotationCount().toBe(1);
+        for (const [action, count] of [
+          ['Undo', 2],
+          ['Redo', 1],
+          ['Undo', 2],
+        ] as const) {
+          await page.getByRole('button', { name: action, exact: true }).click();
+          await rotationCount().toBe(count);
+        }
+        const speed = page.getByRole('spinbutton', {
+          name: 'Speed (×)',
+          exact: true,
+        });
+        await speed.fill('1.5');
+        await speed.press('Enter');
+        await expect
+          .poll(async () => (await saved()).clips[0]?.speed)
+          .toEqual({ numerator: 3, denominator: 2 });
+        await seek.fill('20');
+        await page.getByRole('button', { name: 'Split at playhead' }).click();
+        await expect.poll(async () => (await saved()).clips.length).toBe(4);
+        const snapshot = await saved();
+        for (const { frame, ...properties } of expected) {
+          const visual = evaluateTimelineFrame(snapshot, frame).visualClips[0]!
+            .visual;
+          for (const [property, value] of Object.entries(properties))
+            expect(
+              visual[property as keyof typeof properties],
+              `${frame} ${property}`,
+            ).toBeCloseTo(value, 6);
+        }
+        const canvas = page.locator('#project-viewer canvas');
+        await seek.fill('8');
+        await page.getByRole('button', { name: 'Play', exact: true }).click();
+        await expect
+          .poll(async () => {
+            const [n, d] = (
+              (await canvas.getAttribute('data-position')) ?? '0/1'
+            )
+              .split('/')
+              .map(Number);
+            return n! / d!;
+          })
+          .toBeGreaterThan(0.5);
+        await page.getByRole('button', { name: 'Pause', exact: true }).click();
+        return snapshot;
+      },
+    },
+  );
+  const output = join(directory, 't37-keyframe-animation.mp4');
+  const { samples } = decodeAudio(output);
+  expect(exportAmplitudes(samples, 1)[0]).toBeGreaterThan(0.035);
+  const frames = decodeFrames(output, [0, 30], width, height);
+  const red = (frame: number, x: number, y: number) =>
+    frames.get(frame)![(y * width + x) * 3]!;
+  expect(red(0, 80, 80)).toBeGreaterThan(60);
+  expect(red(0, 200, 80)).toBeLessThan(5);
+  expect(red(30, 220, 130)).toBeGreaterThan(220);
+  const png = join(directory, 't37-frame-30.png');
+  command(process.execPath, [
+    resolve('apps/cli/dist/index.js'),
+    'preview',
+    'frame',
+    join(directory, 't37-keyframe-animation.json'),
+    '--frame',
+    '30',
+    '--output',
+    png,
+    '--json',
+  ]);
+  expect(
+    compareRgb(
+      decodeFrames(png, [0], width, height).get(0)!,
+      frames.get(30)!,
+      tolerance,
+    ).passed,
+  ).toBe(true);
+});
