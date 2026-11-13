@@ -1,8 +1,13 @@
 export { probeMedia } from './probe.js';
 export { extractFrame } from './frame.js';
+export { separateDialogue } from './dialogue.js';
 export { composeMedia } from './compose.js';
 export type { CompositionOptions, CompositionResult } from './compose.js';
-export { MediaError, RenderCancelledError } from './process.js';
+export {
+  MediaError,
+  RenderCancelledError,
+  sourceFileStamp,
+} from './process.js';
 export type { MediaMetadata, MediaStream } from './probe.js';
 export type { FrameResult } from './frame.js';
 export {
@@ -40,5 +45,5 @@ export type {
 export { ThumbnailCache } from './thumbnail.js';
 export type { ThumbnailResult } from './thumbnail.js';
 export { renderContactSheet } from './contact-sheet.js';
-export { rasterizeTextLayer } from './text.js';
+export { rasterizeTextLayer, validateEmbeddedFont } from './text.js';
 export type { TextRaster } from './text.js';

@@ -5,6 +5,7 @@ import {
   sourceColorMatrix,
   usesLayerTransform,
   maximumVisualScale,
+  roomEchoes,
 } from '@opencut/shared';
 import type {
   RenderTimeMapping,
@@ -34,6 +35,8 @@ import type { TransformLayerOptions } from './transform-layer.js';
 import { rasterizeTextLayer } from './text.js';
 
 interface VisualTimelineProperties {
+  crop?: NonNullable<import('@opencut/shared').VisualTransform['crop']>;
+  grade?: import('@opencut/shared').ColorGrade;
   clipId: string;
   timelineStartFrame: number;
   sourceStartFrame: number;
@@ -49,8 +52,8 @@ interface VisualTimelineProperties {
 }
 export type VisualTimelineClip = VisualTimelineProperties &
   (
-    | { path: string; text?: never; subtitle?: never }
-    | { text: TextLayer; path?: never; subtitle?: true }
+    | { path: string; text?: never; subtitle?: never; subtitleCueId?: never }
+    | { text: TextLayer; path?: never; subtitle?: true; subtitleCueId?: string }
   );
 
 export const renderQualities = ['draft', 'balanced', 'high'] as const;
@@ -69,6 +72,11 @@ export interface RenderControls {
   outputFrameRate?: { numerator: number; denominator: number } | undefined;
   quality?: RenderQuality | undefined;
   resolution?: RenderResolution | undefined;
+  outputSize?: { width: number; height: number } | undefined;
+  videoBitrateKbps?: number | undefined;
+  audioBitrateKbps?: number | undefined;
+  audioSampleRate?: 44100 | 48000 | undefined;
+  audioChannels?: 1 | 2 | undefined;
   overwrite?: boolean | undefined;
   signal?: AbortSignal | undefined;
   onProgress?: (progress: RenderProgress) => void;
@@ -112,7 +120,16 @@ export interface VideoTimelineOptions extends RenderControls {
     muted: boolean;
     fadeIn?: RenderAudioFade;
     fadeOut?: RenderAudioFade;
+    gainKeys?: { time: Rational; value: number }[];
+    effects?: Array<
+      | { type: 'eq'; frequency: number; db: number }
+      | { type: 'compressor'; threshold: number; ratio: number }
+      | { type: 'limiter'; ceiling: number }
+      | { type: 'de-esser'; amount: number }
+      | { type: 'reverb'; mix: number }
+    >;
     required: boolean;
+    padAudio?: true;
   }>;
   output: string;
 }
@@ -232,6 +249,27 @@ function validateOptions(options: VideoTimelineOptions): void {
 }
 
 type Rational = RenderTimeMapping['sourceIn'];
+
+function gainExpression(keys: { sample: number; value: number }[]) {
+  const first = keys[0]!;
+  const intervals = [{ end: first.sample, value: String(first.value) }];
+  for (let i = 1; i < keys.length; i++) {
+    const left = keys[i - 1]!;
+    const right = keys[i]!;
+    if (right.sample > left.sample)
+      intervals.push({
+        end: right.sample,
+        value: `${left.value}+(${right.value}-${left.value})*(n-${left.sample})/${right.sample - left.sample}`,
+      });
+  }
+  intervals.push({ end: Infinity, value: String(keys.at(-1)!.value) });
+  function build(start: number, end: number): string {
+    if (end - start === 1) return intervals[start]!.value;
+    const middle = Math.floor((start + end) / 2);
+    return `if(lt(n,${intervals[middle - 1]!.end}),${build(start, middle)},${build(middle, end)})`;
+  }
+  return build(0, intervals.length);
+}
 
 function validRational(time: Rational | undefined): time is Rational {
   return (
@@ -358,6 +396,40 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
     high: { preset: 'medium', crf: '16' },
   }[quality];
   const { width, height, frameRate, frameCount } = options;
+  const { outputSize, videoBitrateKbps } = options;
+  const audioBitrateKbps = options.audioBitrateKbps ?? 192;
+  const audioSampleRate = options.audioSampleRate ?? 48000;
+  const audioChannels = options.audioChannels ?? 2;
+  if (
+    outputSize &&
+    (options.maxDimension !== undefined ||
+      resolution !== 'project' ||
+      ![outputSize.width, outputSize.height].every(
+        (side) =>
+          Number.isInteger(side) && side >= 2 && side <= 3840 && side % 2 === 0,
+      ) ||
+      outputSize.width * outputSize.height > 3840 * 2160)
+  )
+    throw new MediaError(
+      'Custom dimensions must be even, 2–3840 per side, within 3840×2160 pixels, and use project resolution mode.',
+    );
+  if (
+    videoBitrateKbps !== undefined &&
+    (!Number.isInteger(videoBitrateKbps) ||
+      videoBitrateKbps < 100 ||
+      videoBitrateKbps > 100000)
+  )
+    throw new MediaError('Video bitrate must be 100–100000 kb/s.');
+  if (
+    !Number.isInteger(audioBitrateKbps) ||
+    audioBitrateKbps < 32 ||
+    audioBitrateKbps > 320 ||
+    ![44100, 48000].includes(audioSampleRate) ||
+    ![1, 2].includes(audioChannels)
+  )
+    throw new MediaError(
+      'AAC requires 32–320 kb/s, 44.1 or 48 kHz, and mono or stereo.',
+    );
   // Scale the finished canvas, preserving project-space transforms and layout.
   const longSide = resolution === '720p' ? 1280 : 1920;
   const shortSide = resolution === '720p' ? 720 : 1080;
@@ -381,14 +453,18 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
     scaleNumerator = Math.min(size, longest);
     scaleDenominator = longest;
   }
-  const outputWidth = Math.max(
-    2,
-    Math.floor((width * scaleNumerator) / (2 * scaleDenominator)) * 2,
-  );
-  const outputHeight = Math.max(
-    2,
-    Math.floor((height * scaleNumerator) / (2 * scaleDenominator)) * 2,
-  );
+  const outputWidth =
+    outputSize?.width ??
+    Math.max(
+      2,
+      Math.floor((width * scaleNumerator) / (2 * scaleDenominator)) * 2,
+    );
+  const outputHeight =
+    outputSize?.height ??
+    Math.max(
+      2,
+      Math.floor((height * scaleNumerator) / (2 * scaleDenominator)) * 2,
+    );
   const startFrame = options.range?.startFrame ?? 0;
   const endFrame = options.range?.endFrame ?? frameCount;
   if (
@@ -551,12 +627,20 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
       (clip.timelineStartFrame < endFrame &&
         clip.timelineStartFrame + clip.frameCount > startFrame),
   );
-  if (visibleClips.filter((clip) => clip.subtitle).length > 256)
+  if (
+    new Set(
+      visibleClips
+        .filter((clip) => clip.subtitle)
+        .map((clip) => clip.subtitleCueId ?? clip.clipId),
+    ).size > 256
+  )
     throw new MediaError(
       'Burn-in supports up to 256 visible subtitle cues per render. Shorten the render range or export a sidecar.',
     );
   for (const [index, clip] of visibleClips.entries()) {
-    const transformed = usesLayerTransform(clip.rotation, !!clip.animation);
+    const transformed =
+      Boolean(clip.grade || clip.crop) ||
+      usesLayerTransform(clip.rotation, !!clip.animation);
     const first = Math.max(startFrame, clip.timelineStartFrame);
     const last = Math.min(endFrame, clip.timelineStartFrame + clip.frameCount);
     const overlay = ({ x, y }: { x: number; y: number }, framesync: string) =>
@@ -579,6 +663,7 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
             startFrame: first,
             frameCount: hold ? 1 : last - first,
             visual: clip,
+            ...(clip.grade && { grade: clip.grade }),
             source,
             ...(clip.animation && { animation: clip.animation }),
             signal: options.signal,
@@ -813,7 +898,42 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
       clip.timelineStartFrame + (edge === 'start' ? 0 : clip.frameCount);
     return sample(frame, frameRate, fade, sign);
   };
-  const effects = (clip: AudioClip, start: number, end: number) => {
+  const effectChain = (clip: AudioClip, count: number) => {
+    const filters: string[] = [];
+    const linear = (db: number) => 10 ** (db / 20);
+    for (const effect of clip.effects ?? []) {
+      switch (effect.type) {
+        case 'eq':
+          filters.push(
+            `equalizer=f=${effect.frequency}:width_type=q:w=1:g=${effect.db}`,
+          );
+          break;
+        case 'compressor':
+          filters.push(
+            `acompressor=threshold=${linear(effect.threshold)}:ratio=${effect.ratio}:attack=5:release=100`,
+          );
+          break;
+        case 'limiter':
+          filters.push(
+            `alimiter=limit=${linear(effect.ceiling)}:level=0:latency=1`,
+          );
+          break;
+        case 'de-esser':
+          if (effect.amount)
+            filters.push(`deesser=i=${effect.amount}:m=0.5:f=0.5`);
+          break;
+        case 'reverb':
+          if (effect.mix)
+            filters.push(
+              `aecho=1:1:${roomEchoes.map((echo) => echo.seconds * 1000).join('|')}:${roomEchoes.map((echo) => echo.gain * effect.mix).join('|')}`,
+              `atrim=end_sample=${count}`,
+            );
+          break;
+      }
+    }
+    return filters.length ? filters.join(',') + ',' : '';
+  };
+  const envelope = (clip: AudioClip, start: number, end: number) => {
     const filters: string[] = [];
     if (clip.fadeIn) {
       const length =
@@ -831,6 +951,16 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
         );
     }
     filters.push(`volume=${clip.muted ? 0 : clip.volume}`);
+    if (clip.gainKeys?.length) {
+      const keys = clip.gainKeys.map(({ time, value }) => ({
+        sample: timelineSample(clip, 'start', time) - start,
+        value,
+      }));
+      const expression = gainExpression(keys);
+      filters.push(
+        `aeval='val(0)*${expression}|val(1)*${expression}':c=stereo`,
+      );
+    }
     return filters.join(',');
   };
   const runs: AudioClip[][] = [];
@@ -845,6 +975,9 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
       clip.tempoRunId === previous.tempoRunId &&
       clip.path === previous.path &&
       clip.required === previous.required &&
+      clip.padAudio === previous.padAudio &&
+      JSON.stringify(clip.effects ?? []) ===
+        JSON.stringify(previous.effects ?? []) &&
       timeDifference(
         previous.retiming.timelineEnd,
         clip.retiming.timelineStart,
@@ -883,6 +1016,7 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
         : audio.durationSeconds + offset;
     if (
       last.required &&
+      !last.padAudio &&
       (duration === null ||
         (last.retiming
           ? seconds(last.retiming.sourceOut)
@@ -936,12 +1070,16 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
       'aresample=48000:async=1:min_hard_comp=0:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,' +
       `apad,atrim=start_sample=${sourceStart}:end_sample=${sourceEnd},asettb=1/48000,asetpts=N,` +
       tempo +
-      fitDuration;
+      fitDuration +
+      effectChain(first, count);
     const delay = `adelay=${start}S:all=1[a${index}]`;
     if (pieces.length === 1) {
       const piece = pieces[0]!;
       filters.push(
-        inputFilter + effects(piece.clip, piece.start, piece.end) + ',' + delay,
+        inputFilter +
+          envelope(piece.clip, piece.start, piece.end) +
+          ',' +
+          delay,
       );
     } else {
       // Route each sample to its piece once, apply that piece's envelope, then
@@ -958,7 +1096,7 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
         filters.push(
           labels[i]! +
             'asettb=1/48000,asetpts=N,' +
-            effects(piece.clip, piece.start, piece.end) +
+            envelope(piece.clip, piece.start, piece.end) +
             label,
         );
         return label;
@@ -993,8 +1131,9 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
     codec === 'h264' ? 'libx264' : 'libx265',
     '-preset',
     encoding.preset,
-    '-crf',
-    encoding.crf,
+    ...(videoBitrateKbps === undefined
+      ? ['-crf', encoding.crf]
+      : ['-b:v', `${videoBitrateKbps}k`]),
     ...(codec === 'hevc'
       ? ['-x265-params', 'pools=2:log-level=error', '-tag:v', 'hvc1']
       : []),
@@ -1017,11 +1156,11 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
     '-c:a',
     'aac',
     '-b:a',
-    '192k',
+    `${audioBitrateKbps}k`,
     '-ar',
-    '48000',
+    String(audioSampleRate),
     '-ac',
-    '2',
+    String(audioChannels),
     '-movflags',
     '+faststart',
     '-f',
@@ -1158,8 +1297,8 @@ export async function renderVideoTimeline(
       video?.codec !== codec ||
       metadata.streams.length !== 2 ||
       metadata.audio?.codec !== 'aac' ||
-      metadata.audio.sampleRate !== 48000 ||
-      metadata.audio.channels !== 2 ||
+      metadata.audio.sampleRate !== (options.audioSampleRate ?? 48000) ||
+      metadata.audio.channels !== (options.audioChannels ?? 2) ||
       metadata.audio.startTimeSeconds !== 0 ||
       metadata.audio.durationSeconds === null ||
       Math.abs(metadata.audio.durationSeconds - durationSeconds) > 0.0011 ||

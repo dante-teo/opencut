@@ -13,7 +13,8 @@ presets fit the finished canvas inside 1280 × 720 or 1920 × 1080, swapping the
 bounds for portrait projects and rounding down to even dimensions. They can
 upscale a smaller canvas. Project-space transforms and aspect ratio are retained.
 Project resolution exports the existing canvas size. HEVC needs both output sides
-to be at least 16 pixels. All exports are SDR 4:2:0 MP4 with 48 kHz stereo AAC.
+to be at least 16 pixels. All exports are SDR 4:2:0 MP4 with AAC. The audio
+default is 48 kHz stereo.
 
 Frame rate can follow the project or use 24, 25, 30, 60, 24000/1001, 30000/1001,
 or 60000/1001 fps. Conversion samples the completed project-grid composition;
@@ -86,8 +87,9 @@ the project frame grid, and audio uses the clip's exact interval rounded to
 the 48 kHz sample grid. The container duration rounds up to a full output
 frame. Splitting a retimed clip preserves which source frame appears at each
 project tick. Clips on one track that touch in both timeline and source time
-share a tempo pass when their asset and speed match. Export applies each
-piece's gain, mute and fades after tempo processing. FFmpeg and Chromium use different pitch-preserving
+share tempo processing and one effects chain when their asset, speed, and
+ordered effects match. Export then applies each piece's gain, mute, fades,
+and volume keyframes. FFmpeg and Chromium use different pitch-preserving
 algorithms, so at extreme speeds and around short cuts they can differ in
 transient placement or sound quality.
 
@@ -98,23 +100,28 @@ has cues. It is enabled by default. Burn-in uses the shared subtitle style
 and includes cues visible at each project frame above the other visual layers.
 Clear the checkbox to export clean video at the same duration. Use
 **Subtitles → Export SRT…** or **Export WebVTT…** in the timeline to write a
-separate UTF-8 file with cue text and timing. Shared project styles stay with
-the project and burned video. Burn-in supports up to 256 sampled, nonempty
-cues per render range. See [subtitle timing and sidecar limits](CLI.md#editable-subtitles-t34).
+separate UTF-8 file with cue text and cue-level timing. Styles, timed word
+highlights, and animations stay with the project and burned video. Burn-in
+supports up to 256 sampled, nonempty cues per render range. See
+[subtitle timing and sidecar limits](CLI.md#editable-subtitles-t34).
 
 ## Desktop and CLI settings
 
 The desktop and [`project render`](CLI.md#project-rendering) share the same headless
 renderer and verified publication path. Their controls differ:
 
-| Setting              | Desktop                                     | CLI `project render`                                          |
-| -------------------- | ------------------------------------------- | ------------------------------------------------------------- |
-| Video codec          | H.264 or HEVC                               | H.264                                                         |
-| Output frame rate    | Project rate or a supported conversion rate | Project rate                                                  |
-| Existing destination | Always refused                              | Replaced only with explicit `--overwrite`, after verification |
+| Setting              | Desktop                              | CLI `project render`                                          |
+| -------------------- | ------------------------------------ | ------------------------------------------------------------- |
+| Video codec          | H.264 or HEVC                        | H.264 or HEVC                                                 |
+| Output frame rate    | Project rate, preset, or custom rate | Project rate or `--fps N[/D]`                                 |
+| Existing destination | Always refused                       | Replaced only with explicit `--overwrite`, after verification |
 
-Both support the existing quality and resolution presets. T28 adds no CLI codec
-or output-frame-rate flags.
+Both support quality and resolution presets, custom output dimensions, target
+video bitrate, AAC bitrate (32–320 kb/s), 44.1/48 kHz and mono/stereo output.
+Custom sizes scale the finished picture to the requested dimensions. Use
+matching aspect ratios to avoid stretching. Custom output frame rates use the
+same 1–120 fps bounds as the project. Defaults remain H.264, quality-based video
+encoding, and 192 kb/s stereo AAC at 48 kHz.
 
 Current limits include 64 non-subtitle timeline clips, 600 seconds, even canvas
 sides from 2 to 3840 and at most 3840 × 2160 pixels, and project rates from 1 to

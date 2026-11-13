@@ -1,8 +1,43 @@
 import { z } from 'zod';
-import { compareTimes, subtractTimes, timeSchema } from './time.js';
+import { addTimes, compareTimes, subtractTimes, timeSchema } from './time.js';
 import type { RationalTime } from './time.js';
 
 const gain = z.number().finite().min(0).max(1);
+export const audioEffectSchema = z.discriminatedUnion('type', [
+  z.strictObject({
+    type: z.literal('eq'),
+    frequency: z.number().min(40).max(16000),
+    db: z.number().min(-18).max(18),
+  }),
+  z.strictObject({
+    type: z.literal('compressor'),
+    threshold: z.number().min(-50).max(-1),
+    ratio: z.number().min(1).max(20),
+  }),
+  z.strictObject({
+    type: z.literal('limiter'),
+    ceiling: z.number().min(-20).max(-1),
+  }),
+  z.strictObject({
+    type: z.literal('de-esser'),
+    amount: z.number().min(0).max(1),
+  }),
+  z.strictObject({
+    type: z.literal('reverb'),
+    mix: z.number().min(0).max(0.5),
+  }),
+]);
+export type AudioEffect = z.infer<typeof audioEffectSchema>;
+export const audioEffectsSchema = z.array(audioEffectSchema).max(12);
+export const audioPresets = {
+  Dialogue: [
+    { type: 'eq', frequency: 300, db: -3 },
+    { type: 'de-esser', amount: 0.4 },
+    { type: 'compressor', threshold: -18, ratio: 3 },
+    { type: 'limiter', ceiling: -2 },
+  ],
+  Room: [{ type: 'reverb', mix: 0.16 }],
+} satisfies Record<string, AudioEffect[]>;
 export const trackAudioShape = {
   volume: gain.optional(),
   muted: z.boolean().optional(),
@@ -19,7 +54,64 @@ export const clipAudioShape = {
   ...trackAudioShape,
   fadeIn: fadeSchema.optional(),
   fadeOut: fadeSchema.optional(),
+  effects: audioEffectsSchema.optional(),
+  gainKeys: z
+    .array(z.strictObject({ time: timeSchema, value: gain }))
+    .min(1)
+    .max(128)
+    .refine(
+      (keys) =>
+        keys.every(
+          (key, i) => i === 0 || compareTimes(keys[i - 1]!.time, key.time) < 0,
+        ),
+      'Volume key times must increase.',
+    )
+    .optional(),
 };
+export type GainKeys = NonNullable<z.infer<typeof clipAudioShape.gainKeys>>;
+export function keyframeGain(keys: GainKeys, time: RationalTime): number {
+  const i = keys.findIndex((key) => compareTimes(key.time, time) >= 0);
+  if (i < 0) return keys.at(-1)!.value;
+  const right = keys[i]!;
+  if (i === 0 || compareTimes(right.time, time) === 0) return right.value;
+  const left = keys[i - 1]!;
+  const ratio =
+    (timeSeconds(time) - timeSeconds(left.time)) /
+    (timeSeconds(right.time) - timeSeconds(left.time));
+  return linearFadeGain(left.value, right.value, ratio);
+}
+
+export function sliceGainKeys(
+  keys: GainKeys,
+  start: RationalTime,
+  end: RationalTime,
+): GainKeys {
+  const sliced = keys
+    .filter(
+      (key) =>
+        compareTimes(key.time, start) >= 0 && compareTimes(key.time, end) <= 0,
+    )
+    .map((key) => ({ ...key, time: subtractTimes(key.time, start) }));
+  const duration = subtractTimes(end, start);
+  const first = keys[0]!.time;
+  const last = keys.at(-1)!.time;
+  const insideCurve = (time: RationalTime) =>
+    compareTimes(time, first) > 0 && compareTimes(time, last) < 0;
+  if (
+    insideCurve(end) &&
+    (!sliced.length || compareTimes(sliced.at(-1)!.time, duration) < 0)
+  )
+    sliced.push({ time: duration, value: keyframeGain(keys, end) });
+  if (insideCurve(start) && sliced[0]?.time.numerator !== 0)
+    sliced.unshift({ time: zero, value: keyframeGain(keys, start) });
+  return sliced.length
+    ? sliced
+    : [{ time: zero, value: keyframeGain(keys, start) }];
+}
+
+export function shiftGainKeys(keys: GainKeys, shift: RationalTime): GainKeys {
+  return keys.map((key) => ({ ...key, time: addTimes(key.time, shift) }));
+}
 export type AudioFade = z.infer<typeof fadeSchema>;
 interface ClipFades {
   fadeIn?: AudioFade | undefined;

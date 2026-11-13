@@ -69,8 +69,9 @@ healthy decoder. Failures belonging to the current action still surface normally
 Only the current evaluation can paint; seeking media frames are withheld. A cached
 PNG for the paused asset/source-time may bridge that seek. It represents the frame
 whose presentation interval covers the requested instant, including mixed-rate and
-VFR sources. A ready native decoder takes precedence over the cached image. Paused
-frame extraction is bounded to two requests across visible layers. The decoded-PNG
+VFR sources. A ready native decoder takes precedence in standard live preview.
+With **Exact paused frames** enabled, paused video layers use the extracted
+frames instead. Paused extraction is bounded to two requests across visible layers. The decoded-PNG
 cache applies the configured memory limit independently of the worker cache for
 encoded PNGs and waveform peaks. Lowering the limit immediately evicts older
 decoded images. No adjacent
@@ -235,7 +236,21 @@ use bigint and do not limit valid paused navigation.
 Long recordings, sustained heavy overlap, HDR, unusual stream offsets, and
 speaker/display loopback are not validated by the short synthetic suite. T25 adds a separate synthetic 1080p/4K benchmark. Canvas
 preview is capped at 1920 pixels wide; decoding uses an available verified proxy or the source.
-Startup and cut latency depend on browser readiness and scheduling. Effects, transitions, keyframes and export UI are outside T26.
+Startup and cut latency depend on browser readiness and scheduling. **Preview
+quality** can reduce the canvas's longest side to 960 or 480 pixels. **Exact
+paused frames** uses source presentation timestamps and a bounded in-memory
+cache of recently composited frames for the current project revision.
+**Render full timeline** builds a disk-cached MP4 with mixed audio. It selects
+source frames by their presentation timestamps before playback and writes a
+constant-rate stream at the project frame rate. **Live preview** returns to
+direct Chromium source playback. The cache is keyed by the render plan,
+preview size and source file stamps. OpenCut rechecks those stamps before
+publishing a new cache entry. Existing entries are reused across sessions.
+The timeline cache evicts only entries it published. Keep original media
+outside the cache directory, including media referenced in undo and redo.
+Treat returned cache paths as temporary. Export a separate MP4 for delivery.
+The renderer's project limits apply, including 600 seconds. See the
+[CLI and SDK entry points](CLI.md#rendered-preview-and-desktop-control).
 See [the T25 cache contract](MEDIA_CACHE.md) for supported proxy timing, native memory limits, cancellation and resource accounting.
 
 ## Composition and export agreement (T26)

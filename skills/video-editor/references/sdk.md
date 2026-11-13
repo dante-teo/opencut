@@ -39,11 +39,19 @@ result also includes its grid and tile dimensions. Keep your explicit frame
 list alongside the result when you need to associate each tile with a frame.
 Render options include `quality: 'draft' | 'balanced' | 'high'`,
 `resolution: 'project' | '720p' | '1080p'`, `codec: 'h264' | 'hevc'`, and
-`outputFrameRate: { numerator, denominator }`. The defaults are balanced H.264
+`outputFrameRate: { numerator, denominator }`. For custom dimensions, use
+`outputSize: { width, height }` in project resolution mode. Use
+`videoBitrateKbps`, `audioBitrateKbps`, `audioSampleRate`, and `audioChannels`
+to set encoding targets. The defaults are balanced H.264
 at the project size and rate. Use `signal` to cancel or `onProgress` to observe
 encoding. Await the render result before using the file. The result includes
 `path`, `width`, `height`, `frameRate`, `frameCount`, `durationSeconds` and
 probed `metadata`.
+
+`project.cachePreview(size?)` renders or reuses an MP4 of the staged draft.
+Use `project.controlDesktop(request)` for an open, saved desktop project on
+macOS or Linux. This affects the live session. See the
+[CLI reference](cli.md#discover-and-inspect) for request discovery and status.
 
 For example, insert a one-second cutaway on a new top track at frame 45 of an
 existing 30 fps project. Choose IDs that are unused in the inspected project
@@ -126,6 +134,8 @@ with `subtitle.*` operations, and publish via the editor's `save()`.
 `await project.exportSubtitles('new.vtt')` writes the current draft as a
 sidecar. `project.render('new.mp4')` burns visible cues into the video by
 default. Set `{ burnSubtitles: false }` for clean video at the same duration.
+Use `subtitle.words` with exact cue-relative intervals to time word highlights
+in preview and burn-in.
 
 For a music clip, stage
 `editor.project.apply({ type: 'clip.audio', id: musicClipId, volume: 0.5, fadeIn: 15, fadeOut: 30 })`.

@@ -15,6 +15,9 @@ import {
   TIMELINE_PREVIEW_CHANNEL,
   MEDIA_CACHE_CHANNEL,
   TIMELINE_FRAME_CHANNEL,
+  TIMELINE_RENDER_CHANNEL,
+  DESKTOP_CONTROL_CHANNEL,
+  DESKTOP_CONTROL_REPLY,
   TIMELINE_TEXT_CHANNEL,
   TIMELINE_ARTWORK_CHANNEL,
   CANCEL_TIMELINE_ARTWORK_CHANNEL,
@@ -22,6 +25,26 @@ import {
 } from '../bridge.js';
 
 const api: DesktopAPI = {
+  renderTimeline: (input) => ipcRenderer.invoke(TIMELINE_RENDER_CHANNEL, input),
+  onDesktopControl: (callback) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      id: string,
+      control: Parameters<typeof callback>[0],
+    ) => {
+      try {
+        ipcRenderer.send(DESKTOP_CONTROL_REPLY, id, {
+          value: callback(control),
+        });
+      } catch (error) {
+        ipcRenderer.send(DESKTOP_CONTROL_REPLY, id, { error: String(error) });
+      }
+    };
+    ipcRenderer.on(DESKTOP_CONTROL_CHANNEL, listener);
+    return () => {
+      ipcRenderer.removeListener(DESKTOP_CONTROL_CHANNEL, listener);
+    };
+  },
   chooseExportOutput: () => ipcRenderer.invoke(EXPORT_CHANNELS.choose),
   getExport: () => ipcRenderer.invoke(EXPORT_CHANNELS.current),
   startExport: (input) => ipcRenderer.invoke(EXPORT_CHANNELS.start, input),
@@ -75,6 +98,17 @@ const api: DesktopAPI = {
   },
   removeAsset: (input) =>
     ipcRenderer.invoke(PROJECT_CHANNELS.removeAsset, input),
+  relinkAsset: (input) =>
+    ipcRenderer.invoke(PROJECT_CHANNELS.relinkAsset, input),
+  separateDialogue: (input) =>
+    ipcRenderer.invoke(PROJECT_CHANNELS.separateDialogue, input),
+  copyProject: (input) =>
+    ipcRenderer.invoke(PROJECT_CHANNELS.copyProject, input),
+  freezeFrame: (input) =>
+    ipcRenderer.invoke(PROJECT_CHANNELS.freezeFrame, input),
+  importFont: (input) => ipcRenderer.invoke(PROJECT_CHANNELS.importFont, input),
+  exportFrame: (input) =>
+    ipcRenderer.invoke(PROJECT_CHANNELS.exportFrame, input),
   addAssetClip: (input) =>
     ipcRenderer.invoke(PROJECT_CHANNELS.addAssetClip, input),
   assetThumbnail: (id) => ipcRenderer.invoke(THUMBNAIL_CHANNEL, id),

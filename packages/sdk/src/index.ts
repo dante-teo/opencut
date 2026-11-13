@@ -23,7 +23,14 @@ import type {
 import {
   canonicalProjectFilePath,
   checkProjectMedia,
+  controlDesktopProject,
+  renderPreviewCache,
+  type DesktopControlRequest,
+  copyProjectFile,
   prepareMediaAsset,
+  prepareFreezeFrame,
+  prepareEmbeddedFont,
+  prepareMediaRelink,
   ProjectFileError,
   readProjectFile,
   readSubtitleFile,
@@ -33,9 +40,14 @@ import {
   updateProjectFile,
   writeProjectFile,
 } from '@opencut/core/node';
-import type { AssetImportResult, MediaAvailability } from '@opencut/core/node';
+import type {
+  AssetImportResult,
+  AssetInfo,
+  MediaAvailability,
+} from '@opencut/core/node';
 import {
   renderContactSheet,
+  separateDialogue,
   renderTimelineFrame,
   renderVideoTimeline,
 } from '@opencut/media';
@@ -56,6 +68,7 @@ export {
   parseClipSpeed,
 } from '@opencut/core';
 export { AssetError, ProjectFileError, SessionError } from '@opencut/core/node';
+export type { DesktopControlRequest } from '@opencut/core/node';
 export { MediaError, RenderCancelledError } from '@opencut/media';
 export type {
   CreateProjectOptions,
@@ -112,12 +125,21 @@ export type RenderOptions = Pick<
   | 'outputFrameRate'
   | 'quality'
   | 'resolution'
+  | 'outputSize'
+  | 'videoBitrateKbps'
+  | 'audioBitrateKbps'
+  | 'audioSampleRate'
+  | 'audioChannels'
   | 'signal'
   | 'onProgress'
 > & { burnSubtitles?: boolean | undefined };
 
 /** An in-memory view of one project. Only its owning editor can publish edits. */
 export interface ProjectDraft {
+  cachePreview(size?: number): ReturnType<typeof renderPreviewCache>;
+  controlDesktop(
+    request: DesktopControlRequest,
+  ): ReturnType<typeof controlDesktopProject>;
   readonly path: string;
   inspect(): ProjectInspection;
   inspectTimeline(frame: number): TimelineInspection;
@@ -125,6 +147,22 @@ export interface ProjectDraft {
   history(): EditHistory;
   checkMedia(): Promise<MediaAvailability[]>;
   importMedia(file: string): Promise<AssetImportResult>;
+  relinkMedia(assetId: string, file: string): Promise<AssetInfo>;
+  importFont(id: string, file: string): Promise<{ id: string; file: string }>;
+  freezeFrame(
+    clipId: string,
+    at: number,
+    frames: number,
+    output: string,
+  ): Promise<Awaited<ReturnType<typeof prepareFreezeFrame>>['result']>;
+  separateDialogue(
+    assetId: string,
+    directory: string,
+  ): ReturnType<typeof separateDialogue>;
+  copyProject(
+    destination: string,
+    bundle?: boolean,
+  ): ReturnType<typeof copyProjectFile>;
   removeMedia(assetId: string): void;
   importSubtitles(
     file: string,
@@ -319,6 +357,33 @@ function editProject(
     inspectTimeline: (frame) => inspectTimeline(draft, path, frame),
     history: () => getEditHistory(historyPending ? draft : base),
     checkMedia: () => checkProjectMedia(draft, path),
+    cachePreview: (size) =>
+      exclusive(async () => {
+        if (dryRun) throw new Error('Preview caching writes an output file.');
+        return renderPreviewCache(draft, path, size, { signal });
+      }),
+    controlDesktop: (request) =>
+      exclusive(async () => {
+        if (dryRun)
+          throw new Error('Desktop control is unavailable in dry runs.');
+        return controlDesktopProject(path, request);
+      }),
+    copyProject: (destination, bundle) =>
+      exclusive(async () => {
+        if (dryRun)
+          throw new Error('A project copy requires writing output files.');
+        if (
+          projectRevision(commitEdit(base, draft)) !== projectRevision(base) ||
+          historyPending
+        )
+          throw new Error('Save pending edits before copying the project.');
+        return copyProjectFile(
+          base,
+          path,
+          await outputPath(destination),
+          bundle,
+        );
+      }),
     importMedia: async (file) => {
       ensureEditable();
       return exclusive(async () => {
@@ -332,6 +397,51 @@ function editProject(
       ensureEditable();
       draft = removeAssetFromProject(draft, id);
     },
+    importFont: (id, file) => {
+      ensureEditable();
+      return exclusive(async () => {
+        const prepared = await prepareEmbeddedFont(draft, id, resolve(file));
+        signal?.throwIfAborted();
+        draft = prepared.project;
+        return prepared.result;
+      });
+    },
+    freezeFrame: (id, at, frames, file) =>
+      exclusive(async () => {
+        if (dryRun) throw new Error('Freeze frames require an output PNG.');
+        if (historyPending)
+          throw new Error('Save the pending history operation first.');
+        const prepared = await prepareFreezeFrame(
+          draft,
+          path,
+          id,
+          at,
+          frames,
+          await outputPath(file),
+        );
+        draft = prepared.project;
+        return prepared.result;
+      }),
+    relinkMedia: async (id, file) => {
+      ensureEditable();
+      return exclusive(async () => {
+        const prepared = await prepareMediaRelink(draft, path, id, file);
+        signal?.throwIfAborted();
+        draft = prepared.project;
+        return structuredClone(prepared.result);
+      });
+    },
+    separateDialogue: (id, directory) =>
+      exclusive(async () => {
+        if (dryRun)
+          throw new Error('Dialogue separation requires output files.');
+        const source = (await checkProjectMedia(draft, path)).find(
+          (entry) => entry.assetId === id,
+        );
+        if (source?.status !== 'available')
+          throw new Error('Choose an available audio or video asset.');
+        return separateDialogue(source.path, directory, signal);
+      }),
     importSubtitles: async (file) => {
       ensureEditable();
       return exclusive(async () => {
@@ -392,6 +502,11 @@ function editProject(
           renderVideoTimeline({
             ...plan,
             codec: options.codec,
+            outputSize: options.outputSize,
+            videoBitrateKbps: options.videoBitrateKbps,
+            audioBitrateKbps: options.audioBitrateKbps,
+            audioSampleRate: options.audioSampleRate,
+            audioChannels: options.audioChannels,
             outputFrameRate: options.outputFrameRate,
             quality: options.quality,
             resolution: options.resolution,

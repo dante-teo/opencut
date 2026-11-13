@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { snapshotSchema, clipSchema } from './project.js';
+import { snapshotSchema, clipSchema, clipVisualSchema } from './project.js';
 import type { Project } from './project.js';
 import { projectRevision, projectSnapshot } from './editing.js';
 import { evaluateTimelineFrame } from './evaluation.js';
@@ -9,8 +9,23 @@ import { frameRateSchema, timeSchema } from './time.js';
 const natural = z.int().nonnegative();
 const version = z.literal(1);
 const resolvedClip = clipSchema.extend({
+  id: z
+    .string()
+    .regex(
+      /^(?:[A-Za-z0-9][A-Za-z0-9_-]*|word:[A-Za-z0-9][A-Za-z0-9_-]*:\d+)$/,
+    ),
+  text: clipSchema.shape.text
+    .unwrap()
+    .extend({
+      activeWord: z
+        .strictObject({ from: natural, to: natural, phase: z.number() })
+        .optional(),
+    })
+    .optional(),
   trackId: z.string(),
   subtitle: z.literal(true).optional(),
+  subtitleCueId: z.string().optional(),
+  animationStart: timeSchema.optional(),
   duration: timeSchema,
   timelineEnd: timeSchema,
   trackIndex: natural,
@@ -21,6 +36,7 @@ const resolvedClip = clipSchema.extend({
   trackVolume: z.number().optional(),
   trackMuted: z.boolean().optional(),
   visual: z.strictObject({
+    crop: clipVisualSchema.shape.crop,
     x: z.number(),
     y: z.number(),
     scale: z.number(),

@@ -110,6 +110,17 @@ indices, so reordering assets or tracks does not break clips. A clip selects the
 referenced track's media type; video with audio may be referenced by separate
 video and audio clips.
 
+**Detach audio** marks the new audio clip with `detachedAudio: true`. It keeps
+the video source's timing and renders silence after the audio stream ends. The
+audio stream must still exist. Moving the clip onto a video track or replacing
+its source with audio-only media clears this flag.
+
+Project files store each distinct embedded font once in the optional root
+`embeddedFonts` array. A title's `text`, the subtitle track style, or a cue's
+style can use `"embeddedFont": { "font": 0 }` to refer to that table, including
+in undo and redo snapshots. `deserializeProject` resolves those references to
+base64 strings. It also accepts older project files with inline font data.
+
 All object fields are strict: unknown fields, missing required fields and numeric
 strings are rejected. This prevents typos or unsupported data from being silently
 discarded. Names and paths are preserved rather than trimmed. Temporary playback

@@ -189,8 +189,7 @@ See [desktop usage](README.md) for property ranges, shortcuts and preview limits
 
 ## Excluded
 
-Transitions, keyframes, fades and new audio/visual effects
-are outside the current scope. Project export is available through the GUI and CLI. No FFmpeg or MLT runtime is bundled; media commands require
+Project export is available through the GUI and CLI. No FFmpeg or MLT runtime is bundled; media commands require
 manually installed external tools.
 Fixture generation remains an optional development utility.
 

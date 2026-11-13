@@ -3,6 +3,7 @@ import {
   compareTimes,
   effectiveSubtitleStyle,
   parseSubtitleTime,
+  addTimes,
   subtractTimes,
   type Project,
   type RationalTime,
@@ -54,6 +55,41 @@ export function SubtitleProperties({
   return (
     <div className="text-properties-controls subtitle-properties">
       <SubtitleCueForm key={JSON.stringify(cue)} cue={cue} {...form} />
+      <WordTiming
+        key={JSON.stringify([cue.id, cue.text, cue.words])}
+        cue={cue}
+        {...form}
+      />
+      <form
+        key={`${cue.id}:${cue.pop}:${cue.emphasis?.join(',')}`}
+        onSubmit={(event) => {
+          event.preventDefault();
+          const data = new FormData(event.currentTarget);
+          submit(
+            {
+              type: 'subtitle.effects',
+              id: cue.id,
+              pop: data.has('pop'),
+              emphasis: String(data.get('emphasis') ?? '')
+                .split(',')
+                .map((value) => value.trim())
+                .filter(Boolean),
+            },
+            'Set subtitle effects',
+          );
+        }}
+      >
+        <fieldset disabled={form.disabled}>
+          <label>
+            Highlighted words{' '}
+            <input name="emphasis" defaultValue={cue.emphasis?.join(', ')} />
+          </label>
+          <label>
+            <input type="checkbox" name="pop" defaultChecked={cue.pop} /> Pop in
+          </label>
+          <button type="submit">Apply effects</button>
+        </fieldset>
+      </form>
       <SubtitleStyleForm
         key={JSON.stringify([
           project.settings.width,
@@ -61,6 +97,7 @@ export function SubtitleProperties({
           project.subtitles?.style,
         ])}
         style={effectiveSubtitleStyle(project)}
+        cues={project.subtitles?.cues ?? []}
         {...form}
       />
     </div>
@@ -70,6 +107,114 @@ export function SubtitleProperties({
 interface SubtitleFormProps {
   disabled: boolean;
   submit: (operation: TimelineOperation, label: string) => void;
+}
+
+function WordTiming({
+  cue,
+  disabled,
+  submit,
+}: SubtitleFormProps & { cue: SubtitleCue }) {
+  const [error, setError] = useState('');
+  const spans = [
+    ...new Intl.Segmenter(undefined, { granularity: 'word' }).segment(cue.text),
+  ]
+    .filter((item) => item.isWordLike)
+    .slice(0, 128);
+  const duration = subtractTimes(cue.end, cue.start);
+  const split = (index: number) =>
+    displayTime({
+      numerator: duration.numerator * index,
+      denominator: duration.denominator * Math.max(1, spans.length),
+    });
+  const [rows, setRows] = useState(() =>
+    cue.words?.length
+      ? cue.words.map((word) => ({
+          ...word,
+          start: displayTime(word.start),
+          end: displayTime(word.end),
+        }))
+      : spans.map(({ index, segment }, i) => ({
+          from: index,
+          to: index + segment.length,
+          start: split(i),
+          end: split(i + 1),
+        })),
+  );
+  return (
+    <details>
+      <summary>Word timing</summary>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          try {
+            const words = rows.map((row) => ({
+              from: row.from,
+              to: row.to,
+              start: parseSubtitleTime(row.start),
+              end: parseSubtitleTime(row.end),
+            }));
+            if (
+              words.some(
+                (word, i) =>
+                  compareTimes(word.start, word.end) >= 0 ||
+                  compareTimes(addTimes(cue.start, word.end), cue.end) > 0 ||
+                  (i > 0 && compareTimes(words[i - 1]!.end, word.start) > 0),
+              )
+            )
+              throw new Error(
+                'Enter ordered, non-overlapping times within the cue.',
+              );
+            setError('');
+            submit(
+              { type: 'subtitle.words', id: cue.id, words },
+              'Set subtitle word timing',
+            );
+          } catch (cause) {
+            setError(String(cause));
+          }
+        }}
+      >
+        <fieldset disabled={disabled}>
+          {rows.map((row, i) => (
+            <div className="text-fields" key={row.from}>
+              <span>{cue.text.slice(row.from, row.to)}</span>
+              {(['start', 'end'] as const).map((edge) => (
+                <label key={edge}>
+                  {edge === 'start' ? 'Start' : 'End'} (s)
+                  <input
+                    value={row[edge]}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setRows((old) =>
+                        old.map((item, j) =>
+                          i === j ? { ...item, [edge]: value } : item,
+                        ),
+                      );
+                    }}
+                  />
+                </label>
+              ))}
+            </div>
+          ))}
+          {error && <p role="alert">{error}</p>}
+          <button disabled={!rows.length}>Apply word timing</button>
+          {cue.words?.length ? (
+            <button
+              type="button"
+              onClick={() =>
+                submit(
+                  { type: 'subtitle.words', id: cue.id, words: [] },
+                  'Clear subtitle word timing',
+                )
+              }
+            >
+              Clear word timing
+            </button>
+          ) : null}
+        </fieldset>
+      </form>
+    </details>
+  );
 }
 
 function SubtitleCueForm({
@@ -165,10 +310,15 @@ function SubtitleCueForm({
 
 function SubtitleStyleForm({
   style,
+  cues,
   disabled,
   submit,
-}: SubtitleFormProps & { style: ReturnType<typeof effectiveSubtitleStyle> }) {
+}: SubtitleFormProps & {
+  style: ReturnType<typeof effectiveSubtitleStyle>;
+  cues: SubtitleCue[];
+}) {
   const [outline, setOutline] = useState(!!style.stroke);
+  const [shadow, setShadow] = useState(!!style.shadow);
   const [background, setBackground] = useState(!!style.background);
   const [styleDraft, setStyleDraft] = useState<Record<string, string>>({});
   const styleField = (name: string, initial: string | number) => ({
@@ -214,6 +364,9 @@ function SubtitleStyleForm({
         submit(
           {
             type: 'subtitle.style',
+            ...(data.getAll('cue-ids').length && {
+              ids: data.getAll('cue-ids').map(String),
+            }),
             style: {
               fontFamily: value('Subtitle font'),
               fontSize: amount('Subtitle size'),
@@ -224,6 +377,14 @@ function SubtitleStyleForm({
                 ? {
                     color: value('Outline color'),
                     width: amount('Outline width'),
+                  }
+                : null,
+              shadow: shadow
+                ? {
+                    color: value('Subtitle shadow color'),
+                    x: amount('Subtitle shadow X'),
+                    y: amount('Subtitle shadow Y'),
+                    blur: amount('Subtitle shadow blur'),
                   }
                 : null,
               background: background
@@ -271,6 +432,22 @@ function SubtitleStyleForm({
         <label className="text-effect">
           <input
             type="checkbox"
+            checked={shadow}
+            onChange={(event) => setShadow(event.currentTarget.checked)}
+          />{' '}
+          Shadow
+        </label>
+        {shadow && (
+          <div className="text-fields">
+            {color('Subtitle shadow color', style.shadow?.color ?? '#000000b0')}
+            {number('Subtitle shadow X', style.shadow?.x ?? 2, -128, 128)}
+            {number('Subtitle shadow Y', style.shadow?.y ?? 2, -128, 128)}
+            {number('Subtitle shadow blur', style.shadow?.blur ?? 4, 0, 64)}
+          </div>
+        )}
+        <label className="text-effect">
+          <input
+            type="checkbox"
             checked={background}
             onChange={(event) => setBackground(event.currentTarget.checked)}
           />
@@ -285,6 +462,16 @@ function SubtitleStyleForm({
             {number('Subtitle padding', style.background?.padding ?? 6, 0, 128)}
           </div>
         )}
+        <details>
+          <summary>Apply to selected cues</summary>
+          <select multiple name="cue-ids" aria-label="Subtitle cues" size={4}>
+            {cues.map((cue) => (
+              <option key={cue.id} value={cue.id}>
+                {displayTime(cue.start)} · {cue.text.slice(0, 60)}
+              </option>
+            ))}
+          </select>
+        </details>
         <button type="submit">Apply subtitle style</button>
       </fieldset>
     </form>

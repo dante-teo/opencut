@@ -1,6 +1,7 @@
 import {
   fittingBox,
   drawMediaLayer,
+  gradePixels,
   transformTextLayer,
   usesLayerTransform,
   visualGeometry,
@@ -9,6 +10,8 @@ import {
   addTimes,
   subtractTimes,
   baseAudioGain,
+  audioFadeGain,
+  keyframeGain,
   clipSpeed,
   resolveAudioFade,
   compareTimes,
@@ -24,6 +27,7 @@ import {
   type RationalTime,
 } from '@opencut/core';
 import type { PreviewSource } from '../bridge.js';
+import { connectEffects } from './audio-effects.js';
 import {
   clampTime,
   frameIndex,
@@ -130,6 +134,8 @@ interface Entry {
   image?: HTMLImageElement;
   node?: MediaElementAudioSourceNode;
   gain?: GainNode;
+  automation?: GainNode;
+  effects?: AudioNode[];
   disposed: boolean;
   ready: boolean;
   failed: boolean;
@@ -159,6 +165,12 @@ const textBudgetWarning = 'Some text layers exceed the preview memory budget.';
 
 /** Chromium decodes off-thread. This adapter only evaluates, schedules and paints. */
 export class TimelinePlayback {
+  private gradeCanvas?: HTMLCanvasElement;
+  private readonly compositeCache = new Map<
+    string,
+    { pixels: ImageData; painted: string[] }
+  >();
+  private compositeCacheBytes = 0;
   readonly diagnostics: TimelineDiagnostics;
   readonly clock: TimelineClock;
   private readonly evaluate;
@@ -208,6 +220,8 @@ export class TimelinePlayback {
       diagnostics: TimelineDiagnostics,
     ) => void,
     private memoryBudget = 64 * 1024 ** 2,
+    previewMaxSide = 1920,
+    private readonly exactPausedFrames = false,
   ) {
     this.evaluate = createPlaybackTimelineEvaluator(project);
     // Resolve lookahead through T23 too; point queries remain the source-time authority.
@@ -305,7 +319,15 @@ export class TimelinePlayback {
       outputLatencyMs:
         (this.context.outputLatency ?? this.context.baseLatency) * 1000,
     };
-    canvas.width = Math.min(1920, project.settings.width);
+    const previewScale = Math.min(
+      1,
+      previewMaxSide /
+        Math.max(project.settings.width, project.settings.height),
+    );
+    canvas.width = Math.max(
+      1,
+      Math.round(project.settings.width * previewScale),
+    );
     canvas.height = Math.max(
       1,
       Math.round(
@@ -395,10 +417,18 @@ export class TimelinePlayback {
         this.host.append(media);
         const node = this.context.createMediaElementSource(media);
         const gain = this.context.createGain();
+        const automation = this.context.createGain();
         gain.gain.value = 0;
-        node.connect(gain).connect(this.master);
+        item.effects = connectEffects(
+          this.context,
+          node,
+          gain,
+          clip.effects ?? [],
+        );
+        gain.connect(automation).connect(this.master);
         item.node = node;
         item.gain = gain;
+        item.automation = automation;
         media.addEventListener('loadedmetadata', () => {
           if (item.disposed) return;
           if (
@@ -507,6 +537,8 @@ export class TimelinePlayback {
     }
     entry.node?.disconnect();
     entry.gain?.disconnect();
+    entry.automation?.disconnect();
+    entry.effects?.forEach((effect) => effect.disconnect());
     this.entries.delete(entry.key);
     if (
       ![...this.entries.values()].some(
@@ -526,14 +558,17 @@ export class TimelinePlayback {
     }
   }
   setMemoryBudget(memoryBytes: number) {
+    if (this.memoryBudget === memoryBytes) return;
     this.memoryBudget = memoryBytes;
+    this.compositeCache.clear();
+    this.compositeCacheBytes = 0;
     this.fitTextBudget();
     this.trimFrames();
   }
   private trimFrames(reservedBytes = 0) {
     let used = [...this.cachedFrames.values()].reduce(
       (sum, image) => sum + image.naturalWidth * image.naturalHeight * 4,
-      reservedBytes + this.textBytes,
+      reservedBytes + this.textBytes + this.compositeCacheBytes,
     );
     for (const [key, image] of this.cachedFrames) {
       if (used <= this.memoryBudget) break;
@@ -663,6 +698,21 @@ export class TimelinePlayback {
     this.cachedFrames.clear();
     this.wantedFrames.clear();
   }
+  private rememberComposite(key: string, pixels: ImageData, painted: string[]) {
+    const size = pixels.data.byteLength;
+    const limit = Math.min(24 * 1024 ** 2, this.memoryBudget / 3);
+    if (size > limit || this.compositeCache.has(key)) return;
+    while (this.compositeCacheBytes + size > limit) {
+      const oldest = this.compositeCache.keys().next().value;
+      if (oldest === undefined) break;
+      this.compositeCacheBytes -=
+        this.compositeCache.get(oldest)!.pixels.data.byteLength;
+      this.compositeCache.delete(oldest);
+    }
+    this.compositeCache.set(key, { pixels, painted });
+    this.compositeCacheBytes += size;
+    this.trimFrames();
+  }
   private requestFrame() {
     if (this.clock.playing || this.starting || this.disposed) return;
     for (const visual of this.evaluate(this.clock.position).visualClips) {
@@ -678,6 +728,7 @@ export class TimelinePlayback {
       const entry = this.entries.get(this.keys.get(visual.id)!);
       // Native frames are preferred; don't launch extraction for settled decoders.
       if (
+        !this.exactPausedFrames &&
         entry?.ready &&
         entry.media &&
         !entry.media.seeking &&
@@ -733,6 +784,7 @@ export class TimelinePlayback {
     const now = this.context.currentTime;
     entry.gain.gain.cancelScheduledValues(now);
     entry.gain.gain.setValueAtTime(0, now);
+    entry.automation?.gain.cancelScheduledValues(now);
     entry.scheduledAction = -1;
   }
   private scheduleGain(
@@ -745,6 +797,8 @@ export class TimelinePlayback {
     const playhead = seconds(time);
     const at = (t: number) => now + Math.max(0, t - playhead);
     param.cancelScheduledValues(now);
+    const automation = entry.automation?.gain;
+    automation?.cancelScheduledValues(now);
     const run = this.runs.get(entry.key)!;
     for (const next of run) {
       if (compareTimes(next.timelineEnd, time) <= 0) continue;
@@ -754,8 +808,20 @@ export class TimelinePlayback {
       const gain = baseAudioGain(next);
       const attack = next.fadeIn && resolveAudioFade('fadeIn', next.fadeIn);
       const release = next.fadeOut && resolveAudioFade('fadeOut', next.fadeOut);
+      const local = current ? subtractTimes(time, next.timelineStart) : ZERO;
+      automation?.setValueAtTime(
+        next.gainKeys ? keyframeGain(next.gainKeys, local) : 1,
+        at(start),
+      );
+      for (const key of next.gainKeys ?? []) {
+        const target = start + seconds(key.time);
+        if (target > playhead)
+          automation?.linearRampToValueAtTime(key.value, at(target));
+      }
       param.setValueAtTime(
-        current ? clip.effectiveVolume : gain * (attack?.from ?? 1),
+        current
+          ? gain * audioFadeGain(next, next.duration, local)
+          : gain * (attack?.from ?? 1),
         at(start),
       );
       if (attack) {
@@ -1121,79 +1187,124 @@ export class TimelinePlayback {
     ctx.resetTransform();
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
-    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    ctx.fillStyle = evaluation.backgroundColor;
-    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    const painted: string[] = [];
+    const compositeKey = `${time.numerator}/${time.denominator}`;
+    const cachedComposite =
+      this.exactPausedFrames && !this.clock.playing
+        ? this.compositeCache.get(compositeKey)
+        : undefined;
+    const painted: string[] = cachedComposite?.painted ?? [];
     this.textBudgetLimited = false;
-    // Geometry is resolved in project pixels before preview downsampling.
-    ctx.save();
-    ctx.scale(
-      this.canvas.width / this.project.settings.width,
-      this.canvas.height / this.project.settings.height,
-    );
-    for (const visual of visuals) {
-      if (visual.kind === 'text') {
-        const raster = this.textImages.get(this.textKeys.get(visual.id)!);
-        if (raster?.status === 'budget') this.textBudgetLimited = true;
-        if (raster?.status !== 'ready') continue;
-        if (raster.image) {
-          ctx.globalAlpha = 1;
-          ctx.save();
-          if (usesLayerTransform(visual.visual.rotation, visual.animated))
-            transformTextLayer(
-              ctx,
-              this.project.settings.width,
-              this.project.settings.height,
-              visual.visual,
-            );
-          ctx.drawImage(raster.image, raster.x, raster.y);
-          ctx.restore();
+    if (cachedComposite) {
+      ctx.putImageData(cachedComposite.pixels, 0, 0);
+    } else {
+      ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      ctx.fillStyle = evaluation.backgroundColor;
+      ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+      // Geometry is resolved in project pixels before preview downsampling.
+      ctx.save();
+      ctx.scale(
+        this.canvas.width / this.project.settings.width,
+        this.canvas.height / this.project.settings.height,
+      );
+      for (const visual of visuals) {
+        if (visual.kind === 'text') {
+          const raster = this.textImages.get(this.textKeys.get(visual.id)!);
+          if (raster?.status === 'budget') this.textBudgetLimited = true;
+          if (raster?.status !== 'ready') continue;
+          if (raster.image) {
+            ctx.globalAlpha = 1;
+            ctx.save();
+            if (usesLayerTransform(visual.visual.rotation, visual.animated))
+              transformTextLayer(
+                ctx,
+                this.project.settings.width,
+                this.project.settings.height,
+                visual.visual,
+              );
+            ctx.drawImage(raster.image, raster.x, raster.y);
+            ctx.restore();
+          }
+          painted.push(visual.id);
+          continue;
+        }
+        const entry = this.entries.get(this.keys.get(visual.id)!);
+        const nativeReady =
+          entry &&
+          !entry.failed &&
+          entry.ready &&
+          (entry.image ||
+            (entry.media &&
+              !entry.media.seeking &&
+              Math.abs(entry.media.currentTime - seconds(visual.sourceTime)) <
+                (this.clock.playing
+                  ? 0.15 * seconds(clipSpeed(visual))
+                  : 0.001)));
+        const cached =
+          (!nativeReady || this.exactPausedFrames) && !this.clock.playing
+            ? this.cachedFrames.get(
+                this.frameKey(visual.assetId, visual.sourceTime),
+              )
+            : undefined;
+        const drawable =
+          cached ??
+          (nativeReady &&
+          (!this.exactPausedFrames ||
+            this.clock.playing ||
+            visual.kind === 'image')
+            ? (entry?.image ?? entry?.media)
+            : undefined);
+        const width =
+          cached?.naturalWidth ??
+          entry?.image?.naturalWidth ??
+          entry?.media?.videoWidth;
+        const height =
+          cached?.naturalHeight ??
+          entry?.image?.naturalHeight ??
+          entry?.media?.videoHeight;
+        if (!drawable || !width || !height) continue;
+        const geometry = visualGeometry(
+          this.project.settings.width,
+          this.project.settings.height,
+          this.aspects.get(visual.assetId) ?? width / height,
+          1,
+          visual.visual,
+        );
+        if (!geometry.visible) continue;
+        if (visual.grade) {
+          const buffer = (this.gradeCanvas ??=
+            document.createElement('canvas'));
+          const factor = Math.min(1, 1920 / Math.max(width, height));
+          const w = Math.max(1, Math.round(width * factor));
+          const h = Math.max(1, Math.round(height * factor));
+          if (buffer.width !== w) buffer.width = w;
+          if (buffer.height !== h) buffer.height = h;
+          const grade = buffer.getContext('2d', { willReadFrequently: true })!;
+          grade.clearRect(0, 0, w, h);
+          grade.drawImage(drawable, 0, 0, w, h);
+          const pixels = grade.getImageData(0, 0, w, h);
+          gradePixels(pixels.data, visual.grade);
+          grade.putImageData(pixels, 0, 0);
+          drawMediaLayer(ctx, buffer, geometry);
+        } else {
+          drawMediaLayer(ctx, drawable, geometry);
         }
         painted.push(visual.id);
-        continue;
       }
-      const entry = this.entries.get(this.keys.get(visual.id)!);
-      const nativeReady =
-        entry &&
-        !entry.failed &&
-        entry.ready &&
-        (entry.image ||
-          (entry.media &&
-            !entry.media.seeking &&
-            Math.abs(entry.media.currentTime - seconds(visual.sourceTime)) <
-              (this.clock.playing
-                ? 0.15 * seconds(clipSpeed(visual))
-                : 0.001)));
-      const cached =
-        !nativeReady && !this.clock.playing
-          ? this.cachedFrames.get(
-              this.frameKey(visual.assetId, visual.sourceTime),
-            )
-          : undefined;
-      const drawable =
-        cached ?? (nativeReady ? (entry?.image ?? entry?.media) : undefined);
-      const width =
-        cached?.naturalWidth ??
-        entry?.image?.naturalWidth ??
-        entry?.media?.videoWidth;
-      const height =
-        cached?.naturalHeight ??
-        entry?.image?.naturalHeight ??
-        entry?.media?.videoHeight;
-      if (!drawable || !width || !height) continue;
-      const geometry = visualGeometry(
-        this.project.settings.width,
-        this.project.settings.height,
-        this.aspects.get(visual.assetId) ?? width / height,
-        1,
-        visual.visual,
-      );
-      if (!geometry.visible) continue;
-      drawMediaLayer(ctx, drawable, geometry);
-      painted.push(visual.id);
+      ctx.restore();
+      if (
+        this.exactPausedFrames &&
+        !this.clock.playing &&
+        visuals.length > 0 &&
+        painted.length === visuals.length &&
+        this.canvas.width * this.canvas.height * 4 <=
+          Math.min(24 * 1024 ** 2, this.memoryBudget / 3)
+      )
+        this.rememberComposite(
+          compositeKey,
+          ctx.getImageData(0, 0, this.canvas.width, this.canvas.height),
+          painted,
+        );
     }
-    ctx.restore();
     const visual = visuals.at(-1);
     this.canvas.dataset.clipId = visual?.id ?? '';
     this.canvas.dataset.presentedClip = painted.at(-1) ?? '';
@@ -1260,6 +1371,8 @@ export class TimelinePlayback {
     this.disposed = true;
     this.frameGeneration++;
     this.clearFrames();
+    this.compositeCache.clear();
+    this.compositeCacheBytes = 0;
     for (const key of this.textImages.keys()) this.releaseText(key);
     cancelAnimationFrame(this.animation);
     document.removeEventListener('visibilitychange', this.onVisibility);

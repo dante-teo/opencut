@@ -101,11 +101,13 @@ export type {
 
 export {
   audioFadeEdges,
+  audioPresets,
   audioFadeGain,
   baseAudioGain,
+  keyframeGain,
   resolveAudioFade,
 } from './audio.js';
-export type { AudioFade, AudioFadeEdge } from './audio.js';
+export type { AudioEffect, AudioFade, AudioFadeEdge } from './audio.js';
 
 export { addAssetClip } from './library.js';
 

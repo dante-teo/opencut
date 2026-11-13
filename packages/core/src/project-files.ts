@@ -12,6 +12,7 @@ import {
   access,
   copyFile,
   link,
+  mkdir,
   lstat,
   mkdtemp,
   open,
@@ -19,9 +20,10 @@ import {
   realpath,
   rename,
   rm,
+  rmdir,
   stat,
 } from 'node:fs/promises';
-import { basename, dirname, join, posix, win32 } from 'node:path';
+import { basename, dirname, extname, join, posix, win32 } from 'node:path';
 import {
   deserializeProject,
   ProjectFormatError,
@@ -309,6 +311,82 @@ export async function writeProjectFile(
   }
 }
 
+/** Copy a saved revision and rebase media references in both content and history. */
+export async function copyProjectFile(
+  project: Project,
+  sourcePath: string,
+  destination: string,
+  bundle = false,
+) {
+  sourcePath = await canonicalProjectFilePath(nativePath(sourcePath));
+  destination = await canonicalProjectFilePath(nativePath(destination));
+  const output = bundle
+    ? join(destination, 'project.opencut.json')
+    : destination;
+  const copy = structuredClone(project);
+  const snapshots = [
+    copy,
+    ...[...(copy.editing?.undo ?? []), ...(copy.editing?.redo ?? [])].flatMap(
+      ({ before, after }) => [before, after],
+    ),
+  ];
+  const references = new Map<string, MediaReference>();
+  const files: string[] = [];
+  let createdRoot = false;
+  let createdMedia = false;
+  const media = join(destination, 'media');
+  try {
+    if (bundle) {
+      await mkdir(destination);
+      createdRoot = true;
+      await mkdir(media);
+      createdMedia = true;
+    }
+    for (const [snapshotIndex, { assets }] of snapshots.entries()) {
+      for (const asset of assets) {
+        const path = resolveMediaReference(asset.file, sourcePath);
+        let reference = references.get(path);
+        if (!reference) {
+          if (bundle) {
+            const availability = await inspectMediaFile(path);
+            if (availability.status !== 'available' && snapshotIndex === 0)
+              throw new Error(
+                `Cannot package '${asset.name}': ${availability.message}`,
+              );
+            const target = join(
+              media,
+              `${references.size + 1}${extname(path)}`,
+            );
+            if (availability.status === 'available') {
+              await copyFile(path, target, constants.COPYFILE_EXCL);
+              files.push(target);
+            }
+            reference = createMediaReference(target, output);
+          } else {
+            reference = isNativePath(path)
+              ? createMediaReference(path, output)
+              : asset.file;
+          }
+          references.set(path, reference);
+        }
+        asset.file = reference;
+      }
+    }
+    getEditHistory(copy);
+    await writeProjectFile(copy, output);
+    return {
+      path: output,
+      revision: projectRevision(project),
+      mediaFiles: files.length,
+    };
+  } catch (error) {
+    for (const path of files) await rm(path, { force: true }).catch(() => {});
+    if (createdMedia) await rmdir(media).catch(() => {});
+    if (createdRoot) await rmdir(destination).catch(() => {});
+    throw error;
+  }
+}
+
 export interface ProjectUpdateOptions {
   expectedRevision?: number | undefined;
   dryRun?: boolean | undefined;
@@ -320,8 +398,76 @@ export interface ProjectUpdateOptions {
 }
 
 const sessionSnapshot = z.object({ json: z.string(), sessionId: z.string() });
+const entityId = z.string().min(1).max(120);
+const actionOnly = z.strictObject({
+  action: z.enum([
+    'play',
+    'pause',
+    'toggle',
+    'render-preview',
+    'status',
+    'live-preview',
+  ]),
+});
+export const desktopControlSchema = z.union([
+  actionOnly,
+  z.strictObject({ action: z.literal('seek'), frame: z.int().nonnegative() }),
+  z.strictObject({
+    action: z.literal('source-seek'),
+    seconds: z.number().nonnegative(),
+  }),
+  z.strictObject({
+    action: z.literal('step'),
+    direction: z.union([z.literal(-1), z.literal(1)]),
+  }),
+  z.strictObject({
+    action: z.literal('select'),
+    kind: z.enum(['asset', 'clip']),
+    id: entityId.nullable(),
+  }),
+  z.strictObject({
+    action: z.literal('viewer'),
+    viewer: z.enum(['project', 'source']),
+  }),
+  z.strictObject({
+    action: z.literal('online-search'),
+    query: z.string().trim().min(1).max(200),
+    provider: z.enum(['commons', 'openverse']),
+    kind: z.enum(['image', 'audio', 'video']),
+    page: z.string().max(200).optional(),
+  }),
+  z.strictObject({
+    action: z.literal('online-import'),
+    id: entityId,
+    expectedRevision: z.int().nonnegative(),
+  }),
+]);
+export type DesktopControlRequest = z.infer<typeof desktopControlSchema>;
+export const desktopControlJsonSchema = () =>
+  z.toJSONSchema(desktopControlSchema);
+export async function controlDesktopProject(
+  path: string,
+  control: DesktopControlRequest,
+) {
+  const result = await requestSession(await canonicalProjectFilePath(path), {
+    version: 1,
+    type: 'control',
+    control: desktopControlSchema.parse(control),
+  });
+  if (result === undefined)
+    throw new SessionError(
+      'SESSION_CLOSED',
+      'Open this saved project in OpenCut desktop first.',
+    );
+  return result;
+}
 const sessionRequest = z.discriminatedUnion('type', [
   z.strictObject({ version: z.literal(1), type: z.literal('read') }),
+  z.strictObject({
+    version: z.literal(1),
+    type: z.literal('control'),
+    control: desktopControlSchema,
+  }),
   z.strictObject({
     version: z.literal(1),
     type: z.literal('update'),
@@ -420,12 +566,21 @@ export async function acquireProjectWriter(projectFilePath: string) {
         update?: (project: Project) => Project;
         options?: ProjectUpdateOptions;
       }) => Promise<Project>,
+      control?: (request: DesktopControlRequest) => Promise<unknown>,
     ) {
       const sessionId = randomUUID();
       stop = await serveSession(path, async (value) => {
         const request = sessionRequest.parse(value);
         if (request.type === 'read')
           return { json: serializeProject(await handle({})), sessionId };
+        if (request.type === 'control') {
+          if (!control)
+            throw new SessionError(
+              'SESSION_UNSUPPORTED',
+              'This session does not provide desktop controls.',
+            );
+          return control(request.control);
+        }
         if (request.sessionId !== sessionId)
           throw new SessionError(
             'SESSION_CHANGED',
@@ -472,6 +627,7 @@ async function updateProjectDisk<T>(
   const requested = nativePath(projectFilePath);
   let path = requested;
   let temporary: string | undefined;
+  let published = false;
   try {
     // Canonicalize the parent so directory aliases use the same writer lock.
     path = await canonicalProjectFilePath(requested);
@@ -535,6 +691,7 @@ async function updateProjectDisk<T>(
       );
     signal?.throwIfAborted();
     await rename(pending, path);
+    published = true;
     const directory = await open(dirname(path), 'r');
     try {
       await directory.sync();
@@ -543,6 +700,11 @@ async function updateProjectDisk<T>(
     }
     return changed.result;
   } catch (cause) {
+    if (published)
+      throw new SessionError(
+        'COMMIT_OUTCOME_UNKNOWN',
+        'The edit was published but durability could not be confirmed. Reload before retrying.',
+      );
     if (signal?.aborted && cause === signal.reason) throw cause;
     if (
       cause instanceof ProjectFormatError ||
@@ -554,7 +716,8 @@ async function updateProjectDisk<T>(
       throw cause;
     throw new ProjectFileError('UPDATE_FAILED', path, { cause });
   } finally {
-    if (temporary) await rm(temporary, { recursive: true, force: true });
+    if (temporary)
+      await rm(temporary, { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -562,6 +725,11 @@ export {
   AssetError,
   importMediaAsset,
   prepareMediaAsset,
+  prepareMediaRelink,
+  prepareFreezeFrame,
+  freezeProjectFrame,
+  prepareEmbeddedFont,
+  relinkMediaAsset,
   removeAssetFromProject,
   listMediaAssets,
   getMediaAsset,
@@ -570,5 +738,6 @@ export {
 export type { AssetInfo, AssetImportResult } from './assets.js';
 
 export { renderProjectFile, resolveProjectRender } from './render-files.js';
+export { renderPreviewCache } from './preview-cache.js';
 
 export { readSubtitleFile, writeSubtitleFile } from './subtitle-files.js';

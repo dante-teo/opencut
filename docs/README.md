@@ -147,7 +147,9 @@ opening another project offers **Save**, **Discard**, and **Cancel** when the
 current project is unsaved. Canceled dialogs and failed saves preserve it; failed
 opens leave the current project displayed. Operations run one at a time, with
 loading indicators and errors shown in the workspace. New projects and edited
-timelines can be unsaved. There is no Save As. Use **Export** for local MP4 export.
+timelines can be unsaved. **Save snapshot** writes a separate project copy and
+**Package project** gathers the project and media in a new folder. Use **Export**
+for local MP4 export.
 
 Use **Import media** to choose several video, audio or image files, or drop files
 from Finder into the media library. Import requires ffprobe on PATH; original
@@ -255,8 +257,34 @@ to the next compatible track. Focus an edge handle and use Left/Right to trim.
 Keyboard edits use frame stepping without proximity snapping. Scroll to reach
 other tracks/times; there is no automatic edge scrolling during a drag. Zoom is
 locked while dragging. Successful edits and undo/redo pause and unlink source preview,
-retaining the project playhead. Transitions and keyframes remain unavailable.
+retaining the project playhead.
 Use **Export** to render the edited project.
+Use the **Export frame** camera button in the Project viewer to save a PNG
+of the composited frame at the playhead.
+
+In the Inspector, **Fit → Cover** fills the canvas and **Crop** trims the
+edges of the fitted layer. Project settings allow resizing the canvas. Use
+**Replace media** to change the source of a clip, optionally shifting later
+clips on the same track. **Freeze at playhead** writes a PNG and inserts a held
+frame. **Dissolve in** overlaps two adjacent clips on separate layers and adds
+opacity keys. **Flash from white** adds an animated white overlay. **Color**
+adjusts exposure, white balance, contrast, saturation and a piecewise linear
+curve, and can copy the grade to other clips.
+
+Use **Relink media** in an offline asset's information panel to restore the
+source while preserving clip references. **Import font** embeds a TTF/OTF
+file of up to 2 MiB in the selected title or subtitle cue. Subtitles can use
+shadow, highlighted words, an entrance pop, and a style applied to selected cues.
+Select a cue and open **Word timing** in the Inspector to assign each word a
+start and end in seconds relative to the cue. The initial rows divide the cue
+evenly. Adjust them to match the speech, then click **Apply word timing**.
+Timed highlights appear in the Project viewer and in burned-in exports.
+
+**Detach audio** puts the original audio on a new track and mutes the video clip.
+Volume keyframes multiply the existing fades and gains. Audio effects can be
+ordered and edited per clip, with Dialogue and Room presets. **Separate dialogue**
+imports two sample-aligned WAV files, dialogue and residual background, after
+local Bandit v2 inference. See [dialogue model setup](CLI.md#dialogue-separation).
 
 Use **Add text** to create a clip of about three seconds at the playhead on a
 new text track. Edit its content, timing, typography and effects in the
@@ -281,8 +309,13 @@ Known limitation: after repeated ruler seeks, pressing **Play** can intermittent
 leave the linked source paused, with its source clock and the timeline playhead
 remaining fixed.
 
-The **Project viewer** tab plays the edited timeline; see [controls and limits](TIMELINE_PLAYBACK.md). Select an imported video
-in the media library to open **Source preview** automatically, or use **Open video**
+In **Project viewer → Preview quality**, use **Exact paused frames** to check
+which source frame covers the playhead, or **Render full timeline** to review
+a cached MP4 with mixed audio on the project frame grid. **Live preview**
+returns to interactive Chromium playback. See [controls and limits](TIMELINE_PLAYBACK.md).
+
+Select an imported video in the media library to open **Source preview**
+automatically, or use **Open video**
 for a local file. CLI imports update the open library immediately.
 In Source preview, Play/Pause, the Seek slider and Previous/Next frame operate on one source.
 Imported video preview reuses the metadata saved at import and needs no new
@@ -421,9 +454,11 @@ framing checks and delivery verification.
 | `pnpm fixtures:validate`                 | Decode generated media and check metadata/readable video frame counts (ffprobe)         |
 
 `build` emits development-ready production assets, not a signed `.app`, DMG,
-or installer. `test:desktop` needs a graphical desktop session but no downloaded
-Playwright browser. The full desktop suite requires FFmpeg/ffprobe with lavfi,
-libx264, libx265, libvpx-vp9, PNG and AAC support.
+or installer. The Electron suites use hidden, muted windows by default and
+require a graphical desktop session. Set `OPENCUT_DESKTOP_TEST_VISIBLE=1`
+when running `pnpm test:desktop` to show the windows for debugging. The full
+desktop suite requires FFmpeg/ffprobe with lavfi, libx264, libx265, libvpx-vp9,
+PNG and AAC support. The suite uses the project's Electron executable.
 
 Project regressions cover GUI/CLI file compatibility, offline
 assets, invalid files, stale saves, unsaved-close/quit choices, loading states and

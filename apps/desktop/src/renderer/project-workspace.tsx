@@ -23,6 +23,7 @@ import {
   timelineToSource,
   ZERO,
   frameIndex,
+  framePosition,
 } from './timeline-geometry.js';
 import { ProjectTimeline } from './project-timeline.js';
 import { MediaLibrary } from './media-library.js';
@@ -81,6 +82,73 @@ export function ProjectWorkspace() {
     kind: 'asset' | 'clip';
     id: string;
   } | null>(null);
+  function selectAsset(id: string) {
+    setSelection({ kind: 'asset', id });
+    setLinkedClipId(null);
+    setPreviewPosition(undefined);
+    setPreviewAssetId(id);
+    setPreviewRequest((value) => value + 1);
+    setViewer('source');
+  }
+  useEffect(() =>
+    window.opencut.onDesktopControl((control) => {
+      const project = stateRef.current?.project;
+      if (!project) return;
+      switch (control.action) {
+        case 'select':
+          if (!control.id) setSelection(null);
+          else if (control.kind === 'asset') selectAsset(control.id);
+          else setSelection({ kind: 'clip', id: control.id });
+          break;
+        case 'viewer':
+          setViewer(control.viewer);
+          break;
+        case 'status':
+          return {
+            viewer,
+            selection,
+            frame: Number(frameIndex(playhead, project.settings.frameRate)),
+            preview: projectTransport.current?.status(),
+          };
+        case 'source-seek':
+          if (viewer !== 'source' || !transport.current?.seekSeconds)
+            throw new Error('Open a timed source in the source viewer first.');
+          transport.current.seekSeconds(control.seconds);
+          break;
+        case 'step':
+          (viewer === 'source'
+            ? transport.current
+            : projectTransport.current
+          )?.step(control.direction);
+          break;
+        case 'live-preview':
+          projectTransport.current?.livePreview();
+          break;
+        case 'seek':
+          seekTimeline(
+            framePosition(BigInt(control.frame), project.settings.frameRate),
+          );
+          break;
+        case 'render-preview':
+          setViewer('project');
+          projectTransport.current?.renderPreview();
+          break;
+        case 'play':
+        case 'pause':
+          if (viewer === 'source')
+            transport.current?.setPlaying?.(control.action === 'play');
+          else projectTransport.current?.setPlaying(control.action === 'play');
+          break;
+        case 'toggle':
+          (viewer === 'source'
+            ? transport.current
+            : projectTransport.current
+          )?.toggle();
+          break;
+      }
+      return null;
+    }),
+  );
 
   function run(
     label: string,
@@ -126,6 +194,9 @@ export function ProjectWorkspace() {
           if (
             label !== 'Saving project…' &&
             label !== 'Exporting subtitles…' &&
+            label !== 'Exporting frame…' &&
+            label !== 'Saving snapshot…' &&
+            label !== 'Packaging project…' &&
             !editing
           ) {
             setSelection(null);
@@ -414,6 +485,26 @@ export function ProjectWorkspace() {
           >
             <Save aria-hidden="true" focusable="false" /> Save project
           </button>
+          {project &&
+            ([false, true] as const).map((bundle) => (
+              <button
+                key={String(bundle)}
+                disabled={blocking}
+                onClick={() => {
+                  void run(
+                    bundle ? 'Packaging project…' : 'Saving snapshot…',
+                    () =>
+                      window.opencut.copyProject({
+                        projectId: project.metadata.id,
+                        expectedRevision: projectRevision(project),
+                        bundle,
+                      }),
+                  );
+                }}
+              >
+                {bundle ? 'Package project' : 'Save snapshot'}
+              </button>
+            ))}
           <button
             disabled={blocking || !project}
             onClick={() =>
@@ -466,14 +557,7 @@ export function ProjectWorkspace() {
                 true,
               );
           }}
-          onSelect={(id) => {
-            setSelection({ kind: 'asset', id });
-            setLinkedClipId(null);
-            setPreviewPosition(undefined);
-            setPreviewAssetId(id);
-            setPreviewRequest((value) => value + 1);
-            setViewer('source');
-          }}
+          onSelect={selectAsset}
         />
         <section className="viewer-panel" aria-label="Viewer">
           <div className="panel-heading viewer-tabs">
@@ -515,6 +599,15 @@ export function ProjectWorkspace() {
                   if (viewer === 'project') setPlayhead(time);
                 }}
                 transportRef={projectTransport}
+                onExportFrame={(at) => {
+                  void run('Exporting frame…', () =>
+                    window.opencut.exportFrame({
+                      projectId: project.metadata.id,
+                      expectedRevision: projectRevision(project),
+                      at,
+                    }),
+                  );
+                }}
               />
             ) : (
               <div className="viewer-stage">
@@ -584,6 +677,61 @@ export function ProjectWorkspace() {
           onKeyframeSelect={setKeyframeProperty}
           disabled={blocking}
           onEdit={(operations, label) => edit(operations, label, true)}
+          onRelink={(assetId) => {
+            if (!project) return;
+            void run(
+              'Relinking media…',
+              () =>
+                window.opencut.relinkAsset({
+                  projectId: project.metadata.id,
+                  expectedRevision: projectRevision(project),
+                  assetId,
+                }),
+              true,
+            );
+          }}
+          onSeparateDialogue={(assetId) => {
+            if (!project) return;
+            void run(
+              'Separating dialogue…',
+              () =>
+                window.opencut.separateDialogue({
+                  projectId: project.metadata.id,
+                  expectedRevision: projectRevision(project),
+                  assetId,
+                }),
+              true,
+            );
+          }}
+          onFreeze={(clipId, frames) => {
+            if (!project) return;
+            const at = Number(frameIndex(playhead, project.settings.frameRate));
+            void run(
+              'Inserting freeze frame…',
+              () =>
+                window.opencut.freezeFrame({
+                  projectId: project.metadata.id,
+                  expectedRevision: projectRevision(project),
+                  clipId,
+                  at,
+                  frames,
+                }),
+              true,
+            );
+          }}
+          onImportFont={(id) => {
+            if (!project) return;
+            void run(
+              'Importing font…',
+              () =>
+                window.opencut.importFont({
+                  projectId: project.metadata.id,
+                  expectedRevision: projectRevision(project),
+                  id,
+                }),
+              true,
+            );
+          }}
           onClear={() => setSelection(null)}
         />
       </div>

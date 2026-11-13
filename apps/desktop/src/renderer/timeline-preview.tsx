@@ -1,4 +1,4 @@
-import { Play, Pause, StepBack, StepForward } from 'lucide-react';
+import { Camera, Play, Pause, StepBack, StepForward } from 'lucide-react';
 import type { DesktopCacheStatus } from '../bridge.js';
 import { gainDb } from './clip-properties.js';
 import { MediaCacheControls } from './media-cache.js';
@@ -24,6 +24,10 @@ import {
 
 export interface TimelineTransport extends PreviewTransport {
   seek(time: RationalTime): void;
+  setPlaying(playing: boolean): void;
+  renderPreview(): void;
+  livePreview(): void;
+  status(): { playing: boolean; cached: boolean; renderStatus: string };
 }
 
 export function TimelinePreview({
@@ -33,6 +37,7 @@ export function TimelinePreview({
   position,
   onPositionChange,
   transportRef,
+  onExportFrame,
 }: {
   project: Project;
   active: boolean;
@@ -40,6 +45,7 @@ export function TimelinePreview({
   position: RationalTime;
   onPositionChange(time: RationalTime): void;
   transportRef: Ref<TimelineTransport>;
+  onExportFrame: (frame: number) => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const host = useRef<HTMLDivElement>(null);
@@ -52,6 +58,72 @@ export function TimelinePreview({
     null,
   );
   const [cacheEpoch, setCacheEpoch] = useState(0);
+  const [previewSize, setPreviewSize] = useState(1920);
+  const [exactPausedFrames, setExactPausedFrames] = useState(false);
+  const [rendered, setRendered] = useState<{
+    url: string;
+    frameCount: number;
+  } | null>(null);
+  const [renderStatus, setRenderStatus] = useState('');
+  const [renderedPlaying, setRenderedPlaying] = useState(false);
+  const renderedVideo = useRef<HTMLVideoElement>(null);
+  const generation = useRef(0);
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    generation.current++;
+    setRendered(null);
+    setRenderStatus('');
+    setReady(false);
+    return () => {
+      generation.current++;
+    };
+  }, [project, previewSize]);
+  useEffect(
+    () => () => {
+      if (rendered) void window.opencut.releasePreview(rendered.url);
+    },
+    [rendered],
+  );
+  const renderPreview = () => {
+    const current = ++generation.current;
+    player.current?.pause();
+    renderedVideo.current?.pause();
+    setRenderStatus('Rendering full timeline…');
+    void window.opencut
+      .renderTimeline({
+        projectId: project.metadata.id,
+        expectedRevision: project.editing?.revision ?? 0,
+        size: previewSize,
+      })
+      .then(
+        (result) => {
+          if (current !== generation.current) {
+            if (result) void window.opencut.releasePreview(result.url);
+            return;
+          }
+          setRenderStatus(
+            result
+              ? result.hit
+                ? 'Using cached timeline'
+                : 'Timeline preview ready'
+              : '',
+          );
+          if (result) {
+            setReady(false);
+            setRenderedPlaying(false);
+            setRendered(result);
+          }
+        },
+        (error: unknown) => {
+          if (current === generation.current) setRenderStatus(String(error));
+        },
+      );
+  };
+  const livePreview = () => {
+    generation.current++;
+    setRendered(null);
+    setRenderStatus('');
+  };
   const cacheSignature = useRef('');
   const memoryBudget = useRef(64 * 1024 ** 2);
   const onCacheStatus = useCallback((status: DesktopCacheStatus) => {
@@ -79,7 +151,7 @@ export function TimelinePreview({
     }
   }, []);
   useEffect(() => {
-    if (!active) return;
+    if (!active || rendered) return;
     const playback = new TimelinePlayback(
       project,
       canvas.current!,
@@ -89,6 +161,8 @@ export function TimelinePreview({
         callback.current(time);
       },
       memoryBudget.current,
+      previewSize,
+      exactPausedFrames,
     );
     player.current = playback;
     playback.seek(initial.current);
@@ -96,38 +170,135 @@ export function TimelinePreview({
       playback.dispose();
       player.current = null;
     };
-  }, [project, active, cacheEpoch]);
+  }, [project, active, cacheEpoch, previewSize, exactPausedFrames, rendered]);
   useEffect(() => {
-    if (!active || interrupted) player.current?.pause();
+    if (!active || interrupted) {
+      player.current?.pause();
+      renderedVideo.current?.pause();
+    }
   }, [active, interrupted, project]);
-  useImperativeHandle(
-    transportRef,
-    () => ({
-      seek: (time) => {
-        if (active && !interrupted) player.current?.seek(time);
-      },
-      toggle: () => {
-        if (active && !interrupted) void player.current?.toggle();
-      },
-      step: (direction) => {
-        if (active && !interrupted) player.current?.step(direction);
-      },
-    }),
-    [active, interrupted],
-  );
   const rate = project.settings.frameRate;
-  const end = player.current?.clock.end;
+  const end = rendered
+    ? framePosition(BigInt(rendered.frameCount), rate)
+    : player.current?.clock.end;
   const frame = Number(frameIndex(position, rate));
+  const seek = (time: RationalTime) => {
+    const video = renderedVideo.current;
+    if (video && rendered) {
+      const index = Math.max(
+        0,
+        Math.min(rendered.frameCount, Number(frameIndex(time, rate))),
+      );
+      video.currentTime = Math.min(
+        video.duration || Infinity,
+        ((index + (index === rendered.frameCount ? 0 : 0.25)) *
+          rate.denominator) /
+          rate.numerator,
+      );
+      callback.current(framePosition(BigInt(index), rate));
+    } else player.current?.seek(time);
+  };
+  const setPlaying = (playing: boolean) => {
+    if (!active || interrupted) return;
+    const video = renderedVideo.current;
+    if (video) {
+      if (playing)
+        void video
+          .play()
+          .catch((error: unknown) => setRenderStatus(String(error)));
+      else video.pause();
+    } else if (player.current && playing !== player.current.clock.playing) {
+      if (playing) void player.current.toggle();
+      else player.current.pause();
+    }
+  };
+  const toggle = () =>
+    setPlaying(
+      renderedVideo.current
+        ? renderedVideo.current.paused
+        : !player.current?.clock.playing,
+    );
+  const step = (direction: -1 | 1) => {
+    if (interrupted || !active) return;
+    if (!rendered) {
+      player.current?.step(direction);
+      return;
+    }
+    renderedVideo.current?.pause();
+    seek(framePosition(BigInt(Math.max(0, frame + direction)), rate));
+  };
+  useImperativeHandle(transportRef, () => ({
+    seek: (time) => {
+      if (active && !interrupted) seek(time);
+    },
+    setPlaying,
+    toggle,
+    step,
+    renderPreview,
+    livePreview,
+    status: () => ({
+      playing: renderedVideo.current
+        ? !renderedVideo.current.paused
+        : !!player.current?.clock.playing,
+      cached: !!rendered,
+      renderStatus,
+    }),
+  }));
+  const playing = rendered ? renderedPlaying : diagnostics?.playing;
   return (
     <div className="timeline-player" aria-label="Edited timeline preview">
       <div className="timeline-stage">
-        <canvas ref={canvas} aria-label="Edited timeline canvas" />
+        {rendered ? (
+          <video
+            ref={renderedVideo}
+            src={rendered.url}
+            playsInline
+            preload="auto"
+            aria-label="Rendered timeline preview"
+            onLoadedMetadata={() => {
+              setReady(true);
+              seek(initial.current);
+            }}
+            onPlay={() => setRenderedPlaying(true)}
+            onPause={() => setRenderedPlaying(false)}
+            onEnded={() => {
+              setRenderedPlaying(false);
+              callback.current(
+                framePosition(BigInt(rendered.frameCount), rate),
+              );
+            }}
+            onTimeUpdate={(event) => {
+              if (!event.currentTarget.paused)
+                callback.current(
+                  framePosition(
+                    BigInt(
+                      Math.min(
+                        rendered.frameCount,
+                        Math.floor(
+                          (event.currentTarget.currentTime * rate.numerator) /
+                            rate.denominator +
+                            1e-6,
+                        ),
+                      ),
+                    ),
+                    rate,
+                  ),
+                );
+            }}
+            onError={() =>
+              setRenderStatus('The rendered preview could not be decoded.')
+            }
+            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+          />
+        ) : (
+          <canvas ref={canvas} aria-label="Edited timeline canvas" />
+        )}
       </div>
       <div ref={host} className="timeline-decoders" />
       <div className="transport">
         <button
           disabled={interrupted}
-          onClick={() => player.current?.step(-1)}
+          onClick={() => step(-1)}
           aria-label="Previous frame"
         >
           <StepBack aria-hidden="true" />
@@ -135,21 +306,18 @@ export function TimelinePreview({
         <button
           disabled={
             interrupted ||
+            (rendered !== null && !ready) ||
             (!project.clips.length && !project.subtitles?.cues.length)
           }
-          onClick={() => void player.current?.toggle()}
-          aria-label={diagnostics?.playing ? 'Pause' : 'Play'}
-          title={diagnostics?.playing ? 'Pause' : 'Play'}
+          onClick={toggle}
+          aria-label={playing ? 'Pause' : 'Play'}
+          title={playing ? 'Pause' : 'Play'}
         >
-          {diagnostics?.playing ? (
-            <Pause aria-hidden="true" />
-          ) : (
-            <Play aria-hidden="true" />
-          )}
+          {playing ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}
         </button>
         <button
           disabled={interrupted}
-          onClick={() => player.current?.step(1)}
+          onClick={() => step(1)}
           aria-label="Next frame"
         >
           <StepForward aria-hidden="true" />
@@ -157,6 +325,17 @@ export function TimelinePreview({
         <output data-testid="project-position">
           {timelineTimecode(position, rate)} NDF
         </output>
+        <button
+          type="button"
+          aria-label="Export frame"
+          title="Export frame"
+          disabled={
+            interrupted || !end || frame >= Number(frameIndex(end, rate))
+          }
+          onClick={() => onExportFrame(frame)}
+        >
+          <Camera aria-hidden="true" />
+        </button>
         <input
           type="range"
           aria-label="Seek timeline"
@@ -166,9 +345,7 @@ export function TimelinePreview({
           value={frame}
           disabled={interrupted}
           onChange={(event) =>
-            player.current?.seek(
-              framePosition(BigInt(event.target.value), rate),
-            )
+            seek(framePosition(BigInt(event.target.value), rate))
           }
         />
       </div>
@@ -206,6 +383,49 @@ export function TimelinePreview({
           })}
         </div>
         <MediaCacheControls project={project} onStatus={onCacheStatus} />
+        <details name="viewer-utilities" className="preview-quality">
+          <summary>Preview quality</summary>
+          <div className="viewer-utility-content">
+            <label>
+              Preview size{' '}
+              <select
+                value={previewSize}
+                onChange={(event) =>
+                  setPreviewSize(Number(event.currentTarget.value))
+                }
+              >
+                <option value={1920}>Full preview</option>
+                <option value={960}>960 px</option>
+                <option value={480}>480 px</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={renderPreview}
+              disabled={
+                interrupted || renderStatus === 'Rendering full timeline…'
+              }
+            >
+              Render full timeline
+            </button>
+            {rendered && (
+              <button type="button" onClick={livePreview}>
+                Live preview
+              </button>
+            )}
+            {renderStatus && <output>{renderStatus}</output>}
+            <label>
+              <input
+                type="checkbox"
+                checked={exactPausedFrames}
+                onChange={(event) =>
+                  setExactPausedFrames(event.currentTarget.checked)
+                }
+              />{' '}
+              Exact paused frames
+            </label>
+          </div>
+        </details>
         <details name="viewer-utilities" className="timeline-diagnostics">
           <summary>Playback diagnostics</summary>
           <div className="viewer-utility-content">

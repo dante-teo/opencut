@@ -1,6 +1,6 @@
 import type { AnimatedProperty } from '@opencut/shared';
 import { SlidersHorizontal } from 'lucide-react';
-import { ClipProperties } from './clip-properties.js';
+import { ClipProperties, NumberProperty } from './clip-properties.js';
 import { KeyframeProperties } from './keyframe-properties.js';
 import { TextProperties } from './text-properties.js';
 import { SubtitleProperties } from './subtitle-properties.js';
@@ -50,6 +50,10 @@ export function ProjectInspector({
   onKeyframeSelect,
   disabled,
   onEdit,
+  onRelink,
+  onSeparateDialogue,
+  onFreeze,
+  onImportFont,
 }: {
   state: DesktopProject | null;
   selection: { kind: 'asset' | 'clip'; id: string } | null;
@@ -60,6 +64,10 @@ export function ProjectInspector({
   onKeyframeSelect: (property: AnimatedProperty) => void;
   disabled: boolean;
   onEdit: (operations: TimelineOperation[], label: string) => Promise<void>;
+  onRelink: (assetId: string) => void;
+  onSeparateDialogue: (assetId: string) => void;
+  onFreeze: (clipId: string, frames: number) => void;
+  onImportFont: (id: string) => void;
 }) {
   const project = state?.project;
   const clip =
@@ -116,6 +124,41 @@ export function ProjectInspector({
                 onEdit={onEdit}
               />
             )}
+            {(clip?.text || cue) && (
+              <div>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => onImportFont((cue ?? clip)!.id)}
+                >
+                  Import font…
+                </button>
+                {(clip?.text?.embeddedFont || cue?.style?.embeddedFont) && (
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => {
+                      const operation: TimelineOperation = cue
+                        ? {
+                            type: 'subtitle.style',
+                            ids: [cue.id],
+                            style: { embeddedFont: null },
+                          }
+                        : {
+                            type: 'text.set',
+                            id: clip!.id,
+                            text: { embeddedFont: null },
+                          };
+                      void onEdit([operation], 'Remove imported font').catch(
+                        () => {},
+                      );
+                    }}
+                  >
+                    Remove imported font
+                  </button>
+                )}
+              </div>
+            )}
             {clip &&
               project?.tracks.some(
                 (track) => track.id === clip.trackId && track.type === 'video',
@@ -140,6 +183,7 @@ export function ProjectInspector({
                   clip={clip}
                   disabled={disabled}
                   onEdit={onEdit}
+                  onFreeze={(frames) => onFreeze(clip.id, frames)}
                 />
                 <dl>
                   <dt>Track</dt>
@@ -197,6 +241,25 @@ export function ProjectInspector({
                       </>
                     )}
                   </dl>
+                  {availability && availability.status !== 'available' && (
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => onRelink(asset.id)}
+                    >
+                      Relink media…
+                    </button>
+                  )}
+                  {availability?.status === 'available' &&
+                    asset.mediaTypes.includes('audio') && (
+                      <button
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => onSeparateDialogue(asset.id)}
+                      >
+                        Separate dialogue…
+                      </button>
+                    )}
                 </details>
               </>
             )}
@@ -210,6 +273,26 @@ export function ProjectInspector({
         {project && !selection && (
           <>
             <h3>Project settings</h3>
+            <fieldset className="clip-properties" disabled={disabled}>
+              <NumberProperty
+                label="Canvas width"
+                value={project.settings.width}
+                min={1}
+                max={Number.MAX_SAFE_INTEGER}
+                onCommit={(width) =>
+                  onEdit([{ type: 'canvas.set', width }], 'Set canvas width')
+                }
+              />
+              <NumberProperty
+                label="Canvas height"
+                value={project.settings.height}
+                min={1}
+                max={Number.MAX_SAFE_INTEGER}
+                onCommit={(height) =>
+                  onEdit([{ type: 'canvas.set', height }], 'Set canvas height')
+                }
+              />
+            </fieldset>
             <dl className="project-metadata">
               <dt>Resolution</dt>
               <dd>

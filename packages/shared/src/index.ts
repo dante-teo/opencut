@@ -1,16 +1,24 @@
 export * from './keyframes.js';
+export * from './color-grade.js';
 
 export const WAVEFORM_CHUNK_SECONDS = 16;
 export const WAVEFORM_BINS_PER_SECOND = 100;
+export const roomEchoes = [
+  { seconds: 0.029, gain: 0.45 },
+  { seconds: 0.047, gain: 0.32 },
+  { seconds: 0.071, gain: 0.23 },
+] as const;
 
 /** Headless composition rules used by both FFmpeg and the browser preview. */
 export interface VisualTransform {
-  x?: number;
-  y?: number;
-  scale?: number;
-  opacity?: number;
-  rotation?: number;
-  fit?: 'contain' | 'cover' | 'stretch';
+  crop?:
+    { left: number; top: number; right: number; bottom: number } | undefined;
+  x?: number | undefined;
+  y?: number | undefined;
+  scale?: number | undefined;
+  opacity?: number | undefined;
+  rotation?: number | undefined;
+  fit?: 'contain' | 'cover' | 'stretch' | undefined;
 }
 
 export const DEFAULT_TEXT_FONT = 'Noto Sans SC';
@@ -18,6 +26,10 @@ export const DEFAULT_TEXT_SIZE = 48;
 
 export interface TextLayer {
   content: string;
+  canvasFill?: string | undefined;
+  emphasis?: string[] | undefined;
+  activeWord?: { from: number; to: number; phase: number } | undefined;
+  embeddedFont?: string | null | undefined;
   fontFamily?: string | undefined;
   fontSize?: number | undefined;
   fontWeight?: number | undefined;
@@ -122,6 +134,7 @@ export function visualGeometry(
     cropX,
     cropY,
     opacity: visual.opacity ?? 1,
+    ...(visual.crop && { crop: visual.crop }),
     visible:
       (visual.opacity ?? 1) > 0 &&
       centerX - radiusX < width &&
@@ -204,7 +217,13 @@ export function drawMediaLayer<Image>(
   }
   ctx.globalAlpha = opacity;
   ctx.beginPath();
-  ctx.rect(x, y, layerWidth, layerHeight);
+  const { left = 0, top = 0, right = 0, bottom = 0 } = geometry.crop ?? {};
+  ctx.rect(
+    x + left * layerWidth,
+    y + top * layerHeight,
+    (1 - left - right) * layerWidth,
+    (1 - top - bottom) * layerHeight,
+  );
   ctx.clip();
   ctx.drawImage(image, x - cropX, y - cropY, scaledWidth, scaledHeight);
   ctx.restore();

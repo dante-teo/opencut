@@ -216,6 +216,37 @@ errors include a usage hint.
 
 ## Commands
 
+- `project cache-preview PROJECT [--size 960] --json` and
+  `desktop control PROJECT REQUEST.json --json` provide
+  [rendered previews and live desktop control](#rendered-preview-and-desktop-control).
+- `subtitle.words` in `edit apply` accepts a cue ID and a `words` array.
+  Each entry has `from` and `to` UTF-16 text offsets and exact cue-relative
+  `start` and `end` times. Intervals are half-open and cannot overlap.
+  The active word animates and highlights in preview and burn-in.
+  Timeline inspection includes `subtitleCueId` on these generated segments.
+  SRT and WebVTT export still carries cue text and timing.
+
+- `project freeze PROJECT CLIP --at FRAME --frames COUNT --output NEW.png`
+  extracts the covering source frame and inserts a still. The edit shifts later
+  clips on that track and participates in undo. The PNG is retained for redo.
+  OpenCut removes the PNG after a confirmed edit rejection. If the commit
+  outcome is unknown, inspect the project before retrying.
+- `project snapshot PROJECT --output NEW.opencut.json` writes a separate copy
+  of the current revision. `project package PROJECT --output NEW_FOLDER` also
+  copies the media referenced by the current project and undo/redo history.
+  Missing historical files remain offline when that revision is restored.
+- `media relink PROJECT ASSET FILE` re-probes a source and keeps the stable
+  asset ID. `media import-font PROJECT TITLE_OR_CUE FILE` embeds a TTF or OTF
+  of up to 2 MiB. Both support dry runs and revision checks.
+- `project render` accepts `--width` and `--height` together, `--fps N[/D]`,
+  `--codec h264|hevc`, `--video-bitrate`, `--audio-bitrate`, `--audio-rate` and
+  `--audio-channels`. Bitrates are in kb/s. See [export settings](EXPORT.md).
+- `edit apply` supports `clip.replace`, `clip.detach-audio`, `clip.dissolve`,
+  `clip.flash`, `clip.fade`, `clip.grade`, `clip.gain-keys`, `clip.effects` and
+  `subtitle.effects`. `clip.visual` accepts `crop` as fractional edge insets.
+  `subtitle.style` accepts optional cue `ids`. Discover their fields with
+  `opencut help edit apply --json`.
+
 - No arguments, `--help`, or `-h`: print usage. Help takes precedence over version.
 - `help [GROUP [ACTION]] --json`: discover commands, arguments, capabilities and schemas.
 - `--version` or `-v`: print the application version.
@@ -269,6 +300,44 @@ Errors go to stderr. With `--json`, the error is
 `{"ok":false,"error":{"code":"REVISION_CONFLICT","message":"..."}}`;
 argument errors also include `error.hint`. Without `--json`, errors remain text.
 
+## Rendered preview and desktop control
+
+`opencut project cache-preview "$PROJECT" --size 960 --json` renders or
+reuses a full timeline MP4 with mixed audio. It returns `path`, `hit`, `key`,
+`revision`, `frameCount`, and `frameRate`. `--size` caps the longest side at
+64–1920 pixels and defaults to 960. Desktop **Render full timeline** uses
+the same cache. It samples VFR footage by source presentation time onto the
+project frame grid. Use `project render` for a durable export.
+
+`opencut desktop control "$PROJECT" request.json --json` requires the saved
+project to be open in OpenCut desktop on macOS or Linux. Run
+`opencut help desktop control --json` for the request schema. For example, put
+`{"action":"seek","frame":120}` in `request.json` to seek to project frame 120.
+Use `{"action":"status"}` to read the current viewer, selection, playhead, and
+project preview state. The `render-preview` action acknowledges the request
+before rendering finishes. Query `status` for `state.preview.renderStatus` or use
+`project cache-preview` to wait for and obtain the rendered file directly.
+
+Other actions select clips or assets, switch viewers, seek within the source,
+step, play, pause, toggle playback, return to live preview, search online
+media, or import a search result by ID with an expected revision.
+
+## Dialogue separation
+
+`opencut media separate-dialogue PROJECT ASSET --output NEW_FOLDER --json`
+writes `dialogue.wav` and `background.wav`. The model estimates the dialogue;
+background is the normalized original mix minus that estimate. Both stems
+use the same 48 kHz stereo sample grid and cover the input duration. Import
+the files as audio assets to mix or export them. The desktop imports both files
+automatically after separation.
+
+Install [ELUATE](https://github.com/anaxoniclabs/ELUATE) in a local Python
+environment and run `eluate setup` there to obtain its multilingual Bandit v2
+checkpoint. Set `OPENCUT_DIALOGUE_PYTHON` to that environment's Python
+executable before launching OpenCut or the CLI if it differs from `python3`.
+OpenCut invokes the local inference API and requires FFmpeg and ffprobe.
+The current integration accepts sources with a known duration of up to ten minutes.
+
 ## Shared projects in Electron (T22)
 
 On macOS/Linux, existing editing commands automatically route through Electron
@@ -296,8 +365,9 @@ and retry after the competing operation finishes. A second GUI cannot acquire
 the same project. Dry-run validates against the same authority without changing
 project bytes, history or the visible timeline.
 
-After `SESSION_DISCONNECTED`, `SESSION_CHANGED` or a timeout, query history and
-content before retrying: a lost response may follow a successful commit. The CLI
+After `SESSION_DISCONNECTED`, `SESSION_CHANGED`, `COMMIT_OUTCOME_UNKNOWN`, or a
+timeout, query history and content before retrying. A lost response can follow
+a successful commit. The CLI
 never silently retries a session mutation on disk. After Electron exits/crashes,
 new CLI invocations resume independent work on the last complete saved project.
 

@@ -1,4 +1,5 @@
 import { animatedProperties, visualRanges } from '@opencut/shared';
+import { desktopControlJsonSchema } from '@opencut/core/node';
 import {
   editTransactionJsonSchema,
   getApplicationInfo,
@@ -50,6 +51,36 @@ const options: Record<string, Option> = {
     description: 'Encoding quality.',
     enum: ['draft', 'balanced', 'high'],
   },
+  codec: {
+    type: 'string',
+    description: 'MP4 video codec.',
+    enum: ['h264', 'hevc'],
+  },
+  'video-bitrate': {
+    type: 'string',
+    description: 'Target video bitrate instead of CRF.',
+    minimum: 100,
+    maximum: 100000,
+    unit: 'kb/s',
+  },
+  'audio-bitrate': {
+    type: 'string',
+    description: 'Target AAC bitrate.',
+    minimum: 32,
+    maximum: 320,
+    unit: 'kb/s',
+  },
+  'audio-rate': {
+    type: 'string',
+    description: 'AAC sample rate.',
+    enum: ['44100', '48000'],
+    unit: 'Hz',
+  },
+  'audio-channels': {
+    type: 'string',
+    description: 'Mono or stereo.',
+    enum: ['1', '2'],
+  },
   resolution: {
     type: 'string',
     description:
@@ -86,6 +117,12 @@ const options: Record<string, Option> = {
     description: 'Absolute timeline position; split is absolute too.',
     unit: 'project-frame',
     minimum: 0,
+  },
+  frames: {
+    type: 'string',
+    description: 'Positive duration in project frames.',
+    minimum: 1,
+    unit: 'project-frame',
   },
   in: {
     type: 'string',
@@ -337,13 +374,65 @@ const definitions: Definition[] = [
   {
     name: 'project render',
     description:
-      'Render the fully composited timeline with synchronized mixed audio to H.264/AAC MP4.',
+      'Render the composited timeline with mixed audio to H.264 or HEVC with AAC in MP4.',
     args: ['project-file'],
-    options: ['output', 'quality', 'resolution', 'overwrite', 'no-subtitles'],
+    options: [
+      'output',
+      'quality',
+      'resolution',
+      'overwrite',
+      'no-subtitles',
+      'width',
+      'height',
+      'fps',
+      'codec',
+      'video-bitrate',
+      'audio-bitrate',
+      'audio-rate',
+      'audio-channels',
+    ],
     required: ['output'],
     defaults: { quality: 'balanced', resolution: 'project', overwrite: false },
     tools: ['ffmpeg', 'ffprobe'],
     jsonl: true,
+  },
+  {
+    name: 'project freeze',
+    description:
+      'Write a still PNG and insert a freeze frame at an exact project frame.',
+    args: ['project-file', 'clip-id'],
+    options: ['at', 'frames', 'output', 'expected-revision'],
+    required: ['at', 'frames', 'output'],
+    tools: ['ffmpeg', 'ffprobe'],
+    mutates: true,
+  },
+  {
+    name: 'project cache-preview',
+    description: 'Render or reuse a verified full-timeline preview.',
+    args: ['project-file'],
+    options: ['size'],
+    tools: ['ffmpeg', 'ffprobe'],
+  },
+  {
+    name: 'desktop control',
+    description:
+      'Control playback, viewer, selection and online media in a running desktop project.',
+    args: ['project-file', 'request.json'],
+    options: [],
+  },
+  {
+    name: 'project snapshot',
+    description: 'Save a named copy of the current revision.',
+    args: ['project-file'],
+    options: ['output'],
+    required: ['output'],
+  },
+  {
+    name: 'project package',
+    description: 'Copy the project and the media referenced by its history.',
+    args: ['project-file'],
+    options: ['output'],
+    required: ['output'],
   },
   {
     name: 'subtitle import',
@@ -393,6 +482,35 @@ const definitions: Definition[] = [
     args: ['project-file', 'asset-id'],
     options: edit,
     mutates: true,
+  },
+  {
+    name: 'media relink',
+    description:
+      'Reprobe a replacement source and retain the existing asset and clip IDs.',
+    args: ['project-file', 'asset-id', 'file'],
+    options: edit,
+    tools: ['ffprobe'],
+    mutates: true,
+  },
+  {
+    name: 'media import-font',
+    description: 'Embed a TTF or OTF font in a title or subtitle cue.',
+    args: ['project-file', 'clip-id', 'file'],
+    options: edit,
+    mutates: true,
+  },
+  {
+    name: 'media separate-dialogue',
+    description:
+      'Write dialogue and residual background WAV files with local Bandit v2 inference.',
+    args: ['project-file', 'asset-id'],
+    options: ['output'],
+    required: ['output'],
+    tools: [
+      'ffmpeg',
+      'ffprobe',
+      'Python with ELUATE and the Bandit v2 multilingual checkpoint',
+    ],
   },
   {
     name: 'timeline list',
@@ -788,6 +906,7 @@ export function discovery(scope: string[] = [], help = '') {
       progress: 'preview clip progress uses stderr JSONL; stdout is one result',
     },
     schemas: {
+      'desktop control input': desktopControlJsonSchema(),
       ...inspectionJsonSchemas,
       'edit apply input': editTransactionJsonSchema(),
       run: {

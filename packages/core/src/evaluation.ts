@@ -1,6 +1,6 @@
 import { evaluateVisual, visualDefaults } from '@opencut/shared';
 import type { Project, TimelineClip } from './project.js';
-import { audioFadeGain, baseAudioGain } from './audio.js';
+import { audioFadeGain, baseAudioGain, keyframeGain } from './audio.js';
 import { clipSpeed, sampleClipSourceTime } from './clip-timing.js';
 import { listTimeline } from './timeline.js';
 import { subtitleTextLayers } from './subtitles.js';
@@ -15,9 +15,15 @@ interface ResolvedClipProperties extends TimelineClip {
   trackType: 'video' | 'audio';
   visual: {
     [
-      Key in Exclude<keyof NonNullable<TimelineClip['visual']>, 'rotation'>
+      Key in Exclude<
+        keyof NonNullable<TimelineClip['visual']>,
+        'rotation' | 'crop'
+      >
     ]-?: NonNullable<NonNullable<TimelineClip['visual']>[Key]>;
-  } & { rotation?: number };
+  } & {
+    rotation?: number;
+    crop?: NonNullable<NonNullable<TimelineClip['visual']>['crop']>;
+  };
   volume: number;
   muted: boolean;
   trackVolume?: number | undefined;
@@ -41,6 +47,8 @@ export function continuesMediaRun(
     previous.assetId === clip.assetId &&
     compareTimes(previous.timelineEnd, clip.timelineStart) === 0 &&
     compareTimes(previous.sourceOut, clip.sourceIn) === 0 &&
+    JSON.stringify(previous.effects ?? []) ===
+      JSON.stringify(clip.effects ?? []) &&
     compareTimes(clipSpeed(previous), clipSpeed(clip)) === 0
   );
 }
@@ -49,6 +57,8 @@ export type ResolvedTextClip = ResolvedClipProperties & {
   text: NonNullable<TimelineClip['text']>;
   kind: 'text';
   subtitle?: true;
+  subtitleCueId?: string;
+  animationStart?: RationalTime;
 };
 export type ResolvedTimelineClip = ResolvedMediaClip | ResolvedTextClip;
 
@@ -77,6 +87,7 @@ export function resolveTimeline(project: Project) {
             scale: clip.visual?.scale ?? visualDefaults.scale,
             opacity: clip.visual?.opacity ?? visualDefaults.opacity,
             fit: clip.visual?.fit ?? 'contain',
+            ...(clip.visual?.crop && { crop: clip.visual.crop }),
             ...(clip.visual?.rotation !== undefined && {
               rotation: clip.visual.rotation,
             }),
@@ -101,22 +112,34 @@ export function resolveTimeline(project: Project) {
     settings: project.settings,
     subtitles: timeline.subtitles,
   }).entries()) {
-    for (const { cue, text, visual } of layers) {
-      const duration = subtractTimes(cue.end, cue.start);
+    for (const {
+      id,
+      start,
+      end,
+      text,
+      visual,
+      keyframes,
+      subtitleCueId,
+      animationStart,
+    } of layers) {
+      const duration = subtractTimes(end, start);
       clips.push({
-        id: cue.id,
+        id,
         trackId: `subtitle:${lane}`,
         trackIndex: project.tracks.length + lane,
         trackType: 'video',
         kind: 'text',
         subtitle: true,
-        timelineStart: cue.start,
-        timelineEnd: cue.end,
+        timelineStart: start,
+        timelineEnd: end,
         sourceIn: { numerator: 0, denominator: 1 },
         sourceOut: duration,
         duration,
         text,
         visual,
+        ...(keyframes && { keyframes }),
+        ...(subtitleCueId && { subtitleCueId }),
+        ...(animationStart && { animationStart }),
         volume: 1,
         muted: false,
         audioPresence: 'absent',
@@ -225,21 +248,23 @@ function createTimelineQuery<
       const clip = entries[low];
       if (clip && compareTimes(clip.timelineStart, at) <= 0) {
         const gain = baseAudioGain(clip);
-        const effectiveVolume =
-          clip.fadeIn || clip.fadeOut
-            ? gain *
-              audioFadeGain(
-                clip,
-                clip.duration,
-                subtractTimes(at, clip.timelineStart),
-              )
-            : gain;
+        const local =
+          clip.fadeIn || clip.fadeOut || clip.gainKeys
+            ? subtractTimes(at, clip.timelineStart)
+            : undefined;
+        const effectiveVolume = local
+          ? gain *
+            audioFadeGain(clip, clip.duration, local) *
+            (clip.gainKeys ? keyframeGain(clip.gainKeys, local) : 1)
+          : gain;
         const detached = copyClip(clip);
         const visual = evaluateVisual(
           detached.visual,
           clip.keyframes,
           sampled,
-          clip.timelineStart,
+          clip.kind === 'text'
+            ? (clip.animationStart ?? clip.timelineStart)
+            : clip.timelineStart,
         );
         activeClips.push(
           Object.assign(detached, {

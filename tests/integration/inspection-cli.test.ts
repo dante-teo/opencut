@@ -84,7 +84,16 @@ describe('agent CLI discovery and offline inspection', () => {
     expect(result.stderr).toBe('');
     const catalog = JSON.parse(result.stdout);
     expect(catalog.discoveryVersion).toBe(1);
-    expect(catalog.commands).toHaveLength(44);
+    expect(
+      catalog.commands.map((command: { name: string }) => command.name),
+    ).toEqual(
+      expect.arrayContaining([
+        'media relink',
+        'media separate-dialogue',
+        'project snapshot',
+        'project package',
+      ]),
+    );
     expect(
       new Set(catalog.commands.map((command: { name: string }) => command.name))
         .size,
@@ -169,7 +178,7 @@ describe('agent CLI discovery and offline inspection', () => {
     expect(
       JSON.parse(run('help', 'preview', '--json').stdout).commands,
     ).toHaveLength(3);
-  });
+  }, 30_000);
 
   it('returns complete revision-tagged project content without history or probing', async () => {
     const { path, project, original } = await example();

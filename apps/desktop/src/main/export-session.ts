@@ -12,7 +12,6 @@ import {
   type VideoTimelineOptions,
 } from '@opencut/media';
 import type { DesktopProject, ExportInput, ExportState } from '../bridge.js';
-import { exportRates } from '../export-settings.js';
 
 function parseInput(input: unknown): ExportInput {
   if (!input || typeof input !== 'object' || Array.isArray(input))
@@ -35,6 +34,11 @@ function parseInput(input: unknown): ExportInput {
           'quality',
           'resolution',
           'burnSubtitles',
+          'outputSize',
+          'videoBitrateKbps',
+          'audioBitrateKbps',
+          'audioSampleRate',
+          'audioChannels',
         ].includes(key),
     ) ||
     (settings.burnSubtitles !== undefined &&
@@ -42,7 +46,16 @@ function parseInput(input: unknown): ExportInput {
     !renderCodecs.includes(settings.codec) ||
     !renderQualities.includes(settings.quality) ||
     !renderResolutions.includes(settings.resolution) ||
-    !exportRates.includes(settings.frameRate)
+    typeof settings.frameRate !== 'string' ||
+    (settings.frameRate !== 'project' &&
+      !/^\d{1,15}(?:\/\d{1,15})?$/.test(settings.frameRate)) ||
+    (settings.outputSize !== undefined &&
+      (!settings.outputSize ||
+        typeof settings.outputSize !== 'object' ||
+        Object.keys(settings.outputSize).sort().join(',') !== 'height,width' ||
+        ![settings.outputSize.width, settings.outputSize.height].every(
+          Number.isSafeInteger,
+        )))
   )
     throw new Error('Invalid export settings.');
   return structuredClone(value);
@@ -147,6 +160,11 @@ export class ExportSession {
         quality: job.settings.quality,
         resolution: job.settings.resolution,
         codec: job.settings.codec,
+        outputSize: job.settings.outputSize,
+        videoBitrateKbps: job.settings.videoBitrateKbps,
+        audioBitrateKbps: job.settings.audioBitrateKbps,
+        audioSampleRate: job.settings.audioSampleRate,
+        audioChannels: job.settings.audioChannels,
         ...(job.settings.frameRate === 'project'
           ? {}
           : { outputFrameRate: { numerator: numerator!, denominator } }),

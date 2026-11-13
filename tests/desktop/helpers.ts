@@ -10,6 +10,9 @@ import {
 const requireDesktop = createRequire(
   new URL('../../apps/desktop/package.json', import.meta.url),
 );
+export const showDesktopTests =
+  process.env.OPENCUT_DESKTOP_TEST_VISIBLE === '1';
+
 export async function launchDesktop(extraEnv: Record<string, string> = {}) {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
@@ -21,11 +24,15 @@ export async function launchDesktop(extraEnv: Record<string, string> = {}) {
   const application = await electron.launch({
     executablePath: requireDesktop('electron') as string,
     args: [resolve('apps/desktop')],
-    env: { ...env, ...extraEnv },
+    env: {
+      ...env,
+      ...extraEnv,
+      OPENCUT_DESKTOP_TEST_BACKGROUND: showDesktopTests ? '0' : '1',
+    },
   });
   try {
     const page = await application.firstWindow();
-    await page.bringToFront();
+    if (showDesktopTests) await page.bringToFront();
     return { application, page };
   } catch (error) {
     await application.close();

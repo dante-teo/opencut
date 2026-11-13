@@ -16,6 +16,7 @@ import { stat } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getApplicationInfo, projectRevision } from '@opencut/core';
+import { renderPreviewCache } from '@opencut/core/node';
 import { WAVEFORM_CHUNK_SECONDS } from '@opencut/shared';
 import {
   probeMedia,
@@ -41,6 +42,9 @@ import {
   TIMELINE_PREVIEW_CHANNEL,
   MEDIA_CACHE_CHANNEL,
   TIMELINE_FRAME_CHANNEL,
+  TIMELINE_RENDER_CHANNEL,
+  DESKTOP_CONTROL_CHANNEL,
+  DESKTOP_CONTROL_REPLY,
   TIMELINE_TEXT_CHANNEL,
   TIMELINE_ARTWORK_CHANNEL,
   CANCEL_TIMELINE_ARTWORK_CHANNEL,
@@ -69,6 +73,11 @@ protocol.registerSchemesAsPrivileged([
 const directory = fileURLToPath(new URL('.', import.meta.url));
 const rendererRoot = resolve(directory, '../renderer');
 const devURL = process.env.ELECTRON_RENDERER_URL;
+const backgroundTest =
+  !app.isPackaged && process.env.OPENCUT_DESKTOP_TEST_BACKGROUND === '1';
+if (backgroundTest && process.platform === 'darwin') {
+  app.setActivationPolicy('accessory');
+}
 if (devURL && new URL(devURL).origin !== 'http://127.0.0.1:5173') {
   throw new Error('Refusing unexpected renderer development origin.');
 }
@@ -77,9 +86,15 @@ let mainWindow: BrowserWindow | null = null;
 let mediaClient: MediaClient | null = null;
 let previewFile: { url: string; path: string } | null = null;
 const timelineFiles = new Map<string, string>();
+let timelineRender: AbortController | undefined;
+const desktopReplies = new Map<
+  string,
+  (reply: { value?: unknown; error?: string }) => void
+>();
 const artworkRequests = new Map<number, AbortController>();
 let timelineGeneration = 0;
 function revokeTimeline() {
+  timelineRender?.abort();
   timelineGeneration++;
   for (const request of artworkRequests.values()) request.abort();
   void mediaClient?.request('invalidate').catch(() => {});
@@ -89,7 +104,7 @@ let openingPreview = false;
 let closingProject = false;
 let previewGeneration = 0;
 const onlineMedia = new OnlineMediaLibrary();
-const projectSession = new ProjectSession(
+const projectSession: ProjectSession = new ProjectSession(
   {
     async open() {
       const window = mainWindow;
@@ -147,6 +162,64 @@ const projectSession = new ProjectSession(
       });
       return selection.canceled ? null : (selection.filePaths[0] ?? null);
     },
+    async relinkMedia() {
+      const window = mainWindow;
+      if (!window) throw new Error('No project window is available.');
+      const selection = await dialog.showOpenDialog(window, {
+        title: 'Relink media',
+        properties: ['openFile'],
+      });
+      return selection.canceled ? null : (selection.filePaths[0] ?? null);
+    },
+    async saveDialogue() {
+      const window = mainWindow;
+      if (!window) throw new Error('No project window is available.');
+      const selection = await dialog.showSaveDialog(window, {
+        title: 'Save separated audio in a new folder',
+        defaultPath: 'Separated audio',
+      });
+      return selection.canceled ? null : (selection.filePath ?? null);
+    },
+    async saveProjectCopy(bundle) {
+      const window = mainWindow;
+      if (!window) throw new Error('No project window is available.');
+      const selection = await dialog.showSaveDialog(window, {
+        title: bundle
+          ? 'Package project in a new folder'
+          : 'Save project snapshot',
+        defaultPath: bundle
+          ? 'OpenCut project package'
+          : 'Snapshot.opencut.json',
+      });
+      return selection.canceled ? null : (selection.filePath ?? null);
+    },
+    async importFont() {
+      if (!mainWindow) throw new Error('No project window is available.');
+      const selection = await dialog.showOpenDialog(mainWindow, {
+        title: 'Import font',
+        properties: ['openFile'],
+        filters: [{ name: 'Fonts', extensions: ['ttf', 'otf'] }],
+      });
+      return selection.canceled ? null : (selection.filePaths[0] ?? null);
+    },
+    async saveFreezeFrame() {
+      if (!mainWindow) throw new Error('No project window is available.');
+      const selection = await dialog.showSaveDialog(mainWindow, {
+        title: 'Save freeze frame',
+        defaultPath: 'Freeze frame.png',
+        filters: [{ name: 'PNG image', extensions: ['png'] }],
+      });
+      return selection.canceled ? null : (selection.filePath ?? null);
+    },
+    async savePreviewFrame() {
+      if (!mainWindow) throw new Error('No project window is available.');
+      const selection = await dialog.showSaveDialog(mainWindow, {
+        title: 'Export frame',
+        defaultPath: 'Frame.png',
+        filters: [{ name: 'PNG image', extensions: ['png'] }],
+      });
+      return selection.canceled ? null : (selection.filePath ?? null);
+    },
     async exportSubtitles(format) {
       const window = mainWindow;
       if (!window) throw new Error('No project window is available.');
@@ -202,6 +275,66 @@ const projectSession = new ProjectSession(
     source: (id) => onlineMedia.source(id),
     download: (id) =>
       onlineMedia.download(id, join(app.getPath('userData'), 'online-media')),
+  },
+  async (control, state) => {
+    if (control.action === 'online-search') {
+      const { query, provider, kind, page } = control;
+      return onlineMedia.search({
+        query,
+        provider,
+        kind,
+        ...(page !== undefined && { page }),
+      });
+    }
+    if (control.action === 'online-import') {
+      const result = await projectSession.run('importOnline', {
+        projectId: state.project.metadata.id,
+        expectedRevision: control.expectedRevision,
+        resultId: control.id,
+      });
+      if (!result.ok) throw new Error(result.error);
+      if (!result.canceled) {
+        revokeTimeline();
+        mainWindow?.webContents.send(PROJECT_CHANGED_CHANNEL, result.state);
+      }
+      return {
+        revision: result.state ? projectRevision(result.state.project) : 0,
+        notice: result.notice,
+      };
+    }
+    if (!mainWindow || mainWindow.isDestroyed())
+      throw new Error('Open an editor window first.');
+    if (
+      control.action === 'select' &&
+      control.id &&
+      !(control.kind === 'asset'
+        ? state.project.assets.some(({ id }) => id === control.id)
+        : state.project.clips.some(({ id }) => id === control.id) ||
+          state.project.subtitles?.cues.some(({ id }) => id === control.id))
+    )
+      throw new Error('Selection ID is not in the current project.');
+    const id = randomUUID();
+    const contents = mainWindow.webContents;
+    if (desktopReplies.size >= 16)
+      throw new Error('Too many pending desktop requests.');
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        desktopReplies.delete(id);
+        reject(new Error('The editor did not acknowledge the request.'));
+      }, 5000);
+      desktopReplies.set(id, (reply) => {
+        clearTimeout(timeout);
+        desktopReplies.delete(id);
+        if (reply.error) reject(new Error(reply.error));
+        else
+          resolve({
+            accepted: true,
+            revision: projectRevision(state.project),
+            state: reply.value,
+          });
+      });
+      contents.send(DESKTOP_CONTROL_CHANNEL, id, control);
+    });
   },
 );
 
@@ -362,6 +495,8 @@ async function createWindow(): Promise<void> {
     height: 720,
     minWidth: 640,
     minHeight: 480,
+    show: !backgroundTest,
+    focusable: !backgroundTest,
     backgroundColor: getWindowBackgroundColor(),
     webPreferences: {
       preload: join(directory, '../preload/index.cjs'),
@@ -370,8 +505,11 @@ async function createWindow(): Promise<void> {
       sandbox: true,
       webSecurity: true,
       webviewTag: false,
+      // Keep animation and playback clocks running in hidden test windows.
+      backgroundThrottling: !backgroundTest,
     },
   });
+  if (backgroundTest) window.webContents.setAudioMuted(true);
   mainWindow = window;
   window.on('close', (event) => {
     if (projectSession.needsCloseGuard || exportSession.active) {
@@ -491,6 +629,12 @@ app
             'importSubtitles',
             'exportSubtitles',
             'removeAsset',
+            'relinkAsset',
+            'separateDialogue',
+            'copyProject',
+            'freezeFrame',
+            'importFont',
+            'exportFrame',
             'addAssetClip',
           ].includes(action)
             ? 1
@@ -506,7 +650,9 @@ app
           !reply.canceled &&
           action !== 'current' &&
           action !== 'save' &&
-          action !== 'exportSubtitles'
+          action !== 'exportSubtitles' &&
+          action !== 'exportFrame' &&
+          action !== 'copyProject'
         )
           revokeTimeline();
         assertSender(event);
@@ -829,7 +975,60 @@ app
         pendingText--;
       }
     });
+    ipcMain.on(DESKTOP_CONTROL_REPLY, (event, id: unknown, reply: unknown) => {
+      if (
+        event.sender !== mainWindow?.webContents ||
+        event.senderFrame !== event.sender.mainFrame ||
+        typeof id !== 'string' ||
+        !reply ||
+        typeof reply !== 'object'
+      )
+        return;
+      desktopReplies.get(id)?.(reply as { value?: unknown; error?: string });
+    });
     let pendingFrames = 0;
+    ipcMain.handle(TIMELINE_RENDER_CHANNEL, async (event, input: unknown) => {
+      assertSender(event);
+      if (
+        !input ||
+        typeof input !== 'object' ||
+        Object.keys(input).sort().join(',') !==
+          'expectedRevision,projectId,size'
+      )
+        throw new Error('Invalid timeline preview request.');
+      const { projectId, expectedRevision, size } = input as {
+        projectId: string;
+        expectedRevision: number;
+        size: number;
+      };
+      const snapshot = projectSession.captureExport({
+        projectId,
+        expectedRevision,
+      });
+      timelineRender?.abort();
+      const controller = new AbortController();
+      timelineRender = controller;
+      const generation = timelineGeneration;
+      try {
+        const result = await renderPreviewCache(
+          snapshot.project,
+          snapshot.path ?? resolve('Untitled.opencut.json'),
+          size,
+          { signal: controller.signal },
+        );
+        assertSender(event);
+        if (generation !== timelineGeneration || controller.signal.aborted)
+          return null;
+        const url = `opencut://media/${randomUUID()}.mp4`;
+        timelineFiles.set(url, result.path);
+        return { url, hit: result.hit, frameCount: result.frameCount };
+      } catch (error) {
+        if (controller.signal.aborted) return null;
+        throw error;
+      } finally {
+        if (timelineRender === controller) timelineRender = undefined;
+      }
+    });
     ipcMain.handle(TIMELINE_FRAME_CHANNEL, async (event, input: unknown) => {
       assertSender(event);
       if (!input || typeof input !== 'object' || pendingFrames >= 2)

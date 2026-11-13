@@ -1,11 +1,12 @@
 # Preview and export consistency (T27)
 
 Run `pnpm test:consistency` for the focused gate. `pnpm test:desktop` also runs
-it with the rest of the Electron tests. Both require a graphical Electron
-session and FFmpeg/ffprobe on PATH, with lavfi, libx264, libvpx-vp9, PNG and AAC
-support. Missing tools, codecs or frames fail the suite. The T21 generator
-creates fresh synthetic assets for each Playwright worker. No user media,
-checked-in golden frames or existing fixture caches are used.
+it with the rest of the Electron tests. Both use hidden windows by default in
+a graphical desktop session and require FFmpeg/ffprobe on PATH, with lavfi,
+libx264, libvpx-vp9, PNG and AAC support. Missing tools, codecs or frames fail
+the suite. The T21 generator creates fresh synthetic assets for each Playwright
+worker. No user media, checked-in golden frames or existing fixture caches are
+used.
 
 The suite opens T21 cuts, gaps and overlays through Electron's normal project
 picker and uses the production frame slider and Canvas compositor. It waits

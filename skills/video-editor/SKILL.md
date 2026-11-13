@@ -36,6 +36,12 @@ scripts need the supplied `@opencut/sdk` package.
    `clip.keyframe.set` and `clip.keyframe.remove`. Use exact clip-local seconds.
    Verify sampled transforms around keys, trims and splits with `timeline inspect`
    and inspect decoded preview frames.
+   Use `media relink` to restore an offline source and `media import-font`
+   to embed a font in a title or cue. `project freeze` inserts a held frame.
+   Discover replacement, transitions, color, audio automation, ordered
+   effects and subtitle styling through `help edit apply --json`.
+   Use `subtitle.words` for cue-relative word timing. Check timed highlights
+   in rendered frames and use SRT or WebVTT for cue-level text and timing.
    Set fades with `clip audio --fade-in/--fade-out` in project frames. Use
    `track audio` for a track's volume and mute. Clip and track linear gains
    multiply. Re-read the project after publication. On a revision conflict, inspect the
@@ -43,8 +49,10 @@ scripts need the supplied `@opencut/sdk` package.
 4. **Review what the viewer will see.** Use `timeline inspect` to confirm active
    layers and source mappings. Open the rendered PNGs or contact sheet at cuts
    and overlay boundaries. Use a short preview clip to review motion and sound
-   when playback is available. Check text wrapping, alignment, legibility and
-   glyph coverage in the rendered frame. Match the reviewed revision to the export.
+   when playback is available. Use `project cache-preview` for a full-timeline
+   review with VFR sources sampled on the project frame grid. Check text
+   wrapping, alignment, legibility and glyph coverage in the rendered frame.
+   Match the reviewed revision to the export.
 5. **Export and verify.** Choose a new MP4 path in an existing directory.
    For CLI rendering, require exit 0 and a terminal `completed` JSONL event.
    Probe the published file for the expected streams, dimensions and duration.
@@ -52,6 +60,8 @@ scripts need the supplied `@opencut/sdk` package.
    paths, and distinguish what you saw or heard from automated checks. For
    subtitles, verify the sidecar text and timing or inspect visible cues in
    decoded video frames, according to the requested deliverable.
+   Use `project snapshot` to save a separate revision or `project package`
+   to gather its referenced files into a portable folder.
 
 ## Read as needed
 

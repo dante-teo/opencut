@@ -1,14 +1,20 @@
 import { randomUUID } from 'node:crypto';
-import { realpath, stat } from 'node:fs/promises';
+import { lstat, open, realpath, rm, stat } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
-import { probeMedia } from '@opencut/media';
+import { MediaCache, probeMedia, validateEmbeddedFont } from '@opencut/media';
 import type { MediaAsset, Project } from './project.js';
+import { validateProject } from './project.js';
+import { clipSourceTime, clipTimelineEnd } from './clip-timing.js';
+import { compareTimes, frameTime } from './time.js';
+import { insertFreeze } from './timeline.js';
+import { previewTransaction, projectRevision } from './editing.js';
 import {
   canonicalProjectFilePath,
   createMediaReference,
   inspectMediaFile,
   readProjectFile,
   resolveMediaReference,
+  SessionError,
   updateProjectFile,
 } from './project-files.js';
 import type {
@@ -231,6 +237,228 @@ export async function prepareMediaAsset(
       ...info,
     },
   };
+}
+
+/** Refresh the source and metadata while retaining all references to the asset ID. */
+export async function prepareMediaRelink(
+  original: Project,
+  path: string,
+  id: string,
+  file: string,
+  absolute = false,
+): Promise<{ project: Project; result: AssetInfo }> {
+  const old = requireAsset(original, id);
+  const prepared = await prepareMediaAsset(
+    { ...original, assets: [] },
+    path,
+    file,
+  );
+  const asset = { ...prepared.result.asset, id: old.id, name: old.name };
+  if (absolute)
+    asset.file = { type: 'absolute', path: prepared.result.source.path };
+  if (
+    old.provenance &&
+    resolveMediaReference(old.file, path) === prepared.result.source.path
+  )
+    asset.provenance = old.provenance;
+  const candidate = {
+    ...original,
+    assets: original.assets.map((entry) => (entry.id === id ? asset : entry)),
+  };
+  const validation = validateProject(candidate);
+  if (!validation.success) throw validation.error;
+  return {
+    project: validation.project,
+    result: await assetInfo(validation.project, path, asset),
+  };
+}
+
+export function relinkMediaAsset(
+  path: string,
+  id: string,
+  file: string,
+  options: Pick<ProjectUpdateOptions, 'dryRun' | 'expectedRevision'> = {},
+) {
+  return updateProjectFile(
+    path,
+    (project, canonical) => prepareMediaRelink(project, canonical, id, file),
+    {
+      ...options,
+      label: 'Relink media',
+    },
+  );
+}
+
+export async function prepareFreezeFrame(
+  project: Project,
+  path: string,
+  id: string,
+  at: number,
+  frames: number,
+  output: string,
+  absolute = false,
+) {
+  const clip = project.clips.find((entry) => entry.id === id);
+  const asset = project.assets.find((entry) => entry.id === clip?.assetId);
+  const position = frameTime(at, project.settings.frameRate);
+  const duration = frameTime(frames, project.settings.frameRate);
+  if (
+    !clip ||
+    !asset?.mediaTypes.includes('video') ||
+    asset.metadata?.kind === 'image' ||
+    project.tracks.find((entry) => entry.id === clip.trackId)?.type !==
+      'video' ||
+    compareTimes(position, clip.timelineStart) < 0 ||
+    compareTimes(position, clipTimelineEnd(clip)) >= 0 ||
+    !frames
+  )
+    throw new AssetError(
+      'INVALID_MEDIA',
+      'Choose a playhead frame inside a video clip and a positive duration.',
+    );
+  const source = await assetInfo(project, path, asset);
+  if (source.source.status !== 'available')
+    throw new AssetError('SOURCE_UNAVAILABLE', source.source.message);
+  const target = resolve(output);
+  if (!target.toLowerCase().endsWith('.png'))
+    throw new AssetError(
+      'INVALID_MEDIA',
+      'Choose a new PNG file for the freeze frame.',
+    );
+  const time = clipSourceTime(clip, position);
+  const bytes = await new MediaCache().frame(
+    source.source.path,
+    time.numerator / time.denominator,
+    undefined,
+    true,
+  );
+  const file = await open(target, 'wx');
+  const created = await file.stat({ bigint: true });
+  const discard = async () => {
+    const current = await lstat(target, { bigint: true }).catch(() => null);
+    if (
+      current?.dev === created.dev &&
+      current.ino === created.ino &&
+      current.birthtimeNs === created.birthtimeNs
+    )
+      await rm(target);
+  };
+  try {
+    try {
+      await file.writeFile(bytes);
+    } finally {
+      await file.close();
+    }
+    const prepared = await prepareMediaAsset(project, path, target, {
+      localMediaOnly: true,
+    });
+    if (absolute)
+      prepared.result.asset.file = { type: 'absolute', path: target };
+    const updated = insertFreeze(
+      prepared.project,
+      id,
+      prepared.result.asset.id,
+      position,
+      duration,
+    );
+    return {
+      project: updated.project,
+      result: { clip: updated.clip, path: target },
+      discard,
+    };
+  } catch (error) {
+    await discard().catch(() => {});
+    throw error;
+  }
+}
+
+/** Publish a freeze in one file-backed edit, discarding its PNG after a known rejection. */
+export async function freezeProjectFrame(
+  path: string,
+  id: string,
+  at: number,
+  frames: number,
+  output: string,
+  options: Pick<ProjectUpdateOptions, 'expectedRevision'> = {},
+) {
+  let discard: (() => Promise<void>) | undefined;
+  try {
+    return await updateProjectFile(
+      path,
+      async (project, canonical) => {
+        const prepared = await prepareFreezeFrame(
+          project,
+          canonical,
+          id,
+          at,
+          frames,
+          output,
+        );
+        discard = prepared.discard;
+        return prepared;
+      },
+      { ...options, label: 'Freeze frame' },
+    );
+  } catch (error) {
+    if (
+      !(error instanceof SessionError) ||
+      [
+        'REVISION_CONFLICT',
+        'SESSION_CHANGED',
+        'SESSION_BUSY',
+        'SESSION_CLOSED',
+        'UPDATE_FAILED',
+        'INVALID_TRANSACTION',
+        'SESSION_TOO_LARGE',
+      ].includes(error.code)
+    )
+      await discard?.().catch(() => {});
+    throw error;
+  }
+}
+
+export async function prepareEmbeddedFont(
+  project: Project,
+  id: string,
+  path: string,
+) {
+  const clip = project.clips.find((clip) => clip.id === id && clip.text);
+  const subtitle = project.subtitles?.cues.some((cue) => cue.id === id);
+  if (!clip && !subtitle)
+    throw new AssetError(
+      'INVALID_MEDIA',
+      'Select a title or subtitle to import its font.',
+    );
+  const file = await open(path, 'r');
+  let bytes: Buffer;
+  try {
+    const { size } = await file.stat();
+    if (!size || size > 2_097_152)
+      throw new AssetError(
+        'INVALID_MEDIA',
+        'Choose a TTF or OTF font up to 2 MiB.',
+      );
+    bytes = Buffer.alloc(size);
+    const { bytesRead } = await file.read(bytes, 0, size, 0);
+    if (bytesRead !== size)
+      throw new AssetError(
+        'INVALID_MEDIA',
+        'The font file changed while reading.',
+      );
+  } finally {
+    await file.close();
+  }
+  await validateEmbeddedFont(bytes);
+  const embeddedFont = bytes.toString('base64');
+  const next = previewTransaction(project, {
+    expectedRevision: projectRevision(project),
+    operations: [
+      clip
+        ? { type: 'text.set', id, text: { embeddedFont } }
+        : { type: 'subtitle.style', ids: [id], style: { embeddedFont } },
+    ],
+  }).project;
+  return { project: next, result: { id, file: basename(path) } };
 }
 
 /** Remove only the project entry, including when its source is offline. Never unlink media. */

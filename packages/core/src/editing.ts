@@ -1,7 +1,16 @@
 import { z } from 'zod';
-import { canvasShape, clipVisualSchema, validateProject } from './project.js';
+import {
+  canvasShape,
+  clipVisualSchema,
+  colorGradeSchema,
+  validateProject,
+} from './project.js';
 import type { HistoryEntry, Project, ProjectSnapshot } from './project.js';
-import { trackAudioShape } from './audio.js';
+import {
+  audioEffectsSchema,
+  clipAudioShape,
+  trackAudioShape,
+} from './audio.js';
 import { frameTime, timeSchema } from './time.js';
 import { keyframeEdits } from './keyframes.js';
 import { clipSpeedSchema } from './clip-timing.js';
@@ -12,6 +21,12 @@ import {
   addText,
   addTrack,
   moveClip,
+  replaceClipAsset,
+  detachClipAudio,
+  dissolveClips,
+  flashClip,
+  fadeClipVisual,
+  insertFreeze,
   removeClip,
   removeTrack,
   splitClip,
@@ -20,6 +35,9 @@ import {
   setClipSpeed,
   setTrackAudio,
   setClipVisual,
+  setClipGrade,
+  setClipGainKeys,
+  setClipEffects,
   editClipKeyframe,
   setText,
   setCanvas,
@@ -90,6 +108,54 @@ const operationSchema = z.discriminatedUnion('type', [
     outTime: timeSchema.optional(),
   }),
   z.strictObject({ type: z.literal('clip.speed'), id, speed: clipSpeedSchema }),
+  z.strictObject({
+    type: z.literal('clip.replace'),
+    id,
+    assetId: id,
+    sourceIn: timeSchema.optional(),
+    sourceOut: timeSchema.optional(),
+    ripple: z.boolean().optional(),
+  }),
+  z.strictObject({ type: z.literal('clip.detach-audio'), id }),
+  z.strictObject({
+    type: z.literal('clip.dissolve'),
+    id,
+    from: id,
+    frames: frame.positive(),
+  }),
+  z.strictObject({
+    type: z.literal('clip.flash'),
+    id,
+    frames: frame.positive(),
+  }),
+  z.strictObject({
+    type: z.literal('clip.fade'),
+    id,
+    edge: z.enum(['in', 'out']),
+    frames: frame.positive(),
+  }),
+  z.strictObject({
+    type: z.literal('clip.freeze'),
+    id,
+    stillId: id,
+    at: frame,
+    frames: frame.positive(),
+  }),
+  z.strictObject({
+    type: z.literal('clip.grade'),
+    ids: z.array(id).min(1),
+    grade: colorGradeSchema.nullable(),
+  }),
+  z.strictObject({
+    type: z.literal('clip.effects'),
+    id,
+    effects: audioEffectsSchema,
+  }),
+  z.strictObject({
+    type: z.literal('clip.gain-keys'),
+    id,
+    keys: clipAudioShape.gainKeys.unwrap().nullable(),
+  }),
   z.strictObject({
     type: z.literal('clip.split'),
     id,
@@ -271,7 +337,9 @@ export function previewTransaction(project: Project, input: EditTransaction) {
         case 'subtitle.split':
         case 'subtitle.merge':
         case 'subtitle.remove':
-        case 'subtitle.style': {
+        case 'subtitle.style':
+        case 'subtitle.words':
+        case 'subtitle.effects': {
           const edited = editSubtitles(next, operation);
           changed = { ...edited, project: checked(edited.project) };
           break;
@@ -348,6 +416,57 @@ export function previewTransaction(project: Project, input: EditTransaction) {
         case 'clip.speed':
           changed = setClipSpeed(next, operation.id, operation.speed);
           break;
+        case 'clip.replace':
+          changed = replaceClipAsset(next, operation.id, operation);
+          break;
+        case 'clip.detach-audio':
+          changed = detachClipAudio(next, operation.id);
+          break;
+        case 'clip.dissolve':
+          changed = dissolveClips(
+            next,
+            operation.from,
+            operation.id,
+            time(operation.frames),
+          );
+          break;
+        case 'clip.flash':
+          changed = flashClip(next, operation.id, time(operation.frames));
+          break;
+        case 'clip.fade':
+          changed = fadeClipVisual(
+            next,
+            operation.id,
+            operation.edge,
+            time(operation.frames),
+          );
+          break;
+        case 'clip.freeze':
+          changed = insertFreeze(
+            next,
+            operation.id,
+            operation.stillId,
+            time(operation.at),
+            time(operation.frames),
+          );
+          break;
+        case 'clip.grade':
+          changed = setClipGrade(
+            next,
+            operation.ids,
+            operation.grade ?? undefined,
+          );
+          break;
+        case 'clip.gain-keys':
+          changed = setClipGainKeys(
+            next,
+            operation.id,
+            operation.keys ?? undefined,
+          );
+          break;
+        case 'clip.effects':
+          changed = setClipEffects(next, operation.id, operation.effects);
+          break;
         case 'clip.trim': {
           if (
             (operation.in !== undefined && operation.inTime !== undefined) ||
@@ -385,6 +504,7 @@ export function previewTransaction(project: Project, input: EditTransaction) {
           break;
         case 'clip.visual':
           changed = setClipVisual(next, operation.id, {
+            crop: operation.crop,
             x: operation.x,
             y: operation.y,
             scale: operation.scale,

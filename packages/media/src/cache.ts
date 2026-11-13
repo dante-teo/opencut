@@ -692,6 +692,7 @@ export class MediaCache {
     file: string,
     timestamp: number,
     signal?: AbortSignal,
+    fullSize = false,
   ): Promise<Buffer> {
     if (!Number.isFinite(timestamp) || timestamp < 0)
       throw new MediaError('Invalid cache frame timestamp.');
@@ -706,6 +707,7 @@ export class MediaCache {
           source.media,
           'frame-v4-covering-sdr-640x360',
           timestamp,
+          ...(fullSize ? ['full'] : []),
         ]),
       );
       const cached = this.memory.get(key);
@@ -784,7 +786,7 @@ export class MediaCache {
           '-map',
           `0:${video.index}`,
           '-vf',
-          `scale=640:360:force_original_aspect_ratio=decrease:force_divisible_by=2:reset_sar=1:in_color_matrix=${sourceColorMatrix(video.colorSpace, video.width ?? 0, video.height ?? 0, video.codec)}`,
+          `scale=${fullSize ? "w='min(3840,iw*sar)':h='min(3840,ih)'" : '640:360'}:force_original_aspect_ratio=decrease:force_divisible_by=2:reset_sar=1:in_color_matrix=${sourceColorMatrix(video.colorSpace, video.width ?? 0, video.height ?? 0, video.codec)}`,
           '-frames:v',
           '1',
           '-threads',
@@ -795,12 +797,13 @@ export class MediaCache {
           'image2pipe',
           'pipe:1',
         ],
-        2 * 1024 * 1024,
+        (fullSize ? 64 : 2) * 1024 * 1024,
         60000,
         { signal },
       );
       if (!png.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')))
         throw new MediaError('No frame at requested source time.');
+      if (fullSize) return png;
       const temporary = join(this.directory, `partial-${randomUUID()}.png`);
       try {
         await writeFile(temporary, png, { flag: 'wx', mode: 0o600 });

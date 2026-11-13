@@ -18,6 +18,7 @@ import {
 } from './editing.js';
 import type { EditOperation } from './editing.js';
 import { addTrack } from './timeline.js';
+import { keyframeGain, sliceGainKeys } from './audio.js';
 
 function project() {
   const value = createProject({
@@ -60,6 +61,96 @@ const apply = (value = project(), edits = operations) =>
   }).project;
 
 describe('headless editing transactions', () => {
+  it('preserves the gain curve when a trim cuts into a flat segment before a ramp', () => {
+    const time = (numerator: number) => ({ numerator, denominator: 1 });
+    const keys = [
+      { time: time(0), value: 0 },
+      { time: time(2), value: 0 },
+      { time: time(4), value: 1 },
+    ];
+    const trimmed = sliceGainKeys(keys, time(1), time(3));
+    expect(keyframeGain(trimmed, { numerator: 1, denominator: 2 })).toBe(0);
+    expect(keyframeGain(trimmed, time(2))).toBe(0.5);
+  });
+
+  it('replaces a clip with an explicit ripple and restores all affected timings in one undo', () => {
+    const original = apply();
+    original.assets.push({
+      id: 'replacement',
+      name: 'Replacement',
+      file: { type: 'relative', path: 'replacement.mp4' },
+      mediaTypes: ['video', 'audio'],
+    });
+    // Set up the second asset as part of the base document, before recording edits.
+    delete original.editing;
+    const out = { numerator: 1001, denominator: 500 };
+    expect(() =>
+      apply(original, [
+        {
+          type: 'clip.replace',
+          id: 'c1',
+          assetId: 'replacement',
+          sourceOut: { numerator: 3, denominator: 1 },
+        },
+      ]),
+    ).toThrow('overlaps');
+    const changed = apply(original, [
+      {
+        type: 'clip.replace',
+        id: 'c1',
+        assetId: 'replacement',
+        sourceOut: { numerator: 3, denominator: 1 },
+        ripple: true,
+      },
+    ]);
+    expect(
+      changed.clips.find((clip) => clip.id === 'right')?.timelineStart,
+    ).toEqual({ numerator: 4001, denominator: 1000 });
+    expect(changed.clips.find((clip) => clip.id === 'c1')?.assetId).toBe(
+      'replacement',
+    );
+    const restored = undoEdit(changed);
+    expect(
+      restored.clips.find((clip) => clip.id === 'right')?.timelineStart,
+    ).toEqual(out);
+    expect(projectSnapshot(restored)).toEqual(projectSnapshot(original));
+  });
+
+  it('detaches a retimed audio stream without changing its source range or gain automation', () => {
+    const first = apply(project(), operations.slice(0, 2));
+    const withAudio = apply(first, [
+      { type: 'clip.speed', id: 'c1', speed: { numerator: 2, denominator: 1 } },
+      { type: 'clip.audio', id: 'c1', volume: 0.5, fadeIn: 3 },
+      {
+        type: 'clip.gain-keys',
+        id: 'c1',
+        keys: [{ time: { numerator: 1, denominator: 2 }, value: 0.2 }],
+      },
+    ]);
+    const result = apply(withAudio, [{ type: 'clip.detach-audio', id: 'c1' }]);
+    const [video, audio] = result.clips;
+    expect(video?.muted).toBe(true);
+    expect(audio).toMatchObject(
+      withAudio.clips[0]
+        ? {
+            assetId: 'asset',
+            sourceIn: withAudio.clips[0].sourceIn,
+            sourceOut: withAudio.clips[0].sourceOut,
+            speed: withAudio.clips[0].speed,
+            fadeIn: withAudio.clips[0].fadeIn,
+            gainKeys: withAudio.clips[0].gainKeys,
+            volume: 0.5,
+          }
+        : {},
+    );
+    expect(
+      result.tracks.find((track) => track.id === audio?.trackId)?.type,
+    ).toBe('audio');
+    expect(projectSnapshot(undoEdit(result))).toEqual(
+      projectSnapshot(withAudio),
+    );
+  });
+
   it('reuses every T08 operation against evolving state and commits once without mutating input', () => {
     const original = project();
     const before = serializeProject(original);

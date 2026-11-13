@@ -1,5 +1,6 @@
 import { usesLayerTransform } from '@opencut/shared';
 import { isAbsolute, resolve, basename } from 'node:path';
+import { renderTimelineFrame, separateDialogue } from '@opencut/media';
 import {
   createProject,
   commitEdit,
@@ -19,17 +20,23 @@ import {
 import {
   canonicalProjectFilePath,
   prepareMediaAsset,
+  prepareFreezeFrame,
+  prepareEmbeddedFont,
+  prepareMediaRelink,
   removeAssetFromProject,
   checkProjectMedia,
+  copyProjectFile,
   readProjectFile,
   readSubtitleFile,
   writeSubtitleFile,
   writeProjectFile,
   inspectMediaFile,
   resolveMediaReference,
+  resolveProjectRender,
   acquireProjectWriter,
   SessionError,
   type ProjectWriter,
+  type DesktopControlRequest,
 } from '@opencut/core/node';
 import type {
   DesktopProject,
@@ -44,6 +51,12 @@ import type { OnlineMediaLibrary } from './online-media.js';
 export interface ProjectDialogs {
   open(): Promise<string | null>;
   importMedia?(): Promise<string[] | null>;
+  relinkMedia?(): Promise<string | null>;
+  saveDialogue?(): Promise<string | null>;
+  saveProjectCopy?(bundle: boolean): Promise<string | null>;
+  saveFreezeFrame?(): Promise<string | null>;
+  savePreviewFrame?(): Promise<string | null>;
+  importFont?(): Promise<string | null>;
   importSubtitles?(): Promise<string | null>;
   exportSubtitles?(format: SubtitleFormat): Promise<string | null>;
   save(): Promise<string | null>;
@@ -63,6 +76,12 @@ export type ProjectAction =
   | 'importSubtitles'
   | 'exportSubtitles'
   | 'removeAsset'
+  | 'relinkAsset'
+  | 'separateDialogue'
+  | 'copyProject'
+  | 'freezeFrame'
+  | 'importFont'
+  | 'exportFrame'
   | 'addAssetClip';
 
 /** Main-process session. React never submits a path or a replacement document. */
@@ -89,6 +108,10 @@ export class ProjectSession {
       source: OnlineMediaLibrary['source'];
       download: (id: string) => ReturnType<OnlineMediaLibrary['download']>;
     },
+    private readonly desktopControl?: (
+      control: DesktopControlRequest,
+      state: DesktopProject,
+    ) => Promise<unknown>,
   ) {}
 
   /** Also used on shutdown; OS ownership is released automatically after a crash. */
@@ -98,56 +121,72 @@ export class ProjectSession {
   }
 
   private async serve(writer: ProjectWriter) {
-    await writer.serve(async ({ update, options }) => {
-      if (!update && this.writer === writer && this.publishedState)
-        return this.publishedState.project;
-      if (this.busy)
-        throw new SessionError(
-          'SESSION_BUSY',
-          'A project operation is in progress. Retry when it finishes.',
-        );
-      const state = this.state;
-      if (!state || this.writer !== writer)
-        throw new SessionError('SESSION_CHANGED', 'Project session changed.');
-      if (!update) return state.project;
-      this.busy = true;
-      try {
-        let next = state.project;
-        let media = state.media;
-        await writer.update(
-          async (disk) => {
-            if (serializeProject(disk) !== this.baseline)
-              throw new SessionError(
-                'REVISION_CONFLICT',
-                'Project changed on disk. Reopen it before editing.',
-              );
-            const changed = update(state.project);
-            next =
-              options?.history === 'restore'
-                ? changed
-                : commitEdit(state.project, changed, options?.label);
-            if (
-              JSON.stringify(state.project.assets) !==
-              JSON.stringify(next.assets)
-            )
-              media = await checkProjectMedia(next, writer.path);
-            return { project: next, result: undefined };
-          },
-          { ...options, history: 'restore' },
-        );
-        const json = serializeProject(next);
-        if (!options?.dryRun && json !== this.baseline) {
-          this.state = { ...state, project: next, media, dirty: false };
-          this.publishedState = this.state;
-          this.baseline = json;
-          this.savedRevision = projectRevision(next);
-          this.onChange(structuredClone(this.state));
+    await writer.serve(
+      async ({ update, options }) => {
+        if (!update && this.writer === writer && this.publishedState)
+          return this.publishedState.project;
+        if (this.busy)
+          throw new SessionError(
+            'SESSION_BUSY',
+            'A project operation is in progress. Retry when it finishes.',
+          );
+        const state = this.state;
+        if (!state || this.writer !== writer)
+          throw new SessionError('SESSION_CHANGED', 'Project session changed.');
+        if (!update) return state.project;
+        this.busy = true;
+        try {
+          let next = state.project;
+          let media = state.media;
+          await writer.update(
+            async (disk) => {
+              if (serializeProject(disk) !== this.baseline)
+                throw new SessionError(
+                  'REVISION_CONFLICT',
+                  'Project changed on disk. Reopen it before editing.',
+                );
+              const changed = update(state.project);
+              next =
+                options?.history === 'restore'
+                  ? changed
+                  : commitEdit(state.project, changed, options?.label);
+              if (
+                JSON.stringify(state.project.assets) !==
+                JSON.stringify(next.assets)
+              )
+                media = await checkProjectMedia(next, writer.path);
+              return { project: next, result: undefined };
+            },
+            { ...options, history: 'restore' },
+          );
+          const json = serializeProject(next);
+          if (!options?.dryRun && json !== this.baseline) {
+            this.state = { ...state, project: next, media, dirty: false };
+            this.publishedState = this.state;
+            this.baseline = json;
+            this.savedRevision = projectRevision(next);
+            this.onChange(structuredClone(this.state));
+          }
+          return this.state!.project;
+        } finally {
+          this.busy = false;
         }
-        return this.state!.project;
-      } finally {
-        this.busy = false;
-      }
-    });
+      },
+      async (control) => {
+        const state = this.publishedState;
+        if (
+          !state ||
+          this.writer !== writer ||
+          this.busy ||
+          !this.desktopControl
+        )
+          throw new SessionError(
+            'SESSION_BUSY',
+            'Desktop is not ready for a control request.',
+          );
+        return this.desktopControl(control, state);
+      },
+    );
   }
 
   captureExport(input: { projectId: string; expectedRevision: number }) {
@@ -157,6 +196,29 @@ export class ProjectSession {
       throw new Error('Project changed. Open the export settings again.');
     checkProjectRevision(state.project, input.expectedRevision);
     return structuredClone(state);
+  }
+
+  private scopedRequest(
+    input: unknown,
+    fields: string[],
+    message: string,
+    validFields: (request: Record<string, unknown>) => boolean,
+  ) {
+    const state = this.state;
+    if (!state || !input || typeof input !== 'object') throw new Error(message);
+    const request = input as Record<string, unknown>;
+    const { projectId, expectedRevision } = request;
+    if (
+      Object.keys(request).sort().join(',') !==
+        ['projectId', 'expectedRevision', ...fields].sort().join(',') ||
+      projectId !== state.project.metadata.id ||
+      !validFields(request) ||
+      typeof expectedRevision !== 'number' ||
+      !Number.isSafeInteger(expectedRevision)
+    )
+      throw new Error(message);
+    checkProjectRevision(state.project, expectedRevision);
+    return state;
   }
 
   captureText(input: HistoryInput & { clipId: string }) {
@@ -182,13 +244,19 @@ export class ProjectSession {
       layers = new Map(
         subtitleTextLayers(project)
           .flat()
-          .map((layer) => [layer.cue.id, layer]),
+          .map((layer) => [layer.id, layer]),
       );
       this.subtitleText.set(project, layers);
     }
     const layer = layers.get(input.clipId);
     return layer
-      ? { width, height, text: layer.text, visual: layer.visual }
+      ? {
+          width,
+          height,
+          text: layer.text,
+          visual: layer.visual,
+          neutral: !!layer.keyframes,
+        }
       : null;
   }
 
@@ -254,6 +322,7 @@ export class ProjectSession {
     this.busy = true;
     const priorState = this.state;
     let discardDownload: (() => Promise<void>) | undefined;
+    let discardFreeze: (() => Promise<void>) | undefined;
     try {
       let canceled = false;
       let notice: string | undefined;
@@ -322,6 +391,8 @@ export class ProjectSession {
         case 'import':
         case 'importOnline':
         case 'removeAsset':
+        case 'relinkAsset':
+        case 'separateDialogue':
         case 'addAssetClip': {
           const state = this.state;
           if (!state) throw new Error('Open or create a project first.');
@@ -332,7 +403,9 @@ export class ProjectSession {
               ? ['paths']
               : action === 'importOnline'
                 ? ['resultId']
-                : action === 'removeAsset'
+                : action === 'removeAsset' ||
+                    action === 'relinkAsset' ||
+                    action === 'separateDialogue'
                   ? ['assetId']
                   : ['assetId', 'trackId', 'mediaType', 'at']),
           ];
@@ -452,7 +525,41 @@ export class ProjectSession {
           } else {
             if (typeof request.assetId !== 'string')
               throw new Error('Expected an asset ID.');
-            if (action === 'removeAsset') {
+            if (action === 'separateDialogue') {
+              const source = await this.libraryAsset(request.assetId);
+              if (!source) throw new Error('Choose an available media file.');
+              const directory = await this.dialogs.saveDialogue?.();
+              if (!directory) {
+                canceled = true;
+                break;
+              }
+              const stems = await separateDialogue(source.path, directory);
+              for (const file of [stems.dialogue, stems.background]) {
+                const prepared = await prepareMediaAsset(project, path, file, {
+                  localMediaOnly: true,
+                });
+                project = prepared.project;
+                if (!state.path)
+                  prepared.result.asset.file = { type: 'absolute', path: file };
+              }
+              project = commitEdit(state.project, project, 'Separate dialogue');
+              notice = 'Dialogue and background added to the media library.';
+            } else if (action === 'relinkAsset') {
+              const file = await this.dialogs.relinkMedia?.();
+              if (!file) {
+                canceled = true;
+                break;
+              }
+              const prepared = await prepareMediaRelink(
+                project,
+                path,
+                request.assetId,
+                file,
+                !state.path,
+              );
+              project = commitEdit(project, prepared.project, 'Relink media');
+              notice = 'Media relinked.';
+            } else if (action === 'removeAsset') {
               project = commitEdit(
                 project,
                 removeAssetFromProject(project, request.assetId),
@@ -553,6 +660,15 @@ export class ProjectSession {
                     'clip.remove',
                     'clip.audio',
                     'clip.speed',
+                    'clip.replace',
+                    'clip.detach-audio',
+                    'clip.grade',
+                    'clip.gain-keys',
+                    'clip.effects',
+                    'clip.dissolve',
+                    'clip.flash',
+                    'clip.fade',
+                    'canvas.set',
                     'clip.keyframe.add',
                     'clip.keyframe.set',
                     'clip.keyframe.remove',
@@ -567,6 +683,8 @@ export class ProjectSession {
                     'subtitle.merge',
                     'subtitle.remove',
                     'subtitle.style',
+                    'subtitle.effects',
+                    'subtitle.words',
                   ].includes(operation.type),
               )
             )
@@ -593,6 +711,131 @@ export class ProjectSession {
           };
           break;
         }
+        case 'exportFrame': {
+          const state = this.scopedRequest(
+            input,
+            ['at'],
+            'Invalid frame export request.',
+            ({ at }) =>
+              typeof at === 'number' && Number.isSafeInteger(at) && at >= 0,
+          );
+          const { at } = input as { at: number };
+          const path = await this.dialogs.savePreviewFrame?.();
+          if (!path) {
+            canceled = true;
+            break;
+          }
+          const plan = await resolveProjectRender(
+            state.project,
+            state.path ?? resolve('Untitled.opencut.json'),
+          );
+          const frame = await renderTimelineFrame({
+            ...plan,
+            output: path,
+            range: { startFrame: at, endFrame: at + 1 },
+          });
+          notice = `Saved frame to ${frame.path}`;
+          break;
+        }
+        case 'importFont': {
+          const state = this.scopedRequest(
+            input,
+            ['id'],
+            'Invalid font import request.',
+            ({ id }) => typeof id === 'string',
+          );
+          const { id } = input as { id: string };
+          const file = await this.dialogs.importFont?.();
+          if (!file) {
+            canceled = true;
+            break;
+          }
+          const prepared = await prepareEmbeddedFont(state.project, id, file);
+          const project = commitEdit(
+            state.project,
+            prepared.project,
+            'Import font',
+          );
+          this.state = {
+            ...state,
+            project,
+            dirty: serializeProject(project) !== this.baseline,
+          };
+          notice = `Imported font ${prepared.result.file}`;
+          break;
+        }
+        case 'freezeFrame': {
+          const state = this.scopedRequest(
+            input,
+            ['at', 'clipId', 'frames'],
+            'Invalid freeze-frame request.',
+            ({ at, clipId, frames }) =>
+              typeof clipId === 'string' &&
+              typeof at === 'number' &&
+              Number.isSafeInteger(at) &&
+              at >= 0 &&
+              typeof frames === 'number' &&
+              Number.isSafeInteger(frames) &&
+              frames >= 1,
+          );
+          const { clipId, at, frames } = input as {
+            clipId: string;
+            at: number;
+            frames: number;
+          };
+          const file = await this.dialogs.saveFreezeFrame?.();
+          if (!file) {
+            canceled = true;
+            break;
+          }
+          const path = state.path ?? resolve('Untitled.opencut.json');
+          const prepared = await prepareFreezeFrame(
+            state.project,
+            path,
+            clipId,
+            at,
+            frames,
+            file,
+            !state.path,
+          );
+          discardFreeze = prepared.discard;
+          const project = commitEdit(
+            state.project,
+            prepared.project,
+            'Freeze frame',
+          );
+          this.state = {
+            ...state,
+            project,
+            dirty: true,
+            media: await checkProjectMedia(project, path),
+          };
+          notice = 'Freeze frame inserted.';
+          break;
+        }
+        case 'copyProject': {
+          if (!this.state) throw new Error('Open or create a project first.');
+          const state = this.scopedRequest(
+            input,
+            ['bundle'],
+            'Invalid project copy request.',
+            ({ bundle }) => typeof bundle === 'boolean',
+          );
+          const { bundle } = input as { bundle: boolean };
+          const path = await this.dialogs.saveProjectCopy?.(bundle);
+          if (!path) {
+            canceled = true;
+            break;
+          }
+          const result = await copyProjectFile(
+            state.project,
+            state.path ?? resolve('Untitled.opencut.json'),
+            path,
+            bundle,
+          );
+          notice = `Saved revision ${result.revision} to ${result.path}`;
+          break;
+        }
         case 'save':
           canceled = !(await this.save());
           break;
@@ -615,6 +858,10 @@ export class ProjectSession {
       };
     } catch (error) {
       await discardDownload?.().catch(() => {});
+      if (!(
+        error instanceof SessionError && error.code === 'COMMIT_OUTCOME_UNKNOWN'
+      ))
+        await discardFreeze?.().catch(() => {});
       if (
         [
           'edit',
@@ -624,6 +871,10 @@ export class ProjectSession {
           'importOnline',
           'importSubtitles',
           'removeAsset',
+          'relinkAsset',
+          'separateDialogue',
+          'freezeFrame',
+          'importFont',
           'addAssetClip',
         ].includes(action)
       )

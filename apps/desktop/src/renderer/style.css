@@ -1421,7 +1421,8 @@ button {
   flex: 1;
   min-width: 60px;
 }
-.timeline-diagnostics {
+.timeline-diagnostics,
+.preview-quality {
   padding: 0 12px 8px;
   font-size: 11px;
   color: var(--muted);

@@ -21,7 +21,15 @@ describe('standalone project render command', () => {
     ['project', 'render', 'project.json'],
     ['project', 'render', 'project.json', '--output', 'out.mov'],
     ['project', 'render', 'project.json', 'extra', '--output', 'out.mp4'],
-    ['project', 'render', 'project.json', '--output', 'out.mp4', '--fps', '30'],
+    [
+      'project',
+      'render',
+      'project.json',
+      '--output',
+      'out.mp4',
+      '--fps',
+      'bad',
+    ],
     [
       'project',
       'render',

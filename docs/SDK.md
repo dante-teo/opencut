@@ -68,6 +68,16 @@ before starting another operation on the same draft. Open a fresh editor to
 discard staged work or load a new base after a conflict. The SDK uses the
 existing T22 writer and session transport for publication. A successful save
 to an open project updates Electron and shares its undo/redo history.
+
+Use `project.relinkMedia(assetId, file)` to replace a source reference,
+`project.importFont(titleOrCueId, file)` to embed a font, and
+`project.freezeFrame(clipId, at, frames, outputPng)` to write a PNG and stage
+the timeline edit. Call `editor.save()` to publish the edit. The PNG is
+written immediately and remains if you discard the SDK draft.
+`project.separateDialogue(assetId, directory)` writes two WAV files using the
+[local model](CLI.md#dialogue-separation). Use `project.copyProject(destination, true)`
+for a portable package or omit `true` for a project snapshot. Save
+pending edits before making a copy.
 An editor's signal cancels a local save before publication or an Electron save
 before submission. A session disconnect during commit can leave the outcome
 unknown. Read back project content and history before retrying. See the
@@ -117,6 +127,15 @@ mute silences the clip. `project.inspectTimeline(frame)` returns the effective
 gain at that frame. To measure audible output, decode the rendered audio.
 
 ## Preview and render
+
+`project.cachePreview(size?)` renders or reuses the full timeline of the
+current draft, including staged edits. The result's `revision` is the draft's
+base revision. `project.controlDesktop(request)` sends typed playback, seek,
+selection, viewer and online media commands to the open saved project on
+macOS or Linux. It operates on that live session. See the
+[desktop control contract](CLI.md#rendered-preview-and-desktop-control).
+`project.apply({ type: 'subtitle.words', id, words })` sets exact cue-relative
+word timing for preview and burn-in.
 
 Use the same `project.apply` method for editable titles. `TextLayer` is
 exported from `@opencut/sdk` for typed style data.

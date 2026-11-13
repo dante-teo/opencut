@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { launchDesktop } from './helpers.js';
+import { launchDesktop, showDesktopTests } from './helpers.js';
 
 test('built desktop displays React through the sandboxed bridge', async () => {
   const { application, page } = await launchDesktop();
@@ -15,6 +15,8 @@ test('built desktop displays React through the sandboxed bridge', async () => {
       'OpenCut is running · v0.1.0',
     );
     expect(await page.evaluate(() => Object.keys(window.opencut))).toEqual([
+      'renderTimeline',
+      'onDesktopControl',
       'chooseExportOutput',
       'getExport',
       'startExport',
@@ -28,6 +30,12 @@ test('built desktop displays React through the sandboxed bridge', async () => {
       'importDroppedMedia',
       'onImportProgress',
       'removeAsset',
+      'relinkAsset',
+      'separateDialogue',
+      'copyProject',
+      'freezeFrame',
+      'importFont',
+      'exportFrame',
       'addAssetClip',
       'assetThumbnail',
       'importSubtitles',
@@ -75,12 +83,24 @@ test('built desktop displays React through the sandboxed bridge', async () => {
       return {
         fullscreen: window.isFullScreen(),
         resizable: window.isResizable(),
+        visible: window.isVisible(),
+        focusable: window.isFocusable(),
+        focused: window.isFocused(),
+        muted: window.webContents.isAudioMuted(),
         height: window.getBounds().height,
         contentHeight: window.getContentBounds().height,
       };
     });
     expect(windowState.fullscreen).toBe(false);
     expect(windowState.resizable).toBe(true);
+    if (!showDesktopTests) {
+      expect(windowState).toMatchObject({
+        visible: false,
+        focusable: false,
+        focused: false,
+        muted: true,
+      });
+    }
     if (process.platform === 'darwin') {
       expect(windowState.contentHeight).toBe(windowState.height);
     }

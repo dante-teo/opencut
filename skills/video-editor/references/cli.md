@@ -5,7 +5,29 @@ checkout, call `node /absolute/path/to/apps/cli/dist/index.js` directly.
 Relative command paths resolve from the working directory. Keep source and output
 paths separate and quote paths with spaces.
 
+Use `media separate-dialogue PROJECT ASSET --output NEW_FOLDER --json` to
+produce dialogue and background WAVs. The environment needs FFmpeg, ffprobe,
+and a Python installation with ELUATE and its multilingual Bandit v2 model.
+Set `OPENCUT_DIALOGUE_PYTHON` to select that interpreter. Listen to both stems
+against the original mix before using them. Use `media relink` for an offline
+asset, `media import-font` for title or cue fonts, `project freeze` for a held
+frame and `project snapshot|package` for project copies. Check scoped help for
+arguments and `help edit apply --json` for new batch operations.
+
 ## Discover and inspect
+
+Use `project cache-preview PROJECT --size 960 --json` to render or reuse an
+MP4 with mixed audio and VFR footage sampled on the project frame grid. Use
+`project render` for a durable export. Use
+`desktop control PROJECT REQUEST.json --json` for an open, saved project on
+macOS or Linux. Discover the request
+schema with `opencut help desktop control --json`. A `render-preview` reply
+acknowledges the request. Poll `status` or use `project cache-preview` when
+the workflow needs the completed file.
+
+`subtitle.words` in an edit batch assigns exact cue-relative times to UTF-16
+text ranges for animated word highlighting. SRT and WebVTT carry cue-level
+timing and text. Verify word animation in a rendered preview or burn-in.
 
 ```sh
 opencut help --json

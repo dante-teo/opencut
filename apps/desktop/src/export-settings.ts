@@ -16,10 +16,15 @@ export const exportRates = [
 ] as const;
 export interface ExportSettings {
   resolution: RenderResolution;
-  frameRate: (typeof exportRates)[number];
+  frameRate: string;
   codec: RenderCodec;
   quality: RenderQuality;
   burnSubtitles?: boolean;
+  outputSize?: { width: number; height: number } | undefined;
+  videoBitrateKbps?: number | undefined;
+  audioBitrateKbps?: number | undefined;
+  audioSampleRate?: 44100 | 48000 | undefined;
+  audioChannels?: 1 | 2 | undefined;
 }
 const defaultSettings: ExportSettings = {
   resolution: 'project',

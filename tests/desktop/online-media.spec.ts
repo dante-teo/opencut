@@ -10,6 +10,7 @@ import {
 import { join, resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { launchDesktop } from './helpers.js';
+import { controlDesktopProject } from '@opencut/core/node';
 
 const root = resolve('tests/fixtures/generated');
 const names = ['still.png', 'audio-tone.wav', 'video-medium.mp4'];
@@ -312,6 +313,22 @@ test('searches both public providers, previews media and reopens offline imports
       page.getByText('Project saved.', { exact: true }),
     ).toBeVisible();
     const saved = JSON.parse(await readFile(projectPath, 'utf8'));
+    const found = (await controlDesktopProject(projectPath, {
+      action: 'online-search',
+      provider: 'commons',
+      query: 'fixture',
+      kind: 'image',
+    })) as { results: { id: string; title: string }[] };
+    expect(found.results.length).toBeGreaterThan(0);
+    const importResult = await controlDesktopProject(projectPath, {
+      action: 'online-import',
+      id: found.results[0]!.id,
+      expectedRevision: saved.editing.revision,
+    });
+    expect(importResult).toMatchObject({
+      revision: saved.editing.revision,
+      notice: 'Media is already in the project.',
+    });
     expect(
       saved.assets.map((asset: { provenance: unknown }) => asset.provenance),
     ).toEqual([

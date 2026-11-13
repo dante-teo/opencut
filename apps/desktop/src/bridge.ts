@@ -50,6 +50,13 @@ export type TimelineArtworkInput = HistoryInput & {
 } & ({ kind: 'frame'; count: number; interval: number } | { kind: 'waveform' });
 export type TimelineArtworkResult = string | Uint8Array | null;
 export const TIMELINE_FRAME_CHANNEL = 'media:frame';
+export const TIMELINE_RENDER_CHANNEL = 'media:render-timeline';
+export const DESKTOP_CONTROL_CHANNEL = 'project:desktop-control';
+export const DESKTOP_CONTROL_REPLY = 'project:desktop-control-reply';
+export type DesktopControl = Exclude<
+  import('@opencut/core/node').DesktopControlRequest,
+  { action: 'online-search' | 'online-import' }
+>;
 export const TIMELINE_TEXT_CHANNEL = 'media:text';
 export interface TimelineTextImage {
   x: number;
@@ -114,6 +121,12 @@ export const PROJECT_CHANNELS = {
   importSubtitles: 'project:import-subtitles',
   exportSubtitles: 'project:export-subtitles',
   removeAsset: 'project:remove-asset',
+  relinkAsset: 'project:relink-asset',
+  separateDialogue: 'project:separate-dialogue',
+  copyProject: 'project:copy',
+  freezeFrame: 'project:freeze-frame',
+  importFont: 'project:import-font',
+  exportFrame: 'project:export-frame',
   addAssetClip: 'project:add-asset-clip',
 } as const;
 
@@ -152,6 +165,15 @@ export type TimelineOperation = Extract<
       | 'clip.remove'
       | 'clip.audio'
       | 'clip.speed'
+      | 'clip.replace'
+      | 'clip.detach-audio'
+      | 'clip.grade'
+      | 'clip.gain-keys'
+      | 'clip.effects'
+      | 'clip.dissolve'
+      | 'clip.flash'
+      | 'clip.fade'
+      | 'canvas.set'
       | 'track.audio'
       | 'clip.visual'
       | `clip.keyframe.${string}`
@@ -224,6 +246,10 @@ export interface ExportState {
   error: string;
 }
 export interface DesktopAPI {
+  renderTimeline(
+    input: HistoryInput & { size: number },
+  ): Promise<{ url: string; hit: boolean; frameCount: number } | null>;
+  onDesktopControl(callback: (control: DesktopControl) => unknown): () => void;
   chooseExportOutput(): Promise<string | null>;
   getExport(): Promise<ExportState | null>;
   startExport(input: ExportInput): Promise<ExportState>;
@@ -239,12 +265,20 @@ export interface DesktopAPI {
     input: HistoryInput & { resultId: string },
   ): Promise<ProjectReply>;
   importSubtitles(input: HistoryInput): Promise<ProjectReply>;
+  importFont(input: HistoryInput & { id: string }): Promise<ProjectReply>;
+  exportFrame(input: HistoryInput & { at: number }): Promise<ProjectReply>;
   exportSubtitles(
     input: HistoryInput & { format: SubtitleFormat },
   ): Promise<ProjectReply>;
   importDroppedMedia(input: HistoryInput, files: File[]): Promise<ProjectReply>;
   onImportProgress(callback: (progress: ImportProgress) => void): () => void;
   removeAsset(input: AssetRemoveInput): Promise<ProjectReply>;
+  relinkAsset(input: AssetRemoveInput): Promise<ProjectReply>;
+  separateDialogue(input: AssetRemoveInput): Promise<ProjectReply>;
+  copyProject(input: HistoryInput & { bundle: boolean }): Promise<ProjectReply>;
+  freezeFrame(
+    input: HistoryInput & { clipId: string; at: number; frames: number },
+  ): Promise<ProjectReply>;
   addAssetClip(input: AssetClipInput): Promise<ProjectReply>;
   assetThumbnail(assetId: string): Promise<string | null>;
   editTimeline(input: TimelineEditInput): Promise<ProjectReply>;

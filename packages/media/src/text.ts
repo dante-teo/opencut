@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { LRUCache } from 'lru-cache';
 import type { SKRSContext2D } from '@napi-rs/canvas';
 import { DEFAULT_TEXT_FONT, DEFAULT_TEXT_SIZE } from '@opencut/shared';
@@ -10,6 +11,36 @@ const emojiFamily = 'OpenCut Noto Emoji';
 const graphemes = new Intl.Segmenter('und', { granularity: 'grapheme' });
 const words = new Intl.Segmenter('und', { granularity: 'word' });
 let engine: Promise<typeof import('@napi-rs/canvas')> | undefined;
+const registeredFonts = new Map<
+  string,
+  NonNullable<
+    ReturnType<(typeof import('@napi-rs/canvas'))['GlobalFonts']['register']>
+  >
+>();
+
+async function embeddedFamily(encoded: string) {
+  const { GlobalFonts } = await loadEngine();
+  const data = Buffer.from(encoded, 'base64');
+  const signature = data.subarray(0, 4).toString('hex');
+  if (data.length > 2_097_152 || !['00010000', '4f54544f'].includes(signature))
+    throw new MediaError('Choose a TTF or OTF font up to 2 MiB.');
+  const alias = `OpenCut ${createHash('sha256').update(data).digest('hex')}`;
+  if (!registeredFonts.has(alias)) {
+    const font = GlobalFonts.register(data, alias);
+    if (!font) throw new MediaError('The font file could not be loaded.');
+    registeredFonts.set(alias, font);
+    if (registeredFonts.size > 32) {
+      const oldest = registeredFonts.keys().next().value!;
+      GlobalFonts.remove(registeredFonts.get(oldest)!);
+      registeredFonts.delete(oldest);
+    }
+  }
+  return alias;
+}
+
+export async function validateEmbeddedFont(data: Buffer) {
+  await embeddedFamily(data.toString('base64'));
+}
 
 function loadEngine() {
   return (engine ??= import('@napi-rs/canvas').then((canvas) => {
@@ -51,11 +82,11 @@ function fittingEnd(
   return low;
 }
 
+const normalizeLayoutText = (content: string) =>
+  content.replace(/\r\n?/g, '\n').replaceAll('\t', '    ');
+
 function layoutLines(ctx: SKRSContext2D, content: string, wrap?: number) {
-  const paragraphs = content
-    .replace(/\r\n?/g, '\n')
-    .replaceAll('\t', '    ')
-    .split('\n');
+  const paragraphs = content.split('\n');
   if (wrap === undefined) return paragraphs;
   const lines: string[] = [];
   const fits = (line: string) => ctx.measureText(line).width <= wrap;
@@ -144,9 +175,27 @@ export async function rasterizeTextLayer(
   if (cached) return cached;
   const { createCanvas, GlobalFonts } = await loadEngine();
   checkRenderSignal(signal);
+  if (text.canvasFill) {
+    const canvas = createCanvas(width, height);
+    const context = canvas.getContext('2d');
+    context.globalAlpha = opacity;
+    context.fillStyle = text.canvasFill;
+    context.fillRect(0, 0, width, height);
+    const raster = {
+      x: 0,
+      y: 0,
+      width,
+      height,
+      png: canvas.toBuffer('image/png'),
+      warning: null,
+    };
+    rasters.set(key, raster);
+    return raster;
+  }
   const requested = text.fontFamily ?? DEFAULT_TEXT_FONT;
-  const family =
-    requested.toLowerCase() === DEFAULT_TEXT_FONT.toLowerCase()
+  const family = text.embeddedFont
+    ? await embeddedFamily(text.embeddedFont)
+    : requested.toLowerCase() === DEFAULT_TEXT_FONT.toLowerCase()
       ? bundledFamily
       : requested.toLowerCase() === 'noto emoji'
         ? emojiFamily
@@ -174,7 +223,8 @@ export async function rasterizeTextLayer(
   const font = `${text.fontWeight ?? 400} ${size}px ${fontFamilies}`;
   const metrics = createCanvas(1, 1).getContext('2d');
   metrics.font = font;
-  const lines = layoutLines(metrics, text.content, text.wrapWidth ?? undefined);
+  const normalized = normalizeLayoutText(text.content);
+  const lines = layoutLines(metrics, normalized, text.wrapWidth ?? undefined);
   const measured = lines.map((line) => metrics.measureText(line));
   const blockWidth = Math.max(
     text.wrapWidth ?? 0,
@@ -272,10 +322,65 @@ export async function rasterizeTextLayer(
     ctx.lineWidth = stroke * 2;
     ctx.lineJoin = 'round';
   }
+  const highlight = (
+    line: string,
+    x: number,
+    y: number,
+    from: number,
+    to: number,
+    onset = false,
+  ) => {
+    const left = ctx.measureText(line.slice(0, from)).width;
+    const right = ctx.measureText(line.slice(0, to)).width;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x + left, y - ascent - 2, right - left, ascent + descent + 4);
+    ctx.clip();
+    ctx.fillStyle = onset ? '#fff5ad' : '#ffe45c';
+    ctx.fillText(line, x, y - (onset ? size * 0.06 : 0));
+    ctx.restore();
+  };
+  let offsetInText = 0;
+  const layoutOffset = (offset: number) =>
+    normalizeLayoutText(text.content.slice(0, offset)).length;
+  const active = text.activeWord && {
+    from: layoutOffset(text.activeWord.from),
+    to: layoutOffset(text.activeWord.to),
+    phase: text.activeWord.phase,
+  };
   for (const [i, line] of lines.entries()) {
     const { x, y } = positions[i]!;
     if (stroke) ctx.strokeText(line, x, y);
     ctx.fillText(line, x, y);
+    for (const word of text.emphasis ?? []) {
+      for (
+        let offset = line.indexOf(word);
+        offset >= 0;
+        offset = line.indexOf(word, offset + word.length)
+      ) {
+        const isLatin = /^[a-z0-9]+$/i.test(word);
+        if (
+          isLatin &&
+          (/[a-z0-9]/i.test(line[offset - 1] ?? '') ||
+            /[a-z0-9]/i.test(line[offset + word.length] ?? ''))
+        )
+          continue;
+        highlight(line, x, y, offset, offset + word.length);
+      }
+    }
+    const lineStart = active ? normalized.indexOf(line, offsetInText) : -1;
+    if (active && lineStart >= 0) {
+      offsetInText = lineStart + line.length;
+      if (active.to > lineStart && active.from < offsetInText)
+        highlight(
+          line,
+          x,
+          y,
+          Math.max(0, active.from - lineStart),
+          active.to - lineStart,
+          active.phase === 0,
+        );
+    }
   }
   if (opacity !== 1) {
     ctx.resetTransform();

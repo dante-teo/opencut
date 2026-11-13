@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { canvasColorPattern } from '@opencut/shared';
 import { textLayerSchema } from './text-style.js';
-import { subtitleTrackSchema } from './subtitles.js';
+import { subtitleTrackSchema, validSubtitleWords } from './subtitles.js';
 import { visualKeyframesSchema, visualValueSchema } from './keyframes.js';
 import { clipDuration, clipSpeedSchema } from './clip-timing.js';
 import { clipAudioShape, resolveAudioFade, trackAudioShape } from './audio.js';
@@ -100,6 +100,18 @@ const trackSchema = z.strictObject({
   ...trackAudioShape,
 });
 export const clipVisualSchema = z.strictObject({
+  crop: z
+    .strictObject({
+      left: z.number().min(0).lt(1),
+      top: z.number().min(0).lt(1),
+      right: z.number().min(0).lt(1),
+      bottom: z.number().min(0).lt(1),
+    })
+    .refine(
+      (crop) => crop.left + crop.right < 1 && crop.top + crop.bottom < 1,
+      'Crop must leave visible area.',
+    )
+    .optional(),
   x: visualValueSchema('x').optional(),
   y: visualValueSchema('y').optional(),
   scale: visualValueSchema('scale').optional(),
@@ -112,6 +124,28 @@ export const canvasShape = {
   height: z.int().positive().optional(),
   backgroundColor: z.string().regex(canvasColorPattern).optional(),
 };
+export const colorGradeSchema = z.strictObject({
+  exposure: z.number().min(-4).max(4),
+  temperature: z.number().min(-1).max(1),
+  tint: z.number().min(-1).max(1),
+  contrast: z.number().min(0).max(3),
+  saturation: z.number().min(0).max(3),
+  curve: z
+    .array(
+      z.strictObject({
+        input: z.number().gt(0).lt(1),
+        output: z.number().min(0).max(1),
+      }),
+    )
+    .max(16)
+    .refine(
+      (points) =>
+        points.every(
+          (point, i) => i === 0 || points[i - 1]!.input < point.input,
+        ),
+      'Curve input points must increase.',
+    ),
+});
 export const clipSchema = z.strictObject({
   id,
   assetId: id.optional(),
@@ -122,7 +156,9 @@ export const clipSchema = z.strictObject({
   sourceOut: timeSchema,
   speed: clipSpeedSchema.optional(),
   ...clipAudioShape,
+  detachedAudio: z.literal(true).optional(),
   visual: clipVisualSchema.optional(),
+  grade: colorGradeSchema.optional(),
   keyframes: visualKeyframesSchema.optional(),
 });
 const persistedClipSchema = clipSchema.refine(
@@ -254,7 +290,12 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
       );
     } else {
       try {
-        subtractTimes(cue.end, cue.start);
+        if (!validSubtitleWords(cue, subtractTimes(cue.end, cue.start)))
+          add(
+            location + '/words',
+            'invalid_range',
+            'Words must have ordered, non-overlapping text and time ranges within the cue.',
+          );
       } catch (error) {
         if (!(error instanceof RangeError)) throw error;
         add(
@@ -304,11 +345,41 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
         'incompatible_media',
         `Asset '${asset.id}' has no ${track.type} media for track '${track.id}'.`,
       );
+    if (
+      clip.detachedAudio &&
+      (track?.type !== 'audio' || !asset?.mediaTypes.includes('video'))
+    )
+      add(
+        `${location}/detachedAudio`,
+        'incompatible_media',
+        'Detached audio requires a video source on an audio track.',
+      );
     if (clip.keyframes && track?.type !== 'video')
       add(
         location + '/keyframes',
         'incompatible_visual',
         'Keyframes require a video track.',
+      );
+    if (clip.visual?.crop && track?.type !== 'video')
+      add(
+        location + '/visual/crop',
+        'incompatible_visual',
+        'Cropping requires a video track.',
+      );
+    if (clip.grade && (track?.type !== 'video' || clip.text))
+      add(
+        location + '/grade',
+        'incompatible_visual',
+        'Color grading requires a video or image clip.',
+      );
+    if (
+      (clip.gainKeys || clip.effects?.length) &&
+      (clip.text || asset?.metadata?.kind === 'image')
+    )
+      add(
+        location + '/gainKeys',
+        'incompatible_media',
+        'Audio effects and volume keyframes require a timed media clip.',
       );
     if (clip.visual !== undefined && track?.type !== 'video')
       add(
@@ -337,7 +408,8 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
         clip.muted !== undefined ||
         clip.fadeIn !== undefined ||
         clip.fadeOut !== undefined ||
-        clip.visual?.fit !== undefined
+        clip.visual?.fit !== undefined ||
+        clip.visual?.crop !== undefined
       )
         add(
           location,
@@ -360,6 +432,12 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
     if (compareTimes(clip.sourceOut, clip.sourceIn) > 0) {
       try {
         const duration = clipDuration(clip);
+        if (clip.gainKeys?.some((key) => compareTimes(key.time, duration) > 0))
+          add(
+            location + '/gainKeys',
+            'keyframe_bounds',
+            'Volume keyframes must be within the clip duration.',
+          );
         const end = addTimes(clip.timelineStart, duration);
         for (const [property, keys] of Object.entries(clip.keyframes ?? {})) {
           if (!keys) continue;
@@ -586,7 +664,26 @@ export function createProject(options: CreateProjectOptions): Project {
 
 /** Schema parsing fixes object key order without sorting semantically ordered arrays. */
 export function serializeProject(project: Project): string {
-  return JSON.stringify(requireProject(project), null, 2) + '\n';
+  const fonts: string[] = [];
+  const ids = new Map<string, number>();
+  const document = { ...requireProject(project), embeddedFonts: fonts };
+  return (
+    JSON.stringify(
+      document,
+      (key, value: unknown) => {
+        if (key === 'embeddedFonts') return fonts.length ? fonts : undefined;
+        if (key !== 'embeddedFont' || typeof value !== 'string') return value;
+        let index = ids.get(value);
+        if (index === undefined) {
+          index = fonts.length;
+          ids.set(value, index);
+          fonts.push(value);
+        }
+        return { font: index };
+      },
+      2,
+    ) + '\n'
+  );
 }
 
 export function deserializeProject(json: string): Project {
@@ -607,5 +704,52 @@ export function deserializeProject(json: string): Project {
       { cause },
     );
   }
-  return requireProject(value);
+  const isObject = (value: unknown): value is Record<string, unknown> =>
+    value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (!isObject(value) || !('embeddedFonts' in value))
+    return requireProject(value);
+  const { embeddedFonts, ...document } = value;
+  const fontTable = z
+    .array(textLayerSchema.shape.embeddedFont.unwrap().unwrap())
+    .safeParse(embeddedFonts);
+  if (!fontTable.success)
+    throw new ProjectFormatError('INVALID_PROJECT', [
+      {
+        path: '/embeddedFonts',
+        code: 'invalid_font_table',
+        message: 'Expected a table of embedded font data.',
+      },
+    ]);
+  const snapshots = [document];
+  if (isObject(document.editing)) {
+    for (const stack of [document.editing.undo, document.editing.redo])
+      if (Array.isArray(stack))
+        for (const entry of stack)
+          if (isObject(entry))
+            for (const snapshot of [entry.before, entry.after])
+              if (isObject(snapshot)) snapshots.push(snapshot);
+  }
+  const restore = (style: unknown) => {
+    if (!isObject(style) || !isObject(style.embeddedFont)) return;
+    const reference = style.embeddedFont;
+    if (
+      Object.keys(reference).length === 1 &&
+      typeof reference.font === 'number' &&
+      Number.isSafeInteger(reference.font) &&
+      reference.font >= 0 &&
+      reference.font < fontTable.data.length
+    )
+      style.embeddedFont = fontTable.data[reference.font];
+  };
+  for (const snapshot of snapshots) {
+    if (Array.isArray(snapshot.clips))
+      for (const clip of snapshot.clips) if (isObject(clip)) restore(clip.text);
+    if (isObject(snapshot.subtitles)) {
+      restore(snapshot.subtitles.style);
+      if (Array.isArray(snapshot.subtitles.cues))
+        for (const cue of snapshot.subtitles.cues)
+          if (isObject(cue)) restore(cue.style);
+    }
+  }
+  return requireProject(document);
 }

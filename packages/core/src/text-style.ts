@@ -3,6 +3,9 @@ import { canvasColorPattern } from '@opencut/shared';
 
 const textColor = z.string().regex(canvasColorPattern);
 export const textLayerSchema = z.strictObject({
+  canvasFill: textColor.optional(),
+  embeddedFont: z.base64().max(2_800_000).nullable().optional(),
+  emphasis: z.array(z.string().trim().min(1).max(120)).max(20).optional(),
   content: z
     .string()
     .max(4096)

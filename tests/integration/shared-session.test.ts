@@ -8,6 +8,10 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import {
   addTrack,
   createProject,
+  commitEdit,
+  deserializeProject,
+  frameTime,
+  serializeProject,
   getEditHistory,
   projectRevision,
   undoEdit,
@@ -71,6 +75,53 @@ function add(name: string, expectedRevision?: number) {
     { expectedRevision },
   );
 }
+
+it('shares a project with a full-size font repeated in history and reads legacy inline fonts', async () => {
+  const font = Buffer.alloc(2 * 1024 * 1024, 1).toString('base64');
+  const original = createProject({ name: 'Font history' });
+  const { frameRate } = original.settings;
+  original.tracks.push({ id: 'titles', name: 'Titles', type: 'video' });
+  original.clips.push({
+    id: 'title',
+    trackId: 'titles',
+    timelineStart: frameTime(0, frameRate),
+    sourceIn: frameTime(0, frameRate),
+    sourceOut: frameTime(30, frameRate),
+    text: { content: 'Title', embeddedFont: font },
+  });
+  let project = deserializeProject(JSON.stringify(original));
+  for (let index = 0; index < 13; index++) {
+    const next = structuredClone(project);
+    next.clips[0]!.text!.content = `Title ${index}`;
+    project = commitEdit(project, next, 'Change title');
+  }
+  const compact = serializeProject(project);
+  expect(compact.indexOf(font)).toBe(compact.lastIndexOf(font));
+  expect(compact.length).toBeLessThan(3 * 1024 * 1024);
+  expect(deserializeProject(compact)).toEqual(project);
+  const fontProject = join(directory, 'fonts.json');
+  await writeProjectFile(project, fontProject);
+  const session = new ProjectSession({
+    open: async () => fontProject,
+    save: async () => null,
+    unsaved: async () => 'discard',
+  });
+  sessions.push(session);
+  expect(await session.run('open')).toMatchObject({ ok: true });
+  expect(projectRevision(await readProjectFile(fontProject))).toBe(13);
+  await cli(
+    'track',
+    'add',
+    fontProject,
+    '--type',
+    'audio',
+    '--name',
+    'Shared audio',
+  );
+  const updated = await readProjectFile(fontProject);
+  expect(projectRevision(updated)).toBe(14);
+  expect(undoEdit(updated).clips[0]!.text!.embeddedFont === font).toBe(true);
+}, 30_000);
 
 it('routes unchanged CLI commands, queries and undo/redo through another process and persists history', async () => {
   const child = await launch();

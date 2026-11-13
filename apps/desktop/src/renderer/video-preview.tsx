@@ -20,6 +20,8 @@ import {
 } from './preview.js';
 
 export interface PreviewTransport {
+  setPlaying?(playing: boolean): void;
+  seekSeconds?(seconds: number): void;
   toggle(): void;
   step(direction: -1 | 1): void;
 }
@@ -278,6 +280,17 @@ export function VideoPreview({
     else video.pause();
   };
   useImperativeHandle(transportRef, () => ({
+    seekSeconds(seconds) {
+      if (!transportDisabled)
+        void perform((video) => seek(video, Math.min(seconds, video.duration)));
+    },
+    setPlaying(playing) {
+      if (!transportDisabled)
+        void perform(async (video) => {
+          if (playing) await video.play();
+          else video.pause();
+        });
+    },
     toggle() {
       if (!transportDisabled) void perform(toggle);
     },
@@ -533,6 +546,17 @@ function SimpleSourcePreview({
   const audio = useRef<HTMLAudioElement>(null);
   const [error, setError] = useState('');
   useImperativeHandle(transportRef, () => ({
+    seekSeconds(seconds) {
+      if (active && audio.current && Number.isFinite(audio.current.duration))
+        audio.current.currentTime = Math.min(seconds, audio.current.duration);
+    },
+    setPlaying(playing) {
+      const player = audio.current;
+      if (!active || !player) return;
+      if (playing)
+        void player.play().catch((error: unknown) => setError(String(error)));
+      else player.pause();
+    },
     toggle() {
       const player = audio.current;
       if (!active || !player) return;

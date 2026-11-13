@@ -13,6 +13,8 @@ export class RenderError extends Error {
 }
 
 interface VisualRenderProperties {
+  crop?: NonNullable<NonNullable<TimelineClip['visual']>['crop']>;
+  grade?: NonNullable<TimelineClip['grade']>;
   clipId: string;
   timelineStartFrame: number;
   sourceStartFrame: number;
@@ -34,6 +36,7 @@ export type VisualRenderClip = VisualRenderProperties &
         text: NonNullable<TimelineClip['text']>;
         assetId?: never;
         subtitle?: true;
+        subtitleCueId?: string;
       }
   );
 
@@ -60,8 +63,11 @@ export interface AudioRenderClip {
   muted: boolean;
   fadeIn?: ReturnType<typeof resolveAudioFade>;
   fadeOut?: ReturnType<typeof resolveAudioFade>;
+  gainKeys?: NonNullable<TimelineClip['gainKeys']>;
+  effects?: NonNullable<TimelineClip['effects']>;
   /** Audio tracks require an audio stream; video clips may provide silence. */
   required: boolean;
+  padAudio?: true;
 }
 
 function framePosition(time: RationalTime, rate: FrameRate) {
@@ -166,10 +172,17 @@ export function planProjectRender(
           clipId: clip.id,
           text: clip.text,
           subtitle: true,
+          ...(clip.subtitleCueId && { subtitleCueId: clip.subtitleCueId }),
           timelineStartFrame: start,
           sourceStartFrame: 0,
           frameCount: end - start,
           ...clip.visual,
+          ...(clip.keyframes && {
+            animation: {
+              start: clip.animationStart ?? clip.timelineStart,
+              keyframes: clip.keyframes,
+            },
+          }),
         });
       continue;
     }
@@ -205,9 +218,15 @@ export function planProjectRender(
         sourceStart;
     if (clip.kind !== 'text') {
       const speed = clipSpeed(clip);
-      if (!previousMedia || !continuesMediaRun(previousMedia, clip))
+      if (
+        !previousMedia ||
+        !continuesMediaRun(previousMedia, clip) ||
+        previousMedia.detachedAudio !== clip.detachedAudio
+      )
         tempoRunId =
-          speed.numerator === speed.denominator ? undefined : clip.id;
+          speed.numerator === speed.denominator && !clip.effects?.length
+            ? undefined
+            : clip.id;
       previousMedia = clip;
       audioClips.push({
         clipId: clip.id,
@@ -215,15 +234,28 @@ export function planProjectRender(
         timelineStartFrame: start,
         sourceStartFrame: sourceStart,
         frameCount: count,
-        ...(retiming && { retiming }),
+        ...(retiming || clip.effects?.length
+          ? {
+              retiming: retiming ?? {
+                timelineStart: clip.timelineStart,
+                timelineEnd: clip.timelineEnd,
+                sourceIn: clip.sourceIn,
+                sourceOut: clip.sourceOut,
+                speed,
+              },
+            }
+          : {}),
         ...(tempoRunId && { tempoRunId }),
         volume: clip.volume * (clip.trackVolume ?? 1),
         muted: clip.muted || (clip.trackMuted ?? false),
         ...(clip.fadeIn && { fadeIn: resolveAudioFade('fadeIn', clip.fadeIn) }),
+        ...(clip.gainKeys && { gainKeys: clip.gainKeys }),
+        ...(clip.effects && { effects: clip.effects }),
         ...(clip.fadeOut && {
           fadeOut: resolveAudioFade('fadeOut', clip.fadeOut),
         }),
         required: clip.trackType === 'audio',
+        ...(clip.detachedAudio && { padAudio: true }),
       });
     }
     if (clip.trackType === 'video' && count > 0) {
@@ -251,6 +283,7 @@ export function planProjectRender(
           },
         }),
         ...visual,
+        ...(clip.grade && { grade: clip.grade }),
         ...(clip.keyframes && {
           animation: { start: clip.timelineStart, keyframes: clip.keyframes },
         }),

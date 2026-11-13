@@ -3,6 +3,7 @@ import { pipeline } from 'node:stream/promises';
 import {
   evaluateVisual,
   drawMediaLayer,
+  gradePixels,
   transformTextLayer,
   visualGeometry,
 } from '@opencut/shared';
@@ -10,6 +11,7 @@ import type {
   KeyframeTime,
   VisualAnimation,
   VisualTransform,
+  ColorGrade,
 } from '@opencut/shared';
 import { checkRenderSignal, MediaError } from './process.js';
 
@@ -35,6 +37,7 @@ export interface TransformLayerOptions {
   frameCount: number;
   visual: VisualTransform;
   animation?: VisualAnimation;
+  grade?: ColorGrade;
   source: TransformSource;
   signal?: AbortSignal | undefined;
 }
@@ -216,6 +219,7 @@ export async function stageTransformLayer(
           throw new MediaError(
             'FFmpeg returned fewer transform frames than expected.',
           );
+        if (options.grade) gradePixels(media.pixels.data, options.grade);
         sourceCtx!.putImageData(media.pixels, 0, 0);
       }
       const sampled = evaluateVisual(

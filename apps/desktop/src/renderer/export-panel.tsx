@@ -224,28 +224,52 @@ export function ExportPanel({
                 Resolution
                 <select
                   aria-label="Resolution"
-                  value={settings.resolution}
-                  onChange={(event) =>
-                    update(
-                      'resolution',
-                      event.target.value as ExportSettings['resolution'],
-                    )
-                  }
+                  value={settings.outputSize ? 'custom' : settings.resolution}
+                  onChange={(event) => {
+                    const resolution = event.currentTarget.value;
+                    if (resolution === 'custom') {
+                      setSettings((old) => ({
+                        ...old,
+                        resolution: 'project',
+                        outputSize: {
+                          width: state?.project.settings.width ?? 1920,
+                          height: state?.project.settings.height ?? 1080,
+                        },
+                      }));
+                    } else if (
+                      resolution === 'project' ||
+                      resolution === '720p' ||
+                      resolution === '1080p'
+                    ) {
+                      setSettings((old) => ({
+                        ...old,
+                        resolution,
+                        outputSize: undefined,
+                      }));
+                    }
+                  }}
                 >
                   <option value="project">Project</option>
                   <option value="720p">720p</option>
                   <option value="1080p">1080p</option>
+                  <option value="custom">Custom</option>
                 </select>
               </label>
               <label>
                 Frame rate
                 <select
                   aria-label="Export frame rate"
-                  value={settings.frameRate}
+                  value={
+                    (exportRates as readonly string[]).includes(
+                      settings.frameRate,
+                    )
+                      ? settings.frameRate
+                      : 'custom'
+                  }
                   onChange={(event) =>
                     update(
                       'frameRate',
-                      event.target.value as ExportSettings['frameRate'],
+                      event.target.value === 'custom' ? '' : event.target.value,
                     )
                   }
                 >
@@ -254,6 +278,7 @@ export function ExportPanel({
                       {rate === 'project' ? 'Project' : `${rate} fps`}
                     </option>
                   ))}
+                  <option value="custom">Custom</option>
                 </select>
               </label>
               <label>
@@ -290,6 +315,121 @@ export function ExportPanel({
                 </select>
               </label>
             </div>
+            {settings.outputSize && (
+              <div className="export-settings-grid">
+                {(['width', 'height'] as const).map((side) => (
+                  <label key={side}>
+                    Output {side}
+                    <input
+                      type="number"
+                      min={2}
+                      max={3840}
+                      step={2}
+                      value={settings.outputSize?.[side] || ''}
+                      onChange={(event) => {
+                        const value = Number(event.currentTarget.value);
+                        setSettings((old) =>
+                          old.outputSize
+                            ? {
+                                ...old,
+                                outputSize: {
+                                  ...old.outputSize,
+                                  [side]: value,
+                                },
+                              }
+                            : old,
+                        );
+                      }}
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
+            {!(exportRates as readonly string[]).includes(
+              settings.frameRate,
+            ) && (
+              <label>
+                Custom FPS
+                <input
+                  value={settings.frameRate}
+                  placeholder="30000/1001"
+                  onChange={(event) =>
+                    update('frameRate', event.currentTarget.value)
+                  }
+                />
+              </label>
+            )}
+            <details>
+              <summary>Bitrate and audio</summary>
+              <div className="export-settings-grid">
+                <label>
+                  Video bitrate (kb/s)
+                  <input
+                    type="number"
+                    min={100}
+                    max={100000}
+                    placeholder="Automatic"
+                    value={settings.videoBitrateKbps ?? ''}
+                    onChange={(event) =>
+                      update(
+                        'videoBitrateKbps',
+                        event.currentTarget.value
+                          ? Number(event.currentTarget.value)
+                          : undefined,
+                      )
+                    }
+                  />
+                </label>
+                <label>
+                  Audio bitrate (kb/s)
+                  <input
+                    type="number"
+                    min={32}
+                    max={320}
+                    placeholder="192"
+                    value={settings.audioBitrateKbps ?? ''}
+                    onChange={(event) =>
+                      update(
+                        'audioBitrateKbps',
+                        event.currentTarget.value
+                          ? Number(event.currentTarget.value)
+                          : undefined,
+                      )
+                    }
+                  />
+                </label>
+                <label>
+                  Sample rate
+                  <select
+                    value={settings.audioSampleRate ?? 48000}
+                    onChange={(event) =>
+                      update(
+                        'audioSampleRate',
+                        event.currentTarget.value === '44100' ? 44100 : 48000,
+                      )
+                    }
+                  >
+                    <option value="48000">48 kHz</option>
+                    <option value="44100">44.1 kHz</option>
+                  </select>
+                </label>
+                <label>
+                  Channels
+                  <select
+                    value={settings.audioChannels ?? 2}
+                    onChange={(event) =>
+                      update(
+                        'audioChannels',
+                        event.currentTarget.value === '1' ? 1 : 2,
+                      )
+                    }
+                  >
+                    <option value="2">Stereo</option>
+                    <option value="1">Mono</option>
+                  </select>
+                </label>
+              </div>
+            </details>
             {!!state?.project.subtitles?.cues.length && (
               <label>
                 <input
