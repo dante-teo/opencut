@@ -11,6 +11,9 @@ import {
   projectRevision,
   clipTimelineEnd,
   clipSpeed,
+  resolveTransition,
+  transitionOwner,
+  transitionUsesClip,
   type Project,
   type RationalTime,
   type TimelineClip,
@@ -25,6 +28,7 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { NumberProperty } from './clip-properties.js';
+import { TransitionControls, transitionNames } from './transition-controls.js';
 import { ClipArtwork } from './clip-artwork.js';
 import { ASSET_DRAG_TYPE, readAssetDrag } from './media-library.js';
 import type { AssetClipInput, TimelineOperation } from '../bridge.js';
@@ -149,11 +153,40 @@ export function ProjectTimeline({
   const nextCue = selectedSubtitle
     ? sortedCues[sortedCues.findIndex((cue) => cue.id === selected) + 1]
     : undefined;
-  const previewable =
-    selectedClip?.assetId &&
-    project?.tracks.find((track) => track.id === selectedClip.trackId)?.type ===
-      'video' &&
-    index.assets.get(selectedClip.assetId)?.metadata?.kind !== 'image';
+  const transitionMenu = useRef<HTMLDetailsElement>(null);
+  const transitionWindows = useMemo(() => {
+    if (!project?.transitions?.length) return [];
+    const clips = new Map(project.clips.map((clip) => [clip.id, clip]));
+    return project.transitions.map((transition) => ({
+      transition,
+      ...resolveTransition(transition, clips, project.settings.frameRate),
+    }));
+  }, [project]);
+  const selectedTransitions = selected
+    ? (project?.transitions ?? []).filter((transition) =>
+        transitionUsesClip(transition, selected),
+      )
+    : [];
+  const isVideo = (clip: TimelineClip) =>
+    !!clip.assetId &&
+    index.assets.get(clip.assetId)?.metadata?.kind !== 'image' &&
+    project?.tracks.some(
+      ({ id, type }) => id === clip.trackId && type === 'video',
+    );
+  const transitionClip =
+    selectedClip && isVideo(selectedClip) ? selectedClip : undefined;
+  const previousVideo =
+    transitionClip &&
+    project?.clips.find(
+      (candidate) =>
+        candidate.id !== transitionClip.id &&
+        candidate.trackId === transitionClip.trackId &&
+        isVideo(candidate) &&
+        compareTimes(
+          clipTimelineEnd(candidate),
+          transitionClip.timelineStart,
+        ) === 0,
+    );
 
   const canSplit =
     selectedClip &&
@@ -625,6 +658,16 @@ export function ProjectTimeline({
               </div>
             </details>
           )}
+          {transitionClip && (
+            <TransitionControls
+              menuRef={transitionMenu}
+              clipId={transitionClip.id}
+              previousId={previousVideo?.id}
+              transitions={selectedTransitions}
+              disabled={disabled || !!proposal}
+              onEdit={onEdit}
+            />
+          )}
           <button
             disabled={disabled || !canSplit || !!proposal}
             onClick={splitSelected}
@@ -682,7 +725,7 @@ export function ProjectTimeline({
           <button
             aria-label="Preview selected clip"
             title="Preview selected clip"
-            disabled={!previewable}
+            disabled={!transitionClip}
             onClick={() => selectedClip && onPreviewClip?.(selectedClip.id)}
           >
             <Clapperboard aria-hidden="true" />
@@ -1257,6 +1300,54 @@ export function ProjectTimeline({
                       );
                     },
                   )}
+                  {transitionWindows
+                    .filter(
+                      (window) =>
+                        window.trackId === track.id &&
+                        compareTimes(window.end, origin) > 0 &&
+                        compareTimes(window.start, visibleEnd) < 0,
+                    )
+                    .map(({ transition, start, end }) => {
+                      const x = Math.max(
+                        0,
+                        relativePixels(start, origin, zoom),
+                      );
+                      const right = Math.min(
+                        width,
+                        relativePixels(end, origin, zoom),
+                      );
+                      const inspect = () => {
+                        onSelect(transitionOwner(transition));
+                        requestAnimationFrame(() => {
+                          if (transitionMenu.current)
+                            transitionMenu.current.open = true;
+                        });
+                      };
+                      const label = `${transitionNames[transition.kind]}, ${transition.frames} frames`;
+                      return (
+                        <rect
+                          className="timeline-transition"
+                          key={transition.id}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={label}
+                          x={x}
+                          y={45}
+                          width={Math.max(2, right - x)}
+                          height={12}
+                          rx={2}
+                          onClick={inspect}
+                          onKeyDown={(event) => {
+                            if (event.key !== 'Enter' && event.key !== ' ')
+                              return;
+                            event.preventDefault();
+                            inspect();
+                          }}
+                        >
+                          <title>{label}</title>
+                        </rect>
+                      );
+                    })}
                 </svg>
               </div>
             );

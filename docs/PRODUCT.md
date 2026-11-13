@@ -27,7 +27,7 @@ The editing model (projects, intent, commands, validation) and the media engine
 and [architecture decisions](adr/0012-realtime-layer-composition.md) define their
 current contracts and validation boundaries.
 
-## Implemented milestones through T37
+## Implemented milestones through T38
 
 Implemented: pnpm workspace, Electron/React shell, standalone help/version
 CLI, importable core identity, headless media package, reserved shared package,
@@ -355,3 +355,11 @@ content and holds edge values on extensions. Splitting preserves the value and
 easing across the cut. Speed changes retime the keys with the source. Keyframe
 edits save with the project and participate in undo/redo. The CLI and TypeScript
 SDK use the same [keyframe transactions](CLI.md#keyframe-animation-t37).
+
+### Video transitions (T38)
+
+Video clips support cross-dissolves at adjacent cuts and fades at their
+edges. Use the timeline's transition controls, CLI commands or SDK edits
+to add, resize and remove them. Cross-dissolves use trimmed source handles
+and keep clip placement, project length and audio timing intact. See
+[transition controls and playback](TIMELINE_PLAYBACK.md#video-transitions-t38).

@@ -186,3 +186,19 @@ move a key, or supply `value` or `easing` to edit it. Use
 `inspect()` exposes stored keys and `inspectTimeline(frame)` exposes sampled
 visual transforms. Check the sampled values and render representative frames
 from the same revision.
+
+## Video transitions
+
+```ts
+editor.project.apply({
+  type: 'transition.add',
+  id: 'intro-cut',
+  transition: { kind: 'cross-dissolve', from: 'intro', to: 'main', frames: 12 },
+});
+await editor.save({ label: 'Add intro dissolve' });
+```
+
+A fade takes `{ kind: 'fade-in', clipId: 'intro', frames: 6 }` or
+`kind: 'fade-out'`. Use `{ type: 'transition.set', id, frames }` to adjust the
+duration and `{ type: 'transition.remove', id }` to delete it.
+`project.inspect().transitions` lists the records.

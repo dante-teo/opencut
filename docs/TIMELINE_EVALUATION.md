@@ -24,16 +24,16 @@ Both APIs return `TimelineEvaluation` and accept offline projects. Frame indices
 are nonnegative safe integers on the project frame grid; timestamp queries accept
 `RationalTime` in seconds. Neither API clamps a query to the project duration.
 
-| Field              | Meaning                                                                     |
-| ------------------ | --------------------------------------------------------------------------- |
-| `time`, `duration` | Requested time and greatest clip or subtitle cue end, in rational seconds.  |
-| `boundary`         | `inside` before duration, `end` exactly at duration, `after` beyond it.     |
-| `activeClips`      | Clips and derived subtitle layers active at the query, in track order.      |
-| `visualClips`      | Active video-track clips and subtitle layers, including zero-opacity clips. |
-| `audioClips`       | Active clips with present or unknown audio, including muted clips.          |
-| `mixingSources`    | Audio candidates whose effective volume is greater than zero.               |
-| `gap`, `visualGap` | No active clips, or no active opacity-positive visual clips, respectively.  |
-| `backgroundColor`  | Stored canvas background, defaulting to `#000000`.                          |
+| Field              | Meaning                                                                             |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| `time`, `duration` | Requested time and greatest clip or subtitle cue end, in rational seconds.          |
+| `boundary`         | `inside` before duration, `end` exactly at duration, `after` beyond it.             |
+| `activeClips`      | Clips and derived subtitle layers active at the query, in track order.              |
+| `visualClips`      | Ordered picture layers, including transition participants and zero-opacity samples. |
+| `audioClips`       | Active clips with present or unknown audio, including muted clips.                  |
+| `mixingSources`    | Audio candidates whose effective volume is greater than zero.                       |
+| `gap`, `visualGap` | No active clips, or no active opacity-positive visual clips, respectively.          |
+| `backgroundColor`  | Stored canvas background, defaulting to `#000000`.                                  |
 
 Each `EvaluatedTimelineClip` retains the stored clip fields and adds `duration`,
 `timelineEnd`, `trackIndex`, `trackType`, `kind`, `sourceTime`, `visible`,
@@ -49,7 +49,9 @@ Mutating a returned clip does not modify the input project.
 
 For example, a clip at timeline second 2 with source range `[5, 7)` is active at
 second 2 with source time 5 and at second 3 with source time 6. At second 4 it is
-inactive. A following clip starting at second 4 alone owns that shared boundary.
+inactive. A following clip starting at second 4 owns that shared boundary in
+`activeClips` and any audio result. A cross-dissolve can show both clips in
+`visualClips` around the cut.
 
 ## Time and ordering
 
@@ -73,7 +75,13 @@ there is no floating-point accumulation or conversion through source FPS. Mixed
 source rates do not change source-time mapping. This is a request for a media
 instant, not a decoded source-frame index; VFR sampling remains a decoder concern.
 Negative/invalid times and unsafe arithmetic throw instead of clamping or rounding.
-Exact subframe queries are supported.
+Exact subframe queries are supported. Within a transition window, the
+evaluator samples the participating picture layers at the start of the
+containing project frame. Each sample carries `transitionId` and its weighted
+opacity, including zero-opacity endpoints. A cross-dissolve can sample source
+handles outside nominal clip ranges. Use `audioClips` or `mixingSources` for
+audio. Exact timestamp queries keep subtitle visibility on the cue's stored
+interval even when the project contains transitions.
 
 Duration is the greatest end across clips and subtitle cues, including muted,
 transparent or audio-only clips and empty cues. The boundary is `inside`,

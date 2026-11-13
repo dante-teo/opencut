@@ -75,5 +75,18 @@ export async function resolveProjectRender(
   const audioClips = [];
   for (const clip of plan.audioClips)
     audioClips.push({ ...clip, path: await resolveSource(clip) });
-  return { ...plan, visualClips, audioClips };
+  const { visualTransitions: transitions, ...settings } = plan;
+  const visualTransitions = [];
+  for (const { afterClipId, layers } of transitions ?? []) {
+    const resolved = [];
+    for (const clip of layers)
+      resolved.push({ ...clip, path: await resolveSource(clip) });
+    visualTransitions.push({ afterClipId, layers: resolved });
+  }
+  return {
+    ...settings,
+    visualClips,
+    audioClips,
+    ...(visualTransitions.length && { visualTransitions }),
+  };
 }

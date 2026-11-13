@@ -1,7 +1,12 @@
-import { evaluateVisual, visualDefaults } from '@opencut/shared';
+import {
+  evaluateVisual,
+  transitionOpacity,
+  visualDefaults,
+} from '@opencut/shared';
 import type { Project, TimelineClip } from './project.js';
 import { audioFadeGain, baseAudioGain, keyframeGain } from './audio.js';
 import { clipSpeed, sampleClipSourceTime } from './clip-timing.js';
+import { resolveTransition } from './transitions.js';
 import { listTimeline } from './timeline.js';
 import { subtitleTextLayers } from './subtitles.js';
 import { compareTimes, frameTime, subtractTimes, timeSchema } from './time.js';
@@ -146,7 +151,19 @@ export function resolveTimeline(project: Project) {
       });
     }
   }
-  return { duration: timeline.duration, clips };
+  const transitions = [];
+  if (timeline.transitions?.length) {
+    const media = new Map(
+      clips.flatMap((clip) =>
+        clip.kind === 'video' ? [[clip.id, clip] as const] : [],
+      ),
+    );
+    for (const transition of timeline.transitions)
+      transitions.push(
+        resolveTransition(transition, media, timeline.frameRate),
+      );
+  }
+  return { duration: timeline.duration, clips, transitions };
 }
 
 type ClipSample = {
@@ -154,6 +171,7 @@ type ClipSample = {
   /** Opacity-based eligibility, not occlusion or decoded-alpha detection. */
   visible: boolean;
   effectiveVolume: number;
+  transitionId?: string;
 };
 
 export type EvaluatedTimelineClip = ResolvedTimelineClip & ClipSample;
@@ -166,6 +184,7 @@ export interface TimelineEvaluation<Clip = EvaluatedTimelineClip> {
   time: RationalTime;
   duration: RationalTime;
   boundary: 'inside' | 'end' | 'after';
+  /** Nominal clip intervals. Video handles appear only in visualClips. */
   activeClips: Clip[];
   /** Bottom to top. Includes transparent clips, whose visible flag is false. */
   visualClips: Clip[];
@@ -215,18 +234,26 @@ function createTimelineQuery<
   const backgroundColor = project.settings.backgroundColor ?? '#000000';
   const rate = { ...project.settings.frameRate };
   const needsFrameSampling =
-    sampleVisuals &&
-    (!!project.subtitles?.cues.length ||
-      timeline.clips.some((clip) => clip.keyframes));
+    timeline.transitions.length > 0 ||
+    (sampleVisuals &&
+      (!!project.subtitles?.cues.length ||
+        timeline.clips.some((clip) => clip.keyframes)));
   const tracks = new Map<string, ResolvedTimelineClip[]>();
   for (const clip of timeline.clips) {
     const entries = tracks.get(clip.trackId) ?? [];
     entries.push(clip);
     tracks.set(clip.trackId, entries);
   }
+  const transitions = new Map<string, typeof timeline.transitions>();
+  for (const transition of timeline.transitions) {
+    const entries = transitions.get(transition.trackId) ?? [];
+    entries.push(transition);
+    transitions.set(transition.trackId, entries);
+  }
   return (time: RationalTime): TimelineEvaluation<Clip & ClipSample> => {
     timeSchema.parse(time);
     const activeClips: (Clip & ClipSample)[] = [];
+    const visualClips: (Clip & ClipSample)[] = [];
     const frame = needsFrameSampling
       ? (BigInt(time.numerator) * BigInt(rate.numerator)) /
         (BigInt(time.denominator) * BigInt(rate.denominator))
@@ -236,7 +263,7 @@ function createTimelineQuery<
         ? frameTime(Number(frame), rate)
         : time;
     for (const [id, entries] of tracks) {
-      const at = id.startsWith('subtitle:') ? sampled : time;
+      const at = sampleVisuals && id.startsWith('subtitle:') ? sampled : time;
       let low = 0,
         high = entries.length;
       while (low < high) {
@@ -245,8 +272,21 @@ function createTimelineQuery<
           low = middle + 1;
         else high = middle;
       }
-      const clip = entries[low];
-      if (clip && compareTimes(clip.timelineStart, at) <= 0) {
+      const nominal = entries[low];
+      const clip =
+        nominal && compareTimes(nominal.timelineStart, at) <= 0
+          ? nominal
+          : undefined;
+      const transition =
+        frame !== null
+          ? transitions
+              .get(id)
+              ?.find(
+                ({ startFrame, endFrame }) =>
+                  frame >= BigInt(startFrame) && frame < BigInt(endFrame),
+              )
+          : undefined;
+      if (clip) {
         const gain = baseAudioGain(clip);
         const local =
           clip.fadeIn || clip.fadeOut || clip.gainKeys
@@ -261,27 +301,46 @@ function createTimelineQuery<
         const visual = evaluateVisual(
           detached.visual,
           clip.keyframes,
-          sampled,
+          sampleVisuals ? sampled : time,
           clip.kind === 'text'
             ? (clip.animationStart ?? clip.timelineStart)
             : clip.timelineStart,
         );
-        activeClips.push(
-          Object.assign(detached, {
-            sourceTime:
-              clip.kind === 'text' && clip.subtitle
-                ? { ...clip.sourceIn }
-                : sampleClipSourceTime(clip, at),
-            visual,
-            visible: clip.trackType === 'video' && visual.opacity > 0,
-            effectiveVolume,
-          }),
-        );
+        const sample = Object.assign(detached, {
+          sourceTime:
+            clip.kind === 'text' && clip.subtitle
+              ? { ...clip.sourceIn }
+              : sampleClipSourceTime(clip, at),
+          visual,
+          visible: clip.trackType === 'video' && visual.opacity > 0,
+          effectiveVolume,
+        });
+        activeClips.push(sample);
+        if (!transition && clip.trackType === 'video') visualClips.push(sample);
+      }
+      if (transition) {
+        for (const { clip: participant, direction } of transition.layers) {
+          const detached = copyClip(participant);
+          const visual = evaluateVisual(
+            detached.visual,
+            participant.keyframes,
+            sampled,
+            participant.timelineStart,
+          );
+          const opacity =
+            visual.opacity *
+            transitionOpacity(Number(frame), { ...transition, direction });
+          const sample = Object.assign(detached, {
+            visual: { ...visual, opacity },
+            sourceTime: sampleClipSourceTime(participant, sampled),
+            transitionId: transition.id,
+            visible: opacity > 0,
+            effectiveVolume: 0,
+          });
+          visualClips.push(sample);
+        }
       }
     }
-    const visualClips = activeClips.filter(
-      (clip): boolean => clip.trackType === 'video',
-    );
     const audioClips = activeClips.filter(
       (clip): boolean => clip.audioPresence !== 'absent',
     );

@@ -26,11 +26,18 @@ export {
   clipTimelineEnd,
   clipSpeed,
   clipSourceTime,
+  sampleClipSourceTime,
   clipSourcePosition,
   clipTimelinePosition,
   parseClipSpeed,
   timelineToSourceOffset,
 } from './clip-timing.js';
+export {
+  resolveTransition,
+  transitionOwner,
+  transitionUsesClip,
+} from './transitions.js';
+export type { Transition, TransitionInput } from './transitions.js';
 export type { ClipSpeed } from './clip-timing.js';
 
 /** Shared application identity, introduced in T01. */
@@ -61,6 +68,9 @@ export {
   splitClip,
   removeClip,
   listTimeline,
+  addTransition,
+  setTransition,
+  removeTransition,
 } from './timeline.js';
 export type {
   AddTrackOptions,

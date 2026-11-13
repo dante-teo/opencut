@@ -213,3 +213,17 @@ outside its key span and uses the static value once all its keys are deleted.
 Trims discard cut keys, splits preserve the curve over both pieces, and a speed
 change rescales the local times. Use `timeline inspect` for sampled values and
 decode the rendered output to confirm placement and opacity.
+
+## Video transitions
+
+```bash
+opencut transition add project.json incoming --kind cross-dissolve --from-clip outgoing --frames 12 --json
+opencut transition add project.json opening --kind fade-in --frames 6 --json
+opencut transition add project.json ending --kind fade-out --frames 6 --json
+opencut transition set project.json TRANSITION_ID --frames 16 --json
+opencut transition remove project.json TRANSITION_ID --json
+```
+
+Use `timeline list --json` to find stored transition IDs. The dissolve spans
+the cut using trimmed source handles. Use at least two project frames and
+leave enough source on both sides at the clips' playback speeds.

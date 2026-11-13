@@ -617,6 +617,140 @@ for (const interruption of ['pause', 'seek'] as const)
     }
   });
 
+for (const kind of ['fade-in', 'cross-dissolve'] as const)
+  test(`T38 waits for the zero-weight decoder when starting a ${kind}`, async () => {
+    const { application, page } = await launchDesktop();
+    try {
+      const project = auditProjects().cuts!;
+      const dissolve = kind === 'cross-dissolve';
+      const clipId = dissolve ? 'c1' : 'c0';
+      const start = dissolve ? 84 : 0;
+      if (!dissolve) project.clips = project.clips.slice(0, 1);
+      project.clips.find((clip) => clip.id === clipId)!.muted = true;
+      project.transitions = [
+        dissolve
+          ? { id: 'mix', kind, from: 'c0', to: 'c1', frames: 12 }
+          : { id: 'mix', kind, clipId, frames: 12 },
+      ];
+
+      // Gate readiness and the first play promise independently. This makes a
+      // cold decoder reproducible even if Chromium loads the fixture instantly.
+      await page.evaluate((clipId) => {
+        let ready: HTMLVideoElement | undefined;
+        let releasePlay: (() => void) | undefined;
+        const state = {
+          holdingReady: true,
+          hasReadyEvent: false,
+          playRequested: false,
+          releaseReady() {
+            state.holdingReady = false;
+            ready?.dispatchEvent(new Event('seeked'));
+          },
+          releasePlay() {
+            releasePlay?.();
+          },
+        };
+        (
+          window as unknown as { transitionStartup: typeof state }
+        ).transitionStartup = state;
+        for (const event of ['loadeddata', 'seeked']) {
+          document.addEventListener(
+            event,
+            (e) => {
+              if (
+                state.holdingReady &&
+                e.target instanceof HTMLVideoElement &&
+                e.target.dataset.timelineClip === clipId
+              ) {
+                e.stopImmediatePropagation();
+                ready = e.target;
+                state.hasReadyEvent = true;
+              }
+            },
+            true,
+          );
+        }
+        const nativePlay = HTMLMediaElement.prototype.play;
+        HTMLMediaElement.prototype.play = async function () {
+          if (
+            this instanceof HTMLVideoElement &&
+            this.dataset.timelineClip === clipId &&
+            !state.playRequested
+          ) {
+            state.playRequested = true;
+            await new Promise<void>((resolve) => {
+              releasePlay = resolve;
+            });
+          }
+          return nativePlay.call(this);
+        };
+      }, clipId);
+
+      await open(application, page, project, `startup-${kind}`);
+      await seek(page, start);
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (
+                window as unknown as {
+                  transitionStartup: { hasReadyEvent: boolean };
+                }
+              ).transitionStartup.hasReadyEvent,
+          ),
+        )
+        .toBe(true);
+      await page
+        .locator('#project-viewer')
+        .getByRole('button', { name: 'Play', exact: true })
+        .click();
+      const beforeReady = await page.evaluate(async () => {
+        // Let the startup loop and media clock each have a chance to advance.
+        for (let i = 0; i < 5; i++)
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => resolve()),
+          );
+        const startup = (
+          window as unknown as {
+            transitionStartup: { playRequested: boolean; releaseReady(): void };
+          }
+        ).transitionStartup;
+        const { playRequested } = startup;
+        startup.releaseReady();
+        return playRequested;
+      });
+      expect(beforeReady).toBe(false);
+
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (
+                window as unknown as {
+                  transitionStartup: { playRequested: boolean };
+                }
+              ).transitionStartup.playRequested,
+          ),
+        )
+        .toBe(true);
+      const pending = await report(page);
+      expect(pending.playing).toBe(false);
+      expect(time(pending)).toBe(start / 30);
+
+      await page.evaluate(() =>
+        (
+          window as unknown as { transitionStartup: { releasePlay(): void } }
+        ).transitionStartup.releasePlay(),
+      );
+      await expect
+        .poll(async () => time(await report(page)))
+        .toBeGreaterThan(start / 30 + 0.15);
+      expect((await report(page)).unavailable).toEqual([]);
+    } finally {
+      await application.close();
+    }
+  });
+
 test('edits, interruption, source isolation, missing media and grant revocation', async () => {
   test.setTimeout(45000);
   const { application, page } = await launchDesktop();

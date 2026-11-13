@@ -126,7 +126,7 @@ encoding, and 192 kb/s stereo AAC at 48 kHz.
 Current limits include 64 non-subtitle timeline clips, 600 seconds, even canvas
 sides from 2 to 3840 and at most 3840 × 2160 pixels, and project rates from 1 to
 120 fps. Browser
-preview codec support can differ from FFmpeg export support. HDR, transitions,
+preview codec support can differ from FFmpeg export support. HDR,
 distribution/signing, persistent queues and cloud rendering are outside
 the current scope.
 
@@ -148,3 +148,13 @@ for staging, and animated text exceeding that bound produces a validation
 error. Fitted media retains the existing even-pixel alignment. Compressed
 output and edge antialiasing can differ from live Canvas. [The T27 harness](PREVIEW_EXPORT_CONSISTENCY.md) checks representative
 encoded frames against the production Electron Canvas.
+
+## Video transitions (T38)
+
+Export fits and samples both original videos on the project frame grid and
+blends them in premultiplied RGB with the same weights as the live viewer.
+The weighted layers use the existing FFV1 staging pipeline, so temporary
+disk use grows with canvas size and transition length. On a transparent or
+translucent canvas, MP4 flattens the result over black as usual. See
+[the T27 comparison harness](PREVIEW_EXPORT_CONSISTENCY.md#video-transitions-t38)
+for SDR tolerances.

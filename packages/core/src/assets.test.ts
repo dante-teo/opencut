@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MediaError, probeMedia } from '@opencut/media';
 import type { MediaMetadata } from '@opencut/media';
 import { createProject, serializeProject, validateProject } from './project.js';
+import { addClip, addTrack, addTransition } from './timeline.js';
+import { frameTime } from './time.js';
 import {
   getEditHistory,
   projectSnapshot,
@@ -93,6 +95,41 @@ afterEach(async () => {
 });
 
 describe('headless asset management', () => {
+  it('preserves the last frame of a fractional-rate video when adding a fade', async () => {
+    const media = metadata('video');
+    media.video!.durationSeconds = media.durationSeconds = 1.001;
+    vi.mocked(probeMedia).mockResolvedValue(media);
+    const { asset } = await importMediaAsset(path, source);
+    expect(asset.metadata?.videoDuration).toEqual({
+      numerator: 1_001_000,
+      denominator: 1_000_000,
+    });
+
+    const project = await readProjectFile(path);
+    project.settings.frameRate = { numerator: 30000, denominator: 1001 };
+    const { project: withTrack, track } = addTrack(project, {
+      name: 'Video',
+      type: 'video',
+    });
+    const { project: withClip, clip } = addClip(withTrack, {
+      assetId: asset.id,
+      trackId: track.id,
+      timelineStart: frameTime(0, project.settings.frameRate),
+      sourceIn: frameTime(0, project.settings.frameRate),
+      sourceOut: frameTime(30, project.settings.frameRate),
+    });
+    const fade = { kind: 'fade-out', clipId: clip.id, frames: 6 } as const;
+    expect(addTransition(withClip, fade).transition).toMatchObject(fade);
+
+    const savedDuration = withClip.assets[0]!.metadata!.videoDuration!;
+    savedDuration.numerator -= 1;
+    expect(addTransition(withClip, fade).transition).toMatchObject(fade);
+    savedDuration.numerator -= 10;
+    expect(() => addTransition(withClip, fade)).toThrow(
+      /video stream duration/,
+    );
+  });
+
   it('shares import/remove history, previews without saving, and restores metadata without probing', async () => {
     const original = await readProjectFile(path);
     const bytes = await fs.readFile(path, 'utf8');
@@ -218,6 +255,9 @@ describe('headless asset management', () => {
         formatName:
           kind === 'image' ? 'png_pipe' : kind === 'audio' ? 'wav' : 'mov,mp4',
         durationSeconds: kind === 'image' ? null : 2.5,
+        ...(kind === 'video' && {
+          videoDuration: { numerator: 2_500_000, denominator: 1_000_000 },
+        }),
         width: kind === 'audio' ? null : 640,
         height: kind === 'audio' ? null : 360,
         videoCodec: kind === 'audio' ? null : kind === 'image' ? 'png' : 'h264',

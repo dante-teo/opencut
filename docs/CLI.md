@@ -1645,3 +1645,22 @@ with exit 130/143 after child cleanup. Configure persists limits and evicts old
 entries; cleanup removes stale/corrupt/orphaned entries, and clear removes all owned
 derivatives. These commands never change project JSON or source media. A missing
 source cannot be made available by a proxy. See [the cache contract](MEDIA_CACHE.md).
+
+## Video transitions (T38)
+
+```bash
+opencut transition add project.json incoming --kind cross-dissolve --from-clip outgoing --frames 12 --json
+opencut transition add project.json first --kind fade-in --frames 8 --json
+opencut transition add project.json last --kind fade-out --frames 10 --json
+opencut timeline list project.json --json
+opencut transition set project.json TRANSITION_ID --frames 16 --json
+opencut transition remove project.json TRANSITION_ID --json
+```
+
+Use the ID returned by `transition add` or listed by `timeline list`. These
+commands support `--dry-run` and `--expected-revision`. Batch edits expose
+`transition.add`, `transition.set`, and `transition.remove` through
+`edit apply`. Run `opencut help edit apply --json` for the transaction schema.
+The [project format](PROJECT_FORMAT.md#video-transitions-t38) defines the
+project-frame windows and source-handle requirements. For older edit scripts,
+`clip.dissolve` and `clip.fade` retain their layer/keyframe behavior.

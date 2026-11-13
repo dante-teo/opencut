@@ -13,6 +13,8 @@ import {
   audioFadeGain,
   keyframeGain,
   clipSpeed,
+  sampleClipSourceTime,
+  clipSourceTime,
   resolveAudioFade,
   compareTimes,
   createPlaybackTimelineEvaluator,
@@ -166,6 +168,7 @@ const textBudgetWarning = 'Some text layers exceed the preview memory budget.';
 /** Chromium decodes off-thread. This adapter only evaluates, schedules and paints. */
 export class TimelinePlayback {
   private gradeCanvas?: HTMLCanvasElement;
+  private transitionCanvas?: HTMLCanvasElement;
   private readonly compositeCache = new Map<
     string,
     { pixels: ImageData; painted: string[] }
@@ -225,7 +228,16 @@ export class TimelinePlayback {
   ) {
     this.evaluate = createPlaybackTimelineEvaluator(project);
     // Resolve lookahead through T23 too; point queries remain the source-time authority.
-    const clips = resolveTimeline(project).clips;
+    const { clips, transitions } = resolveTimeline(project);
+    const incoming = new Map<string, { fromId: string; start: RationalTime }>();
+    for (const {
+      ownerId,
+      layers: [first, second],
+      start,
+    } of transitions) {
+      if (first && second)
+        incoming.set(ownerId, { fromId: first.clip.id, start });
+    }
     let previous: ResolvedMediaClip | undefined;
     for (const clip of clips) {
       if (clip.kind === 'text') {
@@ -242,7 +254,9 @@ export class TimelinePlayback {
       // A split with contiguous source points shares its decoder and never restarts audio.
       this.keys.set(
         clip.id,
-        previous && continuesMediaRun(previous, clip)
+        previous &&
+          incoming.get(clip.id)?.fromId !== previous.id &&
+          continuesMediaRun(previous, clip)
           ? this.keys.get(previous.id)!
           : clip.id,
       );
@@ -252,9 +266,18 @@ export class TimelinePlayback {
       this.runs.set(key, run);
       previous = clip;
     }
-    this.upcoming = clips.sort((a, b) =>
-      compareTimes(a.timelineStart, b.timelineStart),
-    );
+    this.upcoming = clips
+      .map((clip) => {
+        const start = incoming.get(clip.id)?.start;
+        return start
+          ? {
+              ...clip,
+              timelineStart: start,
+              sourceIn: clipSourceTime(clip, start),
+            }
+          : clip;
+      })
+      .sort((a, b) => compareTimes(a.timelineStart, b.timelineStart));
     this.context = new AudioContext({ latencyHint: 'interactive' });
     this.context.onstatechange = () => {
       if (
@@ -440,7 +463,7 @@ export class TimelinePlayback {
               clip.assetId,
               media.videoWidth / media.videoHeight,
             );
-          const current = this.evaluate(this.clock.read()).activeClips.find(
+          const current = this.decoderClips(this.clock.read()).find(
             (c) => this.keys.get(c.id) === key,
           );
           media.currentTime = decoderSeekTime(
@@ -594,8 +617,8 @@ export class TimelinePlayback {
       clip.visual,
     ).visible;
   }
-  private needsDecoder(clip: ResolvedMediaClip) {
-    return this.visible(clip) || baseAudioGain(clip) > 0;
+  private needsDecoder(clip: ResolvedMediaClip & { transitionId?: string }) {
+    return !!clip.transitionId || this.visible(clip) || baseAudioGain(clip) > 0;
   }
   private releaseText(key: string, deferredBytes?: number) {
     const entry = this.textImages.get(key);
@@ -802,7 +825,8 @@ export class TimelinePlayback {
     const run = this.runs.get(entry.key)!;
     for (const next of run) {
       if (compareTimes(next.timelineEnd, time) <= 0) continue;
-      const current = next.id === clip.id;
+      const current =
+        next.id === clip.id && compareTimes(time, next.timelineStart) >= 0;
       const start = seconds(next.timelineStart);
       const end = seconds(next.timelineEnd);
       const gain = baseAudioGain(next);
@@ -870,7 +894,7 @@ export class TimelinePlayback {
     this.clearFrames();
     this.seekStarted = performance.now();
     this.requestFrame();
-    const active = this.evaluate(this.clock.position).activeClips;
+    const active = this.decoderClips(this.clock.position);
     for (const entry of this.entries.values()) {
       const clip = active.find((c) => this.keys.get(c.id) === entry.key);
       if (clip && entry.media?.readyState) {
@@ -912,7 +936,7 @@ export class TimelinePlayback {
       // Allow initial metadata/seek to settle before starting the authoritative clock.
       const deadline = performance.now() + 8000;
       while (
-        this.evaluate(this.clock.position).activeClips.some((c) => {
+        this.decoderClips(this.clock.position).some((c) => {
           if (c.kind === 'text') {
             const status = this.textImages.get(
               this.textKeys.get(c.id)!,
@@ -930,7 +954,7 @@ export class TimelinePlayback {
         if (performance.now() > deadline)
           throw new Error('Media did not become ready within 8 seconds.');
       }
-      const active = this.evaluate(this.clock.position).activeClips;
+      const active = this.decoderClips(this.clock.position);
       await Promise.all(
         active.map(async (clip) => {
           if (clip.kind === 'text' || !this.needsDecoder(clip)) return;
@@ -998,6 +1022,25 @@ export class TimelinePlayback {
       this.publish();
     }
   }
+  private decoderClips(time: RationalTime, evaluation = this.evaluate(time)) {
+    if (!evaluation.visualClips.some((clip) => clip.transitionId))
+      return evaluation.activeClips;
+    const clips = new Map(
+      evaluation.activeClips.map((clip) => [clip.id, clip]),
+    );
+    for (const visual of evaluation.visualClips) {
+      if (!visual.transitionId || visual.kind === 'text') continue;
+      const nominal = clips.get(visual.id);
+      clips.set(visual.id, {
+        ...visual,
+        sourceTime: this.clock.playing
+          ? sampleClipSourceTime(visual, time)
+          : visual.sourceTime,
+        effectiveVolume: nominal?.effectiveVolume ?? 0,
+      });
+    }
+    return [...clips.values()];
+  }
   private renderFrame() {
     const time = this.clock.read();
     const evaluation = this.evaluate(time);
@@ -1013,16 +1056,13 @@ export class TimelinePlayback {
       if (clip.animated || this.visible(clip))
         textWanted.set(this.textKeys.get(clip.id)!, clip);
     }
-    const activeMedia = evaluation.activeClips.filter(
+    const activeMedia = this.decoderClips(time, evaluation).filter(
       (clip) => clip.kind !== 'text',
     );
     const active = new Map(
       activeMedia.map((clip) => [this.keys.get(clip.id)!, clip]),
     );
-    const needed = activeMedia.filter(
-      (clip) =>
-        visualKeys.has(this.keys.get(clip.id)!) || baseAudioGain(clip) > 0,
-    );
+    const needed = activeMedia.filter((clip) => this.needsDecoder(clip));
     const keep = new Set(needed.map((clip) => this.keys.get(clip.id)!));
 
     for (const entry of this.entries.values()) {
@@ -1206,7 +1246,38 @@ export class TimelinePlayback {
         this.canvas.width / this.project.settings.width,
         this.canvas.height / this.project.settings.height,
       );
+      let transitionId: string | undefined;
+      let transitionContext: CanvasRenderingContext2D | undefined;
+      const flushTransition = () => {
+        if (!transitionContext) return;
+        ctx.save();
+        ctx.resetTransform();
+        ctx.globalAlpha = 1;
+        ctx.drawImage(transitionContext.canvas, 0, 0);
+        ctx.restore();
+        transitionContext = undefined;
+      };
       for (const visual of visuals) {
+        if (visual.transitionId !== transitionId) {
+          flushTransition();
+          transitionId = visual.transitionId;
+          if (transitionId) {
+            const buffer = (this.transitionCanvas ??=
+              document.createElement('canvas'));
+            if (buffer.width !== this.canvas.width)
+              buffer.width = this.canvas.width;
+            if (buffer.height !== this.canvas.height)
+              buffer.height = this.canvas.height;
+            transitionContext = buffer.getContext('2d')!;
+            transitionContext.resetTransform();
+            transitionContext.clearRect(0, 0, buffer.width, buffer.height);
+            transitionContext.scale(
+              buffer.width / this.project.settings.width,
+              buffer.height / this.project.settings.height,
+            );
+            transitionContext.globalCompositeOperation = 'lighter';
+          }
+        }
         if (visual.kind === 'text') {
           const raster = this.textImages.get(this.textKeys.get(visual.id)!);
           if (raster?.status === 'budget') this.textBudgetLimited = true;
@@ -1284,12 +1355,13 @@ export class TimelinePlayback {
           const pixels = grade.getImageData(0, 0, w, h);
           gradePixels(pixels.data, visual.grade);
           grade.putImageData(pixels, 0, 0);
-          drawMediaLayer(ctx, buffer, geometry);
+          drawMediaLayer(transitionContext ?? ctx, buffer, geometry);
         } else {
-          drawMediaLayer(ctx, drawable, geometry);
+          drawMediaLayer(transitionContext ?? ctx, drawable, geometry);
         }
         painted.push(visual.id);
       }
+      flushTransition();
       ctx.restore();
       if (
         this.exactPausedFrames &&

@@ -2091,3 +2091,27 @@ button {
 .online-results audio {
   width: 100%;
 }
+
+.timeline-transition {
+  fill: #d7afff;
+  stroke: #6c4094;
+  stroke-width: 1;
+  cursor: pointer;
+}
+
+.timeline-transition:focus-visible,
+.timeline-transition:hover {
+  fill: #f3ddff;
+  stroke: #fff;
+}
+
+.transition-actions form,
+.transition-duration {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.transition-actions input[type='number'] {
+  width: 5rem;
+}

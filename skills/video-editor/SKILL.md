@@ -71,3 +71,16 @@ scripts need the supplied `@opencut/sdk` package.
   and writing reusable creator scripts.
 - [Creator workflows](references/workflow.md) for a worked rough cut with
   music and an image overlay, vertical photo stories, and screen recordings.
+
+### Video transitions
+
+Use `transition add/set/remove` or SDK `project.apply` with
+`transition.add/set/remove` for picture fades and cross-dissolves. Use
+`timeline list --json` to find transition and clip IDs. Durations are integer
+project frames (minimum two). A cross-dissolve requires touching video clips
+at a project-frame boundary on the same track. Leave trimmed source media
+after the outgoing out point and before the incoming in point, accounting for
+playback speed. The outgoing asset needs a known duration.
+Fades reveal the canvas and lower tracks. Transitions keep audio and nominal
+clip timing intact. Check frames on either side of the cut and inside the
+blend with `preview frame`.

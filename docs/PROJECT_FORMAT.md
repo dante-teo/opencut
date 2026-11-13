@@ -128,15 +128,17 @@ URLs and machine-specific cache state are not embedded.
 
 T07 adds optional strict asset `metadata`: `kind` (`video`, `audio`, `image`),
 `formatName`, `durationSeconds`, pixel `width`/`height`, `videoCodec`, `audioCodec`,
-average `frameRate`, `frameRateRatio` and `hasAudio`. All metadata fields are
-required when the object exists; unknown/inapplicable values are `null`, except
-the required kind and boolean audio presence. Dimensions are positive safe integers;
+average `frameRate`, `frameRateRatio` and `hasAudio`. These fields are
+required when the object exists. Unknown or inapplicable values are `null`
+where the field allows it. Dimensions are positive safe integers;
 duration is finite/nonnegative and FPS is finite/positive when known. Images
 use the existing `video` media type for visual content, with metadata kind `image`
 and null duration/FPS. Images use explicit clip source ranges as model durations
 on video tracks, without an inferred finite source bound.
 Import also stores positive known duration as rational seconds rounded to
-microseconds for the existing source-bound validator. Probe metadata is a snapshot;
+microseconds for the existing source-bound validator. The optional
+`metadata.videoDuration` field stores the probed video stream duration in
+rational seconds rounded to microseconds when available. Probe metadata is a snapshot;
 availability checks do not refresh it or detect changed content at the same path.
 
 ## Exact time
@@ -776,3 +778,39 @@ filesystem-boundary rationale.
 T22 routes these Node reads/updates through an active Electron session when present;
 otherwise updates acquire standalone ownership. The JSON schema and history remain
 unchanged. See [the session decision](adr/0011-shared-project-session.md).
+
+## Video transitions (T38)
+
+Projects may store a top-level `transitions` array. Each record has a stable
+`id`, a `kind`, and an integer `frames` count of at least two project frames.
+A `cross-dissolve` references the outgoing and incoming clip IDs with `from`
+and `to`. A `fade-in` or `fade-out` references one clip with `clipId`.
+Older projects can omit the array. Undo and redo snapshots preserve it.
+
+If the cut is on frame `C` and the duration is `N`, the cross-dissolve starts
+on `C - floor(N / 2)` and occupies `N` consecutive frames. The incoming
+video uses its pre-in handle before the cut and the outgoing video uses its
+post-out handle after it. Source time follows each clip's existing affine
+mapping, including speed. Each handle must cover the part of the window
+outside its clip's nominal interval. The window must fit inside the two
+clips' combined nominal interval. The outgoing asset needs a known duration.
+Validation uses `metadata.videoDuration` when present and otherwise uses the
+stored asset duration for the outgoing handle. Video stream duration checks
+allow one microsecond of probe precision, as export does when checking the
+current source. Import the original to record its duration and trim both
+clips to leave handles.
+
+Fade-in starts at the clip's first frame. Fade-out ends at its exclusive out
+frame. All transition anchors must fall on project frame boundaries and
+windows on the same track must be disjoint. The first and last sampled frames
+are the exact endpoints. Between them, the weight is linear over `N - 1`
+frame intervals. Cross-dissolve interpolates the premultiplied color and alpha
+of the fitted layers. Fade-in and fade-out scale the video layer's alpha over
+the existing lower layers and canvas background.
+
+A transition never changes clip ranges, track order, project duration or
+audio. A split keeps a start transition on the left piece and moves an end
+transition to the right piece. A split inside a participating edge's window,
+or any clip edit that invalidates a transition, fails atomically. Remove or
+shorten the transition first. Removing a clip removes its attached
+transitions in the same history entry.

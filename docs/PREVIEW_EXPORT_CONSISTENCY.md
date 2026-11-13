@@ -187,3 +187,21 @@ sides of the split, the last key and the final active frame. The case also
 checks decoded color at known coordinates, verifies audio from the animated
 clip, and compares a CLI PNG with the corresponding MP4 frame. The same sample
 includes animated title opacity and rotation on an alpha-bearing still.
+
+## Video transitions (T38)
+
+Run `pnpm test:consistency --grep T38`. The test launches Electron, adds
+both fades and a cross-dissolve, adjusts the dissolve duration, and checks
+remove, undo and redo. It compares the live Canvas and decoded MP4 before,
+during and after transition windows using the T27 RGB limits. The fixture
+combines a landscape H.264/AAC MP4, a retimed portrait VP9 WebM at a different
+frame rate, a PNG overlay and a nonblack canvas. It checks every output video
+timestamp and verifies representative blend pixels against independent color
+expectations. It also checks a CLI PNG inside the dissolve and measures the
+outgoing audio gate during real-time playback. Browser decode and FFmpeg
+export can differ at codec, scaling, alpha quantization and VFR boundaries.
+
+Run `pnpm test:desktop timeline-playback.spec.ts --grep zero-weight` for the
+startup cases. They hold the muted incoming decoder's readiness event and
+play request independently and check that the playhead waits at the first
+frame of a fade-in or cross-dissolve.

@@ -248,3 +248,6 @@ export function transformTextLayer(
   ctx.scale(scale, scale);
   ctx.translate(-width / 2, -height / 2);
 }
+
+export { transitionOpacity } from './transition.js';
+export type { TransitionRamp } from './transition.js';

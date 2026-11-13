@@ -1,6 +1,14 @@
 import { maximumVisualScale } from '@opencut/shared';
-import type { RenderTimeMapping, VisualAnimation } from '@opencut/shared';
-import { clipSourcePosition, clipSpeed } from './clip-timing.js';
+import type {
+  RenderTimeMapping,
+  TransitionRamp,
+  VisualAnimation,
+} from '@opencut/shared';
+import {
+  clipSourcePosition,
+  clipSourceTime,
+  clipSpeed,
+} from './clip-timing.js';
 import type { Project, TimelineClip } from './project.js';
 import { continuesMediaRun, resolveTimeline } from './evaluation.js';
 import type { ResolvedMediaClip } from './evaluation.js';
@@ -49,6 +57,12 @@ export interface ProjectRenderPlan {
   /** Bottom to top, by track array order, then timeline start. */
   visualClips: VisualRenderClip[];
   audioClips: AudioRenderClip[];
+  visualTransitions?: Array<{
+    afterClipId: string;
+    layers: Array<
+      Extract<VisualRenderClip, { assetId: string }> & { ramp: TransitionRamp }
+    >;
+  }>;
 }
 
 export interface AudioRenderClip {
@@ -290,6 +304,35 @@ export function planProjectRender(
       });
     }
   }
+  const visualById = new Map(visualClips.map((clip) => [clip.clipId, clip]));
+  const visualTransitions = timeline.transitions.map((transition) => ({
+    afterClipId: transition.ownerId,
+    layers: transition.layers.map(({ clip, direction }) => {
+      const { start, end, startFrame, endFrame } = transition;
+      const sourceIn = clipSourceTime(clip, start);
+      const sourceOut = clipSourceTime(clip, end);
+      const visual = visualById.get(clip.id);
+      if (!visual?.assetId)
+        throw new RenderError(
+          `Transition clip '${clip.id}' requires a video render layer.`,
+        );
+      return {
+        ...visual,
+        timelineStartFrame: startFrame,
+        sourceStartFrame: 0,
+        frameCount: endFrame - startFrame,
+        ramp: { startFrame, endFrame, direction },
+        retiming: {
+          timelineStart: start,
+          timelineEnd: end,
+          sourceIn,
+          sourceOut,
+          speed: clipSpeed(clip),
+          sourceOriginNs: sourceOriginNanoseconds(clip),
+        },
+      };
+    }),
+  }));
   return {
     width,
     height,
@@ -298,5 +341,6 @@ export function planProjectRender(
     backgroundColor: project.settings.backgroundColor ?? '#000000',
     visualClips,
     audioClips,
+    ...(visualTransitions.length && { visualTransitions }),
   };
 }

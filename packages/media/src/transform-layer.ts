@@ -5,6 +5,7 @@ import {
   drawMediaLayer,
   gradePixels,
   transformTextLayer,
+  transitionOpacity,
   visualGeometry,
 } from '@opencut/shared';
 import type {
@@ -12,6 +13,7 @@ import type {
   VisualAnimation,
   VisualTransform,
   ColorGrade,
+  TransitionRamp,
 } from '@opencut/shared';
 import { checkRenderSignal, MediaError } from './process.js';
 
@@ -37,6 +39,7 @@ export interface TransformLayerOptions {
   frameCount: number;
   visual: VisualTransform;
   animation?: VisualAnimation;
+  ramp?: TransitionRamp;
   grade?: ColorGrade;
   source: TransformSource;
   signal?: AbortSignal | undefined;
@@ -246,6 +249,16 @@ export async function stageTransformLayer(
           sampled,
         );
         if (geometry.visible) drawMediaLayer(ctx, media.canvas, geometry);
+      }
+      if (options.ramp) {
+        // Multiply while Canvas still holds premultiplied pixels, avoiding an
+        // extra low-alpha conversion before FFmpeg adds the transition layers.
+        ctx.globalCompositeOperation = 'destination-in';
+        ctx.fillStyle = '#fff';
+        ctx.globalAlpha = transitionOpacity(startFrame + i, options.ramp);
+        ctx.fillRect(0, 0, width, height);
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
       }
       const pixels = ctx.getImageData(0, 0, width, height).data;
       yield Buffer.from(pixels.buffer, pixels.byteOffset, pixels.byteLength);

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { transitionFrames, transitionInputSchema } from './transitions.js';
 import {
   canvasShape,
   clipVisualSchema,
@@ -24,6 +25,9 @@ import {
   replaceClipAsset,
   detachClipAudio,
   dissolveClips,
+  addTransition,
+  setTransition,
+  removeTransition,
   flashClip,
   fadeClipVisual,
   insertFreeze,
@@ -117,6 +121,17 @@ const operationSchema = z.discriminatedUnion('type', [
     ripple: z.boolean().optional(),
   }),
   z.strictObject({ type: z.literal('clip.detach-audio'), id }),
+  z.strictObject({
+    type: z.literal('transition.add'),
+    id: id.optional(),
+    transition: transitionInputSchema,
+  }),
+  z.strictObject({
+    type: z.literal('transition.set'),
+    id,
+    frames: transitionFrames,
+  }),
+  z.strictObject({ type: z.literal('transition.remove'), id }),
   z.strictObject({
     type: z.literal('clip.dissolve'),
     id,
@@ -421,6 +436,15 @@ export function previewTransaction(project: Project, input: EditTransaction) {
           break;
         case 'clip.detach-audio':
           changed = detachClipAudio(next, operation.id);
+          break;
+        case 'transition.add':
+          changed = addTransition(next, operation.transition, operation.id);
+          break;
+        case 'transition.set':
+          changed = setTransition(next, operation.id, operation.frames);
+          break;
+        case 'transition.remove':
+          changed = removeTransition(next, operation.id);
           break;
         case 'clip.dissolve':
           changed = dissolveClips(

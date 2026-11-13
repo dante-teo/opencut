@@ -48,6 +48,7 @@ const resolvedClip = clipSchema.extend({
   sourceTime: timeSchema,
   visible: z.boolean(),
   effectiveVolume: z.number(),
+  transitionId: z.string().optional(),
 });
 export const projectInspectionSchema = snapshotSchema.extend({
   inspectionVersion: version,

@@ -314,3 +314,19 @@ completion, leaving the previous completed measurement. Playback start cancels a
 pending paused-seek measurement. CPU aggregates Electron processes and working set can
 double-count shared pages. These synthetic warm-cache measurements do not promise
 long-running, cross-platform or physical speaker/display synchronization.
+
+## Video transitions (T38)
+
+Select a video clip and open **Transitions** in the timeline toolbar. Enter a
+duration in project frames and choose **Fade in**, **Fade out**, or
+**Cross-dissolve**. For a cross-dissolve, select the incoming clip. It must touch
+the previous video clip on the same track. The colored bar shows the transition
+window. Select the bar to open its duration and remove controls. Transition
+edits participate in project undo and redo.
+
+Fades reveal the canvas background and any lower tracks. A cross-dissolve
+blends the two fitted video layers at their existing track position, so an
+image, title or subtitle on a higher track remains above the blend. Each clip
+keeps its own fit, crop, animation and color settings. Audio follows the
+original clip boundaries and existing audio settings. See
+[transition timing and handle requirements](PROJECT_FORMAT.md#video-transitions-t38).

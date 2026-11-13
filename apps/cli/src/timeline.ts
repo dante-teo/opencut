@@ -6,6 +6,9 @@ import {
 import { resolve } from 'node:path';
 import {
   addClip,
+  addTransition,
+  setTransition,
+  removeTransition,
   addTrack,
   frameTime,
   listTimeline,
@@ -29,6 +32,7 @@ import type {
   RationalTime,
   ClipVisualOptions,
   TrackAudioOptions,
+  TransitionInput,
 } from '@opencut/core';
 import { readProjectFile, updateProjectFile } from '@opencut/core/node';
 
@@ -73,6 +77,9 @@ export const timelineHelp = `Usage: opencut timeline list <project-file> [--json
        opencut clip speed <project-file> <clip-id> --speed <decimal|ratio> [--json]
        opencut clip split <project-file> <clip-id> --at <frame> [--json]
        opencut clip remove <project-file> <clip-id> [--json]
+       opencut transition add <project-file> <clip-id> --kind <cross-dissolve|fade-in|fade-out> --frames <count> [--from-clip <outgoing-clip-id>] [--json]
+       opencut transition set <project-file> <transition-id> --frames <count> [--json]
+       opencut transition remove <project-file> <transition-id> [--json]
 
 All time arguments are nonnegative safe integer frame indices at the PROJECT frame rate,
 including source in/out (not source-file frame indices). --in-time and --out-time use exact seconds. Out points are exclusive.
@@ -119,6 +126,9 @@ const optionsForCommand: Record<string, readonly string[]> = {
   'clip speed': ['speed'],
   'clip split': ['at'],
   'clip remove': [],
+  'transition add': ['kind', 'frames', 'from-clip'],
+  'transition set': ['frames'],
+  'transition remove': [],
 };
 
 /** Parsing and persistence only; all edit semantics live in @opencut/core. */
@@ -135,7 +145,7 @@ export async function runTimelineCommand(
       (['timeline list', 'track add', 'canvas set'].includes(command) ? 3 : 4)
   )
     throw new UsageError(
-      'Expected a timeline list, track add/remove/audio or clip add/move/trim/split/remove/audio/visual/speed or canvas set command. Run opencut timeline --help for usage.',
+      'Expected a timeline list, track add/remove/audio or clip add/move/trim/split/remove/audio/visual/speed or canvas set or transition add/set/remove command. Run opencut timeline --help for usage.',
     );
   const allowedOptions = [
     'json',
@@ -162,6 +172,37 @@ export async function runTimelineCommand(
       );
     return value;
   };
+  let transitionFrames: number | undefined;
+  let transition: TransitionInput | undefined;
+  if (command === 'transition add' || command === 'transition set') {
+    const value = required('frames');
+    transitionFrames = Number(value);
+    if (
+      !/^\d+$/.test(value) ||
+      !Number.isSafeInteger(transitionFrames) ||
+      transitionFrames < 2
+    )
+      throw new UsageError('--frames requires at least two project frames.');
+  }
+  if (command === 'transition add') {
+    const kind = required('kind');
+    if (kind === 'cross-dissolve')
+      transition = {
+        kind,
+        from: required('from-clip'),
+        to: id!,
+        frames: transitionFrames!,
+      };
+    else if (
+      (kind === 'fade-in' || kind === 'fade-out') &&
+      values['from-clip'] === undefined
+    )
+      transition = { kind, clipId: id!, frames: transitionFrames! };
+    else
+      throw new UsageError(
+        'Use --kind cross-dissolve with --from-clip, or fade-in or fade-out.',
+      );
+  }
   if (command === 'track add') {
     const type = required('type');
     if (type !== 'video' && type !== 'audio')
@@ -319,6 +360,10 @@ export async function runTimelineCommand(
             : `  Clip: ${clip.id}; asset ${clip.assetId}; timeline [${time(clip.timelineStart)}, ${time(clip.timelineEnd)}); source [${time(clip.sourceIn)}, ${time(clip.sourceOut)}); speed ${clipSpeed(clip).numerator}/${clipSpeed(clip).denominator}×; volume ${clip.volume ?? 1}; muted ${clip.muted ?? false}; fade in ${clip.fadeIn ? time(clip.fadeIn.duration) : '0s'}; fade out ${clip.fadeOut ? time(clip.fadeOut.duration) : '0s'}; visual ${JSON.stringify(clip.visual ?? {})}`,
         ),
       ]),
+      ...(result.transitions ?? []).map(
+        (entry) =>
+          `Transition: ${entry.id} (${entry.kind}, ${entry.frames} frames); ${entry.kind === 'cross-dissolve' ? `${entry.from} → ${entry.to}` : entry.clipId}`,
+      ),
       '',
     ].join('\n');
     process.stdout.write(
@@ -339,6 +384,15 @@ export async function runTimelineCommand(
       };
       let changed;
       switch (command) {
+        case 'transition add':
+          changed = addTransition(project, transition!);
+          break;
+        case 'transition set':
+          changed = setTransition(project, id!, transitionFrames!);
+          break;
+        case 'transition remove':
+          changed = removeTransition(project, id!);
+          break;
         case 'track add':
           changed = addTrack(project, {
             type: values.type as 'video' | 'audio',

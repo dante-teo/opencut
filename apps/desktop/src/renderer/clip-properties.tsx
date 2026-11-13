@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import {
   audioFadeEdges,
   clipDuration,
-  clipTimelineEnd,
   clipSpeed,
   parseClipSpeed,
   addTimes,
@@ -226,14 +225,6 @@ export function ClipProperties({
     (track) => track.id === clip.trackId,
   )?.type;
   const video = trackType === 'video';
-  const preceding =
-    video &&
-    project.clips.find(
-      (candidate) =>
-        candidate.trackId === clip.trackId &&
-        candidate.id !== clip.id &&
-        compareTimes(clipTimelineEnd(candidate), clip.timelineStart) === 0,
-    );
   const replacements = project.assets.filter(
     (candidate) =>
       candidate.id !== clip.assetId &&
@@ -539,39 +530,15 @@ export function ClipProperties({
                 event.nativeEvent as SubmitEvent
               ).submitter?.getAttribute('value');
               if (action === 'freeze') onFreeze(count);
-              else if (action === 'fade-in' || action === 'fade-out') {
-                void onEdit(
-                  [
-                    {
-                      type: 'clip.fade',
-                      id: clip.id,
-                      edge: action === 'fade-in' ? 'in' : 'out',
-                      frames: count,
-                    },
-                  ],
-                  'Set visual fade',
-                ).catch(() => {});
-              } else if (action === 'flash')
+              else if (action === 'flash')
                 void onEdit(
                   [{ type: 'clip.flash', id: clip.id, frames: count }],
                   'Flash from white',
                 ).catch(() => {});
-              else if (preceding)
-                void onEdit(
-                  [
-                    {
-                      type: 'clip.dissolve',
-                      id: clip.id,
-                      from: preceding.id,
-                      frames: count,
-                    },
-                  ],
-                  'Dissolve into clip',
-                ).catch(() => {});
             }}
           >
             <label>
-              Transition frames{' '}
+              Effect frames{' '}
               <input
                 type="number"
                 name="frames"
@@ -580,19 +547,8 @@ export function ClipProperties({
                 required
               />
             </label>
-            {preceding && (
-              <button type="submit" value="dissolve">
-                Dissolve in
-              </button>
-            )}
             <button type="submit" value="flash">
               Flash from white
-            </button>
-            <button type="submit" value="fade-in">
-              Fade in picture
-            </button>
-            <button type="submit" value="fade-out">
-              Fade out picture
             </button>
             {asset?.metadata?.kind !== 'image' && (
               <button type="submit" value="freeze">

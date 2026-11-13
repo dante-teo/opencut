@@ -100,6 +100,7 @@ interface TextScenario {
   ) => Promise<Project>;
   guiExport?: boolean;
   fontWarning?: boolean;
+  observeAudio?: boolean;
 }
 
 async function compareScenario(
@@ -132,6 +133,7 @@ async function compareScenario(
   const previousErrors = test.info().errors.length;
   try {
     await observeNativePaint(page);
+    if (textScenario?.observeAudio) await observeAudioOutput(page);
     await page.evaluate(() =>
       window.opencut.mediaCache({ action: 'enable', enabled: false }),
     );
@@ -1575,4 +1577,240 @@ test('T37 Electron keyframes survive edits and match encoded animation', async (
       tolerance,
     ).passed,
   ).toBe(true);
+});
+
+test('T38 mixed-rate dissolve and canvas fades match Electron and export', async () => {
+  const project = createProject({
+    name: 'T38 transitions',
+    settings: {
+      width: 320,
+      height: 180,
+      frameRate: { numerator: 30, denominator: 1 },
+      backgroundColor: '#206040',
+    },
+  });
+  ffmpeg([
+    '-f',
+    'lavfi',
+    '-i',
+    "color=red:s=320x180:r=30:d=3,drawbox=x=12:y=12:w=32:h=24:c=white:t=fill:enable='gte(n,42)'",
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=440:duration=3',
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:a',
+    'aac',
+    join(directory, 't38-landscape.mp4'),
+  ]);
+  ffmpeg([
+    '-f',
+    'lavfi',
+    '-i',
+    "color=blue:s=96x160:r=25:d=3,drawbox=x=16:y=16:w=24:h=20:c=yellow:t=fill:enable='gte(n,17)'",
+    '-c:v',
+    'libvpx-vp9',
+    '-pix_fmt',
+    'yuv420p',
+    join(directory, 't38-portrait.webm'),
+  ]);
+  ffmpeg([
+    '-f',
+    'lavfi',
+    '-i',
+    'color=white:s=32x16,format=rgba,colorchannelmixer=aa=0.6',
+    '-frames:v',
+    '1',
+    join(directory, 't38-overlay.png'),
+  ]);
+  project.assets = [
+    't38-landscape.mp4',
+    't38-portrait.webm',
+    't38-overlay.png',
+  ].map((path, i) => ({
+    id: `asset-${i}`,
+    name: path,
+    file: { type: 'relative', path },
+    mediaTypes: i === 0 ? ['video', 'audio'] : ['video'],
+    ...(i < 2 && { duration: time(90) }),
+    metadata: {
+      kind: i < 2 ? 'video' : 'image',
+      formatName: null,
+      durationSeconds: i < 2 ? 3 : null,
+      width: [320, 96, 32][i]!,
+      height: [180, 160, 16][i]!,
+      frameRate: [30, 25, null][i]!,
+      frameRateRatio: null,
+      videoCodec: ['h264', 'vp9', 'png'][i]!,
+      audioCodec: i === 0 ? 'aac' : null,
+      hasAudio: i === 0,
+    },
+  }));
+  project.tracks = [
+    { id: 'picture', name: 'Picture', type: 'video' },
+    { id: 'overlay', name: 'Overlay', type: 'video' },
+  ];
+  project.clips = [
+    {
+      id: 'red',
+      trackId: 'picture',
+      assetId: 'asset-0',
+      timelineStart: time(0),
+      sourceIn: time(12),
+      sourceOut: time(42),
+    },
+    {
+      id: 'blue',
+      trackId: 'picture',
+      assetId: 'asset-1',
+      timelineStart: time(30),
+      sourceIn: time(20),
+      sourceOut: time(65),
+      speed: { numerator: 3, denominator: 2 },
+    },
+    {
+      id: 'still',
+      trackId: 'overlay',
+      assetId: 'asset-2',
+      timelineStart: time(20),
+      sourceIn: time(0),
+      sourceOut: time(20),
+      visual: { scale: 0.2, x: -100, y: 50 },
+    },
+  ];
+  await compareScenario(
+    't38-transitions',
+    project,
+    [0, 1, 3, 5, 6, 24, 25, 26, 29, 30, 34, 35, 53, 54, 56, 58, 59, 60].map(
+      (frame) => ({ frame }),
+    ),
+    undefined,
+    {
+      observeAudio: true,
+      edit: async (application, page, path) => {
+        const select = (id: string) =>
+          page.getByRole('button', { name: `Inspect clip ${id}` }).click();
+        const menu = page.getByText('Transitions', { exact: true });
+        const open = async () => {
+          if (
+            !(await page
+              .getByRole('spinbutton', {
+                name: 'Transition frames',
+                exact: true,
+              })
+              .isVisible())
+          )
+            await menu.click();
+        };
+        const add = async (name: string, frames: string) => {
+          await open();
+          await page
+            .getByRole('spinbutton', { name: 'Transition frames', exact: true })
+            .fill(frames);
+          await page.getByRole('button', { name, exact: true }).click();
+          await expect(
+            page.getByRole('button', {
+              name: `${name}, ${frames} frames`,
+              exact: true,
+            }),
+          ).toBeVisible();
+        };
+        await select('red');
+        await add('Fade in', '6');
+        await menu.click();
+        await select('blue');
+        await add('Cross-dissolve', '8');
+        const duration = page.getByRole('spinbutton', {
+          name: 'Cross-dissolve duration (frames)',
+        });
+        await duration.fill('10');
+        await duration.press('Enter');
+        const marker = page.getByRole('button', {
+          name: 'Cross-dissolve, 10 frames',
+          exact: true,
+        });
+        await expect(marker).toBeVisible();
+        await page
+          .getByRole('button', { name: 'Remove Cross-dissolve', exact: true })
+          .click();
+        await expect(marker).toHaveCount(0);
+        await page.getByRole('button', { name: 'Undo', exact: true }).click();
+        await expect(marker).toBeVisible();
+        await page.getByRole('button', { name: 'Redo', exact: true }).click();
+        await expect(marker).toHaveCount(0);
+        await page.getByRole('button', { name: 'Undo', exact: true }).click();
+        await expect(marker).toBeVisible();
+        await add('Fade out', '6');
+        await menu.click();
+        const saved = deserializeProject(await readFile(path, 'utf8'));
+        expect(saved.clips).toEqual(project.clips);
+        expect(saved.transitions?.map(({ frames }) => frames)).toEqual([
+          6, 10, 6,
+        ]);
+        expect(planProjectRender(saved).frameCount).toBe(60);
+        await page
+          .getByRole('slider', { name: 'Seek timeline', exact: true })
+          .fill('15');
+        await page.getByRole('button', { name: 'Play', exact: true }).click();
+        const audio = await recordPreviewAudio(page, 1.35);
+        const beforeCut = audio.filter(
+          ({ time }) => time >= 25 / 30 && time < 1,
+        );
+        const afterCut = audio.filter(
+          ({ time }) => time >= 1.09 && time < 34 / 30,
+        );
+        expect(beforeCut.some(({ hz440 }) => hz440 > 0.04)).toBe(true);
+        expect(afterCut.length).toBeGreaterThan(0);
+        expect(afterCut.every(({ hz440 }) => hz440 < 0.01)).toBe(true);
+        await page.getByRole('button', { name: 'Pause', exact: true }).click();
+
+        const output = await exportTextFromDesktop(
+          application,
+          page,
+          join(directory, 't38-independent.mp4'),
+          false,
+        );
+        const rgb = decodeFrames(output, [0, 30, 59], 320, 180);
+        const pixel = (frame: number, x = 160) => [
+          ...rgb
+            .get(frame)!
+            .subarray((90 * 320 + x) * 3, (90 * 320 + x) * 3 + 3),
+        ];
+        for (const frame of [0, 59]) {
+          const [r, g, b] = pixel(frame);
+          expect(Math.abs(r! - 32)).toBeLessThan(5);
+          expect(Math.abs(g! - 96)).toBeLessThan(5);
+          expect(Math.abs(b! - 64)).toBeLessThan(5);
+        }
+        const [r, g, b] = pixel(30);
+        expect(Math.abs(r! - 113)).toBeLessThan(7);
+        expect(g).toBeLessThanOrEqual(8);
+        expect(Math.abs(b! - 142)).toBeLessThan(7);
+
+        const matte = pixel(30, 20);
+        for (const [channel, expected] of [131, 53, 36].entries())
+          expect(Math.abs(matte[channel]! - expected)).toBeLessThanOrEqual(8);
+        const { samples } = decodeAudio(output);
+        expect(exportAmplitudes(samples, 0.95)[0]).toBeGreaterThan(0.04);
+        expect(exportAmplitudes(samples, 1.1)[0]).toBeLessThan(0.01);
+        const png = join(directory, 't38-frame.png');
+        command(process.execPath, [
+          resolve('apps/cli/dist/index.js'),
+          'preview',
+          'frame',
+          path,
+          '--frame',
+          '30',
+          '--output',
+          png,
+        ]);
+        const preview = decodeFrames(png, [0], 320, 180).get(0)!;
+        expect(compareRgb(preview, rgb.get(30)!, tolerance).passed).toBe(true);
+        return saved;
+      },
+    },
+  );
 });

@@ -625,3 +625,73 @@ describe('TypeScript runner', () => {
     expect(await readFile(path, 'utf8')).toBe(before);
   });
 });
+
+it('shares transition edits, inspection and undo across the CLI and SDK', async () => {
+  await seedOffline();
+  const document = JSON.parse(await readFile(path, 'utf8'));
+  document.assets[0].duration = { numerator: 5, denominator: 1 };
+  await writeFile(path, JSON.stringify(document));
+  const seeded = await openProject(path);
+  seeded.project.apply(
+    videoTrack,
+    {
+      type: 'clip.add',
+      id: 'left',
+      assetId: 'offline',
+      trackId: 'video',
+      at: 0,
+      in: 5,
+      out: 35,
+    },
+    {
+      type: 'clip.add',
+      id: 'right',
+      assetId: 'offline',
+      trackId: 'video',
+      at: 30,
+      in: 10,
+      out: 40,
+    },
+    {
+      type: 'transition.add',
+      id: 'fade',
+      transition: { kind: 'fade-in', clipId: 'left', frames: 4 },
+    },
+  );
+  await seeded.save();
+  const cliJson = (...args: string[]) =>
+    JSON.parse(
+      execFileSync(process.execPath, [cli, ...args, '--json'], {
+        encoding: 'utf8',
+      }),
+    );
+  const { transition } = cliJson(
+    'transition',
+    'add',
+    path,
+    'right',
+    '--kind',
+    'cross-dissolve',
+    '--from-clip',
+    'left',
+    '--frames',
+    '8',
+  );
+  cliJson('transition', 'set', path, transition.id, '--frames', '10');
+  const changed = await openProject(path);
+  expect(
+    changed.project.inspect().transitions?.map(({ frames }) => frames),
+  ).toEqual([4, 10]);
+  expect(
+    changed.project
+      .inspectTimeline(30)
+      .visualClips.map(({ transitionId }) => transitionId),
+  ).toEqual([transition.id, transition.id]);
+  changed.project.apply({ type: 'transition.remove', id: transition.id });
+  await changed.save();
+  expect(cliJson('timeline', 'list', path).transitions).toHaveLength(1);
+  cliJson('edit', 'undo', path);
+  expect(cliJson('timeline', 'list', path).transitions).toHaveLength(2);
+  cliJson('transition', 'remove', path, transition.id);
+  expect(cliJson('timeline', 'list', path).transitions).toHaveLength(1);
+});

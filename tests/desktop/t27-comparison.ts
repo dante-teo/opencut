@@ -147,22 +147,20 @@ export async function observeNativePaint(page: Page) {
     const clear = proto.clearRect;
     const draw = proto.drawImage;
     proto.clearRect = function (...args) {
-      if (this.canvas.closest('#project-viewer'))
-        this.canvas.dataset.nativeVideoTimes = '[]';
+      this.canvas.dataset.nativeVideoTimes = '[]';
       return clear.apply(this, args);
     };
     proto.drawImage = function (source: CanvasImageSource, ...args: number[]) {
       Reflect.apply(draw, this, [source, ...args]);
-      if (
-        this.canvas.closest('#project-viewer') &&
-        source instanceof HTMLVideoElement
-      ) {
-        const times = JSON.parse(
-          this.canvas.dataset.nativeVideoTimes ?? '[]',
-        ) as number[];
-        times.push(source.currentTime);
-        this.canvas.dataset.nativeVideoTimes = JSON.stringify(times);
-      }
+      const times = JSON.parse(
+        this.canvas.dataset.nativeVideoTimes ?? '[]',
+      ) as number[];
+      if (source instanceof HTMLVideoElement) times.push(source.currentTime);
+      if (source instanceof HTMLCanvasElement)
+        times.push(
+          ...(JSON.parse(source.dataset.nativeVideoTimes ?? '[]') as number[]),
+        );
+      this.canvas.dataset.nativeVideoTimes = JSON.stringify(times);
     };
   });
 }

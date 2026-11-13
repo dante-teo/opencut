@@ -67,6 +67,7 @@ timing, shared styles, SRT/WebVTT import and export, and optional MP4 burn-in.
 T35 adds [audio fades, track controls, and stereo peak meters](TIMELINE_PLAYBACK.md#audio-editing-and-meters).
 T36 adds [constant clip playback speed and time remapping](TIMELINE_PLAYBACK.md#playback-speed-t36).
 T37 adds [clip keyframe animation](PRODUCT.md#keyframe-animation-t37).
+T38 adds [video cross-dissolves and canvas fades](TIMELINE_PLAYBACK.md#video-transitions-t38).
 
 Select a media clip to edit **Timeline position**, **Duration**, **Source in/out** in
 whole project frames, **Volume** (linear 0–1), **Mute**, **Fade in/out**, and video **Position X/Y**
@@ -266,10 +267,15 @@ In the Inspector, **Fit → Cover** fills the canvas and **Crop** trims the
 edges of the fitted layer. Project settings allow resizing the canvas. Use
 **Replace media** to change the source of a clip, optionally shifting later
 clips on the same track. **Freeze at playhead** writes a PNG and inserts a held
-frame. **Dissolve in** overlaps two adjacent clips on separate layers and adds
-opacity keys. **Flash from white** adds an animated white overlay. **Color**
+frame. **Flash from white** adds an animated white overlay. **Color**
 adjusts exposure, white balance, contrast, saturation and a piecewise linear
 curve, and can copy the grade to other clips.
+
+In the timeline, select the incoming video clip and open **Transitions** to
+add a **Cross-dissolve**. The clips must touch on the same track and have enough
+trimmed source media on both sides of the cut. The dissolve preserves clip
+positions, project duration and audio timing. The same menu adds picture fades,
+and selecting a transition bar opens its duration and removal controls.
 
 Use **Relink media** in an offline asset's information panel to restore the
 source while preserving clip references. **Import font** embeds a TTF/OTF

@@ -91,6 +91,7 @@ Commands:
   clip add|move|trim|split|remove|audio|visual <project-file>
                                        Edit clips (clip --help; time arguments are frames)
   canvas set <project-file>            Configure dimensions and background (canvas --help)
+  transition <add|set|remove>         Edit video transitions (transition --help)
   edit apply <project-file> <batch.json> Apply an atomic transaction
   edit undo|redo|history <project-file>  Restore or inspect persistent editing history
   cache status|proxy|frame|configure|cleanup|clear  Manage preview derivatives (cache --help)
@@ -335,6 +336,8 @@ async function runCli(args: string[]): Promise<void> {
       volume: { type: 'string' },
       muted: { type: 'string' },
       speed: { type: 'string' },
+      kind: { type: 'string' },
+      'from-clip': { type: 'string' },
       'in-time': { type: 'string' },
       'out-time': { type: 'string' },
       'fade-in': { type: 'string' },
@@ -370,9 +373,13 @@ async function runCli(args: string[]): Promise<void> {
   const explicitHelp = command === 'help';
   const commandPositionals = explicitHelp ? positionals.slice(1) : positionals;
   const [group, action] = commandPositionals;
-  const timelineCommand = ['timeline', 'track', 'clip', 'canvas'].includes(
-    group ?? '',
-  );
+  const timelineCommand = [
+    'timeline',
+    'track',
+    'clip',
+    'canvas',
+    'transition',
+  ].includes(group ?? '');
   const projectCommand =
     group === 'project' && action && Object.hasOwn(projectHelp, action)
       ? (action as keyof typeof projectHelp)
@@ -501,6 +508,8 @@ async function runCli(args: string[]): Promise<void> {
   }
   for (const option of [
     'type',
+    'kind',
+    'from-clip',
     'track',
     'at',
     'in',

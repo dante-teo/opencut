@@ -20,6 +20,15 @@ const options: Record<string, Option> = {
     type: 'boolean',
     description: 'Structured stdout and structured errors on stderr.',
   },
+  kind: {
+    type: 'string',
+    description: 'Video transition kind.',
+    enum: ['cross-dissolve', 'fade-in', 'fade-out'],
+  },
+  'from-clip': {
+    type: 'string',
+    description: 'Outgoing clip ID. Required for cross-dissolve only.',
+  },
   name: { type: 'string', description: 'Nonblank project or track name.' },
   project: { type: 'string', description: 'Project file to open or create.' },
   create: {
@@ -514,7 +523,8 @@ const definitions: Definition[] = [
   },
   {
     name: 'timeline list',
-    description: 'Read ordered tracks/clips with exact rational timing.',
+    description:
+      'Read ordered tracks, clips and transitions with exact rational timing.',
     args: ['project-file'],
     options: [],
   },
@@ -588,6 +598,29 @@ const definitions: Definition[] = [
     args: ['project-file', 'clip-id'],
     options: ['at', ...edit],
     required: ['at'],
+    mutates: true,
+  },
+  {
+    name: 'transition add',
+    description: 'Add a cross-dissolve or canvas fade to a video clip.',
+    args: ['project-file', 'clip-id'],
+    options: ['kind', 'frames', 'from-clip', ...edit],
+    required: ['kind', 'frames'],
+    mutates: true,
+  },
+  {
+    name: 'transition set',
+    description: 'Set a video transition duration in project frames.',
+    args: ['project-file', 'transition-id'],
+    options: ['frames', ...edit],
+    required: ['frames'],
+    mutates: true,
+  },
+  {
+    name: 'transition remove',
+    description: 'Remove a video transition.',
+    args: ['project-file', 'transition-id'],
+    options: edit,
     mutates: true,
   },
   {
@@ -773,6 +806,9 @@ export function discovery(scope: string[] = [], help = '') {
         options: [...command.options, 'json', 'help'].map((name) => ({
           name: `--${name}`,
           ...options[name]!,
+          ...(command.name.startsWith('transition ') && name === 'frames'
+            ? { minimum: 2 }
+            : {}),
           ...(command.name === 'preview contact-sheet' && name === 'size'
             ? { maximum: 640 }
             : {}),

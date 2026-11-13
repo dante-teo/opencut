@@ -184,6 +184,9 @@ export async function prepareMediaAsset(
       (['gif', 'apng'].includes(format) && !probed.durationSeconds)),
   );
   const durationSeconds = image ? null : probed.durationSeconds;
+  const videoMicroseconds = Math.round(
+    (probed.video?.durationSeconds ?? 0) * 1_000_000,
+  );
   const mediaTypes: MediaAsset['mediaTypes'] = [];
   if (probed.video) mediaTypes.push('video');
   if (probed.audio) mediaTypes.push('audio');
@@ -192,6 +195,7 @@ export async function prepareMediaAsset(
     ...project.assets.map((asset) => asset.id),
     ...project.tracks.map((track) => track.id),
     ...project.clips.map((clip) => clip.id),
+    ...(project.transitions?.map((transition) => transition.id) ?? []),
   ]);
   let id = randomUUID();
   while (ids.has(id)) id = randomUUID();
@@ -204,6 +208,14 @@ export async function prepareMediaAsset(
       kind: image ? 'image' : probed.video ? 'video' : 'audio',
       formatName: probed.formatName,
       durationSeconds,
+      ...(!image &&
+        Number.isSafeInteger(videoMicroseconds) &&
+        videoMicroseconds > 0 && {
+          videoDuration: {
+            numerator: videoMicroseconds,
+            denominator: 1_000_000,
+          },
+        }),
       width: probed.video?.width ?? null,
       height: probed.video?.height ?? null,
       videoCodec: probed.video?.codec ?? null,

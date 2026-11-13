@@ -11,6 +11,7 @@ import type {
   RenderTimeMapping,
   TextLayer,
   VisualAnimation,
+  TransitionRamp,
 } from '@opencut/shared';
 import {
   access,
@@ -56,6 +57,14 @@ export type VisualTimelineClip = VisualTimelineProperties &
     | { text: TextLayer; path?: never; subtitle?: true; subtitleCueId?: string }
   );
 
+type TransitionLayer = Extract<VisualTimelineClip, { path: string }> & {
+  ramp: TransitionRamp;
+};
+interface VisualTransition {
+  afterClipId: string;
+  layers: TransitionLayer[];
+}
+
 export const renderQualities = ['draft', 'balanced', 'high'] as const;
 export const renderResolutions = ['project', '720p', '1080p'] as const;
 export const renderCodecs = ['h264', 'hevc'] as const;
@@ -97,6 +106,7 @@ export interface VideoTimelineOptions extends RenderControls {
   frameCount: number;
   backgroundColor?: string;
   visualClips?: VisualTimelineClip[];
+  visualTransitions?: VisualTransition[];
   /** Legacy sequential plan; supply either segments or visualClips. */
   segments?: Array<
     | { kind: 'gap'; frameCount: number }
@@ -621,6 +631,48 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
     `color=c=${opaqueCanvasColor(options.backgroundColor ?? '#000000')}:s=${width}x${height}:r=${rate},` +
       `format=rgba,trim=end_frame=${frameCount},settb=1/${numerator},setpts=N*${denominator}[canvas0]`,
   );
+  const transitions = options.visualTransitions ?? [];
+  const byOwner = new Map<string, VisualTransition[]>();
+  const windows = new Map<string, TransitionRamp[]>();
+  for (const transition of transitions) {
+    const [first, second] = transition.layers;
+    const ramp = first?.ramp;
+    if (
+      !ramp ||
+      transition.layers.length > 2 ||
+      transition.layers.at(-1)?.clipId !== transition.afterClipId ||
+      (second &&
+        (ramp.direction !== 'out' ||
+          second.ramp.direction !== 'in' ||
+          first.clipId === second.clipId)) ||
+      !Number.isSafeInteger(ramp.startFrame) ||
+      !Number.isSafeInteger(ramp.endFrame) ||
+      ramp.startFrame < 0 ||
+      ramp.endFrame > frameCount ||
+      ramp.endFrame - ramp.startFrame < 2 ||
+      transition.layers.some(
+        (layer) =>
+          !visualClips.some(({ clipId }) => clipId === layer.clipId) ||
+          !layer.retiming ||
+          !validRetiming(layer.retiming) ||
+          !Number.isInteger(layer.retiming.sourceOriginNs) ||
+          layer.timelineStartFrame !== ramp.startFrame ||
+          layer.frameCount !== ramp.endFrame - ramp.startFrame ||
+          layer.ramp.startFrame !== ramp.startFrame ||
+          layer.ramp.endFrame !== ramp.endFrame ||
+          !['in', 'out'].includes(layer.ramp.direction),
+      )
+    )
+      throw new MediaError('Invalid video transition render plan.');
+    const owned = byOwner.get(transition.afterClipId) ?? [];
+    owned.push(transition);
+    byOwner.set(transition.afterClipId, owned);
+    for (const layer of transition.layers) {
+      const ranges = windows.get(layer.clipId) ?? [];
+      ranges.push(ramp);
+      windows.set(layer.clipId, ranges);
+    }
+  }
   const visibleClips = visualClips.filter(
     (clip) =>
       !clip.subtitle ||
@@ -637,24 +689,24 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
     throw new MediaError(
       'Burn-in supports up to 256 visible subtitle cues per render. Shorten the render range or export a sidecar.',
     );
-  for (const [index, clip] of visibleClips.entries()) {
+  const framesync = 'eof_action=pass:repeatlast=0';
+  const prepareLayer = async (
+    clip: VisualTimelineClip,
+    label: string,
+    scratchName: string,
+    ramp?: TransitionRamp,
+  ) => {
     const transformed =
-      Boolean(clip.grade || clip.crop) ||
+      Boolean(ramp || clip.grade || clip.crop) ||
       usesLayerTransform(clip.rotation, !!clip.animation);
     const first = Math.max(startFrame, clip.timelineStartFrame);
     const last = Math.min(endFrame, clip.timelineStartFrame + clip.frameCount);
-    const overlay = ({ x, y }: { x: number; y: number }, framesync: string) =>
-      `[canvas${index}][layer${index}]overlay=x=${x}:y=${y}:${framesync}:` +
-      `format=rgb:alpha=straight:enable='gte(n,${clip.timelineStartFrame})*lt(n,${clip.timelineStartFrame + clip.frameCount})'[canvas${index + 1}]`;
-    const overlayTransformed = (source: TransformLayerOptions['source']) => {
-      if (first >= last) {
-        filters.push(`[canvas${index}]null[canvas${index + 1}]`);
-        return;
-      }
+    const transform = (source: TransformLayerOptions['source']) => {
+      if (first >= last) return;
       encoders.add('ffv1');
       const hold =
         !clip.animation && (source.kind === 'text' || !source.sampling);
-      const layerInput = registerInput(`layer-${index}.nut`, (destination) =>
+      const layerInput = registerInput(`${scratchName}.nut`, (destination) =>
         stageTransformLayer(
           {
             width,
@@ -666,18 +718,16 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
             ...(clip.grade && { grade: clip.grade }),
             source,
             ...(clip.animation && { animation: clip.animation }),
+            ...(ramp && { ramp }),
             signal: options.signal,
           },
           destination,
         ),
       );
       filters.push(
-        `[${layerInput}:v]format=rgba,settb=1/${numerator},setpts=(N+${first})*${denominator}[layer${index}]`,
-        overlay(
-          { x: 0, y: 0 },
-          hold ? 'repeatlast=1' : 'eof_action=pass:repeatlast=0',
-        ),
+        `[${layerInput}:v]format=rgba,settb=1/${numerator},setpts=(N+${first})*${denominator}[${label}]`,
       );
+      return { x: 0, y: 0, sync: hold ? 'repeatlast=1' : framesync };
     };
     if (clip.text) {
       const text = clip.text;
@@ -694,10 +744,7 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
       const { x, y, png, warning } = await rasterize();
       checkRenderSignal(options.signal);
       if (warning) warnings.push(`Clip '${clip.clipId}': ${warning}`);
-      if (!png) {
-        filters.push(`[canvas${index}]null[canvas${index + 1}]`);
-        continue;
-      }
+      if (!png) return;
       // Let the text raster cache own the bytes between preparation and staging.
       const readRaster = async () => {
         const { png } = await rasterize();
@@ -707,24 +754,19 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
           );
         return png;
       };
-      if (transformed) {
-        overlayTransformed({ kind: 'text', rasterize: readRaster, x, y });
-        continue;
-      }
-      const textInput = registerInput(
-        `text-${index}.png`,
-        async (destination) =>
-          writeFile(destination, await readRaster(), {
-            flag: 'wx',
-            signal: options.signal,
-          }),
+      if (transformed)
+        return transform({ kind: 'text', rasterize: readRaster, x, y });
+      const textInput = registerInput(`${label}.png`, async (destination) =>
+        writeFile(destination, await readRaster(), {
+          flag: 'wx',
+          signal: options.signal,
+        }),
       );
       // Hold the static image from time zero and gate it to the clip interval.
       filters.push(
-        `[${textInput}:v]format=rgba,settb=1/${numerator},setpts=0[layer${index}]`,
-        overlay({ x, y }, 'repeatlast=1'),
+        `[${textInput}:v]format=rgba,settb=1/${numerator},setpts=0[${label}]`,
       );
-      continue;
+      return { x, y, sync: 'repeatlast=1' };
     }
     const source = await readSource(clip);
     const { video } = source;
@@ -737,6 +779,10 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
     if (!video || video.isAttachedPicture || (!still && !video.frameRate))
       throw new MediaError(
         `Clip '${clip.clipId}' requires timed video or a still image on the video track.`,
+      );
+    if (ramp && still)
+      throw new MediaError(
+        `Transition clip '${clip.clipId}' requires timed video.`,
       );
     const rotated = Math.abs(video.rotation ?? 0) % 180 === 90;
     const displayWidth =
@@ -790,7 +836,7 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
           frameSampling +
           `trim=start_frame=${clip.sourceStartFrame}:end_frame=${sourceEnd}`;
     if (transformed) {
-      overlayTransformed({
+      return transform({
         kind: 'media',
         path: source.path,
         stream: video.index,
@@ -804,7 +850,6 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
           sampling: `${sampling},trim=start_frame=${first - clip.timelineStartFrame}:end_frame=${last - clip.timelineStartFrame}`,
         }),
       });
-      continue;
     }
     const geometry = visualGeometry(
       width,
@@ -819,12 +864,64 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
       `[${input++}:${video.index}]${sampling},` +
         `${fitVisual(geometry, matrix)},format=rgba,` +
         ((clip.opacity ?? 1) === 1 ? '' : `lut=a=val*${clip.opacity},`) +
-        `settb=1/${numerator},setpts=(N+${clip.timelineStartFrame})*${denominator}[layer${index}]`,
-      overlay(geometry, 'eof_action=pass:repeatlast=0'),
+        `settb=1/${numerator},setpts=(N+${clip.timelineStartFrame})*${denominator}[${label}]`,
     );
+    return { x: geometry.x, y: geometry.y, sync: framesync };
+  };
+
+  const enabled = (start: number, end: number) =>
+    `gte(n,${start})*lt(n,${end})`;
+  let canvas = 0;
+  const overlay = (
+    label: string,
+    { x, y, sync }: { x: number; y: number; sync: string },
+    gate: string,
+  ) => {
+    filters.push(
+      `[canvas${canvas}][${label}]overlay=x=${x}:y=${y}:${sync}:format=rgb:alpha=straight:enable='${gate}'[canvas${canvas + 1}]`,
+    );
+    canvas++;
+  };
+  for (const [index, clip] of visibleClips.entries()) {
+    const label = `layer${index}`;
+    const placement = await prepareLayer(clip, label, `layer-${index}`);
+    if (placement) {
+      const gate = enabled(
+        clip.timelineStartFrame,
+        clip.timelineStartFrame + clip.frameCount,
+      );
+      const replaced = (windows.get(clip.clipId) ?? [])
+        .map(
+          ({ startFrame, endFrame }) => `*(1-${enabled(startFrame, endFrame)})`,
+        )
+        .join('');
+      overlay(label, placement, gate + replaced);
+    }
+    for (const [j, transition] of (byOwner.get(clip.clipId) ?? []).entries()) {
+      const group = `transition${index}_${j}`;
+      const [first, second] = transition.layers;
+      const { startFrame: start, endFrame: end } = first!.ramp;
+      if (start >= endFrame || end <= startFrame) continue;
+      const gate = enabled(start, end);
+      if (!second) {
+        const placement = await prepareLayer(first!, group, group, first!.ramp);
+        if (placement) overlay(group, placement, gate);
+        continue;
+      }
+      await prepareLayer(first!, group + 'out', group + '-out', first!.ramp);
+      await prepareLayer(second, group + 'in', group + '-in', second.ramp);
+      // Both inputs are fitted to the canvas. Blend weighted premultiplied color
+      // and alpha, then composite the result once at this track's position.
+      filters.push(
+        `[${group}out]format=gbrap,premultiply=inplace=1[${group}a]`,
+        `[${group}in]format=gbrap,premultiply=inplace=1[${group}b]`,
+        `[${group}a][${group}b]blend=all_mode=addition:shortest=1,unpremultiply=inplace=1,format=rgba[${group}]`,
+      );
+      overlay(group, { x: 0, y: 0, sync: framesync }, gate);
+    }
   }
   filters.push(
-    `[canvas${visibleClips.length}]trim=start_frame=${startFrame}:end_frame=${endFrame},settb=1/${numerator},setpts=N*${denominator},scale=${outputWidth}:${outputHeight}:out_color_matrix=bt709,setsar=1,` +
+    `[canvas${canvas}]trim=start_frame=${startFrame}:end_frame=${endFrame},settb=1/${numerator},setpts=N*${denominator},scale=${outputWidth}:${outputHeight}:out_color_matrix=bt709,setsar=1,` +
       (options.outputFrameRate
         ? `fps=${outputRate.numerator}/${outputRate.denominator}:round=up:eof_action=pass,tpad=stop_mode=clone:stop=1,trim=end_frame=${outputFrameCount},settb=1/${outputRate.numerator},setpts=N*${outputRate.denominator},`
         : '') +

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { transitionSchema, validateTransitions } from './transitions.js';
 import { canvasColorPattern } from '@opencut/shared';
 import { textLayerSchema } from './text-style.js';
 import { subtitleTrackSchema, validSubtitleWords } from './subtitles.js';
@@ -60,6 +61,7 @@ const assetMetadataSchema = z.strictObject({
   kind: z.enum(['video', 'audio', 'image']),
   formatName: z.string().nullable(),
   durationSeconds: z.number().finite().nonnegative().nullable(),
+  videoDuration: timeSchema.optional(),
   width: z.int().positive().nullable(),
   height: z.int().positive().nullable(),
   videoCodec: z.string().nullable(),
@@ -189,6 +191,7 @@ export const snapshotSchema = z.strictObject({
   tracks: z.array(trackSchema),
   clips: z.array(persistedClipSchema),
   subtitles: subtitleTrackSchema.optional(),
+  transitions: z.array(transitionSchema).optional(),
 });
 
 const historyEntrySchema = z.strictObject({
@@ -549,6 +552,7 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
         previous = entry;
     }
   }
+  validateTransitions(project, add, ids);
   return issues;
 }
 

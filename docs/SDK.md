@@ -256,3 +256,35 @@ returns sampled transforms. `AnimatedProperty`, `KeyframeEasing`,
 `VisualKeyframe` and `VisualKeyframes` are exported types. The
 [CLI reference](CLI.md#keyframe-animation-t37) lists the operation fields and
 [project format](PROJECT_FORMAT.md#visual-keyframes-t37) defines timing.
+
+## Video transitions (T38)
+
+Use `project.apply` with the shared transition operations. Supply an ID if
+another edit will refer to the transition. Otherwise the editor generates
+one. `project.inspect().transitions` returns the stored records and
+`project.inspectTimeline(frame)` reports `transitionId` on visual samples
+inside the window. Audio inspection follows the underlying clips.
+
+```ts
+editor.project.apply({
+  type: 'transition.add',
+  id: 'opening-cut',
+  transition: {
+    kind: 'cross-dissolve',
+    from: 'opening',
+    to: 'interview',
+    frames: 12,
+  },
+});
+await editor.save({ label: 'Add opening dissolve' });
+
+editor.project.apply({ type: 'transition.set', id: 'opening-cut', frames: 16 });
+await editor.save({ label: 'Lengthen opening dissolve' });
+
+editor.project.apply({ type: 'transition.remove', id: 'opening-cut' });
+await editor.save({ label: 'Remove opening dissolve' });
+```
+
+For a fade use `{ kind: 'fade-in', clipId: 'opening', frames: 8 }` or
+`kind: 'fade-out'`. The [project format](PROJECT_FORMAT.md#video-transitions-t38)
+describes validation and ownership.

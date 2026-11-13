@@ -1,5 +1,7 @@
 import { animatedProperties, evaluateVisual } from '@opencut/shared';
 import type { VisualKeyframe } from '@opencut/shared';
+import { transitionUsesClip } from './transitions.js';
+import type { Transition, TransitionInput } from './transitions.js';
 import { retimeKeyframes, trimKeyframes } from './keyframes.js';
 import type { KeyframeEdit } from './keyframes.js';
 import type { Project, TimelineClip, Track } from './project.js';
@@ -59,6 +61,7 @@ function newId(project: Project, requested?: string): string {
     ...project.tracks.map((track) => track.id),
     ...project.clips.map((clip) => clip.id),
     ...(project.subtitles?.cues.map((cue) => cue.id) ?? []),
+    ...(project.transitions?.map((transition) => transition.id) ?? []),
   ]);
   let id = globalThis.crypto.randomUUID();
   while (ids.has(id)) id = globalThis.crypto.randomUUID();
@@ -98,6 +101,7 @@ export function listTimeline(project: Project) {
     duration,
     tracks,
     ...(validated.subtitles ? { subtitles: validated.subtitles } : {}),
+    ...(validated.transitions ? { transitions: validated.transitions } : {}),
   };
 }
 
@@ -402,6 +406,43 @@ export function detachClipAudio(project: Project, id: string) {
     clip: requireClip(updated, id),
     audioClip: requireClip(updated, audioClip.id),
   };
+}
+
+export function addTransition(
+  project: Project,
+  input: TransitionInput,
+  id?: string,
+) {
+  const next = copyProject(project);
+  const transition: Transition = { ...input, id: newId(next, id) };
+  (next.transitions ??= []).push(transition);
+  return { project: finish(next), transition };
+}
+
+export function setTransition(project: Project, id: string, frames: number) {
+  const next = copyProject(project);
+  const transition = next.transitions?.find((entry) => entry.id === id);
+  if (!transition)
+    throw new TimelineError(
+      'INVALID_EDIT',
+      `Transition '${id}' does not exist.`,
+    );
+  if (frames === transition.frames) return { project: next, transition };
+  transition.frames = frames;
+  return { project: finish(next), transition };
+}
+
+export function removeTransition(project: Project, id: string) {
+  const next = copyProject(project);
+  const remaining = next.transitions?.filter((entry) => entry.id !== id);
+  if (!remaining || remaining.length === next.transitions?.length)
+    throw new TimelineError(
+      'INVALID_EDIT',
+      `Transition '${id}' does not exist.`,
+    );
+  if (remaining.length) next.transitions = remaining;
+  else delete next.transitions;
+  return { project: finish(next), removedTransitionId: id };
 }
 
 /** Dissolve two adjacent video clips by moving the incoming clip to a higher layer. */
@@ -976,6 +1017,12 @@ export function splitClip(
   trimKeyframes(previous, clip);
   trimKeyframes(previous, right);
   next.clips.splice(next.clips.indexOf(clip) + 1, 0, right);
+  for (const transition of next.transitions ?? []) {
+    if (transition.kind === 'cross-dissolve' && transition.from === id)
+      transition.from = right.id;
+    if (transition.kind === 'fade-out' && transition.clipId === id)
+      transition.clipId = right.id;
+  }
   const updated = finish(next);
   return {
     project: updated,
@@ -988,6 +1035,12 @@ export function removeClip(project: Project, id: string) {
   const next = copyProject(project);
   requireClip(next, id);
   next.clips = next.clips.filter((clip) => clip.id !== id);
+  if (next.transitions) {
+    next.transitions = next.transitions.filter(
+      (entry) => !transitionUsesClip(entry, id),
+    );
+    if (!next.transitions.length) delete next.transitions;
+  }
   return { project: finish(next), removedClipId: id };
 }
 

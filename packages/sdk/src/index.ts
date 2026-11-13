@@ -91,6 +91,8 @@ export type {
   TextLayer,
   TimelineClip,
   Track,
+  Transition,
+  TransitionInput,
 } from '@opencut/core';
 export type { AssetImportResult, MediaAvailability } from '@opencut/core/node';
 export type {
