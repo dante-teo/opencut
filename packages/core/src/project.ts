@@ -18,13 +18,13 @@ import type { RationalTime } from './time.js';
 
 export const PROJECT_SCHEMA_VERSION = 1;
 
-const id = z
+export const entityIdSchema = z
   .string()
   .regex(
     /^[A-Za-z0-9][A-Za-z0-9_-]*$/,
     'Use a nonempty stable ID containing letters, digits, underscores or hyphens.',
   );
-const name = z
+export const entityNameSchema = z
   .string()
   .refine((value) => value.trim().length > 0, 'Name must not be blank.');
 const path = z
@@ -37,13 +37,15 @@ const path = z
     'Use forward slashes and no control characters in file paths.',
   );
 
+export const relativeMediaPathSchema = path.refine(
+  (value) => !value.startsWith('/') && !value.includes(':'),
+  'Relative paths must not have a root, drive or URL scheme.',
+);
+
 export const mediaReferenceSchema = z.discriminatedUnion('type', [
   z.strictObject({
     type: z.literal('relative'),
-    path: path.refine(
-      (value) => !value.startsWith('/') && !value.includes(':'),
-      'Relative paths must not have a root, drive or URL scheme.',
-    ),
+    path: relativeMediaPathSchema,
   }),
   z.strictObject({
     type: z.literal('absolute'),
@@ -72,8 +74,8 @@ const assetMetadataSchema = z.strictObject({
   hasAudio: z.boolean(),
 });
 const assetSchema = z.strictObject({
-  id,
-  name,
+  id: entityIdSchema,
+  name: entityNameSchema,
   file: mediaReferenceSchema,
   mediaTypes: z
     .array(mediaType)
@@ -97,8 +99,8 @@ const assetSchema = z.strictObject({
     .optional(),
 });
 const trackSchema = z.strictObject({
-  id,
-  name,
+  id: entityIdSchema,
+  name: entityNameSchema,
   type: mediaType,
   ...trackAudioShape,
   locked: z.boolean().optional(),
@@ -151,17 +153,17 @@ export const colorGradeSchema = z.strictObject({
     ),
 });
 export const clipSchema = z.strictObject({
-  id,
-  assetId: id.optional(),
+  id: entityIdSchema,
+  assetId: entityIdSchema.optional(),
   text: textLayerSchema.optional(),
-  trackId: id,
+  trackId: entityIdSchema,
   timelineStart: timeSchema,
   sourceIn: timeSchema,
   sourceOut: timeSchema,
   speed: clipSpeedSchema.optional(),
   ...clipAudioShape,
   detachedAudio: z.literal(true).optional(),
-  linkId: id.optional(),
+  linkId: entityIdSchema.optional(),
   visual: clipVisualSchema.optional(),
   grade: colorGradeSchema.optional(),
   keyframes: visualKeyframesSchema.optional(),
@@ -180,17 +182,18 @@ const settingsSchema = z.strictObject({
   width: z.int().positive(),
   height: z.int().positive(),
   frameRate: frameRateSchema,
+  durationFrames: z.int().positive().optional(),
 });
 export const markerSchema = z.strictObject({
-  id,
+  id: entityIdSchema,
   frame: z.int().nonnegative(),
-  name,
+  name: entityNameSchema,
 });
 export const snapshotSchema = z.strictObject({
   schemaVersion: z.literal(PROJECT_SCHEMA_VERSION),
   metadata: z.strictObject({
-    id,
-    name,
+    id: entityIdSchema,
+    name: entityNameSchema,
     createdAt: z.iso.datetime({ precision: 3 }),
     updatedAt: z.iso.datetime({ precision: 3 }),
   }),
@@ -204,8 +207,8 @@ export const snapshotSchema = z.strictObject({
 });
 
 const historyEntrySchema = z.strictObject({
-  id,
-  label: name,
+  id: entityIdSchema,
+  label: entityNameSchema,
   committedAt: z.iso.datetime({ precision: 3 }),
   before: snapshotSchema,
   after: snapshotSchema,
@@ -273,6 +276,21 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
   const issues: ProjectIssue[] = [];
   const add = (path: string, code: string, message: string) =>
     issues.push({ path, code, message });
+  let declaredEnd: RationalTime | undefined;
+  if (project.settings.durationFrames !== undefined) {
+    try {
+      declaredEnd = frameTime(
+        project.settings.durationFrames,
+        project.settings.frameRate,
+      );
+    } catch {
+      add(
+        '/settings/durationFrames',
+        'time_overflow',
+        'Canvas duration exceeds the supported time range.',
+      );
+    }
+  }
   const ids = new Set([project.metadata.id]);
   for (const collection of ['assets', 'tracks', 'clips'] as const) {
     project[collection].forEach((entity, index) => {
@@ -312,6 +330,12 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
         `ID '${cue.id}' is already in use.`,
       );
     ids.add(cue.id);
+    if (declaredEnd && compareTimes(cue.end, declaredEnd) > 0)
+      add(
+        location + '/end',
+        'timeline_bounds',
+        'Subtitle ends after the declared canvas duration.',
+      );
     if (compareTimes(cue.end, cue.start) <= 0) {
       add(
         location + '/end',
@@ -469,6 +493,12 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
             'Volume keyframes must be within the clip duration.',
           );
         const end = addTimes(clip.timelineStart, duration);
+        if (declaredEnd && compareTimes(end, declaredEnd) > 0)
+          add(
+            location + '/timelineStart',
+            'timeline_bounds',
+            'Clip ends after the declared canvas duration.',
+          );
         for (const [property, keys] of Object.entries(clip.keyframes ?? {})) {
           if (!keys) continue;
           const keyframesPath = location + '/keyframes/' + property;

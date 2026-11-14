@@ -24,6 +24,22 @@ with `pnpm fixtures:generate` if absent; see the
 [fixture contract](../tests/fixtures/README.md). The output parent directory must
 already exist, and the output file must not exist.
 
+## Whole-video definitions (T44)
+
+```sh
+opencut validate sample.video.ts
+opencut inspect sample.video.ts --json
+opencut preview frame sample.video.ts --frame 48 --output frame.png
+opencut render sample.video.ts --output final.mp4
+```
+
+The same commands accept `.video.json`. Define the canvas, duration, assets,
+tracks and clips in a single file and render without creating a saved project.
+`preview frame` also accepts saved projects, including ones named
+`*.video.json`. For that suffix, a top-level `schemaVersion` identifies a
+saved project. Video definitions use the optional `version` field.
+See the [definition reference and executable examples](VIDEO_DEFINITIONS.md).
+
 ## TypeScript scripts and SDK (T30)
 
 ```sh

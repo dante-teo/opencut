@@ -1,13 +1,18 @@
 # OpenCut
 
-OpenCut is a desktop video editor with an Electron timeline, a command-line
-interface, and a TypeScript SDK. All three use the same project format and
-editing core.
+OpenCut is a local video editor for authoring and rendering video as code.
+Define a complete video in one TypeScript or JSON file and render it from
+the CLI.
 
-Edit video, audio, titles, and subtitles across multiple tracks. Group edits,
-ripple delete, and insert editing share a persistent undo and redo history.
-Preview edits in the desktop app or use the CLI to inspect and render a saved
-project.
+```sh
+opencut validate my-video.video.ts
+opencut preview frame my-video.video.ts --frame 48 --output review.png
+opencut render my-video.video.ts --output final.mp4
+```
+
+The CLI, TypeScript SDK and Electron review app share the same timeline
+evaluator and rendering pipeline. Saved projects also support persistent
+undo and redo for interactive editing through the CLI or SDK.
 
 ## Run from source
 
@@ -25,6 +30,7 @@ details.
 
 ## Documentation
 
+- [Video-as-Code reference and runnable examples](docs/VIDEO_DEFINITIONS.md)
 - [Timeline editing and shortcuts](docs/TIMELINE_EDITING.md)
 - [CLI reference](docs/CLI.md)
 - [TypeScript SDK](docs/SDK.md)

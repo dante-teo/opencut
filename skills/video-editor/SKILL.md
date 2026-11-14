@@ -1,6 +1,6 @@
 ---
 name: video-editor
-description: Edit local videos with OpenCut using its CLI or TypeScript SDK. Use when a user wants to assemble a rough cut, trim, split or retime footage, animate clip transforms, add editable text or subtitles, layer images or music, mix and fade audio, inspect an edited timeline, or export and verify a playable MP4 from media files or an OpenCut project.
+description: Author whole videos from TypeScript or JSON definitions and edit local videos with the OpenCut CLI or SDK. Use when a user wants to assemble a rough cut, trim, split or retime footage, animate clip transforms, add editable text or subtitles, layer images or music, mix and fade audio, inspect an edited timeline, or export and verify a playable MP4 from media files or an OpenCut project.
 ---
 
 # Edit videos with OpenCut
@@ -10,14 +10,23 @@ ffprobe. Rendered previews and video export need FFmpeg and ffprobe on PATH.
 Subtitle sidecar import and export work without those tools. Standalone SDK
 scripts need the supplied `@opencut/sdk` package.
 
+For a new video, author one `.video.ts` or `.video.json` definition. Run
+`opencut validate DEFINITION`, then `opencut inspect DEFINITION --json`.
+Review `opencut preview frame DEFINITION --frame N --output review.png`
+and deliver `opencut render DEFINITION --output final.mp4`. Probe the
+result. The [whole-video workflow](references/video-definitions.md) covers
+the fields, timing, paths and a complete example. Run trusted TypeScript
+definitions only. Keep the definition and source files in place.
+
+For an existing saved project, follow the steps below.
+
 1. **Discover the interface.** Run `opencut help --json` and scope it with
    `opencut help GROUP ACTION --json`. Here `opencut` means the supplied
    executable or `node /absolute/path/to/the/built/dist/index.js`. Use the
    public CLI, the `@opencut/sdk` package root, and these references.
 2. **Inspect before editing.** Read `project inspect PROJECT --json` for the
    revision, canvas, tracks, assets, clips and duration. Check `media list` for
-   availability and `probe` for new footage. Create a project at a fresh path
-   when starting from media alone. Import references to the original files.
+   availability and `probe` for new footage. Import references to the original files.
    Keep those files in place and leave their contents unchanged. Search
    Wikimedia Commons or Openverse with `online search REQUEST.json`, then import
    a licensed result with `online import PROJECT REQUEST.json --result ID`

@@ -103,6 +103,23 @@ describe('timeline geometry and transport', () => {
       denominator: 1,
     });
   });
+  it('includes the declared closing gap and preserves later markers in seek bounds', () => {
+    const project = createProject({
+      name: 'Declared duration',
+      settings: {
+        width: 320,
+        height: 180,
+        frameRate: rate,
+        durationFrames: 480,
+      },
+    });
+    project.clips = [clip];
+    expect(indexTimeline(project).end).toEqual(frameTime(480, rate));
+    project.markers = [
+      { id: 'review-marker', frame: 500, name: 'Review marker' },
+    ];
+    expect(indexTimeline(project).end).toEqual(frameTime(500, rate));
+  });
   it('indexes a large subtitle track and queries only cues intersecting the viewport', () => {
     const project = createProject({ name: 'Long subtitle list' });
     const at = (numerator: number) => ({ numerator, denominator: 1 });

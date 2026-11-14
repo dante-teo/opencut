@@ -3,7 +3,9 @@
 This matrix describes the current public interfaces. `edit apply` accepts the
 operation types and fields in `opencut help edit apply --json`; the SDK accepts
 the same operations through `project.apply`. Both use the core validation and
-history model. Inspect the project revision before editing. Electron reviews
+history model. Inspect the project revision before editing. Whole-video definitions use `validate`, `inspect`, `preview frame` and
+`render` with `defineVideo()`/`compileVideo()` in the SDK. See
+[Video as code](VIDEO_DEFINITIONS.md). Electron reviews
 and exports saved projects and follows revisions committed by either interface.
 
 | Capability                                                              | CLI                                                           | TypeScript SDK                                                                                          | Notes                                                                                                    |
@@ -20,7 +22,7 @@ and exports saved projects and follows revisions committed by either interface.
 | Freeze frame                                                            | `project freeze`                                              | `project.freezeFrame()`                                                                                 | Creates an external PNG as well as an edit. SDK stages the edit for save.                                |
 | Dialogue separation                                                     | `media separate-dialogue`, then `media import` for each stem  | `project.separateDialogue()`, then `project.importMedia()` for each stem                                | Requires FFmpeg, ffprobe and a separately installed ELUATE model. Import each generated stem separately. |
 | Online media                                                            | `online search`, `online import`                              | `project.searchOnlineMedia()`, `project.importOnlineMedia()`                                            | Direct provider search and provenance-preserving import; network required.                               |
-| Preview and export                                                      | `preview`, `render`, `project cache-preview`                  | `project.previewFrame()`, `project.previewContactSheet()`, `project.render()`, `project.cachePreview()` | Media tools and source files are required.                                                               |
+| Preview and export                                                      | `preview`, `project render`, `project cache-preview`          | `project.previewFrame()`, `project.previewContactSheet()`, `project.render()`, `project.cachePreview()` | Media tools and source files are required.                                                               |
 | Undo and redo                                                           | `edit undo/redo/history`                                      | `project.undo()`, `project.redo()`, `project.history()`, then save                                      | Undo and redo advance the revision.                                                                      |
 
 For hardware and VideoToolbox capabilities, use the

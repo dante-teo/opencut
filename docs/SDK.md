@@ -1,5 +1,9 @@
 # OpenCut TypeScript SDK
 
+Use `defineVideo()` for whole-video authoring and `compileVideo(file)` to
+compile a TypeScript or JSON definition into an in-memory project.
+See [Video as code](VIDEO_DEFINITIONS.md) for the authoring format and examples.
+
 `@opencut/sdk` is a Node ESM workspace package with a public root export and
 TypeScript declarations. Add `"@opencut/sdk": "workspace:*"` to a workspace
 consumer's dependencies and run `pnpm install` and `pnpm build:packages` from

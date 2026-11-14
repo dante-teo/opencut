@@ -4,7 +4,6 @@ import {
   frameTime,
   inspectProject,
   inspectTimeline,
-  planProjectRender,
   previewFrameSchema,
   previewClipSchema,
   previewSheetSchema,
@@ -12,7 +11,9 @@ import {
 } from '@opencut/core';
 import {
   canonicalProjectFilePath,
+  isVideoDefinitionPath,
   readProjectFile,
+  readVideoJsonForPreview,
   resolveProjectRender,
 } from '@opencut/core/node';
 import {
@@ -22,11 +23,13 @@ import {
 } from '@opencut/media';
 import type { RenderQuality } from '@opencut/media';
 import { UsageError } from './timeline.js';
+import { withCommandCancellation } from './cancellation.js';
 import { discovery } from './discovery.js';
+import { loadVideo } from './video.js';
 
 export const inspectionHelp = `Usage: opencut project inspect <project-file> [--json]
        opencut timeline inspect <project-file> --frame <n> [--json]
-       opencut preview frame <project-file> --frame <n> --output <new.png> [--size <64..1920>] [--json]
+       opencut preview frame <project-file|definition.video.ts|definition.video.json> --frame <n> --output <new.png> [--size <64..1920>] [--json]
        opencut preview contact-sheet <project-file> --output <new.png> [--from <n>] [--to <n>] [--count <1..16>] [--columns <1..16>] [--size <64..640>] [--json]
        opencut preview clip <project-file> --from <n> --to <n> --output <new.mp4> [--size <64..1920>] [--quality <draft|balanced|high>] [--json]
 
@@ -36,7 +39,7 @@ including the first and last included frames (default 8 samples, 4 columns, size
 Size caps the finished canvas's longest side, without upscaling; frames default to
 project size, clips to 640. Clip ranges must be at most 30 seconds.
 PNG outputs flatten canvas transparency over black, matching H.264 export.
-Inspection works offline, without media tools. Visual previews use original media,
+Saved-project inspection works offline, without media tools. Visual previews use original media,
 FFmpeg and ffprobe, without launching Electron. Existing render limits apply.
 Outputs are new files in existing directories; no overwrite. Projects/media are read only.
 JSON success is one versioned document on stdout; errors/progress go to stderr.
@@ -159,14 +162,31 @@ export async function runInspectionCommand(args: string[]) {
       ? integer('from', sheet ? 0 : undefined)
       : undefined;
   const requestedTo = preview && action === 'clip' ? integer('to') : undefined;
-  const path = await canonicalProjectFilePath(resolve(file!));
-  const project = await readProjectFile(path);
-  let result: unknown;
-  if (command === 'project inspect') result = inspectProject(project, path);
-  else if (command === 'timeline inspect')
-    result = inspectTimeline(project, path, selectedFrame!);
-  else {
-    const plan = planProjectRender(project);
+  if (!preview) {
+    const path = await canonicalProjectFilePath(resolve(file!));
+    const project = await readProjectFile(path);
+    const result =
+      command === 'project inspect'
+        ? inspectProject(project, path)
+        : inspectTimeline(project, path, selectedFrame!);
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  await withCommandCancellation(async (signal) => {
+    const definitionInput =
+      action === 'frame' && isVideoDefinitionPath(file!)
+        ? file!.endsWith('.video.json')
+          ? await readVideoJsonForPreview(file!, signal)
+          : await loadVideo(file!, signal)
+        : undefined;
+    const path =
+      definitionInput?.path ?? (await canonicalProjectFilePath(resolve(file!)));
+    const project = definitionInput?.project ?? (await readProjectFile(path));
+    const plan =
+      definitionInput && 'resolveRender' in definitionInput
+        ? await definitionInput.resolveRender()
+        : await resolveProjectRender(project, path);
     const startFrame = selectedFrame ?? requestedFrom!;
     const endFrame =
       selectedFrame !== undefined
@@ -198,99 +218,83 @@ export async function runInspectionCommand(args: string[]) {
       throw new UsageError(
         '--count must be 1–16 and no greater than the frame range; --columns must be 1–count.',
       );
-    const controller = new AbortController();
-    let cancellationCode = 0;
-    const cancel = (signal: NodeJS.Signals) => {
-      cancellationCode = signal === 'SIGINT' ? 130 : 143;
-      controller.abort();
+    const options = {
+      ...plan,
+      output: values.output!,
+      signal,
+      ...(size === undefined ? {} : { maxDimension: size }),
+      range: { startFrame, endFrame },
     };
-    process.on('SIGINT', cancel);
-    process.on('SIGTERM', cancel);
-    try {
-      const options = {
-        ...(await resolveProjectRender(project, path)),
-        output: values.output!,
-        signal: controller.signal,
-        ...(size === undefined ? {} : { maxDimension: size }),
-        range: { startFrame, endFrame },
-      };
-      const base = {
-        inspectionVersion: 1,
-        projectPath: path,
-        projectId: project.metadata.id,
-        revision: projectRevision(project),
-        frameRate: plan.frameRate,
-      };
-      if (action === 'frame') {
-        result = previewFrameSchema.parse({
-          ...base,
-          ...(await renderTimelineFrame(options)),
-          kind: 'frame',
-          frame: startFrame,
-          time: frameTime(startFrame, plan.frameRate),
-        });
-      } else if (sheet) {
-        const frames = Array.from(
-          { length: count },
-          (_, i) =>
-            startFrame +
-            (count === 1
-              ? 0
-              : Number(
-                  (BigInt(endFrame - startFrame - 1) * BigInt(i)) /
-                    BigInt(count - 1),
-                )),
-        );
-        const rendered = await renderContactSheet(options, frames, columns);
-        result = previewSheetSchema.parse({
-          ...base,
-          ...rendered,
-          kind: 'contact-sheet',
-          startFrame,
-          endFrame,
-          samples: frames.map((frame, i) => ({
-            frame,
-            time: frameTime(frame, plan.frameRate),
-            x: (i % columns) * rendered.cellWidth,
-            y:
-              Math.floor(i / columns) *
-              (rendered.tileHeight + rendered.labelHeight),
-          })),
-        });
-      } else {
-        const rendered = await renderVideoTimeline({
-          ...options,
-          quality: (values.quality as RenderQuality | undefined) ?? 'draft',
-          onProgress: (progress) =>
-            process.stderr.write(
-              values.json
-                ? `${JSON.stringify(progress)}\n`
-                : `${progress.phase}: ${progress.percent.toFixed(1)}%\n`,
-            ),
-        });
-        result = previewClipSchema.parse({
-          ...base,
-          path: rendered.path,
-          width: rendered.width,
-          height: rendered.height,
-          kind: 'clip',
-          startFrame,
-          endFrame,
-          startTime: frameTime(startFrame, plan.frameRate),
-          endTime: frameTime(endFrame, plan.frameRate),
-          frameCount: rendered.frameCount,
-          durationSeconds: rendered.durationSeconds,
-          quality: rendered.quality,
-        });
-      }
-    } catch (error) {
-      if (controller.signal.aborted) process.exitCode = cancellationCode || 130;
-      throw error;
-    } finally {
-      process.off('SIGINT', cancel);
-      process.off('SIGTERM', cancel);
+    const base = {
+      inspectionVersion: 1,
+      projectPath: path,
+      projectId: project.metadata.id,
+      revision: projectRevision(project),
+      frameRate: plan.frameRate,
+    };
+    let result: unknown;
+    if (action === 'frame') {
+      result = previewFrameSchema.parse({
+        ...base,
+        ...(await renderTimelineFrame(options)),
+        kind: 'frame',
+        frame: startFrame,
+        time: frameTime(startFrame, plan.frameRate),
+      });
+    } else if (sheet) {
+      const frames = Array.from(
+        { length: count },
+        (_, i) =>
+          startFrame +
+          (count === 1
+            ? 0
+            : Number(
+                (BigInt(endFrame - startFrame - 1) * BigInt(i)) /
+                  BigInt(count - 1),
+              )),
+      );
+      const rendered = await renderContactSheet(options, frames, columns);
+      result = previewSheetSchema.parse({
+        ...base,
+        ...rendered,
+        kind: 'contact-sheet',
+        startFrame,
+        endFrame,
+        samples: frames.map((frame, i) => ({
+          frame,
+          time: frameTime(frame, plan.frameRate),
+          x: (i % columns) * rendered.cellWidth,
+          y:
+            Math.floor(i / columns) *
+            (rendered.tileHeight + rendered.labelHeight),
+        })),
+      });
+    } else {
+      const rendered = await renderVideoTimeline({
+        ...options,
+        quality: (values.quality as RenderQuality | undefined) ?? 'draft',
+        onProgress: (progress) =>
+          process.stderr.write(
+            values.json
+              ? `${JSON.stringify(progress)}\n`
+              : `${progress.phase}: ${progress.percent.toFixed(1)}%\n`,
+          ),
+      });
+      result = previewClipSchema.parse({
+        ...base,
+        path: rendered.path,
+        width: rendered.width,
+        height: rendered.height,
+        kind: 'clip',
+        startFrame,
+        endFrame,
+        startTime: frameTime(startFrame, plan.frameRate),
+        endTime: frameTime(endFrame, plan.frameRate),
+        frameCount: rendered.frameCount,
+        durationSeconds: rendered.durationSeconds,
+        quality: rendered.quality,
+      });
     }
-  }
-  // Human output also retains the exact structured fields, without progress noise.
-  console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(result, null, 2));
+  });
 }

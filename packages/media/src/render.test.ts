@@ -17,7 +17,10 @@ import { probeMedia } from './probe.js';
 import type { MediaMetadata, MediaStream } from './probe.js';
 import { MediaError, runMediaTool } from './process.js';
 
-vi.mock('./probe.js', () => ({ probeMedia: vi.fn() }));
+vi.mock('./probe.js', async (original) => ({
+  ...(await original<typeof import('./probe.js')>()),
+  probeMedia: vi.fn(),
+}));
 vi.mock('./process.js', async (original) => ({
   ...(await original<typeof import('./process.js')>()),
   runMediaTool: vi.fn(),

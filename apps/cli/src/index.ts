@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
+import { withCommandCancellation } from './cancellation.js';
+import { isVideoCommand, runVideoCommand, videoUsage } from './video.js';
 import { formatSystem, inspectSystem, systemHelp } from './system.js';
 import { jobsHelp, runJobsCommand } from './jobs.js';
 import { discovery } from './discovery.js';
@@ -63,9 +65,14 @@ import type {
 
 const help = `Usage: opencut [command] [options]
 
-OpenCut — project and timeline editing, scripting, visual inspection and headless rendering.
+OpenCut — Video-as-Code, timeline editing, visual inspection and headless rendering.
 
 Commands:
+  validate <definition.video.ts|definition.video.json>
+                                       Validate a whole-video definition and its media
+  inspect <definition> --json          Inspect the compiled timeline
+  render <definition> --output <new.mp4>
+                                       Render directly from a whole-video definition
   system inspect [--json]              Inspect hardware and local VideoToolbox capabilities
   help --json                         Discover commands, arguments, capabilities and schemas
   run <script.ts> --project <project-file>
@@ -297,6 +304,11 @@ async function runCli(args: string[]): Promise<void> {
     (arg) => !['--json', '--help', '-h'].includes(arg),
   );
   const leadingCommand = args[commandPosition];
+  if (isVideoCommand(leadingCommand))
+    return runVideoCommand(leadingCommand, [
+      ...args.slice(0, commandPosition),
+      ...args.slice(commandPosition + 1),
+    ]);
   if (
     leadingCommand === 'run' ||
     leadingCommand === 'cache' ||
@@ -422,7 +434,8 @@ async function runCli(args: string[]): Promise<void> {
     )
       throw new UsageError('help accepts only --json and --help.');
     let usage = help;
-    if (group === 'system') usage = systemHelp;
+    if (isVideoCommand(group)) usage = videoUsage[group];
+    else if (group === 'system') usage = systemHelp;
     else if (group === 'run') usage = scriptHelp;
     else if (group === 'online') usage = onlineHelp;
     else if (group === 'cache') usage = cacheHelp;
@@ -822,62 +835,53 @@ async function runCli(args: string[]): Promise<void> {
           '--fps must be an integer or a fraction such as 30000/1001.',
         );
       const [numerator, denominator = 1] = fps?.split('/').map(Number) ?? [];
-      const controller = new AbortController();
-      let cancellationCode: number | undefined;
-      const cancel = (signal: NodeJS.Signals) => {
-        cancellationCode ??= signal === 'SIGINT' ? 130 : 143;
-        controller.abort();
-      };
+      const destination = values.output;
       const jsonLine = (event: unknown) =>
         process.stdout.write(`${JSON.stringify(event)}\n`);
-      process.on('SIGINT', cancel);
-      process.on('SIGTERM', cancel);
-      try {
-        const result = await renderProjectFile(path, values.output, {
-          quality: values.quality as RenderQuality | undefined,
-          resolution: values.resolution as RenderResolution | undefined,
-          codec: values.codec as RenderCodec | undefined,
-          outputSize:
-            width !== undefined && height !== undefined
-              ? { width, height }
-              : undefined,
-          outputFrameRate:
-            numerator === undefined ? undefined : { numerator, denominator },
-          videoBitrateKbps: integer('video-bitrate'),
-          audioBitrateKbps: integer('audio-bitrate'),
-          audioSampleRate,
-          audioChannels,
-          overwrite: values.overwrite,
-          burnSubtitles: !values['no-subtitles'],
-          signal: controller.signal,
-          onProgress: (event) => {
-            if (values.json) jsonLine(event);
-            else
-              process.stderr.write(
-                `${event.phase}: ${event.percent.toFixed(1)}% (${event.processedFrames}/${event.totalFrames} frames), elapsed ${event.elapsedSeconds.toFixed(1)}s, remaining ${event.remainingSeconds === null ? 'unknown' : `${event.remainingSeconds.toFixed(1)}s`}\n`,
-              );
-          },
-        });
-        if (values.json) jsonLine({ event: 'completed', ...result });
-        else {
-          for (const warning of result.warnings ?? [])
-            process.stderr.write(`Warning: ${warning}\n`);
-          process.stdout.write(
-            `Saved ${result.frameCount} frames (${result.width}x${result.height}, ${result.frameRate.numerator}/${result.frameRate.denominator} fps, ${result.metadata.video?.codec}/AAC) to ${result.path}\n`,
-          );
-        }
-      } catch (error) {
-        if (values.json)
-          jsonLine({
-            event: controller.signal.aborted ? 'cancelled' : 'failed',
-            message: error instanceof Error ? error.message : String(error),
+      await withCommandCancellation(async (signal) => {
+        try {
+          const result = await renderProjectFile(path, destination, {
+            quality: values.quality as RenderQuality | undefined,
+            resolution: values.resolution as RenderResolution | undefined,
+            codec: values.codec as RenderCodec | undefined,
+            outputSize:
+              width !== undefined && height !== undefined
+                ? { width, height }
+                : undefined,
+            outputFrameRate:
+              numerator === undefined ? undefined : { numerator, denominator },
+            videoBitrateKbps: integer('video-bitrate'),
+            audioBitrateKbps: integer('audio-bitrate'),
+            audioSampleRate,
+            audioChannels,
+            overwrite: values.overwrite,
+            burnSubtitles: !values['no-subtitles'],
+            signal,
+            onProgress: (event) => {
+              if (values.json) jsonLine(event);
+              else
+                process.stderr.write(
+                  `${event.phase}: ${event.percent.toFixed(1)}% (${event.processedFrames}/${event.totalFrames} frames), elapsed ${event.elapsedSeconds.toFixed(1)}s, remaining ${event.remainingSeconds === null ? 'unknown' : `${event.remainingSeconds.toFixed(1)}s`}\n`,
+                );
+            },
           });
-        if (cancellationCode) process.exitCode = cancellationCode;
-        throw error;
-      } finally {
-        process.removeListener('SIGINT', cancel);
-        process.removeListener('SIGTERM', cancel);
-      }
+          if (values.json) jsonLine({ event: 'completed', ...result });
+          else {
+            for (const warning of result.warnings ?? [])
+              process.stderr.write(`Warning: ${warning}\n`);
+            process.stdout.write(
+              `Saved ${result.frameCount} frames (${result.width}x${result.height}, ${result.frameRate.numerator}/${result.frameRate.denominator} fps, ${result.metadata.video?.codec}/AAC) to ${result.path}\n`,
+            );
+          }
+        } catch (error) {
+          if (values.json)
+            jsonLine({
+              event: signal.aborted ? 'cancelled' : 'failed',
+              message: error instanceof Error ? error.message : String(error),
+            });
+          throw error;
+        }
+      });
       return;
     }
     if (projectCommand === 'validate') {

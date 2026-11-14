@@ -385,8 +385,35 @@ type Definition = {
   tools?: string[];
   mutates?: boolean;
   jsonl?: boolean;
+  resultSchema?: string;
 };
 const definitions: Definition[] = [
+  {
+    name: 'validate',
+    description:
+      'Validate a whole-video definition and probe its declared media without decoding.',
+    args: ['definition-file'],
+    options: [],
+    tools: ['ffprobe'],
+  },
+  {
+    name: 'inspect',
+    resultSchema: 'project inspect',
+    description:
+      'Inspect the compiled project of a .video.ts or .video.json definition.',
+    args: ['definition-file'],
+    options: [],
+    tools: ['ffprobe'],
+  },
+  {
+    name: 'render',
+    description:
+      'Render a .video.ts or .video.json definition directly to a new H.264/AAC MP4.',
+    args: ['definition-file'],
+    options: ['output'],
+    required: ['output'],
+    tools: ['ffmpeg', 'ffprobe'],
+  },
   {
     name: 'system inspect',
     description:
@@ -757,7 +784,7 @@ const definitions: Definition[] = [
   {
     name: 'preview frame',
     description:
-      'Export lossless PNG from fully composited timeline; canvas alpha flattens over black.',
+      'Export a composited frame from a saved project or video definition as a lossless PNG. Canvas alpha flattens over black.',
     args: ['project-file'],
     options: ['frame', 'output', 'size'],
     required: ['frame', 'output'],
@@ -986,8 +1013,10 @@ export function discovery(scope: string[] = [], help = '') {
         prerequisites: command.tools ?? [],
         runtime: runtimeStatus(command.tools ?? []),
         jsonOutput: command.jsonl ? 'jsonl' : 'document',
-        ...(command.name in inspectionJsonSchemas || command.name === 'run'
-          ? { resultSchema: command.name }
+        ...(command.resultSchema !== undefined ||
+        command.name in inspectionJsonSchemas ||
+        command.name === 'run'
+          ? { resultSchema: command.resultSchema ?? command.name }
           : {}),
       })),
     globalOptions: [
@@ -1001,6 +1030,12 @@ export function discovery(scope: string[] = [], help = '') {
       { name: '--json', type: 'boolean' },
     ],
     capabilities: {
+      videoDefinitions: {
+        status: 'supported',
+        extensions: ['.video.ts', '.video.json'],
+        trustedTypeScript: true,
+        requiresVisualClip: false,
+      },
       projectInspection: { status: 'supported', offline: true },
       timelineEvaluation: {
         status: 'supported',

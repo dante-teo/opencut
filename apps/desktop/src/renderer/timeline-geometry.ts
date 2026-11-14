@@ -143,7 +143,10 @@ export function cueTimelineClip(
 export function indexTimeline(project: Project | undefined) {
   const tracks = new Map<string, { clip: TimelineClip; end: RationalTime }[]>();
   const assets = new Map(project?.assets.map((asset) => [asset.id, asset]));
-  let end = ZERO;
+  let end =
+    project?.settings.durationFrames === undefined
+      ? ZERO
+      : frameTime(project.settings.durationFrames, project.settings.frameRate);
   if (project)
     for (const marker of project.markers ?? []) {
       const at = frameTime(marker.frame, project.settings.frameRate);

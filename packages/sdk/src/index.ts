@@ -663,3 +663,8 @@ export interface ScriptContext {
 export type OpenCutScript = (
   context: ScriptContext,
 ) => unknown | Promise<unknown>;
+
+export { defineVideo } from '@opencut/core';
+export type { VideoDefinition } from '@opencut/core';
+export { compileVideo, VideoDefinitionError } from '@opencut/core/node';
+export type { CompiledVideo } from '@opencut/core/node';

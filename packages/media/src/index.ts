@@ -1,4 +1,9 @@
-export { probeMedia } from './probe.js';
+export {
+  probeMedia,
+  isStillImage,
+  videoSourceDuration,
+  audioSourceDuration,
+} from './probe.js';
 export { extractFrame } from './frame.js';
 export { separateDialogue } from './dialogue.js';
 export { composeMedia } from './compose.js';

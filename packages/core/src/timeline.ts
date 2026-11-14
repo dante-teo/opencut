@@ -87,7 +87,13 @@ function requireClip(project: Project, id: string): TimelineClip {
 /** Track insertion order, then exact timeline start order. No media access or mutation. */
 export function listTimeline(project: Project) {
   const validated = copyProject(project);
-  let duration: RationalTime = { numerator: 0, denominator: 1 };
+  let duration =
+    validated.settings.durationFrames === undefined
+      ? ZERO
+      : frameTime(
+          validated.settings.durationFrames,
+          validated.settings.frameRate,
+        );
   const tracks = validated.tracks.map((track) => ({
     ...track,
     clips: validated.clips

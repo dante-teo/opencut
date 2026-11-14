@@ -677,3 +677,11 @@ export type {
   OnlineMediaPage,
   OnlineMediaResult,
 } from './online-media.js';
+
+export {
+  compileVideo,
+  isVideoDefinitionPath,
+  readVideoJsonForPreview,
+  VideoDefinitionError,
+} from './video-files.js';
+export type { CompiledVideo } from './video-files.js';

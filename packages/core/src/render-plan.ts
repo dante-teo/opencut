@@ -120,6 +120,7 @@ export function planProjectRender(
 ): ProjectRenderPlan {
   const timeline = resolveTimeline(project);
   if (
+    project.settings.durationFrames === undefined &&
     !timeline.clips.some((clip) => clip.trackType === 'video') &&
     !project.subtitles?.cues.length
   )

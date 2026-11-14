@@ -181,3 +181,6 @@ export type {
   VisualKeyframe,
   VisualKeyframes,
 } from '@opencut/shared';
+
+export { defineVideo } from './video-definition.js';
+export type { VideoDefinition } from './video-definition.js';

@@ -10,6 +10,7 @@ import {
   resolveMediaReference,
 } from './project-files.js';
 import { planProjectRender, RenderError } from './render-plan.js';
+import type { ProjectRenderPlan } from './render-plan.js';
 
 /** Read a single project snapshot; rendering never saves or changes editing history. */
 export async function renderProjectFile(
@@ -53,9 +54,8 @@ export async function resolveProjectRender(
 ) {
   const plan = planProjectRender(project, options);
   const assets = new Map(project.assets.map((asset) => [asset.id, asset]));
-  const visualClips: VisualTimelineClip[] = [];
   const checked = new Set<string>();
-  const resolveSource = async (clip: { assetId: string; clipId: string }) => {
+  return bindRenderSources(plan, async (clip) => {
     const asset = assets.get(clip.assetId)!;
     const sourcePath = resolveMediaReference(asset.file, projectFilePath);
     if (!checked.has(sourcePath)) {
@@ -67,7 +67,18 @@ export async function resolveProjectRender(
       checked.add(sourcePath);
     }
     return sourcePath;
-  };
+  });
+}
+
+/** Bind a planned timeline to the original files selected by its caller. */
+export async function bindRenderSources(
+  plan: ProjectRenderPlan,
+  resolveSource: (clip: {
+    assetId: string;
+    clipId: string;
+  }) => string | Promise<string>,
+) {
+  const visualClips: VisualTimelineClip[] = [];
   for (const clip of plan.visualClips)
     visualClips.push(
       clip.text ? clip : { ...clip, path: await resolveSource(clip) },

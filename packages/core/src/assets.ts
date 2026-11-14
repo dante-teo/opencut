@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, open, realpath, rm, stat } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
-import { MediaCache, probeMedia, validateEmbeddedFont } from '@opencut/media';
+import {
+  isStillImage,
+  MediaCache,
+  probeMedia,
+  validateEmbeddedFont,
+} from '@opencut/media';
+import type { MediaMetadata } from '@opencut/media';
 import type { MediaAsset, Project } from './project.js';
 import type { OnlineMediaLibrary } from './online-media.js';
 import { serializeProject, validateProject } from './project.js';
@@ -182,21 +188,6 @@ export async function prepareMediaAsset(
       'SOURCE_UNAVAILABLE',
       `Source '${source}' changed while probing. Wait for it to finish writing and retry.`,
     );
-  const format = probed.formatName ?? '';
-  const image = Boolean(
-    probed.video &&
-    !probed.audio &&
-    (format.endsWith('_pipe') ||
-      ['image2', 'image2pipe'].includes(format) ||
-      (['gif', 'apng'].includes(format) && !probed.durationSeconds)),
-  );
-  const durationSeconds = image ? null : probed.durationSeconds;
-  const videoMicroseconds = Math.round(
-    (probed.video?.durationSeconds ?? 0) * 1_000_000,
-  );
-  const mediaTypes: MediaAsset['mediaTypes'] = [];
-  if (probed.video) mediaTypes.push('video');
-  if (probed.audio) mediaTypes.push('audio');
   const ids = new Set([
     project.metadata.id,
     ...project.assets.map((asset) => asset.id),
@@ -210,6 +201,41 @@ export async function prepareMediaAsset(
     id,
     name: basename(source),
     file: createMediaReference(source, path),
+    ...describeMediaAsset(probed),
+  };
+  project.assets.push(asset);
+  project.metadata.updatedAt = new Date(
+    Math.max(Date.now(), Date.parse(project.metadata.updatedAt)),
+  ).toISOString();
+  const info = await assetInfo(project, path, asset);
+  if (info.source.status !== 'available')
+    throw new AssetError(
+      'SOURCE_UNAVAILABLE',
+      `Source '${source}' became unavailable during import. Restore it or grant read permission, then retry.`,
+    );
+  return {
+    project,
+    result: {
+      path,
+      imported: true,
+      ...info,
+    },
+  };
+}
+
+/** Translate shared probe metadata into the persisted asset fields. */
+export function describeMediaAsset(probed: MediaMetadata) {
+  const image = isStillImage(probed);
+  const durationSeconds = image ? null : probed.durationSeconds;
+  const videoMicroseconds = Math.round(
+    (probed.video?.durationSeconds ?? 0) * 1_000_000,
+  );
+  const mediaTypes: MediaAsset['mediaTypes'] = [];
+  if (probed.video) mediaTypes.push('video');
+  if (probed.audio) mediaTypes.push('audio');
+  const asset: Pick<MediaAsset, 'mediaTypes' | 'duration'> & {
+    metadata: NonNullable<MediaAsset['metadata']>;
+  } = {
     mediaTypes,
     metadata: {
       kind: image ? 'image' : probed.video ? 'video' : 'audio',
@@ -238,24 +264,7 @@ export async function prepareMediaAsset(
     if (Number.isSafeInteger(numerator) && numerator > 0)
       asset.duration = { numerator, denominator: 1_000_000 };
   }
-  project.assets.push(asset);
-  project.metadata.updatedAt = new Date(
-    Math.max(Date.now(), Date.parse(project.metadata.updatedAt)),
-  ).toISOString();
-  const info = await assetInfo(project, path, asset);
-  if (info.source.status !== 'available')
-    throw new AssetError(
-      'SOURCE_UNAVAILABLE',
-      `Source '${source}' became unavailable during import. Restore it or grant read permission, then retry.`,
-    );
-  return {
-    project,
-    result: {
-      path,
-      imported: true,
-      ...info,
-    },
-  };
+  return asset;
 }
 
 /** Refresh the source and metadata while retaining all references to the asset ID. */

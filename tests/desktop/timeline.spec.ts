@@ -90,6 +90,46 @@ async function setup(path: string) {
   return deserializeProject(await readFile(path, 'utf8'));
 }
 
+test('the ruler and keyboard can seek through the declared closing gap', async () => {
+  const directory = await mkdtemp(join(fixtureRoot, 't44-duration-'));
+  const path = join(directory, 'closing-gap.opencut.json');
+  const project = createProject({
+    name: 'Timeline verification',
+    settings: {
+      width: 320,
+      height: 180,
+      frameRate: { numerator: 24, denominator: 1 },
+      durationFrames: 96,
+    },
+  });
+  project.tracks = [{ id: 'titles', type: 'video', name: 'Titles' }];
+  project.clips = [
+    {
+      id: 'opening',
+      trackId: 'titles',
+      text: { content: 'Opening' },
+      timelineStart: { numerator: 0, denominator: 1 },
+      sourceIn: { numerator: 0, denominator: 1 },
+      sourceOut: { numerator: 1, denominator: 1 },
+    },
+  ];
+  await writeProjectFile(project, path);
+  const { application, page } = await launchDesktop();
+  try {
+    await openProject(application, page, path);
+    const ruler = page.getByRole('slider', { name: 'Timeline playhead' });
+    await expect(ruler).toHaveAttribute('aria-valuemax', '96');
+    await ruler.focus();
+    await page.keyboard.press('End');
+    await expect(ruler).toHaveAttribute('aria-valuenow', '96');
+    await page.keyboard.press('ArrowLeft');
+    await expect(ruler).toHaveAttribute('aria-valuenow', '95');
+  } finally {
+    await application.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('CLI-created tracks, gaps, cross-track overlaps, ruler, zoom anchor and persistent viewport', async () => {
   test.skip(!available, 'Generate synthetic fixtures first.');
   const directory = await mkdtemp(join(fixtureRoot, 't17-'));

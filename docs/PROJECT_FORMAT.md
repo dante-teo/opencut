@@ -14,7 +14,11 @@ serialized into project settings or editing history. Exporting with a resolution
 preset leaves the saved canvas dimensions and clip coordinates unchanged.
 T23 [timeline evaluation](TIMELINE_EVALUATION.md) derives active media and source
 times from these same fields. Evaluation results are transient and do not change
-schema version 1, project content or history.
+schema version 1, project content or history. T44 compiles
+[video definitions](VIDEO_DEFINITIONS.md) to the same project model.
+Optional `settings.durationFrames` declares a positive exact canvas frame
+count. Clip and subtitle ends must fit within it. Projects that omit it
+derive their duration from the last clip or subtitle end.
 
 ## Example
 
@@ -614,7 +618,7 @@ const positioned = setClipVisual(portrait.project, clipId, {
 Known duration bounds are enforced; explicit ranges for unknown-duration assets
 are allowed without inferring physical source bounds. Offline editing is valid.
 
-`listTimeline` returns `frameRate`, maximum clip-end `duration` (zero if empty),
+`listTimeline` returns `frameRate`, the declared or derived `duration`,
 and ordered `tracks` with time-sorted `clips`. Each listed clip includes derived
 `duration` and `timelineEnd`; neither is persisted. `clipDuration(clip)` and
 `clipTimelineEnd(clip)` expose these calculations for callers. `addTimes(a,b)`

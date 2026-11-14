@@ -25,7 +25,12 @@ import {
 } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
-import { probeMedia } from './probe.js';
+import {
+  probeMedia,
+  isStillImage,
+  videoSourceDuration,
+  audioSourceDuration,
+} from './probe.js';
 import type { MediaMetadata } from './probe.js';
 import {
   checkRenderSignal,
@@ -103,6 +108,8 @@ interface RenderAudioFade {
 }
 
 export interface VideoTimelineOptions extends RenderControls {
+  /** Metadata already probed for this render invocation, indexed by resolved source path. */
+  sourceMetadata?: ReadonlyMap<string, MediaMetadata>;
   /** Allow a desktop host to do text shaping off its main thread. */
   rasterizeText?: typeof rasterizeTextLayer;
   width: number;
@@ -585,7 +592,7 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
     encoders,
   };
   const filters: string[] = [];
-  const sources = new Map<string, MediaMetadata>();
+  const sources = new Map(options.sourceMetadata);
   const inputs = new Map<string, number>();
   const readSource = async (clip: { path: string; clipId: string }) => {
     checkRenderSignal(options.signal);
@@ -775,12 +782,7 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
     }
     const source = await readSource(clip);
     const { video } = source;
-    const format = source.formatName ?? '';
-    const still =
-      !source.audio &&
-      (format.endsWith('_pipe') ||
-        ['image2', 'image2pipe'].includes(format) ||
-        (['gif', 'apng'].includes(format) && !source.durationSeconds));
+    const still = isStillImage(source);
     if (!video || video.isAttachedPicture || (!still && !video.frameRate))
       throw new MediaError(
         `Clip '${clip.clipId}' requires timed video or a still image on the video track.`,
@@ -801,14 +803,7 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
       video.height ?? 0,
       video.codec,
     );
-    const offset =
-      (video.startTimeSeconds ?? source.startTimeSeconds ?? 0) -
-      (source.startTimeSeconds ?? 0);
-    const duration =
-      video.durationSeconds ??
-      (source.durationSeconds === null
-        ? null
-        : source.durationSeconds - offset);
+    const duration = videoSourceDuration(source);
     const sourceEnd = clip.sourceStartFrame + clip.frameCount;
     const sourceOutSeconds = clip.retiming
       ? seconds(clip.retiming.sourceOut)
@@ -1109,13 +1104,7 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
       source.startTimeSeconds ??
       0;
     const offset = (audio.startTimeSeconds ?? origin) - origin;
-    const duration =
-      audio.durationSeconds === null
-        ? source.durationSeconds === null
-          ? null
-          : source.durationSeconds -
-            (origin - (source.startTimeSeconds ?? origin))
-        : audio.durationSeconds + offset;
+    const duration = audioSourceDuration(source);
     if (
       last.required &&
       !last.padAudio &&

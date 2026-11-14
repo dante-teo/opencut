@@ -120,6 +120,43 @@ function parseStream(value: unknown): MediaStream {
   };
 }
 
+export function isStillImage(source: MediaMetadata): boolean {
+  const format = source.formatName ?? '';
+  return Boolean(
+    source.video &&
+    !source.audio &&
+    (format.endsWith('_pipe') ||
+      ['image2', 'image2pipe'].includes(format) ||
+      (['gif', 'apng'].includes(format) && !source.durationSeconds)),
+  );
+}
+
+export function videoSourceDuration(source: MediaMetadata): number | null {
+  if (!source.video) return null;
+  const offset =
+    (source.video.startTimeSeconds ?? source.startTimeSeconds ?? 0) -
+    (source.startTimeSeconds ?? 0);
+  return (
+    source.video.durationSeconds ??
+    (source.durationSeconds === null ? null : source.durationSeconds - offset)
+  );
+}
+
+export function audioSourceDuration(source: MediaMetadata): number | null {
+  if (!source.audio) return null;
+  const origin =
+    source.video?.startTimeSeconds ??
+    source.audio.startTimeSeconds ??
+    source.startTimeSeconds ??
+    0;
+  const offset = (source.audio.startTimeSeconds ?? origin) - origin;
+  return source.audio.durationSeconds === null
+    ? source.durationSeconds === null
+      ? null
+      : source.durationSeconds - (origin - (source.startTimeSeconds ?? origin))
+    : source.audio.durationSeconds + offset;
+}
+
 export async function probeMedia(
   file: string,
   signal?: AbortSignal,

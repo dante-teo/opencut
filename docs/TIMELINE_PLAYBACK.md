@@ -8,6 +8,10 @@ overlapping audio tracks. Play/Pause, the project seek slider, ruler, Space and 
 on the edited timeline. Seeks pause playback. End stops at the exact timeline end;
 Play at end restarts at zero. Selection does not change playback.
 
+When a saved project sets `settings.durationFrames`, the ruler and keyboard
+can seek through any gap after the final clip or subtitle. Markers beyond that
+duration extend the ruler. Rendered output ends at the declared duration.
+
 Cuts, trims and splits use T23 source mapping. T26 composites all eligible video
 and image tracks, bottom to top in track array order, with per-clip X/Y, scale,
 opacity and contain/cover/stretch fitting. Visual gaps and audio-only tails show

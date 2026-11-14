@@ -1,7 +1,7 @@
 # OpenCut
 
-A local video editor with a scriptable headless core and an Electron review
-and export app. The milestones below describe the earlier development of OpenCut.
+A local video editor for [video as code](VIDEO_DEFINITIONS.md), with a
+headless core and an Electron review and export app. The milestones below describe the earlier development of OpenCut.
 
 **T04 added an isolated Electron video preview with play/pause, seeking,
 nominal frame stepping and reproducible performance measurements.** The independent
@@ -89,6 +89,10 @@ The benchmark prototypes are isolated from project editing and export.
 T43 adds [durable local jobs](JOBS.md). Submit, inspect, cancel or retry a
 background render through the CLI and SDK without keeping the submitting
 process alive.
+
+T44 compiles whole-video TypeScript and JSON definitions to in-memory projects.
+Use the [executable showcase](VIDEO_DEFINITIONS.md#run-the-example) to validate,
+inspect, preview and render directly from a definition.
 
 ## Quick start (macOS)
 
