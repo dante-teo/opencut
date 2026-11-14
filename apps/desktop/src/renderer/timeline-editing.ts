@@ -12,11 +12,11 @@ import {
   projectSnapshot,
   type FrameRate,
   type Project,
+  type EditOperation,
   type RationalTime,
   type TimelineClip,
   type AudioFadeEdge,
 } from '@opencut/core';
-import type { TimelineOperation } from '../bridge.js';
 import {
   cueTimelineClip,
   frameIndex,
@@ -26,7 +26,7 @@ import {
 
 export type GestureKind = 'move' | 'left' | 'right' | AudioFadeEdge;
 export interface EditProposal {
-  operations: TimelineOperation[];
+  operations: EditOperation[];
   clip: TimelineClip;
   clips?: TimelineClip[];
   error: string | null;
@@ -50,7 +50,7 @@ export function createTimelinePreview(project: Project) {
 function previewClipEdit(
   project: Project,
   clip: TimelineClip,
-  operations: TimelineOperation[],
+  operations: EditOperation[],
   snap: RationalTime | null,
 ): EditProposal {
   const preview = previewTransaction(project, {
@@ -202,7 +202,7 @@ export function proposeEdit(
   snapPixels: number,
   ids: string[] = [clip.id],
 ): EditProposal {
-  let operations: TimelineOperation[] = [];
+  let operations: EditOperation[] = [];
   let snap: RationalTime | null = null;
   try {
     const rate = project.settings.frameRate;
@@ -234,7 +234,7 @@ export function proposeEdit(
       );
       if (compareTimes(frameTime(duration, rate), previous) === 0)
         return unchanged;
-      const operation: TimelineOperation = {
+      const operation: EditOperation = {
         type: 'clip.audio',
         id: clip.id,
         [kind]: duration,
@@ -293,7 +293,7 @@ export function proposeEdit(
         },
       ];
     } else {
-      const trim: TimelineOperation = { type: 'clip.trim', id: clip.id };
+      const trim: EditOperation = { type: 'clip.trim', id: clip.id };
       if (clip.speed) {
         if (change === 0n) return { operations, clip, error: null, snap };
         const at = frameTime(safeFrame(target), rate);
@@ -305,7 +305,7 @@ export function proposeEdit(
       if (kind === 'right') {
         operations = [trim];
       } else {
-        const move: TimelineOperation = {
+        const move: EditOperation = {
           type: 'clip.move',
           id: clip.id,
           at: safeFrame(target),
@@ -363,7 +363,7 @@ export function proposeSubtitleEdit(
           : end;
     if (compareTimes(stop, start) <= 0)
       throw new Error('Subtitle end must be later than start.');
-    const operation: TimelineOperation =
+    const operation: EditOperation =
       kind === 'move'
         ? { type: 'subtitle.move', id: clip.id, start }
         : { type: 'subtitle.set', id: clip.id, start, end: stop };

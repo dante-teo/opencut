@@ -1,26 +1,14 @@
 # Product
 
-OpenCut will be a lightweight, local desktop video editor for YouTubers,
-TikTok and Instagram creators, vloggers, and streamers. A clear conventional
-interface should make everyday editing accessible without code. The desktop now
-provides project management, a media library, timeline editing, clip properties,
-shared undo/redo and [local video export](EXPORT.md). Single-source preview can
-link to an individual video clip;
-Project viewer plays edited cuts, gaps and synchronized multi-track audio.
-Project viewer composites ordered video/image layers with position, scale, opacity,
-fitting and canvas alpha. Timeline clips now show source filmstrips and audio
-waveforms, with visible-area loading and bounded navigation caches.
+OpenCut edits local video through a headless core, CLI and TypeScript SDK.
+Electron is a review and export app. It opens saved projects, follows committed
+revisions, and provides a media library, inspector and read-only timeline.
+Project viewer plays synchronized cuts, gaps, audio and layered video, image,
+text and subtitles. Source preview can link to a timeline clip. Video exports
+capture the displayed revision independently of later edits.
 
-## Two equally important workflows
-
-**GUI-first usability:** creators should be able to edit entirely in the desktop
-application, with discoverable controls and understandable feedback.
-
-**CLI-first architecture:** editing behavior belongs to an independently usable
-headless core. The GUI and a standalone CLI will invoke the same operations.
-Scripts and compatible external AI coding agents should be able to control that
-core without launching Electron. Neither interface gets a separate editing model.
-The [official Agent Skill](../skills/video-editor/SKILL.md) teaches agents the public CLI and SDK.
+The [OpenCut Agent Skill](../skills/video-editor/SKILL.md) teaches agents the
+public CLI and SDK. The milestones below describe earlier releases.
 
 The editing model (projects, intent, commands, validation) and the media engine
 (probing, decoding, playback and encoding) are separate concerns. The [project format](PROJECT_FORMAT.md), [playback contract](TIMELINE_PLAYBACK.md)

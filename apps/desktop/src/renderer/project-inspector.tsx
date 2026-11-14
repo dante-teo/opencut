@@ -1,12 +1,11 @@
-import type { AnimatedProperty } from '@opencut/shared';
 import { SlidersHorizontal } from 'lucide-react';
-import { ClipProperties, NumberProperty } from './clip-properties.js';
-import { KeyframeProperties } from './keyframe-properties.js';
-import { TextProperties } from './text-properties.js';
-import { SubtitleProperties } from './subtitle-properties.js';
-import { CanvasArtwork } from './studio-graphics.js';
-import type { DesktopProject, TimelineOperation } from '../bridge.js';
-import { compareTimes, type RationalTime, type Project } from '@opencut/core';
+import type { DesktopProject } from '../bridge.js';
+import {
+  clipTimelineEnd,
+  compareTimes,
+  type RationalTime,
+  type Project,
+} from '@opencut/core';
 import {
   frameIndex,
   framePosition,
@@ -44,287 +43,120 @@ export function ProjectInspector({
   state,
   selection,
   onClear,
-  position,
   onSeek,
-  keyframeProperty,
-  onKeyframeSelect,
-  disabled,
-  onEdit,
-  onRelink,
-  onSeparateDialogue,
-  onFreeze,
-  onImportFont,
 }: {
   state: DesktopProject | null;
   selection: { kind: 'asset' | 'clip'; id: string } | null;
   onClear: () => void;
-  position: RationalTime;
   onSeek: (time: RationalTime) => void;
-  keyframeProperty: AnimatedProperty;
-  onKeyframeSelect: (property: AnimatedProperty) => void;
-  disabled: boolean;
-  onEdit: (operations: TimelineOperation[], label: string) => Promise<void>;
-  onRelink: (assetId: string) => void;
-  onSeparateDialogue: (assetId: string) => void;
-  onFreeze: (clipId: string, frames: number) => void;
-  onImportFont: (id: string) => void;
 }) {
   const project = state?.project;
   const clip =
     selection?.kind === 'clip'
-      ? project?.clips.find((clip) => clip.id === selection.id)
+      ? project?.clips.find(({ id }) => id === selection.id)
       : undefined;
   const cue =
     selection?.kind === 'clip'
-      ? project?.subtitles?.cues.find((cue) => cue.id === selection.id)
+      ? project?.subtitles?.cues.find(({ id }) => id === selection.id)
       : undefined;
   const asset = project?.assets.find(
-    (asset) =>
-      asset.id === (selection?.kind === 'asset' ? selection.id : clip?.assetId),
+    ({ id }) =>
+      id === (selection?.kind === 'asset' ? selection.id : clip?.assetId),
   );
-  const availability = state?.media.find((item) => item.assetId === asset?.id);
+  const availability = state?.media.find(
+    ({ assetId }) => assetId === asset?.id,
+  );
+  const settings = project?.settings;
+  const start = clip?.timelineStart ?? cue?.start;
+  const end = clip ? clipTimelineEnd(clip) : cue?.end;
+  const track = project?.tracks.find(({ id }) => id === clip?.trackId);
   return (
     <aside className="inspector-panel" aria-label="Inspector">
       <div className="panel-heading">
         <h2>
-          <SlidersHorizontal aria-hidden="true" focusable="false" /> Inspector
+          <SlidersHorizontal aria-hidden="true" /> Inspector
         </h2>
       </div>
-      <div
-        className={
-          clip?.text || cue
-            ? 'inspector-content text-inspector'
-            : 'inspector-content'
-        }
-      >
+      <div className="inspector-content">
         {selection && (
+          <button className="text-button" onClick={onClear}>
+            ← Project settings
+          </button>
+        )}
+        {clip || cue || asset ? (
           <>
-            <button className="text-button" onClick={onClear}>
-              ← Project settings
-            </button>
-            {cue && (
-              <SubtitleProperties
-                key={JSON.stringify([project!.metadata.id, cue.id])}
-                project={project!}
-                cue={cue}
-                disabled={disabled}
-                onEdit={onEdit}
-              />
-            )}
-            {clip?.text && (
-              <TextProperties
-                key={JSON.stringify([
-                  project!.metadata.id,
-                  clip,
-                  project!.settings.frameRate,
-                ])}
-                project={project!}
-                clip={clip}
-                disabled={disabled}
-                onEdit={onEdit}
-              />
-            )}
-            {(clip?.text || cue) && (
-              <div>
-                <button
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => onImportFont((cue ?? clip)!.id)}
-                >
-                  Import font…
-                </button>
-                {(clip?.text?.embeddedFont || cue?.style?.embeddedFont) && (
-                  <button
-                    type="button"
-                    disabled={disabled}
-                    onClick={() => {
-                      const operation: TimelineOperation = cue
-                        ? {
-                            type: 'subtitle.style',
-                            ids: [cue.id],
-                            style: { embeddedFont: null },
-                          }
-                        : {
-                            type: 'text.set',
-                            id: clip!.id,
-                            text: { embeddedFont: null },
-                          };
-                      void onEdit([operation], 'Remove imported font').catch(
-                        () => {},
-                      );
-                    }}
-                  >
-                    Remove imported font
-                  </button>
-                )}
-              </div>
-            )}
-            {clip &&
-              project?.tracks.some(
-                (track) => track.id === clip.trackId && track.type === 'video',
-              ) && (
-                <KeyframeProperties
-                  key={`${project.metadata.id}:${clip.id}`}
-                  clip={clip}
-                  position={position}
-                  onSeek={onSeek}
-                  property={keyframeProperty}
-                  onPropertyChange={onKeyframeSelect}
-                  disabled={disabled}
-                  onEdit={onEdit}
-                />
-              )}
-            {clip && !clip.text && (
-              <>
-                <h3>Clip details</h3>
-                <ClipProperties
-                  key={`${project!.metadata.id}:${clip.id}`}
-                  project={project!}
-                  clip={clip}
-                  disabled={disabled}
-                  onEdit={onEdit}
-                  onFreeze={(frames) => onFreeze(clip.id, frames)}
-                />
-                <dl>
+            <h3>
+              {cue
+                ? 'Subtitle'
+                : clip?.text
+                  ? 'Text clip'
+                  : (asset?.name ?? 'Clip')}
+            </h3>
+            {(cue || clip?.text) && <p>{cue?.text ?? clip?.text?.content}</p>}
+            <dl>
+              <dt>ID</dt>
+              <dd>{(clip ?? cue ?? asset)?.id}</dd>
+              {track && (
+                <>
                   <dt>Track</dt>
+                  <dd>{track.name}</dd>
+                </>
+              )}
+              {project && start && end && (
+                <>
+                  <dt>Timeline</dt>
+                  <dd>{displayRange(start, end, project)}</dd>
+                </>
+              )}
+              {project && clip && (
+                <>
+                  <dt>Source</dt>
                   <dd>
-                    {
-                      project?.tracks.find((track) => track.id === clip.trackId)
-                        ?.name
-                    }
+                    {displayRange(clip.sourceIn, clip.sourceOut, project)}
                   </dd>
-                  <dt>Timeline start</dt>
-                  <dd>{displayTime(clip.timelineStart, project!)}</dd>
-                  <dt>Source in → out</dt>
+                </>
+              )}
+              {asset && (
+                <>
+                  <dt>File</dt>
+                  <dd>{asset.file.path}</dd>
+                </>
+              )}
+              {asset?.metadata?.width && asset.metadata.height && (
+                <>
+                  <dt>Dimensions</dt>
                   <dd>
-                    {displayRange(clip.sourceIn, clip.sourceOut, project!)}
+                    {asset.metadata.width} × {asset.metadata.height}
                   </dd>
-                </dl>
-              </>
-            )}
-            {asset && (
-              <>
-                <h3>{asset.name}</h3>
-                <details className="asset-information" open={!clip}>
-                  <summary>Media information</summary>
-                  <dl>
-                    <dt>File</dt>
-                    <dd>{asset.file.path}</dd>
-                    <dt>Availability</dt>
-                    <dd>
-                      {availability?.status ?? 'Unchecked'} ·{' '}
-                      {availability?.message}
-                    </dd>
-                    <dt>Media type</dt>
-                    <dd>
-                      {asset.metadata?.kind ?? asset.mediaTypes.join(', ')}
-                    </dd>
-                    {asset.metadata && (
-                      <>
-                        <dt>Dimensions</dt>
-                        <dd>
-                          {asset.metadata.width ?? '—'} ×{' '}
-                          {asset.metadata.height ?? '—'}
-                        </dd>
-                        <dt>Duration</dt>
-                        <dd>{asset.metadata.durationSeconds ?? '—'} s</dd>
-                        <dt>Video codec</dt>
-                        <dd>{asset.metadata.videoCodec ?? '—'}</dd>
-                        <dt>Audio codec</dt>
-                        <dd>{asset.metadata.audioCodec ?? '—'}</dd>
-                        <dt>Source FPS</dt>
-                        <dd>
-                          {asset.metadata.frameRateRatio ??
-                            asset.metadata.frameRate ??
-                            '—'}
-                        </dd>
-                      </>
-                    )}
-                  </dl>
-                  {availability && availability.status !== 'available' && (
-                    <button
-                      type="button"
-                      disabled={disabled}
-                      onClick={() => onRelink(asset.id)}
-                    >
-                      Relink media…
-                    </button>
-                  )}
-                  {availability?.status === 'available' &&
-                    asset.mediaTypes.includes('audio') && (
-                      <button
-                        type="button"
-                        disabled={disabled}
-                        onClick={() => onSeparateDialogue(asset.id)}
-                      >
-                        Separate dialogue…
-                      </button>
-                    )}
-                </details>
-              </>
-            )}
-          </>
-        )}
-        {!selection && (
-          <div className="inspector-overview" aria-hidden="true">
-            <CanvasArtwork />
-          </div>
-        )}
-        {project && !selection && (
-          <>
-            <h3>Project settings</h3>
-            <fieldset className="clip-properties" disabled={disabled}>
-              <NumberProperty
-                label="Canvas width"
-                value={project.settings.width}
-                min={1}
-                max={Number.MAX_SAFE_INTEGER}
-                onCommit={(width) =>
-                  onEdit([{ type: 'canvas.set', width }], 'Set canvas width')
-                }
-              />
-              <NumberProperty
-                label="Canvas height"
-                value={project.settings.height}
-                min={1}
-                max={Number.MAX_SAFE_INTEGER}
-                onCommit={(height) =>
-                  onEdit([{ type: 'canvas.set', height }], 'Set canvas height')
-                }
-              />
-            </fieldset>
-            <dl className="project-metadata">
-              <dt>Resolution</dt>
-              <dd>
-                {project.settings.width} × {project.settings.height}
-              </dd>
-              <dt>Frame rate</dt>
-              <dd>
-                {project.settings.frameRate.numerator}/
-                {project.settings.frameRate.denominator} fps
-              </dd>
-              <dt>Background</dt>
-              <dd>{project.settings.backgroundColor ?? '#000000'}</dd>
+                </>
+              )}
+              {availability && (
+                <>
+                  <dt>Media status</dt>
+                  <dd>
+                    {availability.status} {availability.message}
+                  </dd>
+                </>
+              )}
             </dl>
-            <details className="project-information">
-              <summary>Project information</summary>
-              <dl>
-                <dt>Project ID</dt>
-                <dd>{project.metadata.id}</dd>
-                <dt>Created</dt>
-                <dd>{project.metadata.createdAt}</dd>
-                <dt>Updated</dt>
-                <dd>{project.metadata.updatedAt}</dd>
-                <dt>Format / revision</dt>
-                <dd>
-                  {project.schemaVersion} / {project.editing?.revision ?? 0}
-                </dd>
-                <dt>File</dt>
-                <dd>{state?.path ?? 'Not saved yet'}</dd>
-              </dl>
-            </details>
+            {start && (
+              <button onClick={() => onSeek(start)}>Go to start</button>
+            )}
           </>
-        )}
+        ) : settings ? (
+          <dl>
+            <dt>Dimensions</dt>
+            <dd>
+              {settings.width} × {settings.height}
+            </dd>
+            <dt>Frame rate</dt>
+            <dd>
+              {settings.frameRate.numerator}/{settings.frameRate.denominator}
+            </dd>
+            <dt>Project file</dt>
+            <dd>{state?.path}</dd>
+          </dl>
+        ) : null}
       </div>
     </aside>
   );

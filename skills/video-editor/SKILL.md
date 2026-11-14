@@ -60,7 +60,10 @@ scripts need the supplied `@opencut/sdk` package.
    when playback is available. Use `project cache-preview` for a full-timeline
    review with VFR sources sampled on the project frame grid. Check text
    wrapping, alignment, legibility and glyph coverage in the rendered frame.
-   Match the reviewed revision to the export.
+   Electron can open the saved project for read-only review and automatically
+   follows committed revisions. Check the toolbar revision before review and
+   confirm the revision captured by the export job. Make all edits through
+   the CLI or SDK, including undo and redo.
 5. **Export and verify.** Choose a new MP4 path in an existing directory.
    For CLI rendering, require exit 0 and a terminal `completed` JSONL event.
    Probe the published file for the expected streams, dimensions and duration.

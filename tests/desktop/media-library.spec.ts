@@ -30,7 +30,8 @@ const cli = (...args: string[]) => {
   expect(result.status, result.stderr).toBe(0);
   return JSON.parse(result.stdout);
 };
-test('imports multiple sources, drops disk-backed Files and library assets, previews, protects and persists through CLI', async () => {
+// Historical coverage for the removed import picker and drag editing. The active library tests use saved projects.
+test.skip('imports multiple sources, drops disk-backed Files and library assets, previews, protects and persists through CLI', async () => {
   test.setTimeout(90000);
   test.skip(available.includes(false), 'Generate synthetic fixtures first.');
   await mkdir(root, { recursive: true });
@@ -247,6 +248,62 @@ test('imports multiple sources, drops disk-backed Files and library assets, prev
         ),
       ),
     ).toEqual(hashes);
+  } finally {
+    await application.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('reviews and filters CLI imports and refreshes the library on undo', async () => {
+  test.skip(available.includes(false), 'Generate synthetic fixtures first.');
+  await mkdir(root, { recursive: true });
+  const directory = await mkdtemp(join(root, 't41-library-'));
+  const path = join(directory, 'project.json');
+  const hashes = () =>
+    Promise.all(
+      files.map(async (file) =>
+        createHash('sha256')
+          .update(await readFile(file))
+          .digest('hex'),
+      ),
+    );
+  const originals = await hashes();
+  const { application, page } = await launchDesktop();
+  try {
+    cli('project', 'create', path, '--name', 'Library review');
+    for (const file of files.slice(0, 2)) cli('media', 'import', path, file);
+    await picker(application, [path]);
+    await page
+      .getByRole('button', { name: 'Open project', exact: true })
+      .click();
+    const items = page.locator('.asset-list button');
+    await expect(items).toHaveCount(2);
+    cli('media', 'import', path, files[2]!);
+    await expect(items).toHaveCount(3);
+    const search = page.getByRole('searchbox', { name: 'Search media' });
+    await search.fill('VIDEO-MEDIUM');
+    await expect(items).toHaveCount(1);
+    await items.first().click();
+    await expect(
+      page.getByRole('button', { name: 'Play', exact: true }),
+    ).toBeEnabled();
+    await search.fill('');
+    const filter = page.getByLabel('Media type', { exact: true });
+    await filter.selectOption('image');
+    await expect(items).toHaveCount(1);
+    await items.first().click();
+    await expect(page.locator('.simple-source-preview img')).toBeVisible();
+    await filter.selectOption('all');
+    await items.filter({ hasText: 'audio-tone' }).click();
+    await expect(page.locator('audio')).toHaveAttribute(
+      'src',
+      /opencut:\/\/media/,
+    );
+    cli('edit', 'undo', path, '--expected-revision', '3');
+    await expect(items).toHaveCount(2);
+    cli('edit', 'redo', path, '--expected-revision', '4');
+    await expect(items).toHaveCount(3);
+    expect(await hashes()).toEqual(originals);
   } finally {
     await application.close();
     await rm(directory, { recursive: true, force: true });

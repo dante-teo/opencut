@@ -1,8 +1,9 @@
 # Edited timeline playback
 
-**Project viewer** plays the edited timeline. **Source preview** plays original media
-independently; **Preview selected clip** still links that source transport to one
-clip. Select Project viewer to hear clip and track gains, mutes, fades and all
+**Project viewer** plays the edited timeline. **Source preview** plays original
+media. **Preview selected clip** links a timed clip on a video track to its
+source, starting at the clip's source-in. Open audio and still images from the
+media library. Select Project viewer to hear clip and track gains, mutes, fades and all
 overlapping audio tracks. Play/Pause, the project seek slider, ruler, Space and frame steps operate
 on the edited timeline. Seeks pause playback. End stops at the exact timeline end;
 Play at end restarts at zero. Selection does not change playback.
@@ -95,16 +96,11 @@ by CSP and the sandbox.
 
 ## Audio editing and meters
 
-Select a media clip to set **Volume**, **Mute**, **Fade in (frames)** and
-**Fade out (frames)**. Volume is linear with a dB readout. Fade lengths use the
-project frame rate, and zero clears a fade. The two lengths may meet without
-overlapping. On a selected timeline clip, drag the fade handles toward the
-center to lengthen a fade or toward an edge to shorten it. Focus a handle and
-press Left or Right for a one-frame adjustment, or hold Shift for ten frames.
-A drag previews the fade line. Releasing commits one undo step when the
-duration changes. A handle adjustment that leaves the duration unchanged
+Use `clip audio` to set clip volume, mute, and fade lengths. Use `track audio`
+for track gain and mute. Volume is linear, fade lengths use project frames,
+and zero clears a fade. Fade lengths may meet without overlapping. A no-op
 preserves the existing curve and history, including partial fades from a split.
-The track header's slider and speaker button adjust that track's gain and mute.
+See the [CLI audio options](CLI.md#timeline-editing).
 
 The Project viewer's **L** and **R** meters show post-mix sample peaks in dBFS.
 A pair of Web Audio analysers observes the protected stereo output. The UI
@@ -115,14 +111,12 @@ miss transients if rendering stalls for longer than the window.
 
 ## Playback speed (T36)
 
-Select a video or audio clip and enter a multiplier from **0.25** to **4** in
-**Speed (×)**. Press Enter to apply. The timeline shows the multiplier on
-retimed clips. The clip start and selected source range stay fixed, so slowing
-down lengthens the clip and speeding up shortens it. A change that would
-overlap another clip on the same track or invalidate the clip’s fades is
-rejected. The edit supports undo and redo.
+Use `clip speed` to set a multiplier from 0.25 to 4. The timeline displays
+the multiplier. The clip start and source range stay fixed, so slower playback
+lengthens the clip. The edit rejects overlaps on the same track and invalid
+fades, and supports undo and redo.
 
-Clip-edge drags and splits map project-frame positions back to the source at
+Headless trims and splits map project-frame positions back to the source at
 the selected speed. Fade lengths stay in timeline frames and subtitles stay at
 their own timeline positions. Filmstrips and waveforms follow the retimed
 source range. The Project viewer plays timed media at the selected rate and
@@ -170,7 +164,7 @@ viewport drops its subscription. When the last subscriber leaves, the renderer
 removes queued work or signals the worker to stop the running FFmpeg process.
 Main also checks sender, project, revision, asset and sampling bounds before
 resolving the source. Missing media, unsupported formats and decode failures
-leave the clip editable and show a placeholder in the artwork area. When the
+show a placeholder in the artwork area. When the
 first filmstrip tile is partly offscreen, its status label starts in the visible
 area or moves to a later tile with room.
 
@@ -286,7 +280,7 @@ at each project tick and carries only the sampled transform into playback.
 Geometric occlusion by upper layers is deliberately not inferred from unknown source alpha.
 Each seek invalidates cached-frame generations and immediately clears stale
 content. Pending grants/images/frames cannot paint after snapshot disposal.
-Editing pauses and reconstructs the current snapshot at the retained playhead.
+A committed revision pauses playback and rebuilds the preview at the retained playhead.
 
 `tests/desktop/compositing.spec.ts` launches real Electron at its default window
 size, compares sampled Canvas pixels with original-media CLI exports at exact
@@ -317,12 +311,11 @@ long-running, cross-platform or physical speaker/display synchronization.
 
 ## Video transitions (T38)
 
-Select a video clip and open **Transitions** in the timeline toolbar. Enter a
-duration in project frames and choose **Fade in**, **Fade out**, or
-**Cross-dissolve**. For a cross-dissolve, select the incoming clip. It must touch
-the previous video clip on the same track. The colored bar shows the transition
-window. Select the bar to open its duration and remove controls. Transition
-edits participate in project undo and redo.
+Use the [CLI transition commands](CLI.md#video-transitions-t38) to add, adjust,
+or remove fades and cross-dissolves in project frames. For a cross-dissolve,
+the incoming clip must touch the preceding video clip on the same track.
+The colored bar marks the transition window. Select it to inspect its clip.
+Transition edits participate in project undo and redo.
 
 Fades reveal the canvas background and any lower tracks. A cross-dissolve
 blends the two fitted video layers at their existing track position, so an

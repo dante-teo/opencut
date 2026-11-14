@@ -1,4 +1,4 @@
-/** Local transport only. Project validation and editing live in project-files/editing. */
+/** Private local transport for desktop review commands. */
 import { createHash } from 'node:crypto';
 import { createConnection, createServer, type Socket } from 'node:net';
 import { chmod, lstat, mkdir, unlink } from 'node:fs/promises';
@@ -17,11 +17,11 @@ export class SessionError extends Error {
   }
 }
 
-async function endpoint(path: string): Promise<string> {
+export async function reviewEndpoint(path: string): Promise<string> {
   if (process.platform === 'win32')
     throw new SessionError(
       'SESSION_UNSUPPORTED',
-      'Shared project sessions currently require macOS or Linux.',
+      'Desktop review controls require macOS or Linux.',
     );
   // Stable across shell and app TMPDIR settings, and short enough for sockaddr_un.
   const directory = join('/tmp', `oc-session-${process.getuid!()}`);
@@ -38,7 +38,10 @@ async function endpoint(path: string): Promise<string> {
     );
   return join(
     directory,
-    createHash('sha256').update(path).digest('hex').slice(0, 32) + '.sock',
+    createHash('sha256')
+      .update('review:' + path)
+      .digest('hex')
+      .slice(0, 32) + '.sock',
   );
 }
 
@@ -54,7 +57,7 @@ function frame(
     socket.destroy(
       new SessionError(
         'SESSION_TIMEOUT',
-        'Session timed out; query the revision before retrying.',
+        'The review control request timed out.',
       ),
     ),
   );
@@ -94,12 +97,9 @@ function encode(value: unknown): string {
 
 /** Only failure to connect means there is no session. Never replay a sent request. */
 export async function requestSession(
-  path: string,
+  address: string,
   request: unknown,
-  signal?: AbortSignal,
 ): Promise<unknown | undefined> {
-  signal?.throwIfAborted();
-  const address = await endpoint(path);
   return new Promise((resolve, reject) => {
     let connected = false;
     let finished = false;
@@ -115,7 +115,6 @@ export async function requestSession(
       connected = true;
       try {
         const payload = encode(request);
-        signal?.throwIfAborted();
         socket.write(payload);
       } catch (error) {
         finish(undefined, error);
@@ -132,7 +131,7 @@ export async function requestSession(
           undefined,
           new SessionError(
             'SESSION_DISCONNECTED',
-            'Session disconnected; the commit outcome may be unknown. Query history before retrying.',
+            'The desktop review connection was lost.',
           ),
         );
     });
@@ -142,7 +141,7 @@ export async function requestSession(
           undefined,
           new SessionError(
             'SESSION_DISCONNECTED',
-            'Session closed without a reply. Query history before retrying.',
+            'The desktop review connection closed without a reply.',
           ),
         );
     });
@@ -163,12 +162,11 @@ export async function requestSession(
   });
 }
 
-/** Caller must hold the project writer lock before removing a stale socket. */
+/** Caller must hold the endpoint lock before removing a stale socket. */
 export async function serveSession(
-  path: string,
+  address: string,
   handle: (request: unknown) => Promise<unknown>,
 ): Promise<() => Promise<void>> {
-  const address = await endpoint(path);
   await unlink(address).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== 'ENOENT') throw error;
   });
@@ -203,13 +201,19 @@ export async function serveSession(
       resolve();
     });
   });
-  await chmod(address, 0o600);
-  server.unref();
-  return async () => {
+  const close = async () => {
     for (const socket of sockets) socket.destroy();
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
     );
     // net.Server removes its own Unix socket on close, while ownership is held.
   };
+  try {
+    await chmod(address, 0o600);
+  } catch (error) {
+    await close();
+    throw error;
+  }
+  server.unref();
+  return close;
 }

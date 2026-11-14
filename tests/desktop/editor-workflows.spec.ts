@@ -3,9 +3,9 @@ import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join, resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { createProject, frameTime, deserializeProject } from '@opencut/core';
+import { createProject, frameTime } from '@opencut/core';
 import { controlDesktopProject, writeProjectFile } from '@opencut/core/node';
-import { launchDesktop } from './helpers.js';
+import { launchDesktop, commitReviewEdit } from './helpers.js';
 
 test('edits canvas and fit, caches an exact preview and exports a composited PNG', async () => {
   const root = resolve('tests/fixtures/generated');
@@ -70,24 +70,22 @@ test('edits canvas and fit, caches an exact preview and exports a composited PNG
       await page
         .getByRole('button', { name: 'Open project', exact: true })
         .click();
-      const width = page.getByRole('spinbutton', { name: 'Canvas width' });
-      await width.fill('72');
-      await width.press('Enter');
-      const snapshot = async () =>
-        deserializeProject(await readFile(path, 'utf8'));
-      await expect.poll(async () => (await snapshot()).settings.width).toBe(72);
+      await commitReviewEdit(
+        page,
+        path,
+        { type: 'canvas.set', width: 72 },
+        { type: 'clip.visual', id: 'blue', fit: 'cover' },
+      );
       await page
         .getByRole('button', { name: 'Inspect clip blue', exact: true })
         .click();
-      await page
-        .getByRole('combobox', { name: 'Fit', exact: true })
-        .selectOption('cover');
-      await expect
-        .poll(async () => (await snapshot()).clips[0]?.visual?.fit)
-        .toBe('cover');
+      const canvas = page.getByLabel('Edited timeline canvas');
+      await expect(canvas).toHaveAttribute('data-visual-ready', 'true');
       await page.getByText('Preview quality', { exact: true }).click();
       await page.getByRole('checkbox', { name: 'Exact paused frames' }).check();
-      const canvas = page.getByLabel('Edited timeline canvas');
+      await page
+        .getByRole('slider', { name: 'Seek timeline', exact: true })
+        .fill('1');
       await expect(canvas).toHaveAttribute('data-visual-ready', 'true');
       await page
         .getByRole('button', { name: 'Export frame', exact: true })

@@ -1,11 +1,9 @@
-import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import { contextBridge, ipcRenderer } from 'electron';
 import {
   APP_INFO_CHANNEL,
-  ONLINE_MEDIA_CHANNELS,
   EXPORT_CHANNELS,
   EXPORT_CHANGED_CHANNEL,
   PROJECT_CHANGED_CHANNEL,
-  IMPORT_PROGRESS_CHANNEL,
   THUMBNAIL_CHANNEL,
   PROJECT_CHANNELS,
   OPEN_PREVIEW_CHANNEL,
@@ -31,10 +29,12 @@ const api: DesktopAPI = {
       _event: Electron.IpcRendererEvent,
       id: string,
       control: Parameters<typeof callback>[0],
+      view: number,
+      revision: number,
     ) => {
       try {
         ipcRenderer.send(DESKTOP_CONTROL_REPLY, id, {
-          value: callback(control),
+          value: callback(control, view, revision),
         });
       } catch (error) {
         ipcRenderer.send(DESKTOP_CONTROL_REPLY, id, { error: String(error) });
@@ -63,66 +63,22 @@ const api: DesktopAPI = {
     const listener = (
       _event: Electron.IpcRendererEvent,
       state: Parameters<typeof callback>[0],
-    ) => callback(state);
+      sequence: number,
+    ) => callback(state, sequence);
     ipcRenderer.on(PROJECT_CHANGED_CHANNEL, listener);
     return () => {
       ipcRenderer.removeListener(PROJECT_CHANGED_CHANNEL, listener);
     };
   },
-  searchOnlineMedia: (input) =>
-    ipcRenderer.invoke(ONLINE_MEDIA_CHANNELS.search, input),
-  openOnlineMediaSource: (id) =>
-    ipcRenderer.invoke(ONLINE_MEDIA_CHANNELS.openSource, id),
-  importOnlineMedia: (input) =>
-    ipcRenderer.invoke(PROJECT_CHANNELS.importOnline, input),
-  importMedia: (input) =>
-    ipcRenderer.invoke(PROJECT_CHANNELS.import, {
-      projectId: input.projectId,
-      expectedRevision: input.expectedRevision,
-    }),
-  importDroppedMedia: (input, files) =>
-    ipcRenderer.invoke(PROJECT_CHANNELS.import, {
-      projectId: input.projectId,
-      expectedRevision: input.expectedRevision,
-      paths: files.map((file) => webUtils.getPathForFile(file)),
-    }),
-  onImportProgress: (callback) => {
-    const listener = (
-      _event: Electron.IpcRendererEvent,
-      progress: Parameters<typeof callback>[0],
-    ) => callback(progress);
-    ipcRenderer.on(IMPORT_PROGRESS_CHANNEL, listener);
-    return () => {
-      ipcRenderer.removeListener(IMPORT_PROGRESS_CHANNEL, listener);
-    };
-  },
-  removeAsset: (input) =>
-    ipcRenderer.invoke(PROJECT_CHANNELS.removeAsset, input),
-  relinkAsset: (input) =>
-    ipcRenderer.invoke(PROJECT_CHANNELS.relinkAsset, input),
-  separateDialogue: (input) =>
-    ipcRenderer.invoke(PROJECT_CHANNELS.separateDialogue, input),
   copyProject: (input) =>
     ipcRenderer.invoke(PROJECT_CHANNELS.copyProject, input),
-  freezeFrame: (input) =>
-    ipcRenderer.invoke(PROJECT_CHANNELS.freezeFrame, input),
-  importFont: (input) => ipcRenderer.invoke(PROJECT_CHANNELS.importFont, input),
   exportFrame: (input) =>
     ipcRenderer.invoke(PROJECT_CHANNELS.exportFrame, input),
-  addAssetClip: (input) =>
-    ipcRenderer.invoke(PROJECT_CHANNELS.addAssetClip, input),
-  assetThumbnail: (id) => ipcRenderer.invoke(THUMBNAIL_CHANNEL, id),
-  importSubtitles: (input) =>
-    ipcRenderer.invoke(PROJECT_CHANNELS.importSubtitles, input),
   exportSubtitles: (input) =>
     ipcRenderer.invoke(PROJECT_CHANNELS.exportSubtitles, input),
-  editTimeline: (input) => ipcRenderer.invoke(PROJECT_CHANNELS.edit, input),
-  undoProject: (input) => ipcRenderer.invoke(PROJECT_CHANNELS.undo, input),
-  redoProject: (input) => ipcRenderer.invoke(PROJECT_CHANNELS.redo, input),
+  assetThumbnail: (id) => ipcRenderer.invoke(THUMBNAIL_CHANNEL, id),
   getProject: () => ipcRenderer.invoke(PROJECT_CHANNELS.current),
-  createProject: (input) => ipcRenderer.invoke(PROJECT_CHANNELS.create, input),
   openProject: () => ipcRenderer.invoke(PROJECT_CHANNELS.open),
-  saveProject: () => ipcRenderer.invoke(PROJECT_CHANNELS.save),
   closeProject: () => ipcRenderer.invoke(PROJECT_CHANNELS.close),
   getApplicationInfo: () => ipcRenderer.invoke(APP_INFO_CHANNEL),
   openPreview: () => ipcRenderer.invoke(OPEN_PREVIEW_CHANNEL),

@@ -1,3 +1,4 @@
+import type { EditOperation } from '@opencut/core';
 import { spawnSync } from 'node:child_process';
 import { access, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -196,7 +197,8 @@ async function expectClip(
 }
 const rate = { numerator: 30, denominator: 1 };
 
-test('moves, changes track, trims both edges, splits, deletes, restores history and saves the same state the CLI reads', async () => {
+// These scenarios exercise removed editor controls. Headless edit coverage runs in the Core and CLI suites.
+test.skip('moves, changes track, trims both edges, splits, deletes, restores history and saves the same state the CLI reads', async () => {
   const { directory, path, project } = await fixture();
   const { application, page } = await launchDesktop();
   try {
@@ -290,7 +292,7 @@ test('moves, changes track, trims both edges, splits, deletes, restores history 
   }
 });
 
-test('rejects overlap and incompatible tracks, cancels gestures and handles rejected IPC without changing project state', async () => {
+test.skip('rejects overlap and incompatible tracks, cancels gestures and handles rejected IPC without changing project state', async () => {
   const { directory, path, project } = await fixture();
   const { application, page } = await launchDesktop();
   try {
@@ -324,7 +326,16 @@ test('rejects overlap and incompatible tracks, cancels gestures and handles reje
     await startDrag(page, 'c1', 80);
     const reply = await page.evaluate(
       async (project) =>
-        window.opencut.editTimeline({
+        (
+          window.opencut as unknown as {
+            editTimeline(input: {
+              projectId: string;
+              expectedRevision: number;
+              operations: EditOperation[];
+              label: string;
+            }): Promise<{ ok: boolean }>;
+          }
+        ).editTimeline({
           projectId: project.metadata.id,
           expectedRevision: project.editing!.revision,
           label: 'Competing edit',
@@ -350,7 +361,7 @@ test('rejects overlap and incompatible tracks, cancels gestures and handles reje
   }
 });
 
-test('snaps at different zooms and supports focused keyboard movement and trimming', async () => {
+test.skip('snaps at different zooms and supports focused keyboard movement and trimming', async () => {
   const { directory, path } = await fixture();
   const { application, page } = await launchDesktop();
   try {
@@ -410,7 +421,7 @@ test('snaps at different zooms and supports focused keyboard movement and trimmi
   }
 });
 
-test('undo/redo of CLI media removal refreshes library availability and survives save/reopen', async () => {
+test.skip('undo/redo of CLI media removal refreshes library availability and survives save/reopen', async () => {
   const { directory, path } = await fixture();
   await updateProjectFile(path, async (project) => ({
     project: {
@@ -471,7 +482,7 @@ test('undo/redo of CLI media removal refreshes library availability and survives
   }
 });
 
-test('moves, ripples and inserts a video/audio selection and verifies the saved timeline through CLI', async () => {
+test.skip('moves, ripples and inserts a video/audio selection and verifies the saved timeline through CLI', async () => {
   test.setTimeout(45_000);
   await mkdir(root, { recursive: true });
   const directory = await mkdtemp(join(root, 't39-'));
@@ -614,7 +625,16 @@ test('moves, ripples and inserts a video/audio selection and verifies the saved 
         const reply = await window.opencut.getProject();
         if (!reply.ok || !reply.state) throw new Error('No project state');
         const project = reply.state.project;
-        return window.opencut.editTimeline({
+        return (
+          window.opencut as unknown as {
+            editTimeline(input: {
+              projectId: string;
+              expectedRevision: number;
+              operations: EditOperation[];
+              label: string;
+            }): Promise<{ ok: boolean }>;
+          }
+        ).editTimeline({
           projectId: project.metadata.id,
           expectedRevision: project.editing?.revision ?? 0,
           operations: [{ type: 'clip.remove', id: 'v1' }],

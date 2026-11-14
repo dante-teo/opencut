@@ -12,7 +12,7 @@ Native Node TypeScript execution strips erasable types without type checking.
 
 | API                                                                        | Use                                                                                                                                |
 | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `openProject(path, { expectedRevision? })`                                 | Open a named project, including the authoritative snapshot of an open desktop session.                                             |
+| `openProject(path, { expectedRevision? })`                                 | Read the committed project file independently of Electron.                                                                         |
 | `createProject(path, { name, settings? })`                                 | Stage a new project. Set width, height and `frameRate: { numerator, denominator }` in `settings`.                                  |
 | `editor.project.inspect()`, `inspectTimeline(frame)`, `history()`          | Read staged project, evaluated timeline and history. Staged content retains the base revision until saved.                         |
 | `project.importMedia(file)`, `checkMedia()`, `removeMedia(assetId)`        | Link a source and get its `asset.id`, check availability, or remove an unused reference.                                           |
@@ -59,7 +59,7 @@ probed `metadata`.
 
 `project.cachePreview(size?)` renders or reuses an MP4 of the staged draft.
 Use `project.controlDesktop(request)` for an open, saved desktop project on
-macOS or Linux. This affects the live session. See the
+macOS or Linux. It controls review and playback. The reply identifies the viewer revision. See the
 [CLI reference](cli.md#discover-and-inspect) for request discovery and status.
 
 For example, insert a one-second cutaway on a new top track at frame 45 of an

@@ -416,7 +416,7 @@ async function runCli(args: string[]): Promise<void> {
     else if (group === 'subtitle') usage = subtitleHelp;
     else if (group === 'desktop')
       usage =
-        'Usage: opencut desktop control <project-file> <request.json> [--json]\nActions: status, play, pause, toggle, step, seek, source-seek, select, viewer, render-preview, live-preview, online-search, online-import.';
+        'Usage: opencut desktop control <project-file> <request.json> [--json]\nActions: status, play, pause, toggle, step, seek, source-seek, select, viewer, render-preview, live-preview.';
     else if (timelineCommand) usage = timelineHelp;
     else if (group === 'project')
       usage = projectCommand

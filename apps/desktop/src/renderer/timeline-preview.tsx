@@ -1,6 +1,6 @@
 import { Camera, Play, Pause, StepBack, StepForward } from 'lucide-react';
-import type { DesktopCacheStatus } from '../bridge.js';
-import { gainDb } from './clip-properties.js';
+import type { DesktopCacheStatus, ProjectViewInput } from '../bridge.js';
+import { projectRevision } from '@opencut/core';
 import { MediaCacheControls } from './media-cache.js';
 import {
   useEffect,
@@ -22,6 +22,10 @@ import {
   timelineTimecode,
 } from './timeline-geometry.js';
 
+function gainDb(gain: number): string {
+  return gain > 0 ? (20 * Math.log10(gain)).toFixed(1) + ' dB' : '−∞ dB';
+}
+
 export interface TimelineTransport extends PreviewTransport {
   seek(time: RationalTime): void;
   setPlaying(playing: boolean): void;
@@ -32,16 +36,16 @@ export interface TimelineTransport extends PreviewTransport {
 
 export function TimelinePreview({
   project,
+  scope,
   active,
-  interrupted,
   position,
   onPositionChange,
   transportRef,
   onExportFrame,
 }: {
   project: Project;
+  scope: ProjectViewInput;
   active: boolean;
-  interrupted: boolean;
   position: RationalTime;
   onPositionChange(time: RationalTime): void;
   transportRef: Ref<TimelineTransport>;
@@ -91,13 +95,15 @@ export function TimelinePreview({
     setRenderStatus('Rendering full timeline…');
     void window.opencut
       .renderTimeline({
-        projectId: project.metadata.id,
-        expectedRevision: project.editing?.revision ?? 0,
+        ...scope,
         size: previewSize,
       })
       .then(
         (result) => {
-          if (current !== generation.current) {
+          if (
+            current !== generation.current ||
+            (result && result.revision !== projectRevision(project))
+          ) {
             if (result) void window.opencut.releasePreview(result.url);
             return;
           }
@@ -172,11 +178,11 @@ export function TimelinePreview({
     };
   }, [project, active, cacheEpoch, previewSize, exactPausedFrames, rendered]);
   useEffect(() => {
-    if (!active || interrupted) {
+    if (!active) {
       player.current?.pause();
       renderedVideo.current?.pause();
     }
-  }, [active, interrupted, project]);
+  }, [active, project]);
   const rate = project.settings.frameRate;
   const end = rendered
     ? framePosition(BigInt(rendered.frameCount), rate)
@@ -199,7 +205,7 @@ export function TimelinePreview({
     } else player.current?.seek(time);
   };
   const setPlaying = (playing: boolean) => {
-    if (!active || interrupted) return;
+    if (!active) return;
     const video = renderedVideo.current;
     if (video) {
       if (playing)
@@ -219,7 +225,7 @@ export function TimelinePreview({
         : !player.current?.clock.playing,
     );
   const step = (direction: -1 | 1) => {
-    if (interrupted || !active) return;
+    if (!active) return;
     if (!rendered) {
       player.current?.step(direction);
       return;
@@ -229,7 +235,7 @@ export function TimelinePreview({
   };
   useImperativeHandle(transportRef, () => ({
     seek: (time) => {
-      if (active && !interrupted) seek(time);
+      if (active) seek(time);
     },
     setPlaying,
     toggle,
@@ -296,16 +302,11 @@ export function TimelinePreview({
       </div>
       <div ref={host} className="timeline-decoders" />
       <div className="transport">
-        <button
-          disabled={interrupted}
-          onClick={() => step(-1)}
-          aria-label="Previous frame"
-        >
+        <button onClick={() => step(-1)} aria-label="Previous frame">
           <StepBack aria-hidden="true" />
         </button>
         <button
           disabled={
-            interrupted ||
             (rendered !== null && !ready) ||
             (!project.clips.length && !project.subtitles?.cues.length)
           }
@@ -315,11 +316,7 @@ export function TimelinePreview({
         >
           {playing ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}
         </button>
-        <button
-          disabled={interrupted}
-          onClick={() => step(1)}
-          aria-label="Next frame"
-        >
+        <button onClick={() => step(1)} aria-label="Next frame">
           <StepForward aria-hidden="true" />
         </button>
         <output data-testid="project-position">
@@ -329,9 +326,7 @@ export function TimelinePreview({
           type="button"
           aria-label="Export frame"
           title="Export frame"
-          disabled={
-            interrupted || !end || frame >= Number(frameIndex(end, rate))
-          }
+          disabled={!end || frame >= Number(frameIndex(end, rate))}
           onClick={() => onExportFrame(frame)}
         >
           <Camera aria-hidden="true" />
@@ -343,7 +338,6 @@ export function TimelinePreview({
           max={end ? Number(frameIndex(end, rate)) : 0}
           step={1}
           value={frame}
-          disabled={interrupted}
           onChange={(event) =>
             seek(framePosition(BigInt(event.target.value), rate))
           }
@@ -402,9 +396,7 @@ export function TimelinePreview({
             <button
               type="button"
               onClick={renderPreview}
-              disabled={
-                interrupted || renderStatus === 'Rendering full timeline…'
-              }
+              disabled={renderStatus === 'Rendering full timeline…'}
             >
               Render full timeline
             </button>

@@ -1,9 +1,8 @@
 # Desktop export
 
-Open a project and choose **Export** in the toolbar. Choose an output file in an
-existing writable directory, select a preset or adjust the settings, then press
-**Export video**. Unsaved projects and unsaved edits can be exported. Export does
-not save or change the project. FFmpeg and ffprobe must be installed manually and
+Open a saved project and choose **Export** in the toolbar. Choose an output
+file in an existing writable directory, select a preset or adjust the settings,
+then press **Export video**. FFmpeg and ffprobe must be installed manually and
 available on PATH; H.264 requires `libx264`, HEVC requires `libx265`, and both require
 AAC. OpenCut does not bundle or install these tools.
 
@@ -29,10 +28,13 @@ after validation. Project-rate exports retain the established
 veryfast/CRF 20, and medium/CRF 16 settings respectively. CRF targets quality,
 so file size depends on the content and codec; no file-size estimate is promised.
 
-Starting an export captures the project ID, revision, settings and a detached
-project snapshot. Original asset references are resolved from that snapshot and
-its project directory, independently of preview proxies, selection and playhead.
-You can hide the export panel, continue editing, switch projects, and reopen it
+The export panel shows the project revision it is ready to export. When you
+start the job, OpenCut checks that the request still matches the open project
+and revision. If it changed before the job could start, check the revision shown
+in the panel and retry. A started job captures the project snapshot and export
+settings. It resolves original media using the captured project's directory
+and leaves the project file and history intact.
+You can hide the export panel, continue reviewing, switch projects, and reopen it
 from the toolbar. The job's project name and captured revision remain visible.
 After reloading the renderer or reopening the window, choose an output file again
 before starting another export; the previous job's destination remains in its status.

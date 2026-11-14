@@ -1,6 +1,8 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { access, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   expect,
   test,
@@ -107,7 +109,7 @@ function probe(path: string) {
   };
 }
 
-test('GUI export uses originals with proxies enabled and holds its snapshot while GUI edits continue', async () => {
+test('GUI export uses originals with proxies enabled and holds its snapshot while CLI edits continue', async () => {
   test.setTimeout(180000);
   const { directory, project } = fixture;
   const before = await hash(join(directory, 'base.mp4'));
@@ -142,21 +144,26 @@ test('GUI export uses originals with proxies enabled and holds its snapshot whil
     await panel(page)
       .getByRole('button', { name: 'Hide', exact: true })
       .click();
-    await page
-      .getByRole('button', { name: 'Inspect clip base', exact: true })
-      .locator(':scope > rect')
-      .first()
-      .click();
-    const opacity = page.getByRole('spinbutton', {
-      name: 'Opacity',
-      exact: true,
-    });
-    await opacity.fill('0');
-    await opacity.press('Enter');
-    await expect(page.locator('.workspace')).toHaveAttribute(
-      'aria-busy',
-      'false',
+    const projectFile = join(directory, 'gui-snapshot.json');
+    const batch = join(directory, 'hide-base.json');
+    await writeFile(
+      batch,
+      JSON.stringify({
+        expectedRevision: captured.revision,
+        operations: [{ type: 'clip.visual', id: 'base', opacity: 0 }],
+      }),
     );
+    await promisify(execFile)(process.execPath, [
+      resolve('apps/cli/dist/index.js'),
+      'edit',
+      'apply',
+      projectFile,
+      batch,
+      '--json',
+    ]);
+    await expect(
+      page.getByText('Revision ' + (captured.revision + 1), { exact: true }),
+    ).toBeVisible();
     const edited = await page.evaluate(() => window.opencut.getProject());
     expect(
       edited.ok &&
@@ -469,26 +476,49 @@ test('GUI preflight reports unavailable media tools and export IPC rejects untru
       }
     });
     expect(invalid).toContain('Invalid export');
-    const stale = await page.evaluate(async () => {
+    const scope = await page.evaluate(async () => {
       const reply = await window.opencut.getProject();
       if (!reply.ok || !reply.state) throw new Error('No project');
-      try {
-        await window.opencut.startExport({
-          projectId: reply.state.project.metadata.id,
-          expectedRevision: 100,
-          settings: {
-            resolution: 'project',
-            quality: 'balanced',
-            frameRate: 'project',
-            codec: 'h264',
-          },
-        });
-        return '';
-      } catch (error) {
-        return String(error);
-      }
+      return {
+        view: reply.state.view,
+        projectId: reply.state.project.metadata.id,
+        expectedRevision: reply.state.project.editing?.revision ?? 0,
+      };
     });
+    const rejectExport = (request: typeof scope) =>
+      page.evaluate(async (request) => {
+        try {
+          await window.opencut.startExport({
+            ...request,
+            settings: {
+              resolution: 'project',
+              quality: 'balanced',
+              frameRate: 'project',
+              codec: 'h264',
+            },
+          });
+          return '';
+        } catch (error) {
+          return String(error);
+        }
+      }, request);
+    const stale = await rejectExport({ ...scope, expectedRevision: 100 });
     expect(stale).toContain('revision');
+    await panel(page)
+      .getByRole('button', { name: 'Done', exact: true })
+      .click();
+    await page
+      .getByRole('button', { name: 'Open project', exact: true })
+      .click();
+    await expect
+      .poll(() =>
+        page.evaluate(async () => {
+          const reply = await window.opencut.getProject();
+          return reply.ok && reply.state?.view;
+        }),
+      )
+      .toBeGreaterThan(scope.view);
+    expect(await rejectExport(scope)).toContain('Project changed');
   } finally {
     await application.close();
   }

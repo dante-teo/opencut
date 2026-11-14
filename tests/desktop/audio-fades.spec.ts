@@ -8,7 +8,7 @@ import {
   setClipAudio,
   splitClip,
 } from '@opencut/core';
-import { launchDesktop } from './helpers.js';
+import { launchDesktop, commitReviewEdit } from './helpers.js';
 import { compositionReport, openComposition } from './t26-fixtures.js';
 import { decodeAudio, exportAmplitudes } from './t27-audio.js';
 import {
@@ -200,7 +200,7 @@ async function record(page: Page, end: number) {
   return { trace, report };
 }
 
-test('T35 timeline controls, measured stereo peaks, and preview/export fade parity through splits', async () => {
+test('T35 headless audio edits, measured stereo peaks, and preview/export fade parity through splits', async () => {
   test.setTimeout(60_000);
   const { directory, project } = await fixtures();
   const { application, page } = await launchDesktop({
@@ -212,60 +212,12 @@ test('T35 timeline controls, measured stereo peaks, and preview/export fade pari
       window.opencut.mediaCache({ action: 'enable', enabled: false }),
     );
     const path = await openComposition(application, page, directory, project);
-    await page
-      .getByRole('button', { name: 'Inspect clip left', exact: true })
-      .click();
-    const attack = page.getByRole('spinbutton', { name: 'Fade in (frames)' });
-    await attack.fill('30');
-    await attack.press('Enter');
-    await expect(page.locator('[data-fade=fadeIn]')).toHaveCount(1);
-    const release = page.getByRole('button', {
-      name: 'Fade out of left',
-      exact: true,
+    await commitReviewEdit(page, path, {
+      type: 'clip.audio',
+      id: 'left',
+      fadeIn: 30,
+      fadeOut: 30,
     });
-    await release.scrollIntoViewIfNeeded();
-    await page.evaluate(
-      () =>
-        new Promise<void>((done) =>
-          requestAnimationFrame(() => requestAnimationFrame(() => done())),
-        ),
-    );
-    const handle = (await release.boundingBox())!;
-    await page.mouse.move(
-      handle.x + handle.width / 2,
-      handle.y + handle.height / 2,
-    );
-    await page.mouse.down();
-    await page.mouse.move(
-      handle.x + handle.width / 2 - 80,
-      handle.y + handle.height / 2,
-      { steps: 7 },
-    );
-    await page.mouse.up();
-    await expect(
-      page.getByRole('spinbutton', { name: 'Fade out (frames)' }),
-    ).toHaveValue('30');
-    const leftVolume = page.getByRole('slider', { name: 'Left track volume' });
-    await leftVolume.press('ArrowLeft');
-    await expect(leftVolume).toHaveValue('0.49');
-    await expect
-      .poll(
-        async () =>
-          deserializeProject(await readFile(path, 'utf8')).tracks[1]!.volume,
-      )
-      .toBe(0.49);
-    await page.getByRole('button', { name: 'Undo', exact: true }).click();
-    await expect(leftVolume).toHaveValue('0.5');
-    const mute = page.getByRole('button', { name: 'Mute Left track' });
-    await mute.click();
-    await expect(mute).toHaveAttribute('aria-pressed', 'true');
-    await page.getByRole('button', { name: 'Undo', exact: true }).click();
-    await expect(mute).toHaveAttribute('aria-pressed', 'false');
-    await page.getByRole('button', { name: 'Redo', exact: true }).click();
-    await expect(mute).toHaveAttribute('aria-pressed', 'true');
-    await page.getByRole('button', { name: 'Undo', exact: true }).click();
-    await expect(mute).toHaveAttribute('aria-pressed', 'false');
-
     const unsplit = deserializeProject(await readFile(path, 'utf8'));
     expect(unsplit.clips.find((clip) => clip.id === 'left')).toMatchObject({
       fadeIn: { duration: time(30) },
@@ -381,27 +333,10 @@ test('T35 timeline controls, measured stereo peaks, and preview/export fade pari
       exact: true,
     });
     await inspectLeft.locator(':scope > rect').first().click();
-    const fullAttack = page.getByRole('button', {
-      name: 'Fade in of left',
-      exact: true,
-    });
-    await fullAttack.press('ArrowRight');
-    await fullAttack.scrollIntoViewIfNeeded();
-    const hit = (await fullAttack.boundingBox())!;
-    // The next clip begins at the handle's center. Grab the visible left half.
-    const x = hit.x + hit.width / 4;
-    const y = hit.y + hit.height / 2;
-    expect(
-      await fullAttack.evaluate(
-        (handle, point) =>
-          document.elementFromPoint(point.x, point.y) === handle,
-        { x, y },
-      ),
-    ).toBe(true);
-    await page.mouse.move(x, y);
-    await page.mouse.down();
-    await page.mouse.move(x, y + 10, { steps: 3 });
-    await page.mouse.up();
+    await inspectLeft.press('ArrowRight');
+    await expect(
+      page.getByRole('button', { name: 'Fade in of left', exact: true }),
+    ).toHaveCount(0);
     const afterNoop = await page.evaluate(async () => {
       const reply = await window.opencut.getProject();
       if (!reply.ok || !reply.state)
@@ -414,7 +349,7 @@ test('T35 timeline controls, measured stereo peaks, and preview/export fade pari
     );
     await expect(
       page.getByRole('button', { name: 'Undo', exact: true }),
-    ).toBeDisabled();
+    ).toHaveCount(0);
     expect(await readFile(splitPath, 'utf8')).toBe(beforeNoop);
     await application.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0]!.setSize(640, 680),
@@ -508,9 +443,13 @@ test('T35 Electron plays a speech recording with music and verifies muted export
       exportProject(directory, 'speech-export', path),
     ).samples;
     const live = await record(page, 2.7);
-    const mute = page.getByRole('button', { name: 'Mute Left track' });
-    await mute.click();
-    await expect(mute).toHaveAttribute('aria-pressed', 'true');
+    const leftTrack = mixed.tracks.find(({ name }) => name === 'Left')!;
+    await commitReviewEdit(page, path, {
+      type: 'track.audio',
+      id: leftTrack.id,
+      muted: true,
+    });
+    await page.locator('.timeline-diagnostics summary').click();
     const music = decodeAudio(
       exportProject(directory, 'music-only', path),
     ).samples;

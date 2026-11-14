@@ -10,16 +10,9 @@ if (process.argv[3] === 'pending') {
   });
 }
 const session = new ProjectSession(
-  {
-    open: async () => path,
-    save: async () => null,
-    unsaved: async () => 'discard',
-  },
+  { open: async () => path },
   undefined,
-  () => {
-    if (process.argv[3] === 'crash-after-commit')
-      process.kill(process.pid, 'SIGKILL');
-  },
+  async () => null,
 );
 process.send?.(await session.run('open'));
 process.on('message', () => {

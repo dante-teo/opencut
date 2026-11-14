@@ -1,3 +1,5 @@
+import { createProject } from '@opencut/core';
+import { importMediaAsset, writeProjectFile } from '@opencut/core/node';
 import { createRequire } from 'node:module';
 import { access, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -29,6 +31,10 @@ test('development StrictMode preserves audio playback and cleans up replaced sou
   test.skip(available.includes(false), 'Generate synthetic fixtures first.');
   await mkdir(root, { recursive: true });
   const directory = await mkdtemp(join(root, 't19-dev-'));
+  const path = join(directory, 'sources.json');
+  await writeProjectFile(createProject({ name: 'Source review' }), path);
+  await importMediaAsset(path, audioFile);
+  await importMediaAsset(path, imageFile);
   const server = await createServer({
     ...desktopConfig({ command: 'serve', mode: 'development' }).renderer,
     configFile: false,
@@ -46,7 +52,7 @@ test('development StrictMode preserves audio playback and cleans up replaced sou
     const { page } = desktop;
     // Wait for the initial development navigation before requesting a reload.
     await expect(
-      page.getByRole('button', { name: 'New project', exact: true }),
+      page.getByRole('button', { name: 'Open project', exact: true }),
     ).toBeVisible();
     // Observe actual StrictMode effect cleanup without replaying hooks in the test.
     await page.addInitScript(() => {
@@ -71,20 +77,12 @@ test('development StrictMode preserves audio playback and cleans up replaced sou
           checkboxChecked: false,
         });
       },
-      [audioFile, imageFile],
+      [path],
     );
     await page
-      .getByRole('button', { name: 'New project', exact: true })
+      .getByRole('button', { name: 'Open project', exact: true })
       .click();
-    await page
-      .getByRole('button', { name: 'Create project', exact: true })
-      .click();
-    await page
-      .getByRole('button', { name: 'Import media', exact: true })
-      .click();
-    await expect(
-      page.getByRole('heading', { name: 'Media assets (2)' }),
-    ).toBeVisible();
+    await expect(page.locator('.asset-list button')).toHaveCount(2);
     const audioAsset = page
       .locator('.asset-list')
       .getByRole('button', { name: /audio-tone/ });

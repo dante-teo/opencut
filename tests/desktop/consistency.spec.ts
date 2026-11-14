@@ -8,6 +8,7 @@ import {
 } from '@playwright/test';
 import {
   createProject,
+  type EditOperation,
   deserializeProject,
   evaluateTimelineFrame,
   frameTime,
@@ -27,7 +28,11 @@ import {
   recordPreviewAudio,
   sampleOnsets,
 } from './t27-audio.js';
-import { launchDesktop } from './helpers.js';
+import {
+  launchDesktop,
+  commitReviewEdit,
+  restoreReviewEdit,
+} from './helpers.js';
 import { openComposition } from './t26-fixtures.js';
 import {
   command,
@@ -370,7 +375,7 @@ for (const vertical of [false, true]) {
   test(
     'T33 ' +
       orientation +
-      ' GUI text matches encoded video at exact project boundaries',
+      ' text matches encoded video at exact project boundaries',
     async () => {
       const width = vertical ? 360 : 640;
       const height = vertical ? 640 : 360;
@@ -435,77 +440,34 @@ for (const vertical of [false, true]) {
         {
           guiExport: vertical,
           async edit(_application, page, path) {
-            await page
-              .getByRole('button', { name: 'Add text', exact: true })
-              .click();
-            const text = page.getByRole('textbox', {
-              name: 'Text',
-              exact: true,
-            });
-            await expect(text).toHaveValue('Text');
             const content = vertical
               ? 'OpenCut Vertical\n繁體中文 😀'
               : 'OpenCut Wide\n简体中文 😀';
-            await text.fill(content);
-            const input = (name: string) =>
-              page.getByRole('spinbutton', { name, exact: true });
-            await input('Start frame').fill('8');
-            await input('Duration frames').fill('24');
-            await input('X').fill(vertical ? '-17' : '29');
-            await input('Y').fill(vertical ? '65' : '-27');
-            await input('Scale').fill('1.1');
-            await input('Opacity').fill('0.82');
-            await input('Rotation').fill(vertical ? '12' : '-8');
-            await input('Font size').fill('33');
-            await input('Wrap width').fill('260');
-            await page
-              .getByLabel('Weight', { exact: true })
-              .selectOption('700');
-            await page
-              .getByLabel('Alignment', { exact: true })
-              .selectOption(vertical ? 'right' : 'left');
-            await page
-              .getByRole('textbox', { name: 'Color', exact: true })
-              .fill('#f9e8b4');
-            if (vertical)
-              await page
-                .getByRole('textbox', { name: 'Font family', exact: true })
-                .fill('OpenCut Missing Test Face');
-            await page.getByText('Effects', { exact: true }).click();
-            await page
-              .getByRole('checkbox', { name: 'Stroke', exact: true })
-              .check();
-            await page
-              .getByRole('checkbox', { name: 'Shadow', exact: true })
-              .check();
-            await page
-              .getByRole('checkbox', { name: 'Background', exact: true })
-              .check();
-            await page
-              .getByRole('textbox', { name: 'Background color', exact: true })
-              .fill('#50365bbf');
-            await page
-              .getByRole('button', { name: 'Apply text', exact: true })
-              .click();
-            await expect(input('Start frame')).toHaveValue('8');
-            await page
-              .getByRole('button', { name: 'Undo', exact: true })
-              .click();
-            await expect(text).toHaveValue('Text');
-            await page
-              .getByRole('button', { name: 'Redo', exact: true })
-              .click();
-            await expect(text).toHaveValue(content);
-            const clip = page.locator('.timeline-clip.text');
-            await clip.focus();
-            await clip.press('ArrowRight');
-            await expect(input('Start frame')).toHaveValue('9');
-            await page
-              .getByRole('button', { name: 'Save project', exact: true })
-              .click();
-            await expect(
-              page.getByText('Saved project', { exact: true }),
-            ).toBeVisible();
+            await commitReviewEdit(page, path, {
+              type: 'text.add',
+              id: 'heading',
+              at: 9,
+              duration: 24,
+              visual: {
+                x: vertical ? -17 : 29,
+                y: vertical ? 65 : -27,
+                scale: 1.1,
+                opacity: 0.82,
+                rotation: vertical ? 12 : -8,
+              },
+              text: {
+                content,
+                fontSize: 33,
+                wrapWidth: 260,
+                fontWeight: 700,
+                alignment: vertical ? 'right' : 'left',
+                color: '#f9e8b4',
+                ...(vertical && { fontFamily: 'OpenCut Missing Test Face' }),
+                stroke: { color: '#000000', width: 2 },
+                shadow: { color: '#000000', blur: 4, x: 2, y: 2 },
+                background: { color: '#50365bbf', padding: 8 },
+              },
+            });
             const saved = deserializeProject(await readFile(path, 'utf8'));
             expect(saved.clips[1]).toMatchObject({
               timelineStart: time(9),
@@ -518,13 +480,11 @@ for (const vertical of [false, true]) {
               },
               visual: { x: vertical ? -17 : 29, opacity: 0.82 },
             });
-            await page
-              .getByRole('button', { name: 'Open project', exact: true })
-              .click();
             await expect(page.locator('.timeline-clip.text')).toBeVisible();
-            await page.locator('.timeline-clip.text').focus();
             await page.locator('.timeline-clip.text').press('Enter');
-            await expect(text).toHaveValue(content);
+            await expect(
+              page.getByRole('complementary', { name: 'Inspector' }),
+            ).toContainText(content.split('\n')[0]!);
             await page
               .getByRole('slider', { name: 'Seek timeline', exact: true })
               .fill('24');
@@ -1106,104 +1066,49 @@ test('T34 edited multilingual subtitle cues match Chromium Canvas and burned-in 
       guiExport: true,
       fontWarning: false,
       async edit(application, page, path) {
-        const pick = (file: string) =>
-          application.evaluate(({ dialog }, selected) => {
-            dialog.showOpenDialog = async () => ({
-              canceled: false,
-              filePaths: [selected],
-            });
-          }, file);
-        const menu = page.locator('.subtitle-menu summary');
-        const importFile = async (format: string) => {
-          await pick(
-            resolve('tests/fixtures/subtitles/multilingual.' + format),
-          );
-          await menu.click();
-          await page
-            .getByRole('button', { name: 'Import SRT / WebVTT…' })
-            .click();
-        };
+        const cues = parseSubtitles(
+          await readFile(
+            resolve('tests/fixtures/subtitles/multilingual.vtt'),
+            'utf8',
+          ),
+          'vtt',
+        );
+        await commitReviewEdit(page, path, { type: 'subtitle.import', cues });
         const clips = page.locator('.timeline-clip.subtitle');
-        await importFile('vtt');
         await expect(clips).toHaveCount(2);
-        await page.getByRole('button', { name: 'Undo', exact: true }).click();
+        await restoreReviewEdit(page, path, 'undo');
         await expect(clips).toHaveCount(0);
-        await importFile('srt');
-        await expect(clips).toHaveCount(2);
-        const snapshot = () =>
-          page.evaluate(async () => {
-            const reply = await window.opencut.getProject();
-            if (!reply.ok || !reply.state) throw new Error('Missing project');
-            return reply.state.project;
-          });
-        const [first, second] = (await snapshot()).subtitles!.cues;
-        const select = (id: string) =>
-          page.getByRole('button', { name: 'Inspect subtitle ' + id });
-        await select(first!.id).focus();
-        await select(first!.id).press('Enter');
-        const field = (name: string) =>
-          page.getByRole('textbox', { name, exact: true });
-        const text = field('Subtitle text');
-        await expect(text).toHaveValue(first!.text);
-        await field('Start seconds').fill('0.115');
-        await field('Duration seconds').fill('0.495');
-        await expect(field('End seconds')).toHaveValue('');
-        await text.fill('Hello, OpenCut!\n你好，世界！');
-        await page
-          .getByRole('button', { name: 'Apply subtitle', exact: true })
-          .click();
-        await expect
-          .poll(async () => (await snapshot()).subtitles!.cues[0]!.start)
-          .toEqual({ numerator: 23, denominator: 200 });
-        await expect(field('End seconds')).toHaveValue('0.61');
-        const size = page.getByRole('spinbutton', { name: 'Subtitle size' });
-        await size.fill('37');
-        await expect(size).toHaveValue('37');
-        await field('Subtitle color').fill('#fff0bb');
-        await page
-          .getByRole('checkbox', { name: 'Background', exact: true })
-          .check();
-        await field('Subtitle background color').fill('#526884');
-        await expect(
-          page.getByRole('spinbutton', { name: 'Subtitle size' }),
-        ).toHaveValue('37');
-        await page
-          .getByRole('button', { name: 'Apply subtitle style' })
-          .click();
-        await expect
-          .poll(async () => (await snapshot()).subtitles!.style.fontSize)
-          .toBe(37);
-        await page
-          .getByRole('slider', { name: 'Seek timeline', exact: true })
-          .fill('12');
-        await page.getByRole('button', { name: 'Split at playhead' }).click();
-        await expect(clips).toHaveCount(3);
-        await menu.click();
-        await page
-          .getByRole('button', { name: 'Merge with next subtitle' })
-          .click();
-        await expect(clips).toHaveCount(2);
-        await expect(text).toHaveValue(first!.text + '\n' + first!.text);
-        await text.fill(first!.text);
-        await page
-          .getByRole('button', { name: 'Apply subtitle', exact: true })
-          .click();
-        await select(second!.id).focus();
-        await select(second!.id).press('Enter');
-        await select(second!.id).press('ArrowRight');
-        await expect(field('Start seconds')).toHaveValue('263/600');
-        await select(second!.id).press('ArrowLeft');
-        await expect(field('Start seconds')).toHaveValue('0.405');
-        await page
-          .getByRole('button', { name: 'Delete subtitle', exact: true })
-          .click();
-        await expect(clips).toHaveCount(1);
-        await page.getByRole('button', { name: 'Undo', exact: true }).click();
-        await expect(clips).toHaveCount(2);
-        await page.getByRole('button', { name: 'Redo', exact: true }).click();
-        await expect(clips).toHaveCount(1);
-        await page.getByRole('button', { name: 'Undo', exact: true }).click();
-        await expect(clips).toHaveCount(2);
+        const srt = parseSubtitles(
+          await readFile(
+            resolve('tests/fixtures/subtitles/multilingual.srt'),
+            'utf8',
+          ),
+          'srt',
+        );
+        await commitReviewEdit(page, path, {
+          type: 'subtitle.import',
+          cues: srt,
+        });
+        const [first, second] = deserializeProject(await readFile(path, 'utf8'))
+          .subtitles!.cues;
+        await commitReviewEdit(
+          page,
+          path,
+          {
+            type: 'subtitle.set',
+            id: first!.id,
+            start: { numerator: 23, denominator: 200 },
+            end: { numerator: 61, denominator: 100 },
+          },
+          {
+            type: 'subtitle.style',
+            style: {
+              fontSize: 37,
+              color: '#fff0bb',
+              background: { color: '#526884', padding: 8 },
+            },
+          },
+        );
         const sidecar = join(directory, 't34-sidecar.vtt');
         await application.evaluate(({ dialog }, file) => {
           dialog.showSaveDialog = async () => ({
@@ -1211,8 +1116,10 @@ test('T34 edited multilingual subtitle cues match Chromium Canvas and burned-in 
             filePath: file,
           });
         }, sidecar);
-        await menu.click();
-        await page.getByRole('button', { name: 'Export WebVTT…' }).click();
+        await page.getByText('More export options', { exact: true }).click();
+        await page
+          .getByRole('button', { name: 'Export VTT', exact: true })
+          .click();
         await expect(page.getByText(/Exported 2 subtitle cues/)).toBeVisible();
         const sidecarCues = parseSubtitles(
           await readFile(sidecar, 'utf8'),
@@ -1223,14 +1130,15 @@ test('T34 edited multilingual subtitle cues match Chromium Canvas and burned-in 
           text: first!.text,
         });
         expect(sidecarCues[1]?.text).toBe(second!.text);
-        await pick(path);
         await page
-          .getByRole('button', { name: 'Open project', exact: true })
-          .click();
-        await expect(clips).toHaveCount(2);
-        await select(first!.id).focus();
-        await select(first!.id).press('Enter');
-        await expect(text).toHaveValue(first!.text);
+          .getByRole('button', {
+            name: 'Inspect subtitle ' + first!.id,
+            exact: true,
+          })
+          .press('Enter');
+        await expect(
+          page.getByRole('complementary', { name: 'Inspector' }),
+        ).toContainText(first!.text.split('\n')[0]!);
         await page
           .getByRole('slider', { name: 'Seek timeline', exact: true })
           .fill('13');
@@ -1274,7 +1182,7 @@ test('T34 edited multilingual subtitle cues match Chromium Canvas and burned-in 
   ).toBe(false);
 });
 
-test('T37 Electron keyframes survive edits and match encoded animation', async () => {
+test('T37 headless keyframes survive edits and match encoded animation', async () => {
   const width = 320;
   const height = 180;
   const project = createProject({
@@ -1430,97 +1338,58 @@ test('T37 Electron keyframes survive edits and match encoded animation', async (
           name: 'Seek timeline',
           exact: true,
         });
-        await page
-          .getByRole('button', { name: 'Inspect clip animated', exact: true })
-          .locator(':scope > rect')
-          .first()
-          .click();
-        const property = page.getByRole('combobox', {
-          name: 'Animated property',
-        });
-        const add = page.getByRole('button', {
-          name: 'Add keyframe',
-          exact: true,
-        });
-        const apply = page.getByRole('button', {
-          name: 'Apply keyframe',
-          exact: true,
-        });
-        const value = page.getByRole('spinbutton', { name: 'Keyframe value' });
         const saved = async () =>
           deserializeProject(await readFile(path, 'utf8'));
-        const key = async (
-          channel: 'x' | 'y' | 'scale' | 'opacity' | 'rotation',
-          frame: number,
-          next: number,
-          easing = 'linear',
-        ) => {
-          await property.selectOption(channel);
-          await seek.fill(String(frame));
-          await add.click();
-          await expect(add).toBeDisabled();
-          await value.fill(String(next));
-          await page
-            .getByRole('combobox', { name: 'Keyframe easing' })
-            .selectOption(easing);
-          await apply.click();
-          await expect
-            .poll(
-              async () =>
-                (await saved()).clips[0]?.keyframes?.[channel]?.at(-1)?.value,
-            )
-            .toBe(next);
-        };
-        await key('x', 0, -80, 'ease-in');
-        await key('x', 45, 80);
-        await key('y', 0, -12);
-        await key('y', 45, 12);
-        await key('scale', 0, 0.5, 'ease-out');
-        await key('scale', 45, 1);
-        await key('opacity', 0, 0.3);
-        await key('opacity', 45, 1);
-        await key('rotation', 0, 0);
-        await key('rotation', 45, 45);
-        await page
-          .getByRole('button', { name: 'animated rotation keyframe at 3/2 s' })
-          .click();
-        await expect(property).toHaveValue('rotation');
-        await page.getByRole('textbox', { name: 'Keyframe time' }).fill('1');
-        await value.fill('30');
-        await apply.click();
-        await expect
-          .poll(async () =>
-            (await saved()).clips[0]?.keyframes?.rotation?.at(-1),
-          )
-          .toMatchObject({ time: time(30), value: 30 });
-        await page
-          .getByRole('button', { name: 'Delete keyframe', exact: true })
-          .click();
-        const rotationCount = () =>
-          expect.poll(
-            async () => (await saved()).clips[0]?.keyframes?.rotation?.length,
-          );
-        await rotationCount().toBe(1);
-        for (const [action, count] of [
-          ['Undo', 2],
-          ['Redo', 1],
-          ['Undo', 2],
-        ] as const) {
-          await page.getByRole('button', { name: action, exact: true }).click();
-          await rotationCount().toBe(count);
-        }
-        const speed = page.getByRole('spinbutton', {
-          name: 'Speed (×)',
-          exact: true,
+        const keys = [
+          ['x', 0, -80, 'ease-in'],
+          ['x', 45, 80, 'linear'],
+          ['y', 0, -12, 'linear'],
+          ['y', 45, 12, 'linear'],
+          ['scale', 0, 0.5, 'ease-out'],
+          ['scale', 45, 1, 'linear'],
+          ['opacity', 0, 0.3, 'linear'],
+          ['opacity', 45, 1, 'linear'],
+          ['rotation', 0, 0, 'linear'],
+          ['rotation', 45, 45, 'linear'],
+        ] as const;
+        await commitReviewEdit(
+          page,
+          path,
+          ...keys.map(([property, frame, value, easing]): EditOperation => ({
+            type: 'clip.keyframe.add',
+            id: 'animated',
+            property,
+            time: time(frame),
+            value,
+            easing,
+          })),
+        );
+        await commitReviewEdit(page, path, {
+          type: 'clip.keyframe.set',
+          id: 'animated',
+          property: 'rotation',
+          time: time(45),
+          newTime: time(30),
+          value: 30,
         });
-        await speed.fill('1.5');
-        await speed.press('Enter');
-        await expect
-          .poll(async () => (await saved()).clips[0]?.speed)
-          .toEqual({ numerator: 3, denominator: 2 });
-        await seek.fill('20');
-        await page.getByRole('button', { name: 'Split at playhead' }).click();
-        await expect.poll(async () => (await saved()).clips.length).toBe(4);
+        await commitReviewEdit(page, path, {
+          type: 'clip.keyframe.remove',
+          id: 'animated',
+          property: 'rotation',
+          time: time(30),
+        });
+        await restoreReviewEdit(page, path, 'undo');
+        expect((await saved()).clips[0]?.keyframes?.rotation).toHaveLength(2);
+        await commitReviewEdit(
+          page,
+          path,
+          {
+            type: 'clip.speed',
+            id: 'animated',
+            speed: { numerator: 3, denominator: 2 },
+          },
+          { type: 'clip.split', id: 'animated', at: 20 },
+        );
         const snapshot = await saved();
         for (const { frame, ...properties } of expected) {
           const visual = evaluateTimelineFrame(snapshot, frame).visualClips[0]!
@@ -1691,60 +1560,41 @@ test('T38 mixed-rate dissolve and canvas fades match Electron and export', async
     {
       observeAudio: true,
       edit: async (application, page, path) => {
-        const select = (id: string) =>
-          page.getByRole('button', { name: `Inspect clip ${id}` }).click();
-        const menu = page.getByText('Transitions', { exact: true });
-        const open = async () => {
-          if (
-            !(await page
-              .getByRole('spinbutton', {
-                name: 'Transition frames',
-                exact: true,
-              })
-              .isVisible())
-          )
-            await menu.click();
-        };
-        const add = async (name: string, frames: string) => {
-          await open();
-          await page
-            .getByRole('spinbutton', { name: 'Transition frames', exact: true })
-            .fill(frames);
-          await page.getByRole('button', { name, exact: true }).click();
-          await expect(
-            page.getByRole('button', {
-              name: `${name}, ${frames} frames`,
-              exact: true,
-            }),
-          ).toBeVisible();
-        };
-        await select('red');
-        await add('Fade in', '6');
-        await menu.click();
-        await select('blue');
-        await add('Cross-dissolve', '8');
-        const duration = page.getByRole('spinbutton', {
-          name: 'Cross-dissolve duration (frames)',
+        await commitReviewEdit(
+          page,
+          path,
+          {
+            type: 'transition.add',
+            transition: { kind: 'fade-in', clipId: 'red', frames: 6 },
+          },
+          {
+            type: 'transition.add',
+            transition: {
+              kind: 'cross-dissolve',
+              from: 'red',
+              to: 'blue',
+              frames: 10,
+            },
+          },
+        );
+        const cross = deserializeProject(
+          await readFile(path, 'utf8'),
+        ).transitions!.find(({ kind }) => kind === 'cross-dissolve')!;
+        await commitReviewEdit(page, path, {
+          type: 'transition.remove',
+          id: cross.id,
         });
-        await duration.fill('10');
-        await duration.press('Enter');
-        const marker = page.getByRole('button', {
-          name: 'Cross-dissolve, 10 frames',
-          exact: true,
+        await expect(
+          page.getByRole('button', { name: 'Cross-dissolve, 10 frames' }),
+        ).toHaveCount(0);
+        await restoreReviewEdit(page, path, 'undo');
+        await expect(
+          page.getByRole('button', { name: 'Cross-dissolve, 10 frames' }),
+        ).toBeVisible();
+        await commitReviewEdit(page, path, {
+          type: 'transition.add',
+          transition: { kind: 'fade-out', clipId: 'blue', frames: 6 },
         });
-        await expect(marker).toBeVisible();
-        await page
-          .getByRole('button', { name: 'Remove Cross-dissolve', exact: true })
-          .click();
-        await expect(marker).toHaveCount(0);
-        await page.getByRole('button', { name: 'Undo', exact: true }).click();
-        await expect(marker).toBeVisible();
-        await page.getByRole('button', { name: 'Redo', exact: true }).click();
-        await expect(marker).toHaveCount(0);
-        await page.getByRole('button', { name: 'Undo', exact: true }).click();
-        await expect(marker).toBeVisible();
-        await add('Fade out', '6');
-        await menu.click();
         const saved = deserializeProject(await readFile(path, 'utf8'));
         expect(saved.clips).toEqual(project.clips);
         expect(saved.transitions?.map(({ frames }) => frames)).toEqual([

@@ -187,12 +187,6 @@ test('CLI-created tracks, gaps, cross-track overlaps, ruler, zoom anchor and per
     await expect
       .poll(() => scroller.evaluate((element) => element.scrollLeft))
       .toBeCloseTo(1250, 0);
-    await page
-      .getByRole('button', { name: 'Save project', exact: true })
-      .click();
-    await expect(
-      page.getByText('Project saved.', { exact: true }),
-    ).toBeVisible();
     await expect(page.getByLabel('Timeline zoom', { exact: true })).toHaveValue(
       '640',
     );
@@ -233,6 +227,12 @@ test('linked trimmed video source follows ruler seeks and playback independently
   const { application, page } = await launchDesktop();
   try {
     await openProject(application, page, path);
+    await page
+      .getByRole('button', { name: 'Inspect clip ' + project.clips[3]!.id })
+      .press('Enter');
+    await expect(
+      page.getByRole('button', { name: 'Preview selected clip' }),
+    ).toBeDisabled();
     await page
       .getByRole('button', { name: `Inspect clip ${project.clips[0]!.id}` })
       .click();
@@ -308,6 +308,58 @@ test('linked trimmed video source follows ruler seeks and playback independently
   }
 });
 
+test('still clips cannot start a linked source preview', async () => {
+  const directory = await mkdtemp(join(fixtureRoot, 't41-still-'));
+  const path = join(directory, 'project.json');
+  const project = createProject({ name: 'Timeline verification' });
+  const zero = { numerator: 0, denominator: 1 };
+  project.assets = [
+    {
+      id: 'still',
+      name: 'Still image',
+      file: { type: 'relative', path: 'still.png' },
+      mediaTypes: ['video'],
+      metadata: {
+        kind: 'image',
+        formatName: 'png_pipe',
+        durationSeconds: null,
+        width: 64,
+        height: 48,
+        videoCodec: 'png',
+        audioCodec: null,
+        frameRate: null,
+        frameRateRatio: null,
+        hasAudio: false,
+      },
+    },
+  ];
+  project.tracks = [{ id: 'video', name: 'Video', type: 'video' }];
+  project.clips = [
+    {
+      id: 'still-clip',
+      assetId: 'still',
+      trackId: 'video',
+      timelineStart: zero,
+      sourceIn: zero,
+      sourceOut: { numerator: 1, denominator: 1 },
+    },
+  ];
+  await writeProjectFile(project, path);
+  const { application, page } = await launchDesktop();
+  try {
+    await openProject(application, page, path);
+    await page
+      .getByRole('button', { name: 'Inspect clip still-clip' })
+      .press('Enter');
+    await expect(
+      page.getByRole('button', { name: 'Preview selected clip' }),
+    ).toBeDisabled();
+  } finally {
+    await application.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('empty and large timelines bound DOM work and scroll to distant tracks and clips', async () => {
   const directory = await mkdtemp(join(fixtureRoot, 't17-'));
   const path = join(directory, 'large.json');
@@ -316,7 +368,7 @@ test('empty and large timelines bound DOM work and scroll to distant tracks and 
   try {
     await writeProjectFile(project, path);
     await openProject(application, page, path);
-    await expect(page.getByText('Drag media here')).toBeVisible();
+    await expect(page.getByText('No tracks', { exact: true })).toBeVisible();
     project.assets = [
       {
         id: 'offline',

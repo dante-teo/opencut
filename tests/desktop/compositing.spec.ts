@@ -5,7 +5,11 @@ import { join, resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { serializeProject, type Project } from '@opencut/core';
 import { MediaCache } from '../../packages/media/src/index.js';
-import { launchDesktop } from './helpers.js';
+import {
+  launchDesktop,
+  commitReviewEdit,
+  restoreReviewEdit,
+} from './helpers.js';
 import {
   compositionFixture,
   compositionReport,
@@ -229,7 +233,7 @@ test('multi-layer transport, independent decoders, rapid seeks, edits, frame ste
     await page.evaluate(() =>
       window.opencut.mediaCache({ action: 'enable', enabled: false }),
     );
-    await openComposition(
+    const path = await openComposition(
       application,
       page,
       fixture.directory,
@@ -298,65 +302,26 @@ test('multi-layer transport, independent decoders, rapid seeks, edits, frame ste
       }
     });
     await seekComposition(page, 75, ['base', 'pip', 'image']);
-    // Exercise the production edit/history/IPC path while all three layers are visible.
-    await page
-      .getByRole('button', { name: 'Inspect clip pip', exact: true })
-      .locator(':scope > rect')
-      .first()
-      .click();
-    const x = page.getByRole('spinbutton', { name: 'Position X', exact: true });
-    await x.fill('-160');
-    await x.press('Enter');
-    await expect
-      .poll(() =>
-        page.evaluate(async () => {
-          const r = await window.opencut.getProject();
-          return (
-            r.ok &&
-            r.state?.project.clips.find((c) => c.id === 'pip')?.visual?.x
-          );
-        }),
-      )
-      .toBe(-160);
-    await expect(page.locator('.workspace')).toHaveAttribute(
-      'aria-busy',
-      'false',
-    );
-    await page
-      .getByRole('button', { name: 'Inspect clip image', exact: true })
-      .locator(':scope > rect')
-      .first()
-      .click();
-    const opacity = page.getByRole('spinbutton', {
-      name: 'Opacity',
-      exact: true,
+    await commitReviewEdit(page, path, {
+      type: 'clip.visual',
+      id: 'pip',
+      x: -160,
     });
-    await expect(opacity).toHaveValue('0.5');
-    await opacity.fill('0');
-    await opacity.press('Enter');
-    await expect
-      .poll(() =>
-        page.evaluate(async () => {
-          const r = await window.opencut.getProject();
-          return (
-            r.ok &&
-            r.state?.project.clips.find((c) => c.id === 'image')?.visual
-              ?.opacity
-          );
-        }),
-      )
-      .toBe(0);
-    await expect(page.locator('.workspace')).toHaveAttribute(
-      'aria-busy',
-      'false',
-    );
+    await commitReviewEdit(page, path, {
+      type: 'clip.visual',
+      id: 'image',
+      opacity: 0,
+    });
+    await page.locator('.timeline-diagnostics summary').click();
     await seekComposition(page, 75, ['base', 'pip']);
     await expect
       .poll(async () => (await compositionReport(page)).unavailable)
       .toEqual([]);
-    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await restoreReviewEdit(page, path, 'undo');
+    await page.locator('.timeline-diagnostics summary').click();
     await seekComposition(page, 75, ['base', 'pip', 'image']);
-    await page.getByRole('button', { name: 'Redo', exact: true }).click();
+    await restoreReviewEdit(page, path, 'redo');
+    await page.locator('.timeline-diagnostics summary').click();
     await seekComposition(page, 75, ['base', 'pip']);
     const before = await page.locator('canvas').screenshot();
     expect(before.byteLength).toBeGreaterThan(1000);

@@ -1,3 +1,5 @@
+import type { EditOperation } from '@opencut/core';
+import { openProject } from '@opencut/sdk';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import {
@@ -61,4 +63,31 @@ export async function chooseVideo(
     await expect(
       page.getByRole('button', { name: 'Play', exact: true }),
     ).toBeEnabled({ timeout: 10000 });
+}
+
+export async function commitReviewEdit(
+  page: Page,
+  path: string,
+  ...operations: EditOperation[]
+) {
+  const editor = await openProject(path);
+  editor.project.apply(...operations);
+  const saved = await editor.save();
+  await expect(
+    page.getByText('Revision ' + saved.revision, { exact: true }),
+  ).toBeVisible();
+  return saved.revision;
+}
+
+export async function restoreReviewEdit(
+  page: Page,
+  path: string,
+  direction: 'undo' | 'redo',
+) {
+  const editor = await openProject(path);
+  editor.project[direction]();
+  const saved = await editor.save();
+  await expect(
+    page.getByText('Revision ' + saved.revision, { exact: true }),
+  ).toBeVisible();
 }

@@ -344,12 +344,10 @@ for POSIX filenames containing colons. Windows input separators are normalized.
 This is lexical path handling, not realpath/symlink canonicalization or proof of
 Windows runtime support.
 
-T19 desktop imports made before the first save store absolute source references,
-since the project directory is not known yet. Saving preserves those references;
-it does not rebase them, copy media, or change the schema. Imports made after a
-project has a saved path use the normal relative-preferred policy above. After
-moving the project, absolute references still depend on their original source
-paths.
+Projects created in older desktop versions may contain absolute source
+references from imports made before their first save. Opening them for review
+preserves those references. If a source has moved, use `media relink` or
+`project.relinkMedia()` to update its reference and keep the same asset ID.
 
 Filesystem-backed asset inspection and media availability checks resolve project
 directory symlinks to the physical parent before resolving media references,
@@ -727,8 +725,8 @@ and undo/redo snapshots continue to compare and preserve exact timestamps.
 Both managed-history modes require unchanged project identity and consistent
 history. An unchanged result preserves the existing file bytes and mtime.
 For `expectedRevision`, pass the revision last read from disk, rather than the
-new in-memory session revision. The desktop also compares its serialized disk
-baseline inside the callback to refuse external changes at the same revision.
+new in-memory draft revision. SDK save also compares its opened snapshot to
+detect external changes at the same revision.
 Batch execution independently checks its required expected revision against the
 project being edited.
 

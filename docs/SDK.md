@@ -47,7 +47,7 @@ clip later in the same group. Inspect the draft for generated IDs.
 
 | API                                                                                 | Behavior                                                                                                                                                             |
 | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `openProject(path, options?)`                                                       | Reads the authoritative named project snapshot, including an open desktop session. Accepts an optional expected revision.                                            |
+| `openProject(path, options?)`                                                       | Reads the committed project file independently of Electron. Accepts an optional expected revision.                                                                   |
 | `createProject(path, settings, options?)`                                           | Stages a new project. Save publishes at a new path in an existing writable directory. Supply `name` and optionally canvas/frame-rate settings.                       |
 | `project.inspect()`, `project.inspectTimeline(frame)`                               | Returns the versioned project or frame inspection of staged content. Pending content edits retain the base revision until publication.                               |
 | `project.importMedia(file)`, `project.checkMedia()`, `project.removeMedia(assetId)` | Probes and links sources in place, checks their availability, and removes unused asset entries. Re-importing the same source reuses its ID.                          |
@@ -66,8 +66,8 @@ lock. See the [project file persistence contract](PROJECT_FORMAT.md#api-and-erro
 The draft is local to the editor. Await an import, preview, render or save
 before starting another operation on the same draft. Open a fresh editor to
 discard staged work or load a new base after a conflict. The SDK uses the
-existing T22 writer and session transport for publication. A successful save
-to an open project updates Electron and shares its undo/redo history.
+headless writer for atomic publication. A successful save advances the project
+revision and its undo/redo history. Electron follows the committed file.
 
 Use `project.relinkMedia(assetId, file)` to replace a source reference,
 `project.importFont(titleOrCueId, file)` to embed a font, and
@@ -132,8 +132,8 @@ gain at that frame. To measure audible output, decode the rendered audio.
 `project.cachePreview(size?)` renders or reuses the full timeline of the
 current draft, including staged edits. The result's `revision` is the draft's
 base revision. `project.controlDesktop(request)` sends typed playback, seek,
-selection, viewer and online media commands to the open saved project on
-macOS or Linux. It operates on that live session. See the
+selection and viewer commands to the open review app on macOS or Linux.
+The reply identifies the viewer revision. Editing and saving work independently. See the
 [desktop control contract](CLI.md#rendered-preview-and-desktop-control).
 `project.apply({ type: 'subtitle.words', id, words })` sets exact cue-relative
 word timing for preview and burn-in.

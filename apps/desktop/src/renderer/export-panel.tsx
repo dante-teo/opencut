@@ -150,7 +150,7 @@ export function ExportPanel({
         <div className="export-body">
           <p className="export-project-info">
             {state
-              ? `${state.project.metadata.name} · ${state.project.settings.width} × ${state.project.settings.height} · ${state.project.settings.frameRate.numerator}/${state.project.settings.frameRate.denominator} fps · ${state.project.clips.length} clips`
+              ? `${state.project.metadata.name} · revision ${projectRevision(state.project)} · ${state.project.settings.width} × ${state.project.settings.height} · ${state.project.settings.frameRate.numerator}/${state.project.settings.frameRate.denominator} fps · ${state.project.clips.length} clips`
               : 'No project open'}
             {estimatedDuration !== null &&
               ` · ${estimatedDuration.toFixed(3)} s output`}
@@ -490,6 +490,7 @@ export function ExportPanel({
                 void perform(async () => {
                   if (!state) return;
                   await window.opencut.startExport({
+                    view: state.view,
                     projectId: state.project.metadata.id,
                     expectedRevision: projectRevision(state.project),
                     settings,

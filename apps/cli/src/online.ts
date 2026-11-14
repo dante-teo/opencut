@@ -157,12 +157,7 @@ export async function runOnlineCommand(args: string[]): Promise<void> {
       commitPrepared &&
       error instanceof Error &&
       'code' in error &&
-      [
-        'COMMIT_OUTCOME_UNKNOWN',
-        'SESSION_DISCONNECTED',
-        'SESSION_TIMEOUT',
-        'SESSION_PROTOCOL',
-      ].includes(String(error.code));
+      error.code === 'COMMIT_OUTCOME_UNKNOWN';
     if (!uncertainCommit) await download.discard();
     throw error;
   }

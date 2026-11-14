@@ -1,6 +1,6 @@
 # 0011 — One writer for GUI and CLI project sessions
 
-Status: accepted for T22. This supersedes T21's proposed task ordering for T22;
+Status: superseded by [ADR 0016](0016-headless-project-ownership.md) in T41. Accepted for T22. This supersedes T21's proposed task ordering for T22;
 playback, composition and rendering remain outside this change.
 
 ## Decision

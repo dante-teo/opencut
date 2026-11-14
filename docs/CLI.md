@@ -320,8 +320,12 @@ before rendering finishes. Query `status` for `state.preview.renderStatus` or us
 `project cache-preview` to wait for and obtain the rendered file directly.
 
 Other actions select clips or assets, switch viewers, seek within the source,
-step, play, pause, toggle playback, return to live preview, search online
-media, or import a search result by ID with an expected revision.
+step, play, pause, toggle playback, or return to live preview. The response
+includes the revision the viewer controls. If `desktop control` reports
+`SESSION_CLOSED` while the project is open, the review socket may be unavailable
+or another viewer may still own it. Close the other viewer if it owns the socket,
+then reopen the project in the viewer you want to control. Headless commands
+remain available while the socket is unavailable.
 
 ## Dialogue separation
 
@@ -329,8 +333,7 @@ media, or import a search result by ID with an expected revision.
 writes `dialogue.wav` and `background.wav`. The model estimates the dialogue;
 background is the normalized original mix minus that estimate. Both stems
 use the same 48 kHz stereo sample grid and cover the input duration. Import
-the files as audio assets to mix or export them. The desktop imports both files
-automatically after separation.
+the files as audio assets to mix or export them.
 
 Install [ELUATE](https://github.com/anaxoniclabs/ELUATE) in a local Python
 environment and run `eluate setup` there to obtain its multilingual Bandit v2
@@ -339,47 +342,26 @@ executable before launching OpenCut or the CLI if it differs from `python3`.
 OpenCut invokes the local inference API and requires FFmpeg and ffprobe.
 The current integration accepts sources with a known duration of up to ten minutes.
 
-## Shared projects in Electron (T22)
+## Headless project ownership and Electron review (T41)
 
-On macOS/Linux, existing editing commands automatically route through Electron
-when it owns the project. Timeline, media, project and history queries see that
-same session. CLI edits update the open window through events without reopening;
-GUI edits are immediately available to CLI queries. Both use one revision and
-undo/redo history. A named project's edits are saved before success is returned.
-Untitled GUI projects still require their first Save before CLI access.
+CLI and SDK reads use the last complete project file. Headless writes acquire
+the SQLite writer lock for each transaction and publish project content,
+revision and undo/redo history together by atomic replacement. Electron reads
+those snapshots independently and needs no project lock. Closing or crashing
+the viewer has no effect on headless edits.
 
-CLI edits and undo/redo preserve the open timeline's zoom, horizontal/vertical
-scroll, Snap toggle and snap threshold. Explicitly opening or reopening a project
-resets timeline view settings. Source preview is invalidated independently when
-CLI changes arrive.
+Use `edit history` and `--expected-revision` when acting on a prior read.
+`REVISION_CONFLICT` or `PROJECT_LOCKED` means a competing edit can require
+a fresh read before retrying. After `COMMIT_OUTCOME_UNKNOWN`, inspect history
+and content before retrying. The permanent `<project-file>.opencut-lock`
+sidecar contains no project content. Keep it in place so writers share
+one OS lock. Do not mix current and older desktop writers on the same file.
 
-Use **Open project** to select an older backup, including a copy with the same
-project ID or a backup restored at the same path. Its lower revision and stored
-history become current in both interfaces. Query `edit history` again before
-issuing revision-guarded edits; do not reuse a revision observed before reopening.
-
-Use `edit history` and `--expected-revision` when acting on a prior query. Batch
-apply still requires `expectedRevision`. Even without that flag, a proposal
-prepared against an active session is rejected if another edit wins first.
-`REVISION_CONFLICT`, `SESSION_BUSY` and `PROJECT_LOCKED` mean reload/reconsider
-and retry after the competing operation finishes. A second GUI cannot acquire
-the same project. Dry-run validates against the same authority without changing
-project bytes, history or the visible timeline.
-
-After `SESSION_DISCONNECTED`, `SESSION_CHANGED`, `COMMIT_OUTCOME_UNKNOWN`, or a
-timeout, query history and content before retrying. A lost response can follow
-a successful commit. The CLI
-never silently retries a session mutation on disk. After Electron exits/crashes,
-new CLI invocations resume independent work on the last complete saved project.
-
-The permanent `<project-file>.opencut-lock` sidecar holds an OS-backed SQLite
-lock, not project data. **Do not delete this sidecar:** a crash automatically
-releases ownership. A stale socket is replaced by the next session owner.
-Legacy `.lock` files still block updates; remove those only after confirming all
-old writers have stopped. Do not mix old and T22 writer versions. Local filesystems
-are required; Windows session transport and network filesystems are unsupported.
-Messages are limited to 64 MiB, with a 30-second idle timeout. The security boundary
-is the current OS account. See [the session decision](adr/0011-shared-project-session.md).
+The open viewer follows advancing revisions of the same project ID. It can
+coalesce rapid commits and shows the actual revision it has accepted.
+Reopen explicitly to load a replacement with the same or lower revision,
+or a different project ID.
+See [ADR 0016](adr/0016-headless-project-ownership.md).
 
 Exit codes: **0** success, **2** invalid command/arguments, **1** failed project
 validation, invalid project data, media, filesystem, prerequisite or execution failure.
@@ -1689,9 +1671,9 @@ without changing the project. An existing result is reused only while its
 local file is available. Importing an offline result creates a new asset; use
 `media relink` when existing clips must keep their asset ID.
 
-Downloaded files are outside project history. If a shared session disconnects
-during commit, inspect the project and history before retrying. The downloaded
-file is retained because the commit may have succeeded.
+Downloaded files are outside project history. On `COMMIT_OUTCOME_UNKNOWN`, the
+download is retained because the project update may have been published.
+Inspect the project and history before retrying.
 
 `help --json` reports each command's `runtime.status` as `available`,
 `unavailable` or `unknown`, with missing and unchecked prerequisites. FFmpeg

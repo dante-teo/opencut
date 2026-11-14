@@ -11,6 +11,7 @@ import { join, resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { launchDesktop } from './helpers.js';
 import { controlDesktopProject } from '@opencut/core/node';
+import type { DesktopControlRequest } from '@opencut/core/node';
 
 const root = resolve('tests/fixtures/generated');
 const names = ['still.png', 'audio-tone.wav', 'video-medium.mp4'];
@@ -23,7 +24,8 @@ const fixturesAvailable = await Promise.all(
   ),
 );
 
-test('searches both public providers, previews media and reopens offline imports with credits', async () => {
+// Historical coverage for the removed online browser. Headless provider operations are covered by Core and SDK tests.
+test.skip('searches both public providers, previews media and reopens offline imports with credits', async () => {
   test.skip(
     fixturesAvailable.includes(false),
     'Generate synthetic fixtures first.',
@@ -318,13 +320,15 @@ test('searches both public providers, previews media and reopens offline imports
       provider: 'commons',
       query: 'fixture',
       kind: 'image',
-    })) as { results: { id: string; title: string }[] };
+    } as unknown as DesktopControlRequest)) as {
+      results: { id: string; title: string }[];
+    };
     expect(found.results.length).toBeGreaterThan(0);
     const importResult = await controlDesktopProject(projectPath, {
       action: 'online-import',
       id: found.results[0]!.id,
       expectedRevision: saved.editing.revision,
-    });
+    } as unknown as DesktopControlRequest);
     expect(importResult).toMatchObject({
       revision: saved.editing.revision,
       notice: 'Media is already in the project.',

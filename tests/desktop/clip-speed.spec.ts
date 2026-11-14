@@ -12,7 +12,11 @@ import {
   splitClip,
   type Project,
 } from '@opencut/core';
-import { launchDesktop } from './helpers.js';
+import {
+  launchDesktop,
+  commitReviewEdit,
+  restoreReviewEdit,
+} from './helpers.js';
 import { openComposition } from './t26-fixtures.js';
 import {
   decodeAudio,
@@ -77,7 +81,7 @@ async function comparePreviewFrame(
   return mean;
 }
 
-test('T36 Electron speed edits, Canvas frames and pitch-preserved audio agree with encoded media', async () => {
+test('T36 headless speed edits, Canvas frames and pitch-preserved audio agree with encoded media', async () => {
   test.setTimeout(100_000);
   const root = resolve('tests/fixtures/generated');
   await mkdir(root, { recursive: true });
@@ -163,17 +167,11 @@ test('T36 Electron speed edits, Canvas frames and pitch-preserved audio agree wi
         project,
         `speed-${label}`,
       );
-      await page
-        .getByRole('button', { name: 'Inspect clip picture', exact: true })
-        .locator(':scope > rect')
-        .first()
-        .click();
-      const speedField = page.getByRole('spinbutton', {
-        name: 'Speed (×)',
-        exact: true,
+      await commitReviewEdit(page, path, {
+        type: 'clip.speed',
+        id: 'picture',
+        speed: rational,
       });
-      await speedField.fill(label);
-      await speedField.press('Enter');
       const saved = () => readFile(path, 'utf8').then(deserializeProject);
       await expect
         .poll(async () => (await saved()).clips[0]?.speed)
@@ -184,23 +182,27 @@ test('T36 Electron speed edits, Canvas frames and pitch-preserved audio agree wi
           .getByText(`${label}× · marker.mp4`, { exact: true }),
       ).toBeVisible();
       if (speed === 1.5) {
-        await page.getByRole('button', { name: 'Undo', exact: true }).click();
-        await expect(speedField).toHaveValue('1');
-        await page.getByRole('button', { name: 'Redo', exact: true }).click();
-        await expect(speedField).toHaveValue(label);
+        await restoreReviewEdit(page, path, 'undo');
+        expect((await saved()).clips[0]?.speed).toBeUndefined();
+        await restoreReviewEdit(page, path, 'redo');
         await expect
           .poll(async () => (await saved()).clips[0]?.speed)
           .toEqual(rational);
       }
       if (speed === 1.5) {
         await seek.fill('24');
-        await page.getByRole('button', { name: 'Split at playhead' }).click();
+        await commitReviewEdit(page, path, {
+          type: 'clip.split',
+          id: 'picture',
+          at: 24,
+        });
         await expect.poll(async () => (await saved()).clips.length).toBe(3);
         const split = (await saved()).clips.find(
           ({ trackId, id }) => trackId === 'v' && id !== 'picture',
         );
         expect(split?.sourceIn).toEqual({ numerator: 31, denominator: 20 });
       }
+      await page.locator('.timeline-diagnostics summary').click();
       const snapshot = await saved();
       expect(snapshot.subtitles).toEqual(baseline.subtitles);
       const output = exportProject(directory, `export-${label}`, path);

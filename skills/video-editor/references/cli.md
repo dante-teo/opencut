@@ -23,7 +23,9 @@ MP4 with mixed audio and VFR footage sampled on the project frame grid. Use
 macOS or Linux. Discover the request
 schema with `opencut help desktop control --json`. A `render-preview` reply
 acknowledges the request. Poll `status` or use `project cache-preview` when
-the workflow needs the completed file.
+the workflow needs the completed file. Check the returned viewer revision
+before reviewing a recent commit. If the control socket is unavailable,
+headless preview and editing commands still work.
 
 `subtitle.words` in an edit batch assigns exact cue-relative times to UTF-16
 text ranges for animated word highlighting. SRT and WebVTT carry cue-level
@@ -44,7 +46,7 @@ Use discovery's `commands`, `options`, `prerequisites`, `limits`, and
 `jsonOutput` for the installed version. A command's `resultSchema`, when
 present, points into `schemas`. Supported capabilities can still fail when a
 local tool or file is unavailable. Inspection reads saved content, including
-edits in an active named desktop session. Project and timeline inspection
+edits in the committed project file. Project and timeline inspection
 work without decoding. `timeline inspect` shows active clips, visual layers
 from bottom to top, exact source times and audio mix candidates. A candidate
 does not prove a stream decoded or was audible.

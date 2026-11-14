@@ -4,7 +4,7 @@ import { mkdtemp, readFile, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   addTrack,
   createProject,
@@ -23,7 +23,10 @@ import {
   writeProjectFile,
 } from '@opencut/core/node';
 import { ProjectSession } from '../../apps/desktop/src/main/project-session.js';
-import { requestSession } from '../../packages/core/src/session-transport.js';
+import {
+  requestSession,
+  reviewEndpoint,
+} from '../../packages/core/src/session-transport.js';
 
 let directory: string;
 let path: string;
@@ -103,8 +106,6 @@ it('shares a project with a full-size font repeated in history and reads legacy 
   await writeProjectFile(project, fontProject);
   const session = new ProjectSession({
     open: async () => fontProject,
-    save: async () => null,
-    unsaved: async () => 'discard',
   });
   sessions.push(session);
   expect(await session.run('open')).toMatchObject({ ok: true });
@@ -123,7 +124,7 @@ it('shares a project with a full-size font repeated in history and reads legacy 
   expect(undoEdit(updated).clips[0]!.text!.embeddedFont === font).toBe(true);
 }, 30_000);
 
-it('routes unchanged CLI commands, queries and undo/redo through another process and persists history', async () => {
+it('persists CLI commands and history independently of the viewer process', async () => {
   const child = await launch();
   await cli('track', 'add', path, '--name', 'From CLI', '--type', 'video');
   expect(
@@ -141,41 +142,6 @@ it('routes unchanged CLI commands, queries and undo/redo through another process
     revision: 4,
     undo: [expect.anything(), expect.anything()],
   });
-});
-
-it('rejects a prepared stale operation and never drops a successful concurrent edit', async () => {
-  await launch();
-  let release!: () => void;
-  let ready!: () => void;
-  const started = new Promise<void>((resolve) => {
-    ready = resolve;
-  });
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const pending = updateProjectFile(path, async (project) => {
-    ready();
-    await gate;
-    return {
-      project: addTrack(project, { name: 'Stale', type: 'video' }).project,
-      result: null,
-    };
-  });
-  const rejected = expect(pending).rejects.toMatchObject({
-    code: 'REVISION_CONFLICT',
-  });
-  await started;
-  await add('Winner', 0);
-  release();
-  await rejected;
-  expect(
-    (await readProjectFile(path)).tracks.map((track) => track.name),
-  ).toEqual(['Winner']);
-  const outcomes = await Promise.allSettled([add('A', 1), add('B', 1)]);
-  expect(
-    outcomes.filter((outcome) => outcome.status === 'fulfilled'),
-  ).toHaveLength(1);
-  expect(projectRevision(await readProjectFile(path))).toBe(2);
 });
 
 it('does not submit an aborted edit to the active project session', async () => {
@@ -198,49 +164,6 @@ it('does not submit an aborted edit to the active project session', async () => 
   expect(projectRevision(await readProjectFile(path))).toBe(0);
 });
 
-it('notifies the GUI session, shares GUI undo, and keeps dry-run bytes/history unchanged', async () => {
-  const events: number[] = [];
-  const session = new ProjectSession(
-    {
-      open: async () => path,
-      save: async () => null,
-      unsaved: async () => 'discard',
-    },
-    undefined,
-    (state) => events.push(projectRevision(state!.project)),
-  );
-  sessions.push(session);
-  expect(await session.run('open')).toMatchObject({ ok: true });
-  await add('Shared');
-  expect(events).toEqual([1]);
-  const project = await readProjectFile(path);
-  expect(
-    await session.run('undo', {
-      projectId: project.metadata.id,
-      expectedRevision: 1,
-    }),
-  ).toMatchObject({ ok: true, state: { dirty: false } });
-  expect(getEditHistory(await readProjectFile(path))).toMatchObject({
-    revision: 2,
-    redo: [expect.anything()],
-  });
-  const before = await readFile(path, 'utf8');
-  await cli('edit', 'redo', path, '--dry-run', '--expected-revision', '2');
-  expect(await readFile(path, 'utf8')).toBe(before);
-  expect(events).toEqual([1]);
-  const error = await cli(
-    'edit',
-    'undo',
-    path,
-    '--expected-revision',
-    '0',
-  ).catch((error: { stderr: string }) => JSON.parse(error.stderr));
-  expect(error).toMatchObject({
-    ok: false,
-    error: { code: 'REVISION_CONFLICT' },
-  });
-});
-
 it('recovers ownership and durable history after SIGKILL, including a stale socket', async () => {
   const child = await launch();
   await add('Before crash');
@@ -260,39 +183,60 @@ it('recovers ownership and durable history after SIGKILL, including a stale sock
   expect(projectRevision(await readProjectFile(path))).toBe(3);
 });
 
-it('does not silently fall back when the session dies after preparing an edit', async () => {
+it('finishes the same edit when the viewer dies during the transaction', async () => {
   const child = await launch();
-  await expect(
-    updateProjectFile(path, async (project) => {
-      const ended = once(child, 'exit');
-      child.kill('SIGKILL');
-      await ended;
-      return {
-        project: addTrack(project, { name: 'Never committed', type: 'video' })
-          .project,
-        result: null,
-      };
-    }),
-  ).rejects.toMatchObject({ code: 'SESSION_DISCONNECTED' });
-  expect(projectRevision(await readProjectFile(path))).toBe(0);
+  await updateProjectFile(path, async (project) => {
+    const ended = once(child, 'exit');
+    child.kill('SIGKILL');
+    await ended;
+    return {
+      project: addTrack(project, { name: 'Committed', type: 'video' }).project,
+      result: null,
+    };
+  });
+  expect(projectRevision(await readProjectFile(path))).toBe(1);
 });
 
-it('reports a lost commit reply without replaying a durably accepted edit', async () => {
-  const child = await launch('crash-after-commit');
-  const exited = once(child, 'exit');
-  await expect(add('Accepted before lost reply', 0)).rejects.toMatchObject({
-    code: 'SESSION_DISCONNECTED',
+it('publishes increasing revisions and preserves history across CLI undo and redo', async () => {
+  const events: number[] = [];
+  const viewer = new ProjectSession({ open: async () => path }, (state) => {
+    if (state) events.push(projectRevision(state.project));
   });
-  // Socket closure can precede process exit and release of the OS writer lock.
-  await exited;
-  const current = await readProjectFile(path);
-  expect(projectRevision(current)).toBe(1);
-  expect(current.tracks.map((track) => track.name)).toEqual([
-    'Accepted before lost reply',
-  ]);
-  await expect(add('Blind retry', 0)).rejects.toMatchObject({
+  sessions.push(viewer);
+  await viewer.run('open');
+  await add('External', 0);
+  await vi.waitFor(() => expect(events.at(-1)).toBe(1));
+  const before = await readFile(path, 'utf8');
+  await cli('edit', 'undo', path, '--dry-run', '--expected-revision', '1');
+  expect(await readFile(path, 'utf8')).toBe(before);
+  await cli('edit', 'undo', path, '--expected-revision', '1');
+  await cli('edit', 'redo', path, '--expected-revision', '2');
+  await vi.waitFor(() => expect(events.at(-1)).toBe(3));
+  expect(events).toEqual([...new Set(events)].sort((a, b) => a - b));
+});
+
+it('allows exactly one of two headless writers based on the same revision', async () => {
+  await launch();
+  const outcomes = await Promise.allSettled([add('A', 0), add('B', 0)]);
+  expect(outcomes.filter(({ status }) => status === 'fulfilled')).toHaveLength(
+    1,
+  );
+  await expect(add('Stale', 0)).rejects.toMatchObject({
     code: 'REVISION_CONFLICT',
   });
+  expect(projectRevision(await readProjectFile(path))).toBe(1);
+});
+
+it('rejects project mutations on the review control socket', async () => {
+  await launch();
+  await expect(
+    requestSession(await reviewEndpoint(path), {
+      version: 1,
+      type: 'update',
+      json: '{}',
+    }),
+  ).rejects.toThrow();
+  expect(projectRevision(await readProjectFile(path))).toBe(0);
 });
 
 it('releases a crashed standalone writer without publishing its incomplete transaction', async () => {
@@ -306,30 +250,7 @@ it('releases a crashed standalone writer without publishing its incomplete trans
   expect(projectRevision(await readProjectFile(path))).toBe(1);
 });
 
-it('rejects invalid protocol messages and stale session identities without writing', async () => {
-  await launch();
-  const before = await readFile(path, 'utf8');
-  await expect(
-    requestSession(path, { version: 99, type: 'read' }),
-  ).rejects.toThrow();
-  await expect(
-    requestSession(path, {
-      version: 1,
-      type: 'update',
-      sessionId: 'previous-session',
-      base: 'wrong',
-      json: before,
-      options: {},
-    }),
-  ).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
-  await expect(
-    requestSession(path, { version: 1, type: 'read', path: '/etc/passwd' }),
-  ).rejects.toThrow();
-  expect(await readFile(path, 'utf8')).toBe(before);
-  expect(projectRevision(await readProjectFile(path))).toBe(0);
-});
-
-it('keeps OS ownership after failed same-process acquisitions and refuses a second GUI', async () => {
+it('keeps OS ownership after failed same-process acquisitions and allows a second read-only viewer', async () => {
   const writer = await acquireProjectWriter(path);
   try {
     await expect(acquireProjectWriter(path)).rejects.toMatchObject({
@@ -348,13 +269,10 @@ it('keeps OS ownership after failed same-process acquisitions and refuses a seco
   await launch();
   const session = new ProjectSession({
     open: async () => path,
-    save: async () => null,
-    unsaved: async () => 'discard',
   });
   sessions.push(session);
   expect(await session.run('open')).toMatchObject({
-    ok: false,
-    error: expect.stringContaining('locked'),
+    ok: true,
   });
 });
 

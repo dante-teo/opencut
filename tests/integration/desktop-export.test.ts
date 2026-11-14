@@ -34,6 +34,7 @@ const summary = {
 };
 const settings = exportPresets[0]!.settings;
 const input = () => ({
+  view: current.view,
   projectId: current.project.metadata.id,
   expectedRevision: projectRevision(current.project),
   settings,
@@ -49,8 +50,8 @@ beforeEach(async () => {
         frameRate: { numerator: 30, denominator: 1 },
       },
     }),
-    path: null,
-    dirty: true,
+    path: '/projects/snapshot.json',
+    view: 1,
     media: [],
   };
   changes = [];
@@ -81,10 +82,10 @@ async function finished() {
   await vi.waitFor(() => expect(session.active).toBe(false));
   return session.current()!;
 }
-it('captures an unsaved snapshot and resolved original plan, independent of subsequent edits', async () => {
+it('captures a committed snapshot and resolved original plan, independent of subsequent edits', async () => {
   let release!: () => void;
   vi.mocked(resolveProjectRender).mockImplementation(async (project, path) => {
-    expect(path).toMatch(/Untitled.opencut.json$/);
+    expect(path).toBe('/projects/snapshot.json');
     await new Promise<void>((resolve) => {
       release = resolve;
     });

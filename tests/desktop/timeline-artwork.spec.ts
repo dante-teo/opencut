@@ -4,9 +4,9 @@ import { expect, test } from '@playwright/test';
 import { serializeProject } from '@opencut/core';
 import { runMediaTool } from '../../packages/media/src/process.js';
 import { auditProjects } from '../../scripts/t21-projects.js';
-import { launchDesktop } from './helpers.js';
+import { launchDesktop, commitReviewEdit } from './helpers.js';
 
-test('timeline filmstrips and real waveforms follow trims, remain editable, and fit the workspace', async () => {
+test('timeline filmstrips and real waveforms follow headless trims, and fit the workspace', async () => {
   test.setTimeout(120000);
   await mkdir(resolve('tests/fixtures/generated'), { recursive: true });
   const directory = await mkdtemp(resolve('tests/fixtures/generated/artwork-'));
@@ -157,7 +157,7 @@ test('timeline filmstrips and real waveforms follow trims, remain editable, and 
     await page
       .getByRole('button', { name: 'Inspect clip preview-0', exact: true })
       .click();
-    await expect(page.getByLabel('Source in', { exact: true })).toBeVisible();
+    await expect(page.getByText('Source', { exact: true })).toBeVisible();
     const stage = page.locator('.timeline-stage');
     const before = (await stage.boundingBox())!.height;
     await page.locator('.timeline-diagnostics summary').click();
@@ -225,10 +225,11 @@ test('timeline filmstrips and real waveforms follow trims, remain editable, and 
       }),
     );
     expect(stale).toBeNull();
-    await page
-      .getByRole('button', { name: 'Trim start of preview-0', exact: true })
-      .focus();
-    await page.keyboard.press('ArrowRight');
+    await commitReviewEdit(page, path, {
+      type: 'clip.trim',
+      id: 'preview-0',
+      in: 31,
+    });
     await expect(filmstrip.first()).toHaveAttribute('data-status', 'ready', {
       timeout: 30000,
     });
@@ -551,9 +552,11 @@ test('long source artwork stays aligned through viewport changes and a split on 
       await page
         .getByRole('slider', { name: 'Timeline playhead' })
         .click({ position: { x: 720, y: 20 } });
-      await page
-        .getByRole('button', { name: 'Split at playhead', exact: true })
-        .click();
+      await commitReviewEdit(page, path, {
+        type: 'clip.split',
+        id: 'long',
+        at: 35655,
+      });
       await expect
         .poll(() =>
           page.evaluate(async () => {

@@ -18,7 +18,7 @@ import {
 import { frameTime, serializeProject, type Project } from '@opencut/core';
 import { auditMedia, auditProjects } from '../../scripts/t21-projects.js';
 import type { TimelineDiagnostics } from '../../apps/desktop/src/renderer/timeline-playback.js';
-import { launchDesktop } from './helpers.js';
+import { launchDesktop, commitReviewEdit } from './helpers.js';
 
 const root = resolve('tests/fixtures/generated');
 let directory: string;
@@ -757,7 +757,7 @@ test('edits, interruption, source isolation, missing media and grant revocation'
   try {
     await audioMeter(page);
     const project = auditProjects().mixing!;
-    await open(application, page, project, 'lifecycle');
+    const path = await open(application, page, project, 'lifecycle');
     await page
       .locator('#project-viewer')
       .getByRole('button', { name: 'Play', exact: true })
@@ -773,7 +773,12 @@ test('edits, interruption, source isolation, missing media and grant revocation'
     await page
       .getByRole('button', { name: 'Inspect clip music', exact: true })
       .click();
-    await page.getByLabel('Mute', { exact: true }).check();
+    await commitReviewEdit(page, path, {
+      type: 'clip.audio',
+      id: 'music',
+      muted: true,
+    });
+    await page.locator('.timeline-diagnostics summary').click();
     await expect.poll(async () => (await report(page)).playing).toBe(false);
     await expect
       .poll(async () => (await spectrum(page)).rms)

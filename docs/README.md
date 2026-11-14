@@ -1,7 +1,9 @@
 # OpenCut
 
-A lightweight desktop video editor for creators, with a GUI and a scriptable
-headless core. **T04 adds an isolated Electron video preview with play/pause, seeking,
+A local video editor with a scriptable headless core and an Electron review
+and export app. The milestones below describe the earlier development of OpenCut.
+
+**T04 added an isolated Electron video preview with play/pause, seeking,
 nominal frame stepping and reproducible performance measurements.** The independent
 CLI supports inspection, frame extraction and the T03 composition spike.
 T05 adds a headless [project model and JSON file format](PROJECT_FORMAT.md) with
@@ -41,7 +43,7 @@ muxed timestamps against the headless export.
 T28 adds [desktop video export](EXPORT.md): native output selection, presets,
 resolution/FPS/codec/quality controls, preflight validation, progress and cancellation.
 Exports capture an immutable revision, use original media, and publish only verified
-complete files without overwriting existing destinations. Hide the panel to keep editing.
+complete files without overwriting existing destinations. Hide the panel to keep reviewing.
 
 T29 adds [agent discovery and headless visual inspection](CLI.md#agent-discovery-and-visual-inspection-t29):
 `help --json`, revision-tagged project inspection, exact frame-based timeline
@@ -53,7 +55,7 @@ to 30 seconds and sheets to 16 samples; existing export limits still apply.
 T30 adds the [TypeScript workspace SDK](SDK.md) and
 [`opencut run`](CLI.md#typescript-scripts-and-sdk-t30) for trusted local scripts.
 Scripts can stage edits, inspect and render them, and publish the edits as a
-single undo step in headless or open Electron projects.
+single undo step while Electron reviews the project.
 
 T31 delivers the portable [OpenCut Agent Skill](../skills/video-editor/SKILL.md)
 and [black-box agent validation](#external-agent-validation). The Skill uses
@@ -75,26 +77,10 @@ T40 documents the public CLI and SDK editing paths in the
 [headless capability matrix](HEADLESS_CAPABILITIES.md), including online media
 search and import.
 
-Select a media clip to edit **Timeline position**, **Duration**, **Source in/out** in
-whole project frames, **Volume** (linear 0–1), **Mute**, **Fade in/out**, and video **Position X/Y**
-(pixels), **Scale** (0.01–4), and **Opacity** (0–1). Enter or leave a numeric field
-to apply; Escape discards its draft. Sliders apply on release as one undo entry.
-Typing in another field while an edit finishes preserves that field's draft.
-Changes to its stored value, including undo/redo, synchronize the field.
-Core validation rejects overlaps, invalid source ranges and invalid values without
-changing the project. Off-grid or unrepresentable timing remains visible as exact
-stored times but cannot be silently rounded through the numeric editor.
-Source preview plays original media. Project viewer applies clip volume/mute and
-mixes overlapping audio and composites ordered video, image and text layers.
-
-Outside text fields and native controls, **Space** toggles the active viewer,
-**Command+Z / Command+Shift+Z** undo/redo, **Command+S** saves, **S** splits at the
-playhead, and **Delete/Backspace** removes the selected clip. Windows/Linux use
-Control as the command modifier. Left/Right step the active video source, or the
-project playhead in Project viewer. Focused clips and edge handles retain their
-existing arrow-key move/trim behavior; controls retain their native keys.
-Undo/redo spans library imports, timeline gestures and properties, restores a
-deleted clip's selection when it returns, and remains available after save/reopen.
+T41 makes Electron a read-only review and export app. Create and edit projects
+with the CLI or SDK. Open a saved project in Electron to inspect its revision,
+play the timeline, compare it with its source or rendered preview, and export
+the selected revision.
 
 ## Quick start (macOS)
 
@@ -118,269 +104,26 @@ running. On macOS it uses a normal resizable window with native window buttons
 and a hidden title bar. Drag the header, including the space above the logo,
 to move the window.
 
-Use **New project** to enter a name, width, height and integer or rational frame
-rate (for example, `30000/1001`). **Create project** opens an unsaved project;
-**Save project** chooses a new `.opencut.json` file in an existing directory.
-Existing files and symlinks are refused for new projects, even if the native
-save dialog offers replacement. **Open project** reads the same JSON files as
-the CLI. **Save project** on an existing project uses the core's lock, revision
-check and atomic update; saving unchanged content preserves timestamps and history.
-External changes are refused: reopen the project to refresh before saving.
-On macOS, first Save on exFAT can fail with `Writer sidecar changed during acquisition`.
-Use a local APFS volume for the project file in that case. See the
-[shared writer limits](adr/0011-shared-project-session.md#failure-semantics-and-limits).
+Open a saved project with **Open project**. The toolbar shows the revision in
+view. CLI or SDK commits refresh the timeline automatically. Use **Open project**
+again to load a backup or replacement that reuses the same revision, goes back
+to an older revision, or has a different project ID. If OpenCut cannot read the
+replacement, the viewer keeps the last valid project open.
 
-Project metadata/settings, imported assets (including missing-media warnings),
-and video/audio tracks and clips appear in a docked editor workspace: media
-library on the left, viewer in the center, inspector on the right, and a timeline
-below. Select an asset or clip to inspect its stored details. Timeline blocks
-show relative positions and durations. Video and still clips have filmstrips.
-Video clips with audio and audio-only clips also show waveforms. Artwork follows
-the trimmed source range and loads for visible clips with FFmpeg. Placeholders
-appear while artwork loads or if decoding fails. The graphics show source
-content before applying clip transforms or gain.
-See [timeline artwork](TIMELINE_PLAYBACK.md#timeline-clip-artwork) for sampling,
-cache and hardware-decoding behavior.
+The media library shows imported files and availability. Select an asset for
+source playback or a timeline item for details. **Preview selected clip** links
+a timed clip on a video track to the source player. Open audio and still images
+from the media library. Use the ruler or timeline slider to seek. Space toggles
+playback and Left/Right step frames outside native controls.
+The timeline keeps its scroll and zoom on revision updates. Its filmstrips and
+waveforms show the original source samples within each clip's trimmed range.
 
-Stored timing remains exact. The inspector uses project timecode for frame-aligned
-timing and rational seconds for off-grid boundaries. If either source-range
-endpoint is off-grid, both endpoints retain their exact rational values.
-Playback and cache disclosures open over the viewer without resizing the picture;
-diagnostics use readable values instead of JSON. T22 synchronizes CLI edits
-through the active session and pushes updates immediately; there is no
-file-watching loop.
-Project management needs no FFmpeg or ffprobe. Closing, quitting, creating or
-opening another project offers **Save**, **Discard**, and **Cancel** when the
-current project is unsaved. Canceled dialogs and failed saves preserve it; failed
-opens leave the current project displayed. Operations run one at a time, with
-loading indicators and errors shown in the workspace. New projects and edited
-timelines can be unsaved. **Save snapshot** writes a separate project copy and
-**Package project** gathers the project and media in a new folder. Use **Export**
-for local MP4 export.
-
-Use **Import media** to choose several video, audio or image files, or drop files
-from Finder into the media library. Import requires ffprobe on PATH; original
-files are referenced in place. Each batch is one undoable edit and commits only
-if every source succeeds. Existing file identities (including aliases) reuse the
-existing asset. Progress identifies the current file; errors preserve the session.
-Picker imports and file drops queued while a property edit is applying run after
-that edit, using the resulting project revision. The property change and import
-remain separate undo steps.
-Unsaved projects can import before their first save, using absolute references.
-Saving preserves those absolute references; it does not relocate the media or
-convert them to project-relative paths.
-
-With a project open, choose **Browse online** to search Wikimedia Commons for
-images, audio or video, or Openverse for images and audio. Search and previews
-use the providers' public services without an account, API key or OpenCut
-server. Results show the creator and reuse terms. **Open source** opens the
-provider's original listing. **Add to project** downloads the file into
-OpenCut's application data and imports it as one undoable edit. Imports support
-files up to 512 MiB. Wikimedia videos in formats that the editor cannot play,
-such as Ogg Theora, use the best available Wikimedia WebM rendition. When a
-result offers only **Open source**, download the file there and use the local
-importer. GIF and APNG results appear in image searches. On import, OpenCut
-classifies them as timed video when ffprobe reports a duration and as still
-images when it does not. Openverse direct downloads currently support Wikimedia
-Commons files and Flickr images.
-
-Imported media plays and exports offline. Keep the downloaded originals in
-place, including when restoring or moving a project to another machine. Select
-the imported asset in **Project** to read its source and credits. The project
-records the provider, creator, source and license. Verify reuse requirements on
-the source page before publishing, especially for ShareAlike works.
-
-Use **Search media** to filter filenames, and **Filter media type** to show video,
-audio or images. Filters combine, affect only the library view, and reset when
-switching to a different project. **Clear filters** shows the full library when a
-search has no matches.
-
-The library shows type, duration and cached video thumbnails when FFmpeg is available;
-still thumbnails use the native service where supported, with icon fallback. Select media for source
-preview: video uses the existing transport, audio uses native playback controls,
-and images show a still. Browser codec support limits source playback.
-Drag a library asset onto a compatible track, or onto **+ Video track** / **+ Audio
-track** to create a track and clip together at the playhead. Drop x-position includes timeline
-scroll and zoom, rounds to project frames and respects **Snap**. Timed sources use
-all complete project frames; stills default to the nearest five-second frame
-count. A video with audio may also be placed on an audio track. Core validation
-rejects overlaps and incompatible tracks without partial changes. External files
-must enter through the library first; scroll manually to reach distant lanes.
-Select an unused asset and click **Remove asset**; used assets are protected.
-Named projects automatically persist library changes, clips and shared undo/redo history;
-`media list` and `timeline list` expose the same saved data in the CLI.
-
-The timeline preserves project track order, with separate video/audio styling.
-Gaps and overlaps across tracks follow stored rational timing. Select a clip for
-inspection; selection leaves the playhead unchanged. Click/drag the ruler to seek,
-or focus it and use Left/Right (one project frame) and Home/End. The timeline clock
-uses exact project-frame non-drop labels, including `30000/1001`. Choose **Zoom**
-or use +/− to zoom around the viewport center. Ctrl/Command + wheel zooms around
-the pointer. Use horizontal/vertical scrolling to reach distant clips and tracks.
-Zoom, both scroll axes, and snapping preferences survive synchronized CLI edits
-and undo/redo. Zoom and scroll also survive selection, playback and saving;
-replacing/reopening the project resets view state. Older backups can be opened
-even when they retain the same project ID and have a lower revision.
-Clips and tracks outside the viewport are culled.
-Ruler ticks support valid rational rates even when their frame times exceed JSON
-integer limits. In that case, playhead seeks and preview positions use a bounded
-rational approximation; extreme rates or positions can skip frame labels.
-See the [exact-time contract](PROJECT_FORMAT.md#exact-time) for the distinction
-between transient UI positions and persisted project timing.
-
-Drag a clip body to move it; drag vertically to another compatible track. Drag
-an edge to trim the source range, keeping the opposite timeline edge fixed.
-The core enforces source limits, track compatibility and no same-track overlaps.
-A translucent outline shows the core-validated proposal; invalid proposals mark
-the original clip red and show an error. Release commits one undoable transaction.
-Escape, pointer cancellation, lost capture or window blur cancel a gesture. Pointer
-movement never writes the project file. Completed edits and history are saved
-atomically for named projects; errors retain the last valid session.
-**Save project** gives an untitled project its first path or checks a named project's consistency.
-
-**Snap** aligns either moving edge or the trimmed edge to other clips' boundaries,
-sequence zero or the playhead. **Snap px** configures the screen-pixel radius
-(default 8), independent of zoom; disable Snap for frame-only positioning. Edited
-boundaries use integer project frames. On a clip with a stored playback speed,
-edge trims map those positions to exact source times. For clips using the
-implicit 1× default, edge trims require a frame-aligned clip start and source-in.
-Use `clip trim --in-time` or `--out-time` to edit exact source seconds at any
-speed. Before trimming the left edge of a title, align its right edge to a
-project frame.
-**Split at playhead** (S) splits the selected clip; **Delete clip**
-(Delete/Backspace) removes it. **Undo** / **Redo** and Ctrl/Command+Z / Shift+Z
-restore shared CLI/GUI history, including after save/reopen.
-Shared history can also restore or remove imported asset entries. When undo/redo
-changes assets or their references, the library refreshes availability before
-accepting the restored state; a failed refresh retains the previous session.
-This also applies before the first save: undoing an unused asset's removal restores
-its current availability, so readable sources can be dragged again and missing
-sources remain marked offline. This checks source readability without re-probing codecs or changing source files.
-Clip-only edits keep the existing availability snapshot. Reopen the project to
-refresh availability after external file changes.
-
-Focus a clip and use Left/Right to move one frame (Shift: ten); Up/Down moves it
-to the next compatible track. Focus an edge handle and use Left/Right to trim.
-Keyboard edits use frame stepping without proximity snapping. Scroll to reach
-other tracks/times; there is no automatic edge scrolling during a drag. Zoom is
-locked while dragging. Successful edits and undo/redo pause and unlink source preview,
-retaining the project playhead.
-Use **Export** to render the edited project.
-Use the **Export frame** camera button in the Project viewer to save a PNG
-of the composited frame at the playhead.
-
-In the Inspector, **Fit → Cover** fills the canvas and **Crop** trims the
-edges of the fitted layer. Project settings allow resizing the canvas. Use
-**Replace media** to change the source of a clip, optionally shifting later
-clips on the same track. **Freeze at playhead** writes a PNG and inserts a held
-frame. **Flash from white** adds an animated white overlay. **Color**
-adjusts exposure, white balance, contrast, saturation and a piecewise linear
-curve, and can copy the grade to other clips.
-
-In the timeline, select the incoming video clip and open **Transitions** to
-add a **Cross-dissolve**. The clips must touch on the same track and have enough
-trimmed source media on both sides of the cut. The dissolve preserves clip
-positions, project duration and audio timing. The same menu adds picture fades,
-and selecting a transition bar opens its duration and removal controls.
-
-Use **Relink media** in an offline asset's information panel to restore the
-source while preserving clip references. **Import font** embeds a TTF/OTF
-file of up to 2 MiB in the selected title or subtitle cue. Subtitles can use
-shadow, highlighted words, an entrance pop, and a style applied to selected cues.
-Select a cue and open **Word timing** in the Inspector to assign each word a
-start and end in seconds relative to the cue. The initial rows divide the cue
-evenly. Adjust them to match the speech, then click **Apply word timing**.
-Timed highlights appear in the Project viewer and in burned-in exports.
-
-**Detach audio** puts the original audio on a new track and mutes the video clip.
-Volume keyframes multiply the existing fades and gains. Audio effects can be
-ordered and edited per clip, with Dialogue and Room presets. **Separate dialogue**
-imports two sample-aligned WAV files, dialogue and residual background, after
-local Bandit v2 inference. See [dialogue model setup](CLI.md#dialogue-separation).
-
-Use **Add text** to create a clip of about three seconds at the playhead on a
-new text track. Edit its content, timing, typography and effects in the
-Inspector, then choose **Apply text** to commit the fields as one undo step.
-Use the Project viewer to check the result. The CLI and SDK use the same
-[text operations](CLI.md#text-layers-t33).
-
-Select a video clip and click **Preview selected clip** to link source playback.
-This explicit action sets the playhead to the clip start and opens its source-in.
-Ruler seeks within the linked clip seek the matching source time. Source playback
-updates the playhead, clamped to the clip range, while the source transport retains
-its full-source bounds. Selecting another clip only changes the inspector; the
-source link stays with the explicitly previewed clip. Seeking outside the linked
-range switches to Project viewer and pauses/unlinks the source. Library selection
-and **Open video** also unlink. Audio, image and text clips have no linked source preview;
-linked source playback stays within that source. Project viewer provides edited
-timeline cuts/gaps, audio mixing and ordered video, image and text compositing.
-Very long timelines use a proportional scrollbar to stay within browser layout
-limits; scrollbar precision becomes coarser at extreme durations.
-
-Known limitation: after repeated ruler seeks, pressing **Play** can intermittently
-leave the linked source paused, with its source clock and the timeline playhead
-remaining fixed.
-
-In **Project viewer → Preview quality**, use **Exact paused frames** to check
-which source frame covers the playhead, or **Render full timeline** to review
-a cached MP4 with mixed audio on the project frame grid. **Live preview**
-returns to interactive Chromium playback. See [controls and limits](TIMELINE_PLAYBACK.md).
-
-Select an imported video in the media library to open **Source preview**
-automatically, or use **Open video**
-for a local file. CLI imports update the open library immediately.
-In Source preview, Play/Pause, the Seek slider and Previous/Next frame operate on one source.
-Imported video preview reuses the metadata saved at import and needs no new
-ffprobe call. Selecting an asset checks that its file is still readable; reopening
-a project refreshes availability, without refreshing stored codec/FPS metadata.
-The preview scales to fit while preserving the video's aspect ratio.
-Focus the player region for Space/K (play/pause), Left/Right or comma/period
-(step), and Home/End (start/end). Inputs and buttons retain their own keyboard
-behavior. Changing viewer tabs pauses playback.
-
-Time and duration are seconds; Presented is the last compositor frame PTS.
-With a project open, Frame is the zero-based project-clock position and timecode
-uses project FPS with nominal non-drop labels (including fractional rates).
-For example, at `30000/1001` fps, `00:01:00:00` labels frame 1800 at 60.06 seconds.
-Stepping seeks by one project frame interval. Outside a project, frame numbers
-and steps use average source FPS from optional `ffprobe`; without it, playback
-and timestamp seeking still work but stepping/timecode are unavailable.
-HTML video seeks are best effort: VFR, source/project rate differences, stream
-offsets and codec support can repeat or skip decoded frames. Nominal frame
-positions and timecode do not establish frame-accurate seeking or source frame IDs.
-Imported assets use the browser's duration as the seek bound. When audio extends
-beyond the video stream, the clock can continue over the final picture; Presented
-can remain at the last video timestamp while the nominal project frame advances.
-Dragging the seek slider stages a target and seeks when released; keyboard changes
-seek immediately. **Open video** disables the current player's controls during
-selection/probing, and stays disabled during a seek, drag or performance validation.
-Library selection can replace a busy player and cancels its pending work.
-Unsupported codecs and missing files show an error. After repairing a source,
-reselect the asset, including clicking the same asset again to retry. Audio and image
-assets open their own source previews; switching to Project viewer pauses audio.
-Asset replacement pauses/unloads the old media element and revokes its media URL. Closing or
-replacing a project clears the player. Preview state is transient and does not
-modify the project or source files. This is source playback; it does not composite
-timeline tracks or implement editing/render controls.
-
-Open **Details & shortcuts** for source-frame diagnostics and
-**Run performance validation**, which runs a positioning seek, three warm-up seeks,
-30 fixed target seeks, then up to eight seconds of playback. Keep the window visible.
-Open **Details & measurements** after validation for median/p95 seek latency,
-dropped frames and waiting events in a readable report. The disclosure also
-explains keyboard controls and preview precision limits.
-For the reproducible fixture/1080p suite, run `pnpm test:preview` after generating
-fixtures. It uses FFmpeg/ffprobe already on PATH, creates and cleans only an owned
-`tests/fixtures/generated/t04-*` directory, and writes environment, raw samples,
-source hashes, metadata and screenshots under ignored `test-results/preview-performance/`.
-It tests the production build and native picker IPC (stubbing only the dialog result).
-The shell/security checks run without fixtures or media tools. Fixture-backed
-playback, dragging and import/validation regressions need the generated fixture
-set and `ffprobe` on PATH for nominal frame assertions; individual cases skip
-when their required fixtures are absent. A separate case deliberately removes ffprobe from the
-app's PATH to verify basic playback and timestamp seeking without it.
-See [the preview architecture decision](adr/0003-html-video-preview.md) for the
-measurement definitions, findings, recommendation and accuracy limits.
+Use **Render full timeline** to compare with the cached FFmpeg preview.
+The viewer resets the preview when it accepts a new revision.
+**Export** opens the MP4 settings and job progress. A running job retains its
+starting revision while the viewer follows new commits. **More export options**
+provides project snapshots, packages and subtitle exports when available.
+See [desktop export](EXPORT.md) and [desktop control](CLI.md#rendered-preview-and-desktop-control).
 
 To use the CLI independently:
 
@@ -472,22 +215,17 @@ when running `pnpm test:desktop` to show the windows for debugging. The full
 desktop suite requires FFmpeg/ffprobe with lavfi, libx264, libx265, libvpx-vp9,
 PNG and AAC support. The suite uses the project's Electron executable.
 
-Project regressions cover GUI/CLI file compatibility, offline
-assets, invalid files, stale saves, unsaved-close/quit choices, loading states and
-IPC rejection from another window. T28 export checks cover original-media snapshots
+Project regressions cover opening headless projects in Electron, offline assets,
+invalid files and IPC rejection from another window. T28 export checks cover original-media snapshots
 with active proxies and concurrent edits, metadata/presets/output FPS/HEVC, missing
 media/tools, output conflicts, cancellation, failure recovery and shutdown cleanup.
 A restoration regression checks fresh output selection after renderer reload and
 macOS window recreation, canceled pickers and preservation of the prior export.
 These tests exercise the production preload and main handlers with native dialog
-results stubbed; real native dialog interaction is a separate manual check. T19 regressions cover unsaved import/remove/undo/redo,
-readable and missing source availability, and dragging restored library assets.
-T20 regressions cover numeric properties and rejected values, slider history,
-keyboard focus, restored clip selection, and save/reopen against CLI inspection.
-They hold a real edit IPC request pending to verify that another field's draft
-survives its response and that queued picker/file-drop imports use the accepted
-revision with separate undo entries. These checks use explicit release events,
-not timing delays; the import cases require the generated video fixture and ffprobe.
+results stubbed. Library regressions exercise CLI imports, search and filtering,
+source playback, and refresh after headless undo and redo. Timeline regressions
+cover linked video seeking and verify that audio tracks and stills cannot start
+a linked preview.
 T24–T26 checks cover multi-layer preview, proxy fallback/budgets, rapid seeks,
 visual property edits with undo/redo, preview/export frame comparisons and audio
 pulse/flash synchronization. See [the playback contract](TIMELINE_PLAYBACK.md)
@@ -495,10 +233,11 @@ for coverage, tolerances and benchmark definitions. T27 adds the
 [preview/export consistency gate](PREVIEW_EXPORT_CONSISTENCY.md), also runnable
 with `pnpm test:consistency`, with full-frame metrics, diffs and independent
 source-frame and audio checks.
-T22's `tests/desktop/shared-session.spec.ts` covers older backups opened from a
-different file or restored at the same path, subsequent GUI undo, and timeline
-navigation/snapping preservation after CLI edits and undo. A gated Save reply
-checks that a delayed response cannot replace a newer pushed CLI revision.
+The T41 review and export tests exercise revision refresh after CLI commits,
+revocation of older previews, read-only timeline inspection, export isolation
+during headless edits, and continued CLI editing after Electron is killed.
+Integration tests cover reopening older backups, socket setup failure and
+registration after another viewer closes, and requests from a previous view.
 The audio regression additionally runs the development renderer with StrictMode
 replay and verifies playback, pausing when hidden, unloading on replacement, and
 reselection. It needs port 5173 free and cleans its Vite cache from an owned

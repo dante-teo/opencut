@@ -120,7 +120,7 @@ export async function importMediaAsset(
   );
 }
 
-/** Shared import preparation for disk transactions and unsaved desktop sessions. */
+/** Shared import preparation for disk transactions and staged SDK edits. */
 export async function prepareMediaAsset(
   original: Project,
   path: string,
@@ -459,18 +459,9 @@ export async function freezeProjectFrame(
       },
     );
   } catch (error) {
-    if (
-      !(error instanceof SessionError) ||
-      [
-        'REVISION_CONFLICT',
-        'SESSION_CHANGED',
-        'SESSION_BUSY',
-        'SESSION_CLOSED',
-        'UPDATE_FAILED',
-        'INVALID_TRANSACTION',
-        'SESSION_TOO_LARGE',
-      ].includes(error.code)
-    )
+    if (!(
+      error instanceof SessionError && error.code === 'COMMIT_OUTCOME_UNKNOWN'
+    ))
       await discard?.().catch(() => {});
     throw error;
   }

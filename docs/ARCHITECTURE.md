@@ -24,10 +24,10 @@ JavaScript and declarations rather than TypeScript path aliases.
 `getApplicationInfo()` provides a small, usable integration proof. CLI imports it
 directly. Desktop main imports it and answers the renderer's narrow read-only IPC
 request. React holds only view state for that response; it owns no editing state.
-Future GUI actions, CLI commands and scripts must execute the same core editing
-operations. T05 adds a versioned project model and persistence; T08 implements
-pure timeline operations shared by CLI and future GUI callers. T09 adds pure
-transaction dispatch and persistent snapshot history over those operations.
+CLI commands and SDK scripts share the core editing operations. Electron
+loads their saved revisions for review and export. Core provides the versioned
+project model, pure timeline operations, transaction dispatch, and persistent
+snapshot history.
 The application version is currently returned by core and kept aligned with the
 workspace manifests; release/version automation is deferred.
 
@@ -342,7 +342,7 @@ Electron main owns native privileges. React runs with `contextIsolation: true`,
 `nodeIntegration: false`, `sandbox: true`, web security enabled and webviews
 disabled. A bundled **CommonJS preload** exposes typed capabilities including:
 `getApplicationInfo()`, `openPreview()`, `getPreviewMetrics()`, `getProject()`,
-`createProject(input)`, `openProject()`, `saveProject()`, `closeProject()`,
+`openProject()`, `closeProject()`,
 `previewAsset(assetId)`, `timelineArtwork(id, input)`, `cancelTimelineArtwork(id)`,
 `timelineText(input)`,
 `releasePreview(url)`,
@@ -370,10 +370,9 @@ project or previewing an asset does not re-probe them. Imported sources have no
 separate probed video-end bound, so seeks clamp to browser duration. An audio-only
 tail can advance the project clock over an unchanged final video frame. The native
 picker retains T04's optional probe-derived video-end bound for interactive steps.
-Audio/still selections and unknown IDs fail without granting access. Project media
+Audio and still files use their own players. Unknown IDs fail without granting access. Project media
 preview requires no additional ffprobe call. A generation guard prevents older
-asynchronous selections from replacing a newer grant. Successful project
-create/open/close revokes access, while canceled/failed operations preserve it.
+asynchronous selections from replacing a newer grant. Successful project open, refresh and close revoke access. Canceled or failed opens preserve the active snapshot.
 Releasing an older URL cannot revoke a newer grant.
 Only that exact URL can stream the selected file. Release/replacement/window close revokes
 future requests to the old URL; streams already accepted may finish. Canceled
@@ -388,14 +387,11 @@ Main returns aggregate Electron process CPU and working-set
 samples without exposing process or filesystem APIs. Tests cover token revocation,
 byte ranges, missing ffprobe, and IPC rejection from a second window.
 
-T15's main-process `ProjectSession` owns the current project, path, baseline and
-unsaved status. React uses local hooks for snapshots, inspection selection, viewer
-tabs and operation feedback. The creation dialog keeps field values in HTML
-form controls and reads them with `FormData` on submit. React cannot submit a
-path or replacement document. The desktop uses a three-pane editor workspace (media library, viewer, inspector) above an interactive
-track timeline. Selecting video assets also opens source preview. Playback,
-selection, scroll, zoom and timecode state are never saved in the project. The
-project viewer uses T24 edited-timeline playback, with source preview in a separate tab.
+The main-process review session holds the accepted project snapshot and path.
+React holds selection, viewer tabs, scroll, zoom and playback position locally.
+The workspace places the media library, viewer and inspector above the
+read-only timeline. The source preview and Project viewer have separate
+transports. Selection and playback leave project content and history intact.
 
 T17's React/SVG timeline consumes `Project` directly. A memoized per-track search
 index references existing clips, sorts by exact starts and caches core-derived
@@ -431,9 +427,9 @@ subject to sequence-start/end clamping and browser scroll rounding. Ordinary
 rerenders retain the scroll element and zoom state; a project-session key resets
 both when a different project is opened or the current project is reopened.
 
-An explicit **Preview selected clip** action links one video clip to T16's
-source player. Timeline-to-source mapping uses source-in plus the exact timeline
-delta. The source callback converts observed browser seconds at microsecond
+**Preview selected clip** links a timed video clip on a video track to the
+source player. Timeline-to-source mapping offsets source-in by the clip-local
+timeline delta scaled by the clip's playback speed. The source callback converts observed browser seconds at microsecond
 precision, quantizes to the nearest project frame and clamps the playhead to the
 clip's timeline range. External seek request keys are tracked separately from
 position reports: unchanged reports do not issue new seeks, while an explicit
@@ -444,90 +440,17 @@ outside the linked range pauses/hides and unlinks the source; library/local sour
 selection also unlinks. The source transport still spans the full source; that linked source does not switch clips or apply timeline mixing. T24 playback
 in Project viewer has a separate clock, decoder lifecycle and mixer.
 T16's codec, VFR, stream-offset and approximate HTML seek limitations remain.
-Creation accepts only name/settings and reuses core validation. Main's native file dialogs select paths;
-core `readProjectFile`, `writeProjectFile`, `checkProjectMedia` and
-`updateProjectFile` perform persistence and media checks directly, without CLI
-subprocesses. No new dependencies are needed: React hooks and the existing core
-provide state, schemas and persistence; Electron provides dialogs and IPC.
+The review session opens project files using the Core Node adapter and
+publishes a complete snapshot after checking media references. A path watcher
+coalesces changes to the atomically replaced file. Automatic refresh accepts
+strictly advancing revisions of the same project ID. Project switches and
+reloads have a sequence number so delayed IPC replies cannot replace newer UI
+state. Preview capabilities are revoked before the renderer sees a new
+snapshot. The viewer remounts its player for the new revision.
 
-IPC validates request arity as well as sender identity, and returns discriminated
-success/cancellation/error results. Project operations are serialized across IPC
-and native window-close/quit requests. Unsaved new projects require a native
-Save/Discard/Cancel choice before switching or closing; cancellation or a failed
-save retains the session. Saving clean loaded documents is a core-guarded no-op.
-A serialized baseline check plus the core revision guard
-refuses stale writes, including external same-revision changes. Directory aliases
-are canonicalized, and existing creation destinations and project symlink/hard-link
-updates follow the CLI's refusal rules. History and schema version are unchanged.
-Media availability is refreshed on open and when undo/redo changes the asset
-inventory or references, including unsaved projects; clip-only edits retain the
-availability snapshot. Unsaved sessions use the same fallback project location as
-import, with absolute references resolving directly to their sources. A refresh
-must succeed before the restored session is accepted; failure preserves the prior
-session. This checks readability, without watching files or refreshing probe metadata.
-Project playback uses the T24 timeline capabilities; T28 adds separate export capabilities.
-
-T18 adds narrow `editTimeline`, `undoProject` and `redoProject` preload methods.
-Main checks sender, arity, project identity, revision and request shape, allows only
-clip move/trim/split/remove commands, and uses T09 transactions/history. React
-never sends replacement documents or paths. The core's `previewTransaction`
-executes the same validated primitives without recording history; `executeTransaction`
-commits that result. React memoizes a validated content-only snapshot per project
-state and reuses it throughout a gesture, keeping undo/redo snapshots out of
-pointer-move validation. `createTimelinePreview` removes `editing` before calling
-core `projectSnapshot`, so snapshot preparation also avoids historical validation.
-Accepted project changes invalidate the cache; each gesture retains its original
-preview snapshot. Main still validates the complete project/history and revision
-at commit. The UI adapter translates pointer coordinates into frame
-commands and chooses snap targets; no editing validation is duplicated in React.
-Left trims combine move and trim, ordering shrink/extension to keep intermediate
-states valid, and commit as a single transaction. Proposal state remains local and
-separate from the session. Rejected proposals display the unchanged clip with an
-error; IPC errors discard the overlay and retain the last accepted UI state.
-
-Pointer capture belongs to the stable scroll surface, avoiding capture loss when
-clips move between culled lanes. A movement threshold distinguishes selection
-from dragging. Escape/cancel/lost capture/blur cancel; release recomputes the final
-coordinate and submits once. Native scrolling contributes its logical offset to
-pointer deltas; zoom is locked during gestures. Snap distance is measured in
-screen pixels against project-frame-aligned clip boundaries, zero and playhead.
-The configurable default is 8 pixels. Keyboard frame edits omit proximity snapping.
-Successful edits unlink/pause source playback so stale source clocks do not move
-the retained playhead. Existing React/SVG and Pointer Events suffice; a gesture
-or editor library would add a second model without replacing core validation.
-
-Desktop Save uses the revision last saved/read from disk, rather than the edited
-session revision. `updateProjectFile`'s `history: 'preserve'` mode retains several
-already committed in-memory transactions without recording a duplicate entry.
-Changed sessions must advance revision, retain project identity and have consistent
-history. The serialized disk baseline, writer lock, external-change detection and
-atomic rename still guard publication. Undo/redo remain available after reopening.
-
-T19 extracts T07 import preparation and unused-asset removal into shared core Node
-functions used by both CLI file transactions and the desktop session. Main prepares
-an entire multi-file batch on a private project copy, checks availability, then
-records one `commitEdit`; failures retain the original session. Imports before a
-project's first save use absolute references, which saving preserves. Imports into
-a saved project use T07's reference policy: prefer project-relative paths where
-valid, otherwise retain absolute paths. Local sources are referenced in place. The core `addAssetClip` builds
-ordinary track/clip operations with whole project-frame source bounds and a
-five-second still default. New tracks and clips commit together with T09 history.
-
-The sandboxed preload uses Electron `webUtils.getPathForFile` for dropped native
-Files and sends paths only to the import handler; the renderer has no path-based
-filesystem API. Picker/import/removal/clip commands retain sender, arity, identity,
-revision and strict shape checks. Import progress is an event with a removable
-listener. Library drags have a distinct MIME type with project ID, revision and
-asset ID, while external Files are accepted only in the library. Timeline drop
-coordinates reuse the virtual scrollbar, track geometry and exact frame helpers.
-
-Online search and streaming stay in the main process. The renderer receives
-opaque result IDs and a preview URL on the app's media protocol. Each provider
-normalizes its result URLs and license metadata before issuing a result ID.
-The session downloads an accepted result to application storage, then uses
-the same project import transaction as a picker or file drop. The asset keeps
-its attribution with the local media reference. A failed import removes its
-download.
+Project creation, import, editing and history commands run through Core, CLI
+and SDK. The preload exposes only review, cache, and export operations. The
+worker and cache paths continue to use scoped asset IDs and revisions.
 
 Video library thumbnails and timeline filmstrips use the headless JPEG
 cache through the media worker. Nearby timeline samples share an atlas.
@@ -548,7 +471,7 @@ preview pauses audio; replacing it unloads the previous media element. Audio
 setup restores a source removed by cleanup, mirroring the video player's lifecycle:
 React StrictMode replays effects in development while retaining the DOM element.
 The development Electron regression exercises actual replay and decoded playback,
-while the production workflow verifies library selection and timeline drops.
+while the production workflow verifies library selection and source playback.
 
 ## Tooling and build
 
@@ -640,24 +563,22 @@ capability matrix, reproducible source/export benchmarks, explicit fallback
 behavior and recommended T22–T27 gates. That historical baseline predates T24; source and exported-file measurements
 remain distinct from the edited-timeline tests.
 
-## Shared project sessions (T22)
+## Headless ownership and desktop review (T41)
 
-The Node persistence adapter discovers the active session through a private Unix
-socket. SQLite OS locks in a permanent `.opencut-lock` sidecar give one writer
-exclusive ownership across Electron and standalone CLI processes. Existing CLI
-commands prepare proposals with the headless core; the session compares base
-snapshots, validates history/revisions and atomically saves before notifying the
-renderer through a narrow preload subscription. Named GUI projects automatically
-save each edit; untitled projects retain their first-save flow. There is no polling.
+The project file is the authority. Headless writers take an OS-backed SQLite
+lock for a transaction and publish by synced atomic replacement. Electron
+holds a read-only snapshot and refreshes when a complete newer revision is
+available. A separate local socket accepts desktop review controls. It cannot
+read or write project documents.
 
-See [ADR 0011](adr/0011-shared-project-session.md) for ownership, crash recovery,
-security, disconnect semantics, transport limits and platform boundaries.
+See [ADR 0016](adr/0016-headless-project-ownership.md) for synchronization,
+export isolation, command routing and compatibility.
 
 ## TypeScript SDK and script execution (T30)
 
 The SDK applies existing core edit commands and asset preparation to an
 in-memory draft. Save compares the opened snapshot and revision through the
-T22 writer, committing at most one history step. The CLI loads trusted local
+headless writer, committing at most one history step. The CLI loads trusted local
 ESM TypeScript with Node's type stripping, passes only the draft and execution
 context, and saves after successful execution and JSON serialization. Visual
 outputs use the shared renderer and are published independently of project edits.

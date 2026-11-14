@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { resolveProjectRender } from '@opencut/core/node';
 import { projectRevision } from '@opencut/core';
@@ -20,9 +20,10 @@ function parseInput(input: unknown): ExportInput {
   const settings = value.settings;
   if (
     Object.keys(value).sort().join(',') !==
-      'expectedRevision,projectId,settings' ||
+      'expectedRevision,projectId,settings,view' ||
     typeof value.projectId !== 'string' ||
     !Number.isSafeInteger(value.expectedRevision) ||
+    !Number.isSafeInteger(value.view) ||
     !settings ||
     typeof settings !== 'object' ||
     Array.isArray(settings) ||
@@ -115,7 +116,7 @@ export class ExportSession {
       throw new Error('An export operation is already in progress.');
     const request = parseInput(input);
     if (!this.output) throw new Error('Choose an output file first.');
-    // Capture before the first await; even unsaved documents export this exact revision.
+    // Capture before the first await; later commits cannot change this snapshot.
     const snapshot = structuredClone(this.capture(request));
     const controller = new AbortController();
     this.controller = controller;
@@ -148,7 +149,7 @@ export class ExportSession {
     try {
       const plan = await resolveProjectRender(
         snapshot.project,
-        snapshot.path ?? resolve('Untitled.opencut.json'),
+        snapshot.path,
         job.settings,
       );
       const [numerator, denominator = 1] = job.settings.frameRate

@@ -32,7 +32,6 @@ import {
   renderProjectFile,
   writeProjectFile,
 } from '@opencut/core/node';
-import { ProjectSession } from '../../apps/desktop/src/main/project-session.js';
 
 const entry = fileURLToPath(
   new URL('../../apps/cli/dist/index.js', import.meta.url),
@@ -314,7 +313,7 @@ test('prepares freeze frames without holding the writer and rejects concurrent e
   }
 });
 
-test('removes freeze output after confirmed session and desktop save rejection', async () => {
+test('releases freeze output when a competing headless writer owns publication', async () => {
   await mkdir(generated, { recursive: true });
   const directory = await mkdtemp(join(generated, 'review-freeze-'));
   const source = join(directory, 'source.mp4');
@@ -332,47 +331,15 @@ test('removes freeze output after confirmed session and desktop save rejection',
       'libx264',
       source,
     ]);
-    const original = videoProject(source);
-    await writeProjectFile(original, path);
+    await writeProjectFile(videoProject(source), path);
     const writer = await acquireProjectWriter(path);
     try {
-      const changed = structuredClone(original);
-      changed.metadata.name = 'Concurrent edit';
-      await writer.serve(async ({ update }) =>
-        update ? update(changed) : original,
-      );
       await assert.rejects(freezeProjectFrame(path, 'clip', 12, 3, output), {
-        code: 'REVISION_CONFLICT',
+        code: 'PROJECT_LOCKED',
       });
       await assert.rejects(readFile(output), { code: 'ENOENT' });
     } finally {
       await writer.close();
-    }
-    const session = new ProjectSession({
-      open: async () => path,
-      save: async () => null,
-      unsaved: async () => 'discard',
-      saveFreezeFrame: async () => {
-        const changed = structuredClone(original);
-        changed.metadata.name = 'External change during the picker';
-        await writeProjectFile(changed, join(directory, 'changed.json'));
-        await rename(join(directory, 'changed.json'), path);
-        return output;
-      },
-    });
-    try {
-      assert.equal((await session.run('open')).ok, true);
-      const result = await session.run('freezeFrame', {
-        projectId: original.metadata.id,
-        expectedRevision: 0,
-        clipId: 'clip',
-        at: 12,
-        frames: 3,
-      });
-      assert.equal(result.ok, false);
-      await assert.rejects(readFile(output), { code: 'ENOENT' });
-    } finally {
-      await session.dispose();
     }
     const retry = await freezeProjectFrame(path, 'clip', 12, 3, output);
     assert.equal(retry.path, output);

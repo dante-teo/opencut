@@ -166,11 +166,11 @@ test('public SDK and CLI import licensed online media without Electron', async (
     'available',
   );
 
-  const lostPath = join(root, 'lost-reply.json');
-  await (await createProject(lostPath, { name: 'Lost reply' })).save();
+  const lostPath = join(root, 'viewer-crash.json');
+  await (await createProject(lostPath, { name: 'Viewer crash' })).save();
   const worker = fork(
     resolve('tests/integration/session-worker.ts'),
-    [lostPath, 'crash-after-commit'],
+    [lostPath],
     {
       execArgv: ['--import', 'tsx'],
       stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
@@ -180,7 +180,9 @@ test('public SDK and CLI import licensed online media without Electron', async (
     const exited = once(worker, 'exit');
     const [ready] = await once(worker, 'message');
     assert.equal((ready as { ok: boolean }).ok, true);
-    const uncertain = run(
+    worker.kill('SIGKILL');
+    await exited;
+    const imported = run(
       'online',
       'import',
       lostPath,
@@ -192,12 +194,7 @@ test('public SDK and CLI import licensed online media without Electron', async (
       '--expected-revision',
       '0',
     );
-    assert.equal(uncertain.status, 1);
-    assert.equal(
-      JSON.parse(uncertain.stderr).error.code,
-      'SESSION_DISCONNECTED',
-    );
-    await exited;
+    assert.equal(imported.status, 0, imported.stderr);
     const committed = await openProject(lostPath);
     assert.equal(committed.project.inspect().assets.length, 1);
     assert.equal(

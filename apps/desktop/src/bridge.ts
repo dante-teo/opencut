@@ -1,25 +1,6 @@
 import type { ExportSettings } from './export-settings.js';
-import type { OnlineMediaPage, OnlineMediaSearch } from '@opencut/core/node';
 import type { CacheLimits, CacheStatus, RenderProgress } from '@opencut/media';
-import type {
-  ApplicationInfo,
-  Project,
-  ProjectSettings,
-  EditOperation,
-  SubtitleFormat,
-} from '@opencut/core';
-
-export const ONLINE_MEDIA_CHANNELS = {
-  search: 'online-media:search',
-  openSource: 'online-media:open-source',
-} as const;
-export type {
-  OnlineMediaProvider,
-  OnlineMediaKind,
-  OnlineMediaSearch,
-  OnlineMediaResult,
-  OnlineMediaPage,
-} from '@opencut/core/node';
+import type { ApplicationInfo, Project, SubtitleFormat } from '@opencut/core';
 
 export const APP_INFO_CHANNEL = 'app:get-info';
 export const OPEN_PREVIEW_CHANNEL = 'preview:open';
@@ -38,10 +19,7 @@ export const TIMELINE_FRAME_CHANNEL = 'media:frame';
 export const TIMELINE_RENDER_CHANNEL = 'media:render-timeline';
 export const DESKTOP_CONTROL_CHANNEL = 'project:desktop-control';
 export const DESKTOP_CONTROL_REPLY = 'project:desktop-control-reply';
-export type DesktopControl = Exclude<
-  import('@opencut/core/node').DesktopControlRequest,
-  { action: 'online-search' | 'online-import' }
->;
+export type DesktopControl = import('@opencut/core/node').DesktopControlRequest;
 export const TIMELINE_TEXT_CHANNEL = 'media:text';
 export interface TimelineTextImage {
   x: number;
@@ -94,36 +72,17 @@ export interface PreviewMetrics {
 
 export const PROJECT_CHANNELS = {
   current: 'project:current',
-  create: 'project:create',
   open: 'project:open',
-  save: 'project:save',
   close: 'project:close',
-  edit: 'project:edit',
-  undo: 'project:undo',
-  redo: 'project:redo',
-  import: 'project:import',
-  importOnline: 'project:import-online',
-  importSubtitles: 'project:import-subtitles',
-  exportSubtitles: 'project:export-subtitles',
-  removeAsset: 'project:remove-asset',
-  relinkAsset: 'project:relink-asset',
-  separateDialogue: 'project:separate-dialogue',
   copyProject: 'project:copy',
-  freezeFrame: 'project:freeze-frame',
-  importFont: 'project:import-font',
+  exportSubtitles: 'project:export-subtitles',
   exportFrame: 'project:export-frame',
-  addAssetClip: 'project:add-asset-clip',
 } as const;
-
-export interface NewProjectInput {
-  name: string;
-  settings: ProjectSettings;
-}
 
 export interface DesktopProject {
   project: Project;
-  path: string | null;
-  dirty: boolean;
+  path: string;
+  view: number;
   media: { assetId: string; path: string; status: string; message: string }[];
 }
 
@@ -133,7 +92,7 @@ export type ProjectReply =
       state: DesktopProject | null;
       canceled: boolean;
       notice?: string;
-      clipboard?: import('@opencut/core').ClipClipboard;
+      sequence: number;
     }
   | { ok: false; error: string };
 
@@ -141,79 +100,11 @@ export interface HistoryInput {
   projectId: string;
   expectedRevision: number;
 }
-export const timelineOperationTypes = [
-  'clips.move',
-  'clips.remove',
-  'clips.cut',
-  'clips.paste',
-  'clips.duplicate',
-  'clips.link',
-  'timeline.close-gap',
-  'track.lock',
-  'marker.add',
-  'marker.remove',
-  'clip.insert',
-  'clip.move',
-  'clip.trim',
-  'clip.split',
-  'clip.remove',
-  'clip.audio',
-  'clip.speed',
-  'clip.replace',
-  'clip.detach-audio',
-  'clip.grade',
-  'clip.gain-keys',
-  'clip.effects',
-  'clip.dissolve',
-  'transition.add',
-  'transition.set',
-  'transition.remove',
-  'clip.flash',
-  'clip.fade',
-  'canvas.set',
-  'clip.keyframe.add',
-  'clip.keyframe.set',
-  'clip.keyframe.remove',
-  'track.audio',
-  'clip.visual',
-  'text.add',
-  'text.set',
-  'subtitle.add',
-  'subtitle.set',
-  'subtitle.move',
-  'subtitle.split',
-  'subtitle.merge',
-  'subtitle.remove',
-  'subtitle.style',
-  'subtitle.effects',
-  'subtitle.words',
-] as const satisfies readonly EditOperation['type'][];
-export type TimelineOperation = Extract<
-  EditOperation,
-  { type: (typeof timelineOperationTypes)[number] }
->;
-export interface TimelineEditInput extends HistoryInput {
-  operations: TimelineOperation[];
-  label: string;
+export interface ProjectViewInput extends HistoryInput {
+  view: number;
 }
-
-export const IMPORT_PROGRESS_CHANNEL = 'media:import-progress';
 export const PROJECT_CHANGED_CHANNEL = 'project:changed';
 export const THUMBNAIL_CHANNEL = 'media:thumbnail';
-export interface ImportProgress {
-  completed: number;
-  total: number;
-  name: string;
-}
-export interface AssetRemoveInput extends HistoryInput {
-  assetId: string;
-}
-export interface AssetClipInput extends AssetRemoveInput {
-  insert?: boolean;
-  trackId?: string;
-  mediaType: 'video' | 'audio';
-  at: number;
-}
 export const EXPORT_CHANNELS = {
   choose: 'export:choose',
   current: 'export:current',
@@ -221,7 +112,7 @@ export const EXPORT_CHANNELS = {
   cancel: 'export:cancel',
 } as const;
 export const EXPORT_CHANGED_CHANNEL = 'export:changed';
-export interface ExportInput extends HistoryInput {
+export interface ExportInput extends ProjectViewInput {
   settings: ExportSettings;
 }
 export interface ExportState {
@@ -254,48 +145,37 @@ export interface ExportState {
   error: string;
 }
 export interface DesktopAPI {
-  renderTimeline(
-    input: HistoryInput & { size: number },
-  ): Promise<{ url: string; hit: boolean; frameCount: number } | null>;
-  onDesktopControl(callback: (control: DesktopControl) => unknown): () => void;
+  renderTimeline(input: ProjectViewInput & { size: number }): Promise<{
+    url: string;
+    hit: boolean;
+    frameCount: number;
+    revision: number;
+  } | null>;
+  onDesktopControl(
+    callback: (
+      control: DesktopControl,
+      view: number,
+      revision: number,
+    ) => unknown,
+  ): () => void;
   chooseExportOutput(): Promise<string | null>;
   getExport(): Promise<ExportState | null>;
   startExport(input: ExportInput): Promise<ExportState>;
   cancelExport(id: string): Promise<ExportState | null>;
   onExportChanged(callback: (state: ExportState) => void): () => void;
   onProjectChanged(
-    callback: (state: DesktopProject | null) => void,
+    callback: (state: DesktopProject | null, sequence: number) => void,
   ): () => void;
-  importMedia(input: HistoryInput): Promise<ProjectReply>;
-  searchOnlineMedia(input: OnlineMediaSearch): Promise<OnlineMediaPage>;
-  openOnlineMediaSource(id: string): Promise<void>;
-  importOnlineMedia(
-    input: HistoryInput & { resultId: string },
-  ): Promise<ProjectReply>;
-  importSubtitles(input: HistoryInput): Promise<ProjectReply>;
-  importFont(input: HistoryInput & { id: string }): Promise<ProjectReply>;
-  exportFrame(input: HistoryInput & { at: number }): Promise<ProjectReply>;
+  exportFrame(input: ProjectViewInput & { at: number }): Promise<ProjectReply>;
   exportSubtitles(
-    input: HistoryInput & { format: SubtitleFormat },
+    input: ProjectViewInput & { format: SubtitleFormat },
   ): Promise<ProjectReply>;
-  importDroppedMedia(input: HistoryInput, files: File[]): Promise<ProjectReply>;
-  onImportProgress(callback: (progress: ImportProgress) => void): () => void;
-  removeAsset(input: AssetRemoveInput): Promise<ProjectReply>;
-  relinkAsset(input: AssetRemoveInput): Promise<ProjectReply>;
-  separateDialogue(input: AssetRemoveInput): Promise<ProjectReply>;
-  copyProject(input: HistoryInput & { bundle: boolean }): Promise<ProjectReply>;
-  freezeFrame(
-    input: HistoryInput & { clipId: string; at: number; frames: number },
+  copyProject(
+    input: ProjectViewInput & { bundle: boolean },
   ): Promise<ProjectReply>;
-  addAssetClip(input: AssetClipInput): Promise<ProjectReply>;
   assetThumbnail(assetId: string): Promise<string | null>;
-  editTimeline(input: TimelineEditInput): Promise<ProjectReply>;
-  undoProject(input: HistoryInput): Promise<ProjectReply>;
-  redoProject(input: HistoryInput): Promise<ProjectReply>;
   getProject(): Promise<ProjectReply>;
-  createProject(input: NewProjectInput): Promise<ProjectReply>;
   openProject(): Promise<ProjectReply>;
-  saveProject(): Promise<ProjectReply>;
   closeProject(): Promise<ProjectReply>;
   getApplicationInfo(): Promise<ApplicationInfo>;
   openPreview(): Promise<PreviewSource | null>;

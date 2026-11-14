@@ -9,7 +9,7 @@ test('built desktop displays React through the sandboxed bridge', async () => {
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await expect(
-      page.getByRole('button', { name: 'Start creating' }),
+      page.getByRole('button', { name: 'Open a project' }),
     ).toBeVisible();
     await expect(page.getByRole('status')).toHaveText(
       'OpenCut is running · v0.1.0',
@@ -23,30 +23,12 @@ test('built desktop displays React through the sandboxed bridge', async () => {
       'cancelExport',
       'onExportChanged',
       'onProjectChanged',
-      'searchOnlineMedia',
-      'openOnlineMediaSource',
-      'importOnlineMedia',
-      'importMedia',
-      'importDroppedMedia',
-      'onImportProgress',
-      'removeAsset',
-      'relinkAsset',
-      'separateDialogue',
       'copyProject',
-      'freezeFrame',
-      'importFont',
       'exportFrame',
-      'addAssetClip',
-      'assetThumbnail',
-      'importSubtitles',
       'exportSubtitles',
-      'editTimeline',
-      'undoProject',
-      'redoProject',
+      'assetThumbnail',
       'getProject',
-      'createProject',
       'openProject',
-      'saveProject',
       'closeProject',
       'getApplicationInfo',
       'openPreview',
@@ -191,7 +173,7 @@ test('studio panels stay reachable at compact, default and large window sizes', 
         { width, height },
       );
       await expect(
-        page.getByRole('button', { name: 'Start creating' }),
+        page.getByRole('button', { name: 'Open a project' }),
       ).toBeVisible();
       expect(
         await page.evaluate(
@@ -223,13 +205,16 @@ test('studio panels stay reachable at compact, default and large window sizes', 
         animations: 'disabled',
       });
     }
-    await page.getByRole('button', { name: 'Start creating' }).click();
-    await expect(page.getByRole('dialog')).toBeVisible();
+    await application.evaluate(({ dialog }) => {
+      dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] });
+    });
+    await page.getByRole('button', { name: 'Open a project' }).click();
     await expect(
-      page.getByRole('textbox', { name: 'Project name', exact: true }),
-    ).toBeFocused();
-    await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog')).not.toBeVisible();
+      page.getByRole('heading', { name: 'No project', exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Open a project' }),
+    ).toBeEnabled();
   } finally {
     await application.close();
   }

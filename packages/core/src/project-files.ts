@@ -1,10 +1,10 @@
 /** Optional Node adapter. The main core entry point remains free of filesystem imports. */
 import { constants } from 'node:fs';
-import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { lockProject } from './project-writer.js';
 import {
   requestSession,
+  reviewEndpoint,
   serveSession,
   SessionError,
 } from './session-transport.js';
@@ -217,9 +217,6 @@ export async function readProjectFile(
   projectFilePath: string,
 ): Promise<Project> {
   const path = await canonicalProjectFilePath(nativePath(projectFilePath));
-  const response = await requestSession(path, { version: 1, type: 'read' });
-  if (response !== undefined)
-    return deserializeProject(sessionSnapshot.parse(response).json);
   return readProjectDisk(path);
 }
 
@@ -394,11 +391,10 @@ export interface ProjectUpdateOptions {
   label?: string | undefined;
   /** Restore one transaction, or preserve multiple validated in-memory session transactions. */
   history?: 'record' | 'restore' | 'preserve' | undefined;
-  /** Cancel before local publication or submission to the active session. */
+  /** Cancel before atomic publication. */
   signal?: AbortSignal | undefined;
 }
 
-const sessionSnapshot = z.object({ json: z.string(), sessionId: z.string() });
 const entityId = z.string().min(1).max(120);
 const actionOnly = z.strictObject({
   action: z.enum([
@@ -430,18 +426,6 @@ export const desktopControlSchema = z.union([
     action: z.literal('viewer'),
     viewer: z.enum(['project', 'source']),
   }),
-  z.strictObject({
-    action: z.literal('online-search'),
-    query: z.string().trim().min(1).max(200),
-    provider: z.enum(['commons', 'openverse']),
-    kind: z.enum(['image', 'audio', 'video']),
-    page: z.string().max(200).optional(),
-  }),
-  z.strictObject({
-    action: z.literal('online-import'),
-    id: entityId,
-    expectedRevision: z.int().nonnegative(),
-  }),
 ]);
 export type DesktopControlRequest = z.infer<typeof desktopControlSchema>;
 export const desktopControlJsonSchema = () =>
@@ -450,8 +434,9 @@ export async function controlDesktopProject(
   path: string,
   control: DesktopControlRequest,
 ) {
-  const result = await requestSession(await canonicalProjectFilePath(path), {
-    version: 1,
+  const address = await reviewEndpoint(await canonicalProjectFilePath(path));
+  const result = await requestSession(address, {
+    version: 2,
     type: 'control',
     control: desktopControlSchema.parse(control),
   });
@@ -462,69 +447,48 @@ export async function controlDesktopProject(
     );
   return result;
 }
-const sessionRequest = z.discriminatedUnion('type', [
-  z.strictObject({ version: z.literal(1), type: z.literal('read') }),
-  z.strictObject({
-    version: z.literal(1),
-    type: z.literal('control'),
-    control: desktopControlSchema,
-  }),
-  z.strictObject({
-    version: z.literal(1),
-    type: z.literal('update'),
-    sessionId: z.string(),
-    base: z.string(),
-    json: z.string(),
-    options: z.strictObject({
-      expectedRevision: z.number().int().nonnegative().optional(),
-      dryRun: z.boolean().optional(),
-      label: z.string().optional(),
-      history: z.enum(['record', 'restore']).optional(),
-    }),
-  }),
-]);
-const fingerprint = (json: string) =>
-  createHash('sha256').update(json).digest('hex');
+const reviewRequest = z.strictObject({
+  version: z.literal(2),
+  type: z.literal('control'),
+  control: desktopControlSchema,
+});
+
+/** Desktop controls have their own endpoint and never acquire the project lock. */
+export async function serveDesktopControls(
+  path: string,
+  control: (request: DesktopControlRequest) => Promise<unknown>,
+) {
+  const address = await reviewEndpoint(path);
+  const release = await lockProject(address);
+  try {
+    const stop = await serveSession(address, (value) =>
+      control(reviewRequest.parse(value).control),
+    );
+    return async () => {
+      try {
+        await stop();
+      } finally {
+        release();
+      }
+    };
+  } catch (error) {
+    release();
+    throw error;
+  }
+}
+
 type Update<T> = (
   project: Project,
   path: string,
 ) => Promise<{ project: Project; result: T }>;
 
-/** Existing CLI and asset commands transparently use the active writer. */
+/** Headless updates hold the writer lock for a single disk transaction. */
 export async function updateProjectFile<T>(
   path: string,
   update: Update<T>,
   options: ProjectUpdateOptions = {},
 ): Promise<T> {
-  const { signal, ...sessionOptions } = options;
-  signal?.throwIfAborted();
-  path = await canonicalProjectFilePath(nativePath(path));
-  const response = await requestSession(path, { version: 1, type: 'read' });
-  signal?.throwIfAborted();
-  if (response !== undefined) {
-    const snapshot = sessionSnapshot.parse(response);
-    const project = deserializeProject(snapshot.json);
-    checkProjectRevision(project, options.expectedRevision);
-    const changed = await update(project, path);
-    const reply = await requestSession(
-      path,
-      {
-        version: 1,
-        type: 'update',
-        sessionId: snapshot.sessionId,
-        base: fingerprint(snapshot.json),
-        json: serializeProject(changed.project),
-        options: sessionOptions,
-      },
-      signal,
-    );
-    if (reply === undefined)
-      throw new SessionError(
-        'SESSION_DISCONNECTED',
-        'Session ended before commit. Reload and retry; no offline fallback was attempted.',
-      );
-    return changed.result;
-  }
+  options.signal?.throwIfAborted();
   const writer = await acquireProjectWriter(path);
   try {
     return await writer.update(update, options);
@@ -539,7 +503,6 @@ export async function acquireProjectWriter(projectFilePath: string) {
   const release = await lockProject(path);
   let closed = false;
   let activeUpdate: Promise<unknown> | undefined;
-  let stop: (() => Promise<void>) | undefined;
   return {
     path,
     read: () => readProjectDisk(path),
@@ -562,53 +525,10 @@ export async function acquireProjectWriter(projectFilePath: string) {
         activeUpdate = undefined;
       }
     },
-    async serve(
-      handle: (request: {
-        update?: (project: Project) => Project;
-        options?: ProjectUpdateOptions;
-      }) => Promise<Project>,
-      control?: (request: DesktopControlRequest) => Promise<unknown>,
-    ) {
-      const sessionId = randomUUID();
-      stop = await serveSession(path, async (value) => {
-        const request = sessionRequest.parse(value);
-        if (request.type === 'read')
-          return { json: serializeProject(await handle({})), sessionId };
-        if (request.type === 'control') {
-          if (!control)
-            throw new SessionError(
-              'SESSION_UNSUPPORTED',
-              'This session does not provide desktop controls.',
-            );
-          return control(request.control);
-        }
-        if (request.sessionId !== sessionId)
-          throw new SessionError(
-            'SESSION_CHANGED',
-            'Project session changed. Reload before retrying.',
-          );
-        await handle({
-          options: request.options,
-          update: (project) => {
-            if (fingerprint(serializeProject(project)) !== request.base)
-              throw new EditError(
-                'REVISION_CONFLICT',
-                'Project revision conflict: session changed while preparing the edit. Reload and retry.',
-              );
-            const changed = deserializeProject(request.json);
-            if (request.options.history !== 'restore')
-              checkLockedTracks(project, changed);
-            return changed;
-          },
-        });
-        return { committed: true };
-      });
-    },
     async close() {
       if (closed) return;
       closed = true;
       try {
-        await stop?.();
         // Never release ownership while an already accepted publication is running.
         await activeUpdate?.catch(() => {});
       } finally {

@@ -15,7 +15,7 @@ import { writeProjectFile } from '@opencut/core/node';
 import { openProject } from '@opencut/sdk';
 import { launchDesktop } from './helpers.js';
 
-test('T30 scripts share atomic history with an open Electron project and reject a stale edit', async () => {
+test('T30 scripts publish atomic history while Electron reviews and reject a stale edit', async () => {
   const root = resolve('tests/fixtures/generated');
   await mkdir(root, { recursive: true });
   const directory = await mkdtemp(join(root, 't30-session-'));
@@ -109,8 +109,15 @@ test('T30 scripts share atomic history with an open Electron project and reject 
       name: 'Inspect clip right',
       exact: true,
     });
-    const undo = page.getByRole('button', { name: 'Undo', exact: true });
-    const redo = page.getByRole('button', { name: 'Redo', exact: true });
+    const restore = (direction: 'undo' | 'redo', revision: number) =>
+      promisify(execFile)(process.execPath, [
+        resolve('apps/cli/dist/index.js'),
+        'edit',
+        direction,
+        path,
+        '--expected-revision',
+        String(revision),
+      ]);
     const dry = JSON.parse((await run('--dry-run')).stdout);
     expect(dry).toMatchObject({
       dryRun: true,
@@ -123,13 +130,13 @@ test('T30 scripts share atomic history with an open Electron project and reject 
     ).toMatchObject({ revision: 1 });
     await expect(right).toBeVisible();
     expect((await openProject(path)).project.history().undo).toHaveLength(1);
-    await undo.click();
+    await restore('undo', 1);
     await expect(right).toHaveCount(0);
     expect(
       JSON.parse((await run('--expected-revision', '2', '--', 'redo')).stdout),
     ).toMatchObject({ revision: 3 });
     await expect(right).toBeVisible();
-    await undo.click();
+    await restore('undo', 3);
     await expect(right).toHaveCount(0);
 
     const result = run(
@@ -151,7 +158,7 @@ test('T30 scripts share atomic history with an open Electron project and reject 
         ),
       )
       .toBe(true);
-    await redo.click();
+    await restore('redo', 4);
     await expect(right).toBeVisible();
     const saved = await readFile(path, 'utf8');
     await writeFile(release, '');
