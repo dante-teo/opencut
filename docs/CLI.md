@@ -1670,3 +1670,30 @@ commands support `--dry-run` and `--expected-revision`. Batch edits expose
 The [project format](PROJECT_FORMAT.md#video-transitions-t38) defines the
 project-frame windows and source-handle requirements. For older edit scripts,
 `clip.dissolve` and `clip.fade` retain their layer/keyframe behavior.
+
+## Headless online media
+
+`opencut online search SEARCH.json --json` searches Wikimedia Commons or
+Openverse without Electron. The request contains `provider`, `kind`, `query`
+and optional `page`. Use the stable ID from `results` to import a result:
+
+```sh
+opencut online import PROJECT SEARCH.json --result ID --directory MEDIA_DIR --expected-revision REV --json
+```
+
+`--result` also accepts a zero-based index, but import repeats the search, so
+the result order may change. Inspect the returned provenance. Import downloads
+the selected result to a new file, probes it and stores its license and source
+URL in the asset. `--dry-run` downloads and probes, then discards the file
+without changing the project. An existing result is reused only while its
+local file is available. Importing an offline result creates a new asset; use
+`media relink` when existing clips must keep their asset ID.
+
+Downloaded files are outside project history. If a shared session disconnects
+during commit, inspect the project and history before retrying. The downloaded
+file is retained because the commit may have succeeded.
+
+`help --json` reports each command's `runtime.status` as `available`,
+`unavailable` or `unknown`, with missing and unchecked prerequisites. FFmpeg
+and ffprobe are probed locally. Network access and the dialogue model remain
+unknown until execution.

@@ -3,12 +3,18 @@ import { lstat, open, realpath, rm, stat } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { MediaCache, probeMedia, validateEmbeddedFont } from '@opencut/media';
 import type { MediaAsset, Project } from './project.js';
-import { validateProject } from './project.js';
+import type { OnlineMediaLibrary } from './online-media.js';
+import { serializeProject, validateProject } from './project.js';
 import { clipSourceTime, clipTimelineEnd } from './clip-timing.js';
 import { compareTimes, frameTime } from './time.js';
 import { insertFreeze } from './timeline.js';
 import { editableTracks } from './timeline-layout.js';
-import { previewTransaction, projectRevision } from './editing.js';
+import {
+  checkProjectRevision,
+  EditError,
+  previewTransaction,
+  projectRevision,
+} from './editing.js';
 import {
   canonicalProjectFilePath,
   createMediaReference,
@@ -302,6 +308,33 @@ export function relinkMediaAsset(
   );
 }
 
+/** Probe a downloaded result and attach its checked attribution before publication. */
+export async function prepareOnlineMediaAsset(
+  project: Project,
+  path: string,
+  download: Awaited<ReturnType<OnlineMediaLibrary['download']>>,
+) {
+  const prepared = await prepareMediaAsset(project, path, download.path, {
+    localMediaOnly: true,
+  });
+  const { asset } = prepared.result;
+  const metadata = asset.metadata;
+  const timedImage =
+    download.kind === 'image' &&
+    metadata?.kind === 'video' &&
+    (metadata.formatName === 'gif' || metadata.formatName === 'apng');
+  if (metadata?.kind !== download.kind && !timedImage)
+    throw new AssetError(
+      'INVALID_MEDIA',
+      'The downloaded file does not match the selected media type.',
+    );
+  if (prepared.result.imported) {
+    asset.name = download.title;
+    asset.provenance = download.provenance;
+  }
+  return prepared;
+}
+
 export async function prepareFreezeFrame(
   project: Project,
   path: string,
@@ -395,23 +428,35 @@ export async function freezeProjectFrame(
   output: string,
   options: Pick<ProjectUpdateOptions, 'expectedRevision'> = {},
 ) {
-  let discard: (() => Promise<void>) | undefined;
+  const canonical = await canonicalProjectFilePath(path);
+  const snapshot = await readProjectFile(canonical);
+  checkProjectRevision(snapshot, options.expectedRevision);
+  const baseline = serializeProject(snapshot);
+  const prepared = await prepareFreezeFrame(
+    snapshot,
+    canonical,
+    id,
+    at,
+    frames,
+    output,
+  );
+  const discard = prepared.discard;
   try {
     return await updateProjectFile(
-      path,
-      async (project, canonical) => {
-        const prepared = await prepareFreezeFrame(
-          project,
-          canonical,
-          id,
-          at,
-          frames,
-          output,
-        );
-        discard = prepared.discard;
+      canonical,
+      async (current) => {
+        if (serializeProject(current) !== baseline)
+          throw new EditError(
+            'REVISION_CONFLICT',
+            'Project changed while preparing the freeze frame. Inspect it and retry.',
+          );
         return prepared;
       },
-      { ...options, label: 'Freeze frame' },
+      {
+        ...options,
+        expectedRevision: projectRevision(snapshot),
+        label: 'Freeze frame',
+      },
     );
   } catch (error) {
     if (

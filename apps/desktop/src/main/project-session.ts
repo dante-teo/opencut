@@ -22,6 +22,7 @@ import {
 import {
   canonicalProjectFilePath,
   prepareMediaAsset,
+  prepareOnlineMediaAsset,
   prepareFreezeFrame,
   prepareEmbeddedFont,
   prepareMediaRelink,
@@ -49,7 +50,7 @@ import type {
   HistoryInput,
 } from '../bridge.js';
 import { timelineOperationTypes } from '../bridge.js';
-import type { OnlineMediaLibrary } from './online-media.js';
+import type { OnlineMediaLibrary } from '@opencut/core/node';
 
 export interface ProjectDialogs {
   open(): Promise<string | null>;
@@ -484,32 +485,13 @@ export class ProjectSession {
                 name: basename(source),
               };
               if (progress) this.onProgress({ completed: index, ...progress });
-              const prepared = await prepareMediaAsset(
-                project,
-                path,
-                source,
-                download && { localMediaOnly: true },
-              );
+              const prepared = download
+                ? await prepareOnlineMediaAsset(project, path, download)
+                : await prepareMediaAsset(project, path, source);
               project = prepared.project;
               if (prepared.result.imported) {
-                const { asset } = prepared.result;
-                if (download) {
-                  const metadata = asset.metadata;
-                  const timedImage =
-                    download.kind === 'image' &&
-                    metadata?.kind === 'video' &&
-                    (metadata.formatName === 'gif' ||
-                      metadata.formatName === 'apng');
-                  if (metadata?.kind !== download.kind && !timedImage)
-                    throw new Error(
-                      'The downloaded file does not match the selected media type.',
-                    );
-                  asset.name = download.title;
-                  asset.provenance = download.provenance;
-                }
-                // Unsaved projects store absolute references so the first save can be anywhere.
                 if (!state.path)
-                  asset.file = {
+                  prepared.result.asset.file = {
                     type: 'absolute',
                     path: prepared.result.source.path,
                   };

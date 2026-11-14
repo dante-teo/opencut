@@ -1,4 +1,5 @@
 import type { ExportSettings } from './export-settings.js';
+import type { OnlineMediaPage, OnlineMediaSearch } from '@opencut/core/node';
 import type { CacheLimits, CacheStatus, RenderProgress } from '@opencut/media';
 import type {
   ApplicationInfo,
@@ -12,29 +13,13 @@ export const ONLINE_MEDIA_CHANNELS = {
   search: 'online-media:search',
   openSource: 'online-media:open-source',
 } as const;
-export type OnlineMediaProvider = 'commons' | 'openverse';
-export type OnlineMediaKind = 'image' | 'audio' | 'video';
-export interface OnlineMediaSearch {
-  provider: OnlineMediaProvider;
-  kind: OnlineMediaKind;
-  query: string;
-  page?: string;
-}
-export interface OnlineMediaResult {
-  id: string;
-  title: string;
-  kind: OnlineMediaKind;
-  creator: string | null;
-  sourceUrl: string;
-  license: string;
-  licenseUrl: string;
-  previewUrl: string | null;
-  importable: boolean;
-}
-export interface OnlineMediaPage {
-  results: OnlineMediaResult[];
-  nextPage: string | null;
-}
+export type {
+  OnlineMediaProvider,
+  OnlineMediaKind,
+  OnlineMediaSearch,
+  OnlineMediaResult,
+  OnlineMediaPage,
+} from '@opencut/core/node';
 
 export const APP_INFO_CHANNEL = 'app:get-info';
 export const OPEN_PREVIEW_CHANNEL = 'preview:open';

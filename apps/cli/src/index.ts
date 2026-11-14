@@ -7,6 +7,7 @@ import {
   runInspectionCommand,
 } from './inspection.js';
 import { cacheHelp, runCacheCommand } from './cache.js';
+import { onlineHelp, runOnlineCommand } from './online.js';
 import { editHelp, runEditCommand } from './edit.js';
 import { subtitleHelp, runSubtitleCommand } from './subtitle.js';
 import { runScriptCommand, scriptHelp } from './script.js';
@@ -49,6 +50,7 @@ import {
   renderResolutions,
   renderCodecs,
   separateDialogue,
+  MediaError,
 } from '@opencut/media';
 import type {
   MediaMetadata,
@@ -79,6 +81,7 @@ Commands:
   project cache-preview <project-file> Render or reuse a full timeline preview
   desktop control <project-file> <request.json>
                                        Control an open desktop project
+  online search|import                 Search and import licensed online media (online --help)
   media import <project-file> <file>    Import a source reference and probe metadata
   media list <project-file>             List assets, metadata and source availability
   media info <project-file> <asset-id>   Inspect an asset by stable ID
@@ -299,6 +302,12 @@ async function runCli(args: string[]): Promise<void> {
       ? runScriptCommand(commandArgs)
       : runCacheCommand(commandArgs);
   }
+  if (
+    leadingCommand === 'online' &&
+    !args.includes('--help') &&
+    !args.includes('-h')
+  )
+    return runOnlineCommand(args);
   const { values, positionals } = parseArgs({
     args,
     options: {
@@ -396,6 +405,7 @@ async function runCli(args: string[]): Promise<void> {
       throw new UsageError('help accepts only --json and --help.');
     let usage = help;
     if (group === 'run') usage = scriptHelp;
+    else if (group === 'online') usage = onlineHelp;
     else if (group === 'cache') usage = cacheHelp;
     else if (
       group === 'preview' ||
@@ -1058,6 +1068,19 @@ try {
     error instanceof Error && 'code' in error ? String(error.code) : '';
   const usageError =
     error instanceof UsageError || code.startsWith('ERR_PARSE_ARGS_');
+  const dependencyError =
+    error instanceof MediaError &&
+    (/Required executable/.test(error.message) ||
+      /Install ELUATE/.test(error.message));
+  const errorCode =
+    code ||
+    (usageError
+      ? 'INVALID_ARGUMENTS'
+      : dependencyError
+        ? 'MISSING_DEPENDENCY'
+        : error instanceof MediaError
+          ? 'PROCESSING_FAILED'
+          : 'COMMAND_FAILED');
   const message = error instanceof Error ? error.message : String(error);
   const args = process.argv.slice(2);
   const separator = args.indexOf('--');
@@ -1069,7 +1092,7 @@ try {
       ? JSON.stringify({
           ok: false,
           error: {
-            code: code || (usageError ? 'INVALID_ARGUMENTS' : 'COMMAND_FAILED'),
+            code: errorCode,
             message,
             ...(usageError ? { hint: 'Run opencut --help for usage.' } : {}),
           },

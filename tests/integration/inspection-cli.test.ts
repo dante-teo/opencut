@@ -85,6 +85,17 @@ describe('agent CLI discovery and offline inspection', () => {
     const catalog = JSON.parse(result.stdout);
     expect(catalog.discoveryVersion).toBe(1);
     expect(
+      catalog.commands.find(
+        (command: { name: string }) =>
+          command.name === 'media separate-dialogue',
+      ).runtime.status,
+    ).toBe('unavailable');
+    expect(
+      catalog.commands.find(
+        (command: { name: string }) => command.name === 'online search',
+      ).runtime.status,
+    ).toBe('unknown');
+    expect(
       catalog.commands.map((command: { name: string }) => command.name),
     ).toEqual(
       expect.arrayContaining([

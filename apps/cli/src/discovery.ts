@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { animatedProperties, visualRanges } from '@opencut/shared';
 import { desktopControlJsonSchema } from '@opencut/core/node';
 import {
@@ -16,6 +17,10 @@ type Option = {
 };
 const options: Record<string, Option> = {
   help: { type: 'boolean', description: 'Show command help.' },
+  result: {
+    type: 'string',
+    description: 'Stable result ID or zero-based online search result index.',
+  },
   json: {
     type: 'boolean',
     description: 'Structured stdout and structured errors on stderr.',
@@ -298,7 +303,7 @@ const options: Record<string, Option> = {
   directory: {
     type: 'string',
     description:
-      'Cache directory (default OPENCUT_MEDIA_CACHE or ~/.cache/opencut/media-v1).',
+      'Directory for cache files or downloaded media; cache defaults to OPENCUT_MEDIA_CACHE or ~/.cache/opencut/media-v1.',
   },
   'disk-mib': {
     type: 'string',
@@ -428,6 +433,7 @@ const definitions: Definition[] = [
       'Control playback, viewer, selection and online media in a running desktop project.',
     args: ['project-file', 'request.json'],
     options: [],
+    tools: ['running desktop session'],
   },
   {
     name: 'project snapshot',
@@ -463,6 +469,24 @@ const definitions: Definition[] = [
     args: ['project-file'],
     options: ['output'],
     required: ['output'],
+  },
+  {
+    name: 'online search',
+    description:
+      'Search licensed Wikimedia Commons or Openverse media without Electron.',
+    args: ['request.json'],
+    options: [],
+    tools: ['network'],
+  },
+  {
+    name: 'online import',
+    description:
+      'Search and download a result, then import it with provenance.',
+    args: ['project-file', 'request.json'],
+    options: ['result', 'directory', ...edit],
+    required: ['result', 'directory'],
+    tools: ['ffprobe', 'network'],
+    mutates: true,
   },
   {
     name: 'media import',
@@ -781,6 +805,37 @@ const definitions: Definition[] = [
   },
 ];
 
+const toolStatus = new Map<string, boolean>();
+function available(tool: string): boolean | null {
+  if (!['ffmpeg', 'ffprobe'].includes(tool)) return null;
+  if (!toolStatus.has(tool))
+    toolStatus.set(
+      tool,
+      spawnSync(tool, ['-version'], { stdio: 'ignore', timeout: 2000 })
+        .status === 0,
+    );
+  return toolStatus.get(tool)!;
+}
+
+function runtimeStatus(tools: readonly string[]) {
+  const missing: string[] = [];
+  const unchecked: string[] = [];
+  for (const tool of tools) {
+    const status = available(tool);
+    if (status === false) missing.push(tool);
+    else if (status === null) unchecked.push(tool);
+  }
+  return {
+    status: missing.length
+      ? 'unavailable'
+      : unchecked.length
+        ? 'unknown'
+        : 'available',
+    missing,
+    unchecked,
+  };
+}
+
 export function discovery(scope: string[] = [], help = '') {
   const prefix = scope.join(' ');
   return {
@@ -820,6 +875,7 @@ export function discovery(scope: string[] = [], help = '') {
         })),
         modifiesProject: command.mutates ?? false,
         prerequisites: command.tools ?? [],
+        runtime: runtimeStatus(command.tools ?? []),
         jsonOutput: command.jsonl ? 'jsonl' : 'document',
         ...(command.name in inspectionJsonSchemas || command.name === 'run'
           ? { resultSchema: command.name }
@@ -928,7 +984,7 @@ export function discovery(scope: string[] = [], help = '') {
       'Frame and contact-sheet PNGs flatten canvas alpha over black.',
       'Preview ranges trim the finished composition; decoding preceding frames may take time.',
       'Audio candidates with unknown metadata are intent, not a guarantee of a decoded stream.',
-      'Capability status describes implemented commands; tools/media/fonts are checked at execution.',
+      'Runtime availability reports optional executables; network, model checkpoints, media and fonts may require execution-time checks.',
     ],
     exitCodes: {
       '0': 'success',

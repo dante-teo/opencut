@@ -1,19 +1,47 @@
-import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import type {
-  OnlineMediaKind,
-  OnlineMediaPage,
-  OnlineMediaProvider,
-  OnlineMediaResult,
-  OnlineMediaSearch,
-} from '../bridge.js';
+export type OnlineMediaProvider = 'commons' | 'openverse';
+export type OnlineMediaKind = 'image' | 'audio' | 'video';
+export interface OnlineMediaSearch {
+  provider: OnlineMediaProvider;
+  kind: OnlineMediaKind;
+  query: string;
+  page?: string;
+}
+export interface OnlineMediaResult {
+  id: string;
+  title: string;
+  kind: OnlineMediaKind;
+  creator: string | null;
+  sourceUrl: string;
+  license: string;
+  licenseUrl: string;
+  previewUrl: string | null;
+  importable: boolean;
+}
+export interface OnlineMediaPage {
+  results: OnlineMediaResult[];
+  nextPage: string | null;
+}
+
+export class OnlineMediaError extends Error {
+  override name = 'OnlineMediaError';
+  constructor(
+    public readonly code:
+      'INVALID_INPUT' | 'UNSUPPORTED_CAPABILITY' | 'PROCESSING_FAILED',
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+  }
+}
 
 const pageSize = 20;
 const mediaLimit = 512 * 1024 * 1024;
-const userAgent = 'OpenCut/0.1.0 (desktop media library)';
+const userAgent = 'OpenCut/0.1.0 (media library)';
 const mediaTypes: Record<string, [OnlineMediaKind, string]> = {
   '.jpg': ['image', 'image/jpeg'],
   '.jpeg': ['image', 'image/jpeg'],
@@ -299,7 +327,12 @@ function searchInput(value: unknown): OnlineMediaSearch {
     (page !== undefined &&
       (typeof page !== 'string' || !/^\d{1,4}$/.test(page)))
   )
-    throw new Error('Enter a search and choose a supported media type.');
+    throw new OnlineMediaError(
+      provider === 'openverse' && kind === 'video'
+        ? 'UNSUPPORTED_CAPABILITY'
+        : 'INVALID_INPUT',
+      'Enter a search and choose a supported media type.',
+    );
   return { provider, kind, query: query.trim(), ...(page ? { page } : {}) };
 }
 
@@ -360,6 +393,8 @@ async function fetchMedia(
 }
 
 export class OnlineMediaLibrary {
+  constructor(private readonly desktopPreview = false) {}
+
   private readonly results = new Map<
     string,
     { provider: OnlineMediaProvider; item: Candidate }
@@ -367,13 +402,27 @@ export class OnlineMediaLibrary {
 
   async search(value: unknown): Promise<OnlineMediaPage> {
     const input = searchInput(value);
-    const page = await (input.provider === 'commons'
-      ? commonsSearch(input)
-      : openverseSearch(input));
+    let page: SearchPage;
+    try {
+      page = await (input.provider === 'commons'
+        ? commonsSearch(input)
+        : openverseSearch(input));
+    } catch (cause) {
+      throw new OnlineMediaError(
+        'PROCESSING_FAILED',
+        cause instanceof Error ? cause.message : String(cause),
+        { cause },
+      );
+    }
     return {
       nextPage: page.nextPage,
       results: page.results.slice(0, pageSize).map((item) => {
-        const id = randomUUID();
+        const digest = createHash('sha256')
+          .update(
+            `${input.provider}\n${item.sourceUrl}\n${item.original?.url.href ?? ''}`,
+          )
+          .digest('hex');
+        const id = `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`;
         this.results.set(id, { provider: input.provider, item });
         if (this.results.size > 240)
           this.results.delete(this.results.keys().next().value!);
@@ -382,7 +431,10 @@ export class OnlineMediaLibrary {
           ...info,
           id,
           importable: Boolean(original),
-          previewUrl: preview ? `opencut://media/online/${id}` : null,
+          previewUrl:
+            this.desktopPreview && preview
+              ? `opencut://media/online/${id}`
+              : null,
         };
       }),
     };
@@ -395,11 +447,15 @@ export class OnlineMediaLibrary {
 
   private result(id: unknown) {
     const result = typeof id === 'string' ? this.results.get(id) : undefined;
-    if (!result) throw new Error('This search result expired. Search again.');
+    if (!result)
+      throw new OnlineMediaError(
+        'INVALID_INPUT',
+        'This search result expired. Search again.',
+      );
     return result;
   }
 
-  async preview(id: string, request: Request) {
+  async preview(id: string, request: Request): Promise<Response> {
     const { item } = this.result(id);
     if (!item.preview || request.method !== 'GET')
       return new Response(null, { status: 403 });
@@ -427,7 +483,8 @@ export class OnlineMediaLibrary {
   async download(id: unknown, root: string) {
     const { provider, item } = this.result(id);
     if (!item.original)
-      throw new Error(
+      throw new OnlineMediaError(
+        'UNSUPPORTED_CAPABILITY',
         'Download this file from its source and import it locally.',
       );
     const signal = AbortSignal.timeout(120000);
@@ -459,7 +516,11 @@ export class OnlineMediaLibrary {
       };
     } catch (error) {
       await discard();
-      throw error;
+      throw new OnlineMediaError(
+        'PROCESSING_FAILED',
+        error instanceof Error ? error.message : String(error),
+        { cause: error },
+      );
     }
   }
 }

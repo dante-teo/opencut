@@ -301,3 +301,20 @@ effect on a subsequent save. Stage another operation to change the draft.
 `project.cutClips(ids)` returns the same clipboard format and stages removal.
 Use that clipboard with `clips.paste` in the same project. Use `clips.remove`
 for linked groups. A single `editor.save()` commits the staged edits together.
+
+## Headless online media
+
+Call `project.searchOnlineMedia({ provider, kind, query, page })`, then pass a
+returned result ID to `project.importOnlineMedia(resultId, mediaDirectory)`.
+The import downloads a new media file, probes it, stages an asset with license
+and source attribution, and returns the asset. Call `editor.save()` to commit
+the project edit. An existing result is reused while its local file is
+available. Importing an offline result creates a new asset; use
+`project.relinkMedia()` to preserve existing clip references. Headless search
+results do not include a desktop preview URL.
+
+On an editor opened with `{ dryRun: true }`, import still downloads and probes,
+then discards the file without staging an edit. On a normal editor, keep the
+downloaded file in place. External downloads are outside project undo and
+redo, so a failed or abandoned save can leave a downloaded file. Inspect the
+project and history after an uncertain save before retrying.

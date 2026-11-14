@@ -16,7 +16,7 @@ import { stat } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getApplicationInfo, projectRevision } from '@opencut/core';
-import { renderPreviewCache } from '@opencut/core/node';
+import { OnlineMediaLibrary, renderPreviewCache } from '@opencut/core/node';
 import { WAVEFORM_CHUNK_SECONDS } from '@opencut/shared';
 import {
   probeMedia,
@@ -55,7 +55,6 @@ import {
 import type { IpcMainInvokeEvent } from 'electron';
 import { servePreviewFile } from './preview-file.js';
 import { ProjectSession, type ProjectAction } from './project-session.js';
-import { OnlineMediaLibrary } from './online-media.js';
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -103,7 +102,7 @@ function revokeTimeline() {
 let openingPreview = false;
 let closingProject = false;
 let previewGeneration = 0;
-const onlineMedia = new OnlineMediaLibrary();
+const onlineMedia = new OnlineMediaLibrary(true);
 const projectSession: ProjectSession = new ProjectSession(
   {
     async open() {

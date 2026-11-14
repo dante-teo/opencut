@@ -22,6 +22,7 @@ import {
   projectRevision,
 } from '@opencut/core';
 import type { Project } from '@opencut/core';
+import { MediaCache } from '../../packages/media/dist/index.js';
 import {
   acquireProjectWriter,
   copyProjectFile,
@@ -228,6 +229,87 @@ test('resolves packages through the physical project directory and preserves unr
     );
     assert.equal(await readFile(second.path, 'utf8'), 'unrelated replacement');
   } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('prepares freeze frames without holding the writer and rejects concurrent edits', async () => {
+  await mkdir(generated, { recursive: true });
+  const directory = await mkdtemp(join(generated, 'freeze-concurrency-'));
+  const source = join(directory, 'source.mp4');
+  const path = join(directory, 'project.json');
+  const output = join(directory, 'freeze.png');
+  const originalFrame = MediaCache.prototype.frame;
+  let release!: () => void;
+  let started!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  try {
+    execFileSync('ffmpeg', [
+      '-v',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'color=s=64x48:r=30:d=2',
+      '-c:v',
+      'libx264',
+      source,
+    ]);
+    const png = execFileSync('ffmpeg', [
+      '-v',
+      'error',
+      '-i',
+      source,
+      '-frames:v',
+      '1',
+      '-f',
+      'image2pipe',
+      '-c:v',
+      'png',
+      'pipe:1',
+    ]);
+    await writeProjectFile(videoProject(source), path);
+    MediaCache.prototype.frame = async () => {
+      started();
+      await gate;
+      return png;
+    };
+    const freeze = freezeProjectFrame(path, 'clip', 12, 3, output);
+    await waiting;
+    const writer = await acquireProjectWriter(path);
+    try {
+      await writer.update(
+        async (project) => ({
+          project: executeTransaction(project, {
+            expectedRevision: 0,
+            operations: [
+              {
+                type: 'track.add',
+                id: 'other',
+                name: 'Other',
+                mediaType: 'video',
+              },
+            ],
+          }).project,
+          result: undefined,
+        }),
+        { history: 'restore' },
+      );
+    } finally {
+      await writer.close();
+    }
+    release();
+    await assert.rejects(freeze, { code: 'REVISION_CONFLICT' });
+    await assert.rejects(readFile(output), { code: 'ENOENT' });
+    assert.equal(projectRevision(await readProjectFile(path)), 1);
+  } finally {
+    release();
+    MediaCache.prototype.frame = originalFrame;
     await rm(directory, { recursive: true, force: true });
   }
 });

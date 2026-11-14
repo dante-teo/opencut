@@ -731,6 +731,7 @@ export {
   AssetError,
   importMediaAsset,
   prepareMediaAsset,
+  prepareOnlineMediaAsset,
   prepareMediaRelink,
   prepareFreezeFrame,
   freezeProjectFrame,
@@ -747,3 +748,12 @@ export { renderProjectFile, resolveProjectRender } from './render-files.js';
 export { renderPreviewCache } from './preview-cache.js';
 
 export { readSubtitleFile, writeSubtitleFile } from './subtitle-files.js';
+
+export { OnlineMediaLibrary, OnlineMediaError } from './online-media.js';
+export type {
+  OnlineMediaProvider,
+  OnlineMediaKind,
+  OnlineMediaSearch,
+  OnlineMediaPage,
+  OnlineMediaResult,
+} from './online-media.js';

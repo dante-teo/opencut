@@ -18,10 +18,13 @@ scripts need the supplied `@opencut/sdk` package.
    revision, canvas, tracks, assets, clips and duration. Check `media list` for
    availability and `probe` for new footage. Create a project at a fresh path
    when starting from media alone. Import references to the original files.
-   Keep those files in place and leave their contents unchanged. Desktop
-   **Browse online** imports from Wikimedia Commons and Openverse into local
-   application storage. Preserve those files and the asset provenance when
-   using the CLI or SDK to edit the resulting project.
+   Keep those files in place and leave their contents unchanged. Search
+   Wikimedia Commons or Openverse with `online search REQUEST.json`, then import
+   a licensed result with `online import PROJECT REQUEST.json --result ID`
+   and `--directory MEDIA_DIRECTORY`. The SDK provides `searchOnlineMedia()`
+   and `importOnlineMedia()`. Preserve downloaded files and asset provenance.
+   If an online asset goes offline, use `media relink` to keep existing clips
+   connected; importing the result again creates a new asset.
 3. **Plan and apply.** Use stable IDs from inspection and integer project-frame
    indices, including source in/out. The out point is exclusive. Dry-run a
    revision-guarded CLI batch or stage edits with the SDK and dry-run its save.

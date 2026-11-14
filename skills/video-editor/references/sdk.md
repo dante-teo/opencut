@@ -16,6 +16,7 @@ Native Node TypeScript execution strips erasable types without type checking.
 | `createProject(path, { name, settings? })`                                 | Stage a new project. Set width, height and `frameRate: { numerator, denominator }` in `settings`.                                  |
 | `editor.project.inspect()`, `inspectTimeline(frame)`, `history()`          | Read staged project, evaluated timeline and history. Staged content retains the base revision until saved.                         |
 | `project.importMedia(file)`, `checkMedia()`, `removeMedia(assetId)`        | Link a source and get its `asset.id`, check availability, or remove an unused reference.                                           |
+| `project.searchOnlineMedia(input)`, `importOnlineMedia(id, directory)`     | Search Wikimedia Commons or Openverse and stage an imported result with provenance.                                                |
 | `project.apply(...operations)`                                             | Stage a validated group using the [batch operation fields](cli.md#edit-safely). A failed group leaves the previous draft intact.   |
 | `editor.save({ dryRun?, label? })`                                         | Validate publication or publish all staged edits as one undo step. Existing editors guard their opened snapshot.                   |
 | `project.undo()`, `project.redo()`                                         | Stage one history step. Save it separately from content edits.                                                                     |
@@ -28,6 +29,14 @@ project, start with inspection and keep the opened revision. Dry-run the save,
 then review the draft. A per-save dry run keeps the editor usable. Opening or
 creating an editor with `{ dryRun: true }` makes every save simulated and
 disables previews and renders on that handle.
+
+Online search input includes `provider`, `kind`, `query` and optional `page`.
+Use a returned result ID to import. Import downloads and probes an external
+file before staging the asset. On a dry-run editor, it discards the download.
+On a normal editor, save the draft and keep the downloaded file. An available
+result is reused; importing an offline result creates a new asset. Use
+`project.relinkMedia(assetId, file)` to preserve existing clip references.
+After an uncertain save, inspect the project and history before retrying.
 
 Use `project.apply({ type: 'text.add', at: 30, duration: 90, text: { content: 'OpenCut\n中文字幕' } })`
 to stage editable text. The SDK exports `TextLayer` for typed style data.

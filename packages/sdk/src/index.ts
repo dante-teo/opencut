@@ -30,10 +30,12 @@ import {
   type DesktopControlRequest,
   copyProjectFile,
   prepareMediaAsset,
+  prepareOnlineMediaAsset,
   prepareFreezeFrame,
   prepareEmbeddedFont,
   prepareMediaRelink,
   ProjectFileError,
+  OnlineMediaLibrary,
   readProjectFile,
   readSubtitleFile,
   writeSubtitleFile,
@@ -46,6 +48,7 @@ import type {
   AssetImportResult,
   AssetInfo,
   MediaAvailability,
+  OnlineMediaSearch,
 } from '@opencut/core/node';
 import {
   renderContactSheet,
@@ -69,7 +72,12 @@ export {
   parseSubtitleTime,
   parseClipSpeed,
 } from '@opencut/core';
-export { AssetError, ProjectFileError, SessionError } from '@opencut/core/node';
+export {
+  AssetError,
+  OnlineMediaError,
+  ProjectFileError,
+  SessionError,
+} from '@opencut/core/node';
 export type { DesktopControlRequest } from '@opencut/core/node';
 export { MediaError, RenderCancelledError } from '@opencut/media';
 export type {
@@ -153,6 +161,13 @@ export interface ProjectDraft {
   history(): EditHistory;
   checkMedia(): Promise<MediaAvailability[]>;
   importMedia(file: string): Promise<AssetImportResult>;
+  searchOnlineMedia(
+    input: OnlineMediaSearch,
+  ): ReturnType<OnlineMediaLibrary['search']>;
+  importOnlineMedia(
+    resultId: string,
+    directory: string,
+  ): Promise<AssetImportResult>;
   relinkMedia(assetId: string, file: string): Promise<AssetInfo>;
   importFont(id: string, file: string): Promise<{ id: string; file: string }>;
   freezeFrame(
@@ -286,6 +301,7 @@ function editProject(
   let baseline = serializeProject(base);
   let busy = false;
   let historyPending = false;
+  const onlineMedia = new OnlineMediaLibrary();
   const ensureIdle = () => {
     signal?.throwIfAborted();
     if (busy)
@@ -401,6 +417,40 @@ function editProject(
         signal?.throwIfAborted();
         draft = prepared.project;
         return structuredClone(prepared.result);
+      });
+    },
+    searchOnlineMedia: (input) => onlineMedia.search(input),
+    importOnlineMedia: (id, directory) => {
+      ensureEditable();
+      return exclusive(async () => {
+        const { title, sourceUrl } = onlineMedia.source(id);
+        const existing = draft.assets.find(
+          (asset) =>
+            asset.name === title && asset.provenance?.sourceUrl === sourceUrl,
+        );
+        if (existing) {
+          const found = (await checkProjectMedia(draft, path)).find(
+            (entry) =>
+              entry.assetId === existing.id && entry.status === 'available',
+          );
+          if (found) {
+            const prepared = await prepareMediaAsset(draft, path, found.path, {
+              localMediaOnly: true,
+            });
+            return structuredClone(prepared.result);
+          }
+        }
+        const download = await onlineMedia.download(id, resolve(directory));
+        try {
+          const prepared = await prepareOnlineMediaAsset(draft, path, download);
+          signal?.throwIfAborted();
+          if (dryRun) await download.discard();
+          else draft = prepared.project;
+          return structuredClone(prepared.result);
+        } catch (error) {
+          await download.discard();
+          throw error;
+        }
       });
     },
     removeMedia: (id) => {

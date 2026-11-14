@@ -58,6 +58,22 @@ and rate. Pick the aspect ratio and project rate before arranging media.
 `--expected-revision` and `--dry-run`. Re-importing the same file reuses the
 asset ID. Read `project inspect` again after imports.
 
+For online sources, write a request JSON with `provider` (`commons` or
+`openverse`), `kind`, `query` and optional `page`. Search and use a returned
+stable result ID to import:
+
+```sh
+opencut online search REQUEST.json --json
+opencut online import PROJECT REQUEST.json --result ID --directory MEDIA_DIRECTORY --expected-revision REV --json
+```
+
+Import searches again and downloads to a new external file. `--dry-run` probes
+the download and discards it. A result with an available local file is reused;
+importing an offline result creates a new asset. Use `media relink` to keep
+existing clips connected to an offline asset.
+After a disconnected commit reply, inspect the project and history before
+retrying.
+
 Use integer frame indices measured at the project FPS. At 30 fps, frame 45 is
 1.5 seconds. A source range `in: 15, out: 45` covers one second from 0.5 s up
 to 1.5 s. Inspection returns rational seconds as `{numerator, denominator}`.

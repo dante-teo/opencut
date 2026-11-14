@@ -71,6 +71,9 @@ T38 adds [video cross-dissolves and canvas fades](TIMELINE_PLAYBACK.md#video-tra
 T39 adds [group timeline editing](TIMELINE_EDITING.md), including multi-clip
 selection, a project clipboard, ripple delete, insert edits, gap closing,
 track locks, and marker snapping.
+T40 documents the public CLI and SDK editing paths in the
+[headless capability matrix](HEADLESS_CAPABILITIES.md), including online media
+search and import.
 
 Select a media clip to edit **Timeline position**, **Duration**, **Source in/out** in
 whole project frames, **Volume** (linear 0–1), **Mute**, **Fade in/out**, and video **Position X/Y**
