@@ -476,18 +476,7 @@ export async function freezeProjectFrame(
   }
 }
 
-export async function prepareEmbeddedFont(
-  project: Project,
-  id: string,
-  path: string,
-) {
-  const clip = project.clips.find((clip) => clip.id === id && clip.text);
-  const subtitle = project.subtitles?.cues.some((cue) => cue.id === id);
-  if (!clip && !subtitle)
-    throw new AssetError(
-      'INVALID_MEDIA',
-      'Select a title or subtitle to import its font.',
-    );
+export async function readEmbeddedFont(path: string) {
   const file = await open(path, 'r');
   let bytes: Buffer;
   try {
@@ -508,7 +497,22 @@ export async function prepareEmbeddedFont(
     await file.close();
   }
   await validateEmbeddedFont(bytes);
-  const embeddedFont = bytes.toString('base64');
+  return bytes.toString('base64');
+}
+
+export async function prepareEmbeddedFont(
+  project: Project,
+  id: string,
+  path: string,
+) {
+  const clip = project.clips.find((clip) => clip.id === id && clip.text);
+  const subtitle = project.subtitles?.cues.some((cue) => cue.id === id);
+  if (!clip && !subtitle)
+    throw new AssetError(
+      'INVALID_MEDIA',
+      'Select a title or subtitle to import its font.',
+    );
+  const embeddedFont = await readEmbeddedFont(path);
   const next = previewTransaction(project, {
     expectedRevision: projectRevision(project),
     operations: [

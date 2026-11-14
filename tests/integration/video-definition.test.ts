@@ -29,7 +29,11 @@ afterEach(async () => {
 });
 
 function run(...args: string[]) {
-  return spawnSync(process.execPath, [entry, ...args, '--json'], {
+  return runCli(...args, '--json');
+}
+
+function runCli(...args: string[]) {
+  return spawnSync(process.execPath, [entry, ...args], {
     encoding: 'utf8',
     cwd: directory,
     env: { ...process.env, PATH: '' },
@@ -358,5 +362,240 @@ describe('whole-video definitions', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stderr.trim()).toBe('definition executed');
     expect(JSON.parse(result.stdout).settings.durationFrames).toBe(600);
+  });
+});
+
+describe('T45 definitions and migration', () => {
+  it('shares validation for TypeScript and JSON for duplicate IDs and subtitle timing', async () => {
+    const input = definition();
+    for (const [value, message] of [
+      [
+        {
+          ...input,
+          tracks: input.tracks.map((track) => ({ ...track, id: 'repeated' })),
+        },
+        /ID 'repeated' is already in use/,
+      ],
+      [
+        {
+          ...input,
+          subtitles: {
+            style: {},
+            cues: [
+              {
+                id: 'caption',
+                start: { numerator: 1, denominator: 1 },
+                end: { numerator: 2, denominator: 1 },
+                text: 'one',
+                words: [
+                  {
+                    from: 0,
+                    to: 4,
+                    start: { numerator: 0, denominator: 1 },
+                    end: { numerator: 1, denominator: 2 },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        /non-overlapping text and time ranges/,
+      ],
+      [
+        {
+          ...input,
+          tracks: [
+            {
+              type: 'text',
+              clips: [
+                {
+                  at: 0,
+                  duration: 1,
+                  text: { content: 'Test', font: 'missing' },
+                },
+              ],
+            },
+          ],
+        },
+        /Unknown font 'missing'/,
+      ],
+    ] as const) {
+      const json = await writeDefinition(value);
+      const ts = join(directory, 'title.video.ts');
+      await writeFile(ts, `export default ${JSON.stringify(value)};\n`);
+      for (const path of [ts, json])
+        await expect(compileVideo(path)).rejects.toThrow(message);
+    }
+  });
+
+  it('reports the inferred frame count in plain text and JSON', async () => {
+    const input = definition();
+    delete input.canvas.durationFrames;
+    const path = await writeDefinition(input);
+    const plain = runCli('validate', path);
+    expect(plain.status, plain.stderr).toBe(0);
+    expect(plain.stdout).toContain('Valid video definition (60 frames)');
+    const json = run('validate', path);
+    expect(json.status, json.stderr).toBe(0);
+    expect(JSON.parse(json.stdout)).toMatchObject({ frameCount: 60 });
+  });
+
+  it('samples off-grid titles without changing their animation clock', async () => {
+    const at = { numerator: 1, denominator: 25 };
+    const path = await writeDefinition(
+      defineVideo({
+        canvas: { width: 320, height: 180, frameRate: 24 },
+        tracks: [
+          {
+            type: 'text',
+            clips: [
+              {
+                at: 0,
+                duration: { numerator: 1, denominator: 240 },
+                text: { content: 'First' },
+              },
+              {
+                at: { numerator: 1, denominator: 240 },
+                duration: { numerator: 1, denominator: 240 },
+                text: { content: 'Between ticks' },
+              },
+              {
+                at,
+                sourceIn: { numerator: 1, denominator: 75 },
+                sourceOut: { numerator: 7, denominator: 75 },
+                text: { content: 'Title' },
+                keyframes: {
+                  x: [
+                    {
+                      time: { numerator: 0, denominator: 1 },
+                      value: 10,
+                      easing: 'linear',
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const video = await compileVideo(path);
+    const { visualClips } = await video.resolveRender();
+    expect(video.frameCount).toBe(3);
+    expect(visualClips).toHaveLength(2);
+    expect(visualClips).toMatchObject([
+      { timelineStartFrame: 0, frameCount: 1 },
+      { timelineStartFrame: 1, frameCount: 2, animation: { start: at } },
+    ]);
+  });
+
+  it('enforces the full-render subtitle cap during validation and migration', async () => {
+    const input = definition();
+    const cues = Array.from({ length: 257 }, (_, i) => ({
+      id: `cue-${i}`,
+      text: 'Caption',
+      start: { numerator: i, denominator: 24 },
+      end: { numerator: i + 1, denominator: 24 },
+    }));
+    input.subtitles = { style: {}, cues: cues.slice(0, 256) };
+    const path = await writeDefinition(input);
+    const valid = run('validate', path);
+    expect(valid.status, valid.stderr).toBe(0);
+    const original = (await compileVideo(path)).project;
+    input.subtitles.cues = cues;
+    await writeDefinition(input);
+    const invalid = run('validate', path);
+    expect(invalid.status).toBe(1);
+    expect(invalid.stderr).toMatch(/up to 256 visible subtitle cues/);
+    const source = join(directory, 'subtitles.opencut.json');
+    await writeFile(
+      source,
+      serializeProject({ ...original, subtitles: input.subtitles }),
+    );
+    const migration = run(
+      'migrate',
+      source,
+      '--output',
+      'converted.video.json',
+    );
+    expect(migration.status).toBe(1);
+    expect(migration.stderr).toMatch(/up to 256 visible subtitle cues/);
+    expect(await readdir(directory)).not.toContain('converted.video.json');
+  });
+
+  it('converts the saved content and ignores history-only assets', async () => {
+    const original = structuredClone(
+      (await compileVideo(await writeDefinition(definition()))).project,
+    );
+    const before = structuredClone(original);
+    before.assets.push({
+      id: 'missing',
+      name: 'Missing history-only asset',
+      mediaTypes: ['video'],
+      file: { type: 'relative', path: 'missing.mov' },
+    });
+    original.editing = {
+      revision: 1,
+      undo: [
+        {
+          id: 'undo',
+          label: 'Remove asset',
+          committedAt: original.metadata.updatedAt,
+          before,
+          after: structuredClone(original),
+        },
+      ],
+      redo: [],
+    };
+    const source = join(directory, 'source.opencut.json');
+    const snapshot = serializeProject(original);
+    await writeFile(source, snapshot);
+    const json = join(directory, 'converted.video.json');
+    const result = run('migrate', source, '--output', json);
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ historyOmitted: true });
+    const converted = await compileVideo(json);
+    const content = { ...original, editing: undefined };
+    expect(serializeProject(converted.project)).toBe(serializeProject(content));
+    expect(await readFile(source, 'utf8')).toBe(snapshot);
+    expect((await readFile(json, 'utf8')).includes('missing.mov')).toBe(false);
+    const existing = run('migrate', source, '--output', json);
+    expect(existing.status).toBe(1);
+    expect(existing.stderr).toMatch(/Refusing to overwrite/);
+  });
+
+  it('rejects unsupported versions and unrenderable projects without publishing a definition', async () => {
+    const source = join(directory, 'source.opencut.json');
+    const output = 'converted.video.json';
+    const original = structuredClone(
+      (await compileVideo(await writeDefinition(definition()))).project,
+    );
+    for (const [project, message] of [
+      [
+        { ...original, schemaVersion: 100 },
+        /Unsupported project schema version 100/,
+      ],
+      [
+        { ...original, settings: { ...original.settings, width: 319 } },
+        /even dimensions/,
+      ],
+      [
+        {
+          ...original,
+          settings: { ...original.settings, durationFrames: undefined },
+          clips: [],
+        },
+        /Video tracks are empty/,
+      ],
+    ] as const) {
+      await writeFile(source, JSON.stringify(project));
+      const failed = run('migrate', source, '--output', output);
+      expect(failed.status, failed.stderr).toBe(1);
+      expect(JSON.parse(failed.stderr).error).toMatchObject({
+        code: 'VIDEO_MIGRATION_FAILED',
+        message,
+      });
+      expect(await readdir(directory)).not.toContain(output);
+    }
   });
 });

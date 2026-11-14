@@ -8,6 +8,16 @@ In a standalone deployment, place the script where Node can resolve the
 deployed `node_modules/@opencut/sdk`. Use `.mts` outside an ESM package.
 Native Node TypeScript execution strips erasable types without type checking.
 
+## Whole-video definitions
+
+Use `defineVideo()` to type a definition and `compileVideo(file, { signal })`
+to obtain its `path`, frozen `project` and computed `frameCount`. Use
+`compileVideo(file, { signal, preview: true })` when previewing a selected
+range. The renderer checks the subtitle limit for that range. Use
+`migrateProject(source, output, { signal })` with a new `.video.json` or
+`.video.ts` destination to convert a saved project. See the
+[whole-video workflow](video-definitions.md) for authoring and CLI examples.
+
 ## Standalone SDK
 
 | API                                                                        | Use                                                                                                                                |

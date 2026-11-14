@@ -4,7 +4,7 @@ export {
   videoSourceDuration,
   audioSourceDuration,
 } from './probe.js';
-export { extractFrame } from './frame.js';
+export { decodeStillFrame, extractFrame } from './frame.js';
 export { separateDialogue } from './dialogue.js';
 export { composeMedia } from './compose.js';
 export type { CompositionOptions, CompositionResult } from './compose.js';
@@ -20,6 +20,7 @@ export {
   renderVideoTimeline,
   renderTimelineFrame,
   validateVideoTimeline,
+  validateSubtitleBurnIn,
   renderCodecs,
   renderQualities,
   renderResolutions,

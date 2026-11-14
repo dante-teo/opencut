@@ -275,14 +275,27 @@ export async function writeProjectFile(
 ): Promise<void> {
   signal?.throwIfAborted();
   const path = nativePath(projectFilePath);
-  const json = serializeProject(project);
+  await publishNewFile(path, serializeProject(project), signal).catch(
+    (cause: unknown) => {
+      if (signal?.aborted && cause === signal.reason) throw cause;
+      throw new ProjectFileError('WRITE_FAILED', path, { cause });
+    },
+  );
+}
+
+export async function publishNewFile(
+  path: string,
+  content: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted();
   let temporary: string | undefined;
   try {
     temporary = await mkdtemp(join(dirname(path), '.opencut-create-'));
-    const pending = join(temporary, 'project.json');
+    const pending = join(temporary, 'pending');
     const file = await open(pending, 'wx');
     try {
-      await file.writeFile(json, 'utf8');
+      await file.writeFile(content, 'utf8');
       await file.sync();
     } finally {
       await file.close();
@@ -301,9 +314,6 @@ export async function writeProjectFile(
       signal?.throwIfAborted();
       await copyFile(pending, path, constants.COPYFILE_EXCL);
     }
-  } catch (cause) {
-    if (signal?.aborted && cause === signal.reason) throw cause;
-    throw new ProjectFileError('WRITE_FAILED', path, { cause });
   } finally {
     if (temporary) await rm(temporary, { recursive: true, force: true });
   }
@@ -682,6 +692,8 @@ export {
   compileVideo,
   isVideoDefinitionPath,
   readVideoJsonForPreview,
-  VideoDefinitionError,
 } from './video-files.js';
-export type { CompiledVideo } from './video-files.js';
+export { VideoDefinitionError } from './video-compiler.js';
+export type { CompiledVideo } from './video-compiler.js';
+
+export { migrateProject, VideoMigrationError } from './video-migration.js';

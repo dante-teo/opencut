@@ -24,20 +24,26 @@ with `pnpm fixtures:generate` if absent; see the
 [fixture contract](../tests/fixtures/README.md). The output parent directory must
 already exist, and the output file must not exist.
 
-## Whole-video definitions (T44)
+## Whole-video definitions (T44–T45)
 
 ```sh
 opencut validate sample.video.ts
 opencut inspect sample.video.ts --json
 opencut preview frame sample.video.ts --frame 48 --output frame.png
 opencut render sample.video.ts --output final.mp4
+opencut migrate edit.opencut.json --output edit.video.json --json
 ```
 
-The same commands accept `.video.json`. Define the canvas, duration, assets,
-tracks and clips in a single file and render without creating a saved project.
+The same commands accept `.video.json`. Define the canvas, assets, tracks and
+clips in a single file and render without creating a saved project.
+`validate --json` reports the computed `frameCount` even when duration is inferred.
+Full-render validation allows up to 256 visible subtitle cues. A frame preview
+applies the limit to the selected frame.
 `preview frame` also accepts saved projects, including ones named
 `*.video.json`. For that suffix, a top-level `schemaVersion` identifies a
 saved project. Video definitions use the optional `version` field.
+Use `migrate` to convert the saved snapshot to a new `.video.json` or `.video.ts`.
+Media paths are rebased and any omitted editing history is reported.
 See the [definition reference and executable examples](VIDEO_DEFINITIONS.md).
 
 ## TypeScript scripts and SDK (T30)

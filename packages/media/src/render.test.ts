@@ -311,6 +311,63 @@ describe('video timeline executor safety', () => {
     expect(runMediaTool).not.toHaveBeenCalled();
   });
 
+  it('stages each source and freeze time once and cleans up the held PNGs', async () => {
+    const original = join(directory, 'source.mp4');
+    const alias = join(directory, 'alias.mp4');
+    await writeFile(original, '');
+    await symlink(original, alias, 'file');
+    const png = Buffer.alloc(24);
+    Buffer.from('89504e470d0a1a0a', 'hex').copy(png);
+    png.writeUInt32BE(320, 16);
+    png.writeUInt32BE(180, 20);
+    const tool = vi.mocked(runMediaTool);
+    const run = tool.getMockImplementation()!;
+    tool.mockImplementation(async (name, args, ...rest) => {
+      if (name === 'ffprobe' && args.includes('-show_frames'))
+        return Buffer.from('0\n');
+      if (name === 'ffmpeg' && args.includes('image2pipe')) return png;
+      if (name === 'ffmpeg' && args.at(-1)?.endsWith('render.mp4')) {
+        const inputs = args
+          .flatMap((arg, i) => (arg === '-i' ? [args[i + 1]!] : []))
+          .filter((path) => path.endsWith('.png'));
+        expect(inputs).toHaveLength(3);
+        expect(inputs[0]).toBe(inputs[1]);
+        expect(inputs[0]).not.toBe(inputs[2]);
+        for (const path of new Set(inputs))
+          expect(await readFile(path)).toEqual(png);
+      }
+      return run(name, args, ...rest);
+    });
+    const canvas = { ...options };
+    delete canvas.segments;
+    await renderVideoTimeline({
+      ...canvas,
+      visualClips: [original, alias, original].map((path, index) => ({
+        clipId: `held-${index}`,
+        path,
+        freezeFrame: [
+          { numerator: 1, denominator: 4 },
+          { numerator: 2, denominator: 8 },
+          { numerator: 1, denominator: 2 },
+        ][index]!,
+        timelineStartFrame: index * 4,
+        sourceStartFrame: 0,
+        frameCount: 4,
+      })),
+    });
+    expect(
+      tool.mock.calls.filter(([, args]) => args.includes('-show_frames')),
+    ).toHaveLength(2);
+    expect(
+      tool.mock.calls.filter(([, args]) => args.includes('image2pipe')),
+    ).toHaveLength(2);
+    expect((await readdir(directory)).sort()).toEqual([
+      'alias.mp4',
+      'out.mp4',
+      'source.mp4',
+    ]);
+  });
+
   it('publishes only verified output and passes literal paths to the existing subprocess utility', async () => {
     const result = await renderVideoTimeline(options);
     expect(result).toMatchObject({

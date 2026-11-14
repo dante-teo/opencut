@@ -3,6 +3,9 @@
 Use `defineVideo()` for whole-video authoring and `compileVideo(file)` to
 compile a TypeScript or JSON definition into an in-memory project.
 See [Video as code](VIDEO_DEFINITIONS.md) for the authoring format and examples.
+Use `migrateProject(source, output, { signal })` to convert a saved snapshot
+into a new `.video.json` or `.video.ts` definition. See
+[conversion semantics](VIDEO_DEFINITIONS.md#convert-a-saved-project).
 
 `@opencut/sdk` is a Node ESM workspace package with a public root export and
 TypeScript declarations. Add `"@opencut/sdk": "workspace:*"` to a workspace

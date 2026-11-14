@@ -73,6 +73,8 @@ Commands:
   inspect <definition> --json          Inspect the compiled timeline
   render <definition> --output <new.mp4>
                                        Render directly from a whole-video definition
+  migrate <project-file> --output <new.video.json|new.video.ts>
+                                       Convert a saved project into a standalone definition
   system inspect [--json]              Inspect hardware and local VideoToolbox capabilities
   help --json                         Discover commands, arguments, capabilities and schemas
   run <script.ts> --project <project-file>

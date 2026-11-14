@@ -18,7 +18,14 @@ result. The [whole-video workflow](references/video-definitions.md) covers
 the fields, timing, paths and a complete example. Run trusted TypeScript
 definitions only. Keep the definition and source files in place.
 
-For an existing saved project, follow the steps below.
+To move a saved project into whole-video authoring, run
+`opencut migrate PROJECT --output NEW.video.json --json` or use a
+`.video.ts` destination. Validate the result and check the same preview frames
+before and after conversion. Migration reports omitted editing history and
+keeps references to the source media.
+
+For a saved project that will continue using revision-based editing, follow
+the steps below.
 
 1. **Discover the interface.** Run `opencut help --json` and scope it with
    `opencut help GROUP ACTION --json`. Here `opencut` means the supplied

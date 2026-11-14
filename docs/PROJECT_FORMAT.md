@@ -16,6 +16,9 @@ T23 [timeline evaluation](TIMELINE_EVALUATION.md) derives active media and sourc
 times from these same fields. Evaluation results are transient and do not change
 schema version 1, project content or history. T44 compiles
 [video definitions](VIDEO_DEFINITIONS.md) to the same project model.
+T45 can convert saved content in the opposite direction with `opencut migrate`.
+A definition-backed still asset can carry a rational `freezeFrame` timestamp
+into its source video. Legacy freeze commands keep producing referenced PNGs.
 Optional `settings.durationFrames` declares a positive exact canvas frame
 count. Clip and subtitle ends must fit within it. Projects that omit it
 derive their duration from the last clip or subtitle end.

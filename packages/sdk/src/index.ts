@@ -666,5 +666,10 @@ export type OpenCutScript = (
 
 export { defineVideo } from '@opencut/core';
 export type { VideoDefinition } from '@opencut/core';
-export { compileVideo, VideoDefinitionError } from '@opencut/core/node';
+export {
+  compileVideo,
+  migrateProject,
+  VideoDefinitionError,
+  VideoMigrationError,
+} from '@opencut/core/node';
 export type { CompiledVideo } from '@opencut/core/node';

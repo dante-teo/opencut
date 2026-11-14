@@ -415,6 +415,15 @@ const definitions: Definition[] = [
     tools: ['ffmpeg', 'ffprobe'],
   },
   {
+    name: 'migrate',
+    description:
+      'Convert the saved project snapshot into a standalone .video.json or .video.ts.',
+    args: ['project-file'],
+    options: ['output'],
+    required: ['output'],
+    tools: ['ffprobe'],
+  },
+  {
     name: 'system inspect',
     description:
       'Inspect host hardware and probe local VideoToolbox capabilities without installing tools or models.',

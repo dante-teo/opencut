@@ -1,3 +1,4 @@
+import { decodeStillFrame } from './frame.js';
 import {
   canvasColorPattern,
   opaqueCanvasColor,
@@ -18,6 +19,7 @@ import {
   link,
   lstat,
   mkdtemp,
+  realpath,
   rename,
   rm,
   stat,
@@ -63,7 +65,13 @@ interface VisualTimelineProperties {
 }
 export type VisualTimelineClip = VisualTimelineProperties &
   (
-    | { path: string; text?: never; subtitle?: never; subtitleCueId?: never }
+    | {
+        path: string;
+        freezeFrame?: Rational;
+        text?: never;
+        subtitle?: never;
+        subtitleCueId?: never;
+      }
     | { text: TextLayer; path?: never; subtitle?: true; subtitleCueId?: string }
   );
 
@@ -399,8 +407,31 @@ interface StagedInput {
   write: (destination: string) => Promise<void>;
 }
 
-/** Compile and validate the complete render before writing intermediate layers. */
-async function prepareTimeline(options: VideoTimelineOptions, png = false) {
+type HeldFrame = { path: string; width: number; height: number };
+const maxBurnedSubtitleCues = 256;
+
+export function validateSubtitleBurnIn(
+  clips: readonly Pick<
+    VisualTimelineClip,
+    'subtitle' | 'subtitleCueId' | 'clipId'
+  >[],
+) {
+  const ids = new Set<string>();
+  for (const clip of clips) {
+    if (clip.subtitle) ids.add(clip.subtitleCueId ?? clip.clipId);
+    if (ids.size > maxBurnedSubtitleCues)
+      throw new MediaError(
+        `Burn-in supports up to ${maxBurnedSubtitleCues} visible subtitle cues per render. Shorten the render range or export a sidecar.`,
+      );
+  }
+}
+
+/** Prepare filters and stage unique held frames when executing a render. */
+async function prepareTimeline(
+  options: VideoTimelineOptions,
+  png = false,
+  scratch?: ReturnType<typeof renderScratch>,
+) {
   checkRenderSignal(options.signal);
   validateOptions(options);
   const codec = options.codec ?? 'h264';
@@ -691,16 +722,8 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
       (clip.timelineStartFrame < endFrame &&
         clip.timelineStartFrame + clip.frameCount > startFrame),
   );
-  if (
-    new Set(
-      visibleClips
-        .filter((clip) => clip.subtitle)
-        .map((clip) => clip.subtitleCueId ?? clip.clipId),
-    ).size > 256
-  )
-    throw new MediaError(
-      'Burn-in supports up to 256 visible subtitle cues per render. Shorten the render range or export a sidecar.',
-    );
+  validateSubtitleBurnIn(visibleClips);
+  const heldFrames = new Map<string, HeldFrame>();
   const framesync = 'eof_action=pass:repeatlast=0';
   const prepareLayer = async (
     clip: VisualTimelineClip,
@@ -782,7 +805,9 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
     }
     const source = await readSource(clip);
     const { video } = source;
-    const still = isStillImage(source);
+    const duration = videoSourceDuration(source);
+    const freeze = clip.freezeFrame;
+    const still = !!freeze || isStillImage(source);
     if (!video || video.isAttachedPicture || (!still && !video.frameRate))
       throw new MediaError(
         `Clip '${clip.clipId}' requires timed video or a still image on the video track.`,
@@ -791,19 +816,65 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
       throw new MediaError(
         `Transition clip '${clip.clipId}' requires timed video.`,
       );
-    const rotated = Math.abs(video.rotation ?? 0) % 180 === 90;
+    let held: HeldFrame | undefined;
+    if (freeze) {
+      if (
+        isStillImage(source) ||
+        !video.frameRate ||
+        !validRational(freeze) ||
+        (duration !== null && seconds(freeze) >= duration)
+      )
+        throw new MediaError(
+          `Clip '${clip.clipId}' requires a freeze time inside a timed video.`,
+        );
+      if (first >= last) return;
+      const inputStart = source.startTimeSeconds ?? 0;
+      const timestamp =
+        seconds(freeze) + ((video.startTimeSeconds ?? inputStart) - inputStart);
+      const key = JSON.stringify([
+        await realpath(source.path),
+        video.index,
+        timestamp,
+      ]);
+      held = heldFrames.get(key);
+      if (!held) {
+        const bytes = await decodeStillFrame(
+          source,
+          timestamp,
+          true,
+          options.signal,
+        );
+        // Preflight checks decoding and geometry without creating files.
+        const path = scratch
+          ? join(await scratch.open(), `freeze-${heldFrames.size}.png`)
+          : `freeze-${heldFrames.size}.png`;
+        if (scratch)
+          await writeFile(path, bytes, { flag: 'wx', signal: options.signal });
+        held = {
+          path,
+          width: bytes.readUInt32BE(16),
+          height: bytes.readUInt32BE(20),
+        };
+        heldFrames.set(key, held);
+      }
+    }
+    // A held PNG already has square pixels and its display orientation.
+    const rotated = !held && Math.abs(video.rotation ?? 0) % 180 === 90;
+    const pixelWidth = held?.width ?? video.width ?? width;
+    const pixelHeight = held?.height ?? video.height ?? height;
     const displayWidth =
-      (video.width ?? width) * (video.sampleAspectRatio ?? 1);
-    const displayHeight = video.height ?? height;
-    // Chromium treats untagged HD as BT.709 and SD as BT.601. Compose in RGB,
-    // so sources with different YUV matrices and PNG alpha blend like Canvas.
-    const matrix = sourceColorMatrix(
-      video.colorSpace,
-      video.width ?? 0,
-      video.height ?? 0,
-      video.codec,
-    );
-    const duration = videoSourceDuration(source);
+      pixelWidth * (held ? 1 : (video.sampleAspectRatio ?? 1));
+    const displayHeight = pixelHeight;
+    const stream = held ? 0 : video.index;
+    // Follow the same RGB conversion as the existing media pipeline.
+    const matrix = held
+      ? sourceColorMatrix(null, pixelWidth, pixelHeight, 'png')
+      : sourceColorMatrix(
+          video.colorSpace,
+          video.width ?? 0,
+          video.height ?? 0,
+          video.codec,
+        );
     const sourceEnd = clip.sourceStartFrame + clip.frameCount;
     const sourceOutSeconds = clip.retiming
       ? seconds(clip.retiming.sourceOut)
@@ -835,13 +906,14 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
         : 'setpts=PTS-STARTPTS,' +
           frameSampling +
           `trim=start_frame=${clip.sourceStartFrame}:end_frame=${sourceEnd}`;
+    const inputPath = held?.path ?? source.path;
     if (transformed) {
       return transform({
         kind: 'media',
-        path: source.path,
-        stream: video.index,
-        width: (rotated ? video.height : video.width) ?? width,
-        height: (rotated ? video.width : video.height) ?? height,
+        path: inputPath,
+        stream,
+        width: rotated ? pixelHeight : pixelWidth,
+        height: rotated ? pixelWidth : pixelHeight,
         aspect: rotated
           ? displayHeight / displayWidth
           : displayWidth / displayHeight,
@@ -858,10 +930,10 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
       rotated ? displayWidth : displayHeight,
       clip,
     );
-    args.push('-threads', '1', ...renderSourceInputArgs(), '-i', source.path);
-    inputs.set(clip.clipId, input);
+    args.push('-threads', '1', ...renderSourceInputArgs(), '-i', inputPath);
+    if (!held) inputs.set(clip.clipId, input);
     filters.push(
-      `[${input++}:${video.index}]${sampling},` +
+      `[${input++}:${stream}]${sampling},` +
         `${fitVisual(geometry, matrix)},format=rgba,` +
         ((clip.opacity ?? 1) === 1 ? '' : `lut=a=val*${clip.opacity},`) +
         `settb=1/${numerator},setpts=(N+${clip.timelineStartFrame})*${denominator}[${label}]`,
@@ -1333,7 +1405,7 @@ export async function renderVideoTimeline(
 ): Promise<VideoTimelineResult> {
   const scratch = renderScratch(options.output, '.opencut-render-');
   try {
-    const prepared = await prepareTimeline(options);
+    const prepared = await prepareTimeline(options, false, scratch);
     await scratch.stage(prepared, options.signal);
     const {
       args,
@@ -1457,7 +1529,7 @@ export async function renderVideoTimeline(
 export async function renderTimelineFrame(options: VideoTimelineOptions) {
   const scratch = renderScratch(options.output, '.opencut-frame-');
   try {
-    const prepared = await prepareTimeline(options, true);
+    const prepared = await prepareTimeline(options, true, scratch);
     await scratch.stage(prepared, options.signal);
     const rendered = join(await scratch.open(), 'frame.png');
     await runMediaTool(

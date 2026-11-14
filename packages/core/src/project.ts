@@ -73,7 +73,7 @@ const assetMetadataSchema = z.strictObject({
   frameRateRatio: z.string().nullable(),
   hasAudio: z.boolean(),
 });
-const assetSchema = z.strictObject({
+export const assetSchema = z.strictObject({
   id: entityIdSchema,
   name: entityNameSchema,
   file: mediaReferenceSchema,
@@ -88,6 +88,7 @@ const assetSchema = z.strictObject({
     .refine((value) => value.numerator > 0, 'Known duration must be positive.')
     .optional(),
   metadata: assetMetadataSchema.optional(),
+  freezeFrame: timeSchema.optional(),
   provenance: z
     .strictObject({
       provider: z.enum(['commons', 'openverse']),
@@ -98,7 +99,7 @@ const assetSchema = z.strictObject({
     })
     .optional(),
 });
-const trackSchema = z.strictObject({
+export const trackSchema = z.strictObject({
   id: entityIdSchema,
   name: entityNameSchema,
   type: mediaType,
@@ -177,7 +178,7 @@ const persistedClipSchema = clipSchema.refine(
       typeof value === 'object' && value !== null && !Array.isArray(value),
   },
 );
-const settingsSchema = z.strictObject({
+export const settingsSchema = z.strictObject({
   backgroundColor: canvasShape.backgroundColor,
   width: z.int().positive(),
   height: z.int().positive(),
@@ -372,6 +373,19 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
   }
   const assets = new Map(project.assets.map((asset) => [asset.id, asset]));
   const tracks = new Map(project.tracks.map((track) => [track.id, track]));
+  project.assets.forEach((asset, index) => {
+    if (
+      asset.freezeFrame &&
+      (asset.metadata?.kind !== 'image' ||
+        asset.mediaTypes.includes('audio') ||
+        asset.duration !== undefined)
+    )
+      add(
+        `/assets/${index}/freezeFrame`,
+        'invalid_freeze_frame',
+        'A freeze frame is a still image without audio or a source duration.',
+      );
+  });
   const intervals = new Map<
     string,
     { index: number; clip: TimelineClip; end: RationalTime }[]

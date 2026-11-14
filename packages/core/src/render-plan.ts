@@ -39,7 +39,12 @@ interface VisualRenderProperties {
 
 export type VisualRenderClip = VisualRenderProperties &
   (
-    | { assetId: string; text?: never; subtitle?: never }
+    | {
+        assetId: string;
+        freezeFrame?: RationalTime;
+        text?: never;
+        subtitle?: never;
+      }
     | {
         text: NonNullable<TimelineClip['text']>;
         assetId?: never;
@@ -175,18 +180,23 @@ export function planProjectRender(
     throw new RenderError(
       'Rendering supports at most 600 seconds after frame sampling. Shorten the timeline.',
     );
+  const freezes = new Map(
+    project.assets.flatMap(({ id, freezeFrame }) =>
+      freezeFrame ? [[id, freezeFrame] as const] : [],
+    ),
+  );
   let previousMedia: ResolvedMediaClip | undefined;
   let tempoRunId: string | undefined;
   for (const clip of timeline.clips) {
-    if (clip.kind === 'text' && clip.subtitle) {
-      if (!burnSubtitles) continue;
+    if (clip.kind === 'text') {
+      if (clip.subtitle && !burnSubtitles) continue;
       const start = sampledFrame(clip.timelineStart);
       const end = sampledFrame(clip.timelineEnd);
       if (end > start)
         visualClips.push({
           clipId: clip.id,
           text: clip.text,
-          subtitle: true,
+          ...(clip.subtitle && { subtitle: true }),
           ...(clip.subtitleCueId && { subtitleCueId: clip.subtitleCueId }),
           timelineStartFrame: start,
           sourceStartFrame: 0,
@@ -202,12 +212,11 @@ export function planProjectRender(
       continue;
     }
     const needsRationalSampling =
-      clip.kind !== 'text' &&
-      (clip.speed !== undefined ||
-        [clip.timelineStart, clip.sourceIn, clip.sourceOut].some((time) => {
-          const { ticks, tickSize } = framePosition(time, frameRate);
-          return ticks % tickSize !== 0n;
-        }));
+      clip.speed !== undefined ||
+      [clip.timelineStart, clip.sourceIn, clip.sourceOut].some((time) => {
+        const { ticks, tickSize } = framePosition(time, frameRate);
+        return ticks % tickSize !== 0n;
+      });
     const retiming: RenderTimeMapping | undefined = needsRationalSampling
       ? {
           timelineStart: clip.timelineStart,
@@ -231,7 +240,8 @@ export function planProjectRender(
       ? sampledFrame(clip.timelineEnd) - start
       : exactFrame(clip.sourceOut, frameRate, `Clip '${clip.id}' source out`) -
         sourceStart;
-    if (clip.kind !== 'text') {
+    const freezeFrame = freezes.get(clip.assetId);
+    if (!freezeFrame) {
       const speed = clipSpeed(clip);
       if (
         !previousMedia ||
@@ -276,18 +286,14 @@ export function planProjectRender(
     if (clip.trackType === 'video' && count > 0) {
       const visual = clip.visual;
       const maxScale = maximumVisualScale(visual, clip.keyframes);
-      if (
-        clip.kind !== 'text' &&
-        (width * maxScale > 8192 || height * maxScale > 8192)
-      )
+      if (width * maxScale > 8192 || height * maxScale > 8192)
         throw new RenderError(
           `Clip '${clip.id}' scaled canvas exceeds 8192 pixels per side. Reduce scale.`,
         );
       visualClips.push({
         clipId: clip.id,
-        ...(clip.kind === 'text'
-          ? { text: clip.text }
-          : { assetId: clip.assetId }),
+        assetId: clip.assetId,
+        ...(freezeFrame && { freezeFrame }),
         timelineStartFrame: start,
         sourceStartFrame: sourceStart,
         frameCount: count,

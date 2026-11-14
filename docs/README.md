@@ -92,7 +92,8 @@ process alive.
 
 T44 compiles whole-video TypeScript and JSON definitions to in-memory projects.
 Use the [executable showcase](VIDEO_DEFINITIONS.md#run-the-example) to validate,
-inspect, preview and render directly from a definition.
+inspect, preview and render directly from a definition. T45 adds full project
+composition semantics and [saved-project conversion](VIDEO_DEFINITIONS.md#convert-a-saved-project).
 
 ## Quick start (macOS)
 

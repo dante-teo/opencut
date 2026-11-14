@@ -1,4 +1,5 @@
 import { sourceColorMatrix, WAVEFORM_CHUNK_SECONDS } from '@opencut/shared';
+import { decodeStillFrame } from './frame.js';
 import { waveformPeaks } from './waveform.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
@@ -698,9 +699,6 @@ export class MediaCache {
       throw new MediaError('Invalid cache frame timestamp.');
     return this.exclusive(async () => {
       const source = await this.source(file, signal);
-      const video = source.media.video;
-      if (!video || timestamp >= (source.media.durationSeconds ?? Infinity))
-        throw new MediaError('Frame is outside source bounds.');
       const key = digest(
         JSON.stringify([
           source.hash,
@@ -722,87 +720,12 @@ export class MediaCache {
         return bytes;
       }
       this.misses++;
-      // Probe from the preceding seek point through the target, retaining VFR PTS.
-      // Interval end is absolute: a relative duration would start at the seek point.
-      const origin = source.media.startTimeSeconds ?? 0;
-      const target = origin + timestamp;
-      const [numerator, denominator] = (video.timeBase ?? '')
-        .split('/')
-        .map(Number);
-      if (
-        !numerator ||
-        !denominator ||
-        !Number.isFinite(numerator / denominator)
-      )
-        throw new MediaError(
-          'Video time base is unavailable for cached frames.',
-        );
-      const frames = await runMediaTool(
-        'ffprobe',
-        [
-          '-v',
-          'error',
-          '-threads',
-          '2',
-          '-select_streams',
-          String(video.index),
-          '-read_intervals',
-          `${(Math.floor(target * 1_000_000) / 1_000_000).toFixed(6)}%${(target + 1).toFixed(6)}`,
-          '-show_frames',
-          '-show_entries',
-          'frame=best_effort_timestamp',
-          '-of',
-          'csv=p=0',
-          source.path,
-        ],
-        4 * 1024 * 1024,
-        60000,
-        { signal },
+      const png = await decodeStillFrame(
+        source.media,
+        timestamp,
+        fullSize,
+        signal,
       );
-      let presentation = -Infinity;
-      for (const line of frames.toString().split('\n')) {
-        if (!/^-?\d/.test(line)) continue;
-        const ticks = Number(line.split(',')[0]);
-        if (!Number.isSafeInteger(ticks)) continue;
-        const time = (ticks * numerator) / denominator;
-        if (time <= target && time > presentation) presentation = time;
-      }
-      if (!Number.isFinite(presentation))
-        throw new MediaError('No frame covers the requested source time.');
-      // Seek just before the chosen PTS so microsecond rounding cannot skip it.
-      const seek = Math.max(0, presentation - origin - 0.000001);
-      const png = await runMediaTool(
-        'ffmpeg',
-        [
-          '-v',
-          'error',
-          '-nostdin',
-          '-threads',
-          '2',
-          '-ss',
-          seek.toFixed(6),
-          '-i',
-          source.path,
-          '-map',
-          `0:${video.index}`,
-          '-vf',
-          `scale=${fullSize ? "w='min(3840,iw*sar)':h='min(3840,ih)'" : '640:360'}:force_original_aspect_ratio=decrease:force_divisible_by=2:reset_sar=1:in_color_matrix=${sourceColorMatrix(video.colorSpace, video.width ?? 0, video.height ?? 0, video.codec)}`,
-          '-frames:v',
-          '1',
-          '-threads',
-          '1',
-          '-c:v',
-          'png',
-          '-f',
-          'image2pipe',
-          'pipe:1',
-        ],
-        (fullSize ? 64 : 2) * 1024 * 1024,
-        60000,
-        { signal },
-      );
-      if (!png.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')))
-        throw new MediaError('No frame at requested source time.');
       if (fullSize) return png;
       const temporary = join(this.directory, `partial-${randomUUID()}.png`);
       try {

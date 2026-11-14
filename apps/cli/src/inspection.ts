@@ -178,7 +178,7 @@ export async function runInspectionCommand(args: string[]) {
       action === 'frame' && isVideoDefinitionPath(file!)
         ? file!.endsWith('.video.json')
           ? await readVideoJsonForPreview(file!, signal)
-          : await loadVideo(file!, signal)
+          : await loadVideo(file!, { signal, preview: true })
         : undefined;
     const path =
       definitionInput?.path ?? (await canonicalProjectFilePath(resolve(file!)));

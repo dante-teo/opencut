@@ -1,108 +1,131 @@
 import { z } from 'zod';
-import { clipSpeedSchema } from './clip-timing.js';
 import {
-  canvasShape,
-  clipVisualSchema,
+  assetSchema,
+  clipSchema,
   entityIdSchema,
-  entityNameSchema,
+  markerSchema,
   relativeMediaPathSchema,
+  settingsSchema,
+  snapshotSchema,
+  trackSchema,
 } from './project.js';
-import { frameRateSchema } from './time.js';
+import { frameRateSchema, timeSchema } from './time.js';
 import { textLayerSchema } from './text-style.js';
-import { trackAudioShape } from './audio.js';
+import {
+  MAX_SUBTITLE_CUES,
+  subtitleStyleSchema,
+  subtitleTrackSchema,
+} from './subtitles.js';
+import { transitionSchema } from './transitions.js';
 
 const frame = z.int().nonnegative();
-const duration = z.int().positive();
-const clip = {
-  id: entityIdSchema.optional(),
-  at: frame,
+const frameCount = z.int().positive();
+const position = z.union([frame, timeSchema]);
+const duration = z.union([frameCount, timeSchema]);
+const fade = z.union([frameCount, clipSchema.shape.fadeIn.unwrap()]).optional();
+
+const fontReference = { font: entityIdSchema.optional() };
+const hasOneFont = ({
+  font,
+  embeddedFont,
+}: {
+  font?: string | undefined;
+  embeddedFont?: string | null | undefined;
+}) => font === undefined || embeddedFont === undefined;
+const fontConflict = {
+  path: ['font'],
+  message: 'Specify either font or embeddedFont.',
 };
-const timedMedia = {
-  ...clip,
-  asset: entityIdSchema,
-  sourceIn: frame.optional(),
-  sourceOut: duration,
-  speed: clipSpeedSchema.optional(),
-  ...trackAudioShape,
-  fadeIn: duration.optional(),
-  fadeOut: duration.optional(),
-};
-const track = {
-  id: entityIdSchema.optional(),
-  name: entityNameSchema.optional(),
-};
-const asset = z.strictObject({
-  path: relativeMediaPathSchema,
-  kind: z.enum(['video', 'image', 'audio']),
+const text = textLayerSchema
+  .extend(fontReference)
+  .refine(hasOneFont, fontConflict);
+const subtitleStyle = subtitleStyleSchema
+  .extend(fontReference)
+  .refine(hasOneFont, fontConflict);
+const subtitles = subtitleTrackSchema.extend({
+  style: subtitleStyle,
+  cues: z
+    .array(
+      subtitleTrackSchema.shape.cues.element.extend({
+        style: subtitleStyle.optional(),
+      }),
+    )
+    .max(MAX_SUBTITLE_CUES),
 });
+
+const clip = clipSchema
+  .omit({
+    assetId: true,
+    text: true,
+    trackId: true,
+    timelineStart: true,
+    sourceIn: true,
+    sourceOut: true,
+    fadeIn: true,
+    fadeOut: true,
+  })
+  .extend({
+    id: entityIdSchema.optional(),
+    at: position,
+    sourceIn: position.optional(),
+    sourceOut: duration.optional(),
+    duration: duration.optional(),
+    fadeIn: fade,
+    fadeOut: fade,
+  });
+const mediaClip = clip.extend({ asset: entityIdSchema });
+const textClip = clip.extend({ text });
+const track = trackSchema.omit({ id: true, name: true, type: true }).extend({
+  id: entityIdSchema.optional(),
+  name: trackSchema.shape.name.optional(),
+});
+const visualOnlyTrack = track.omit({ volume: true, muted: true });
+const asset = assetSchema
+  .omit({ id: true, file: true })
+  .partial()
+  .extend({
+    path: relativeMediaPathSchema,
+    kind: z.enum(['video', 'image', 'audio']),
+    metadata: assetSchema.shape.metadata.nullable(),
+  });
+const font = z.union([
+  z.strictObject({ path: relativeMediaPathSchema }),
+  z.strictObject({
+    data: textLayerSchema.shape.embeddedFont.unwrap().unwrap(),
+  }),
+]);
 
 export const videoDefinitionSchema = z.strictObject({
   version: z.literal(1).optional(),
-  name: entityNameSchema.optional(),
-  canvas: z.strictObject({
-    width: duration,
-    height: duration,
-    frameRate: z.union([duration, frameRateSchema]),
-    durationFrames: duration,
-    backgroundColor: canvasShape.backgroundColor,
+  ...snapshotSchema.shape.metadata.partial().shape,
+  canvas: settingsSchema.extend({
+    frameRate: z.union([frameCount, frameRateSchema]),
   }),
   assets: z.record(entityIdSchema, asset).optional(),
+  fonts: z.record(entityIdSchema, font).optional(),
   tracks: z.array(
     z.discriminatedUnion('type', [
-      z.strictObject({
-        ...track,
-        ...trackAudioShape,
+      track.extend({
         type: z.literal('video'),
-        clips: z.array(
-          z.strictObject({
-            ...timedMedia,
-            visual: clipVisualSchema.optional(),
-          }),
-        ),
+        clips: z.array(z.union([mediaClip, textClip])),
       }),
-      z.strictObject({
-        ...track,
-        ...trackAudioShape,
+      track.extend({
         type: z.literal('audio'),
-        clips: z.array(z.strictObject(timedMedia)),
+        clips: z.array(mediaClip),
       }),
-      z.strictObject({
-        ...track,
+      visualOnlyTrack.extend({
         type: z.literal('image'),
-        clips: z.array(
-          z.strictObject({
-            ...clip,
-            asset: entityIdSchema,
-            duration,
-            visual: clipVisualSchema.optional(),
-          }),
-        ),
+        clips: z.array(mediaClip),
       }),
-      z.strictObject({
-        ...track,
+      visualOnlyTrack.extend({
         type: z.literal('text'),
-        clips: z.array(
-          z.strictObject({
-            ...clip,
-            duration,
-            text: textLayerSchema.pick({
-              content: true,
-              fontFamily: true,
-              fontSize: true,
-              fontWeight: true,
-              color: true,
-              alignment: true,
-              wrapWidth: true,
-              stroke: true,
-              shadow: true,
-              background: true,
-            }),
-            visual: clipVisualSchema.omit({ fit: true, crop: true }).optional(),
-          }),
-        ),
+        clips: z.array(textClip),
       }),
     ]),
   ),
+  subtitles: subtitles.optional(),
+  transitions: z.array(transitionSchema).optional(),
+  markers: z.array(markerSchema).optional(),
 });
 
 export type VideoDefinition = z.input<typeof videoDefinitionSchema>;
