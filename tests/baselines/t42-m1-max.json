@@ -1,0 +1,1636 @@
+{
+  "version": 1,
+  "dateUTC": "2026-11-14T16:22:43Z",
+  "system": {
+    "systemInspectVersion": 1,
+    "os": {
+      "platform": "darwin",
+      "macOSVersion": "27.0.1",
+      "kernelRelease": "27.0.0"
+    },
+    "architecture": {
+      "host": "arm64",
+      "process": "arm64"
+    },
+    "model": "MacBookPro18,2",
+    "cpu": {
+      "name": "Apple M1 Max",
+      "logicalCores": 10,
+      "availableParallelism": 10
+    },
+    "gpu": [
+      {
+        "name": "Apple M1 Max",
+        "cores": 24
+      }
+    ],
+    "memory": {
+      "installedBytes": 34359738368,
+      "unified": true
+    },
+    "videoToolbox": {
+      "status": "probed",
+      "codecs": {
+        "decoders": {
+          "av1": false,
+          "h264": true,
+          "hevc": true,
+          "prores422": true,
+          "prores4444": true,
+          "vp9": false
+        },
+        "encoders": {
+          "av1": {
+            "availableAt1920x1080": false,
+            "osStatus": -12908
+          },
+          "h264": {
+            "availableAt1920x1080": true,
+            "osStatus": 0
+          },
+          "hevc": {
+            "availableAt1920x1080": true,
+            "osStatus": 0
+          },
+          "prores422": {
+            "availableAt1920x1080": true,
+            "osStatus": 0
+          },
+          "prores4444": {
+            "availableAt1920x1080": true,
+            "osStatus": 0
+          },
+          "vp9": {
+            "availableAt1920x1080": false,
+            "osStatus": -12908
+          }
+        }
+      },
+      "frameProcessors": {
+        "frame-rate-conversion": {
+          "minimumMacOS": "15.4",
+          "status": "reported-supported",
+          "testedSizes": [
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 360,
+              "width": 640
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 720,
+              "width": 1280
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 1280,
+              "width": 720
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 1080,
+              "width": 1920
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 1920,
+              "width": 1080
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 2160,
+              "width": 3840
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 3840,
+              "width": 2160
+            }
+          ]
+        },
+        "low-latency-interpolation": {
+          "minimumMacOS": "26.0",
+          "status": "reported-supported",
+          "testedSizes": [
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 360,
+              "width": 640
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 720,
+              "width": 1280
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 1280,
+              "width": 720
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 1080,
+              "width": 1920
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 1920,
+              "width": 1080
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 2160,
+              "width": 3840
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 3840,
+              "width": 2160
+            }
+          ]
+        },
+        "low-latency-super-resolution": {
+          "minimumMacOS": "26.0",
+          "status": "reported-supported",
+          "testedSizes": [
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1.5,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                },
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 2,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 360,
+              "width": 640
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1.5,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 720,
+              "width": 1280
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1.5,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 1280,
+              "width": 720
+            },
+            {
+              "configurations": [],
+              "height": 1080,
+              "width": 1920
+            },
+            {
+              "configurations": [],
+              "height": 1920,
+              "width": 1080
+            },
+            {
+              "configurations": [],
+              "height": 2160,
+              "width": 3840
+            },
+            {
+              "configurations": [],
+              "height": 3840,
+              "width": 2160
+            }
+          ]
+        },
+        "temporal-noise-filter": {
+          "minimumMacOS": "26.0",
+          "status": "hardware-unsupported"
+        },
+        "video-super-resolution": {
+          "minimumMacOS": "26.0",
+          "status": "reported-supported",
+          "testedSizes": [
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "ready",
+                  "scale": 4,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 360,
+              "width": 640
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "ready",
+                  "scale": 4,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 720,
+              "width": 1280
+            },
+            {
+              "configurations": [
+                {
+                  "scale": 4,
+                  "status": "configuration-rejected"
+                }
+              ],
+              "height": 1280,
+              "width": 720
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "ready",
+                  "scale": 4,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 1080,
+              "width": 1920
+            },
+            {
+              "configurations": [
+                {
+                  "scale": 4,
+                  "status": "configuration-rejected"
+                }
+              ],
+              "height": 1920,
+              "width": 1080
+            },
+            {
+              "configurations": [
+                {
+                  "scale": 4,
+                  "status": "configuration-rejected"
+                }
+              ],
+              "height": 2160,
+              "width": 3840
+            },
+            {
+              "configurations": [
+                {
+                  "scale": 4,
+                  "status": "configuration-rejected"
+                }
+              ],
+              "height": 3840,
+              "width": 2160
+            }
+          ]
+        }
+      },
+      "gpuDevices": [
+        {
+          "hasUnifiedMemory": true,
+          "maxBufferBytes": 20100448256,
+          "name": "Apple M1 Max",
+          "recommendedMaxWorkingSetBytes": 26800603136
+        }
+      ],
+      "thermalState": 0
+    }
+  },
+  "ffmpeg": "ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers",
+  "reference": "Generated moving text and rectangles, with a known midpoint cut in two-shot fixtures.",
+  "targetMacBookAirM4_16GB": "untested",
+  "cases": [
+    {
+      "backend": "duplicate",
+      "status": "completed",
+      "input": [1920, 1080, 24],
+      "output": [1920, 1080, 48],
+      "decodeFilterLosslessWrite": {
+        "wallSeconds": 0.25183512491639704,
+        "exitCode": 0,
+        "peakRssBytes": 157728768,
+        "peakFootprintBytes": 145720016
+      },
+      "encode": {
+        "wallSeconds": 0.1797723330091685,
+        "exitCode": 0,
+        "peakRssBytes": 265011200,
+        "peakFootprintBytes": 252527528
+      },
+      "stream": {
+        "width": 1920,
+        "height": 1080,
+        "sample_aspect_ratio": "1:1",
+        "avg_frame_rate": "48/1",
+        "nb_read_frames": "96"
+      },
+      "sample": "wide24-duplicate.mp4",
+      "qualityHeldOutFrames": {
+        "psnrDb": 26.128282,
+        "psnrInfinite": false,
+        "ssim": 0.955427
+      }
+    },
+    {
+      "backend": "low-latency-interpolation",
+      "input": [1920, 1080, 24],
+      "output": [1920, 1080, 48],
+      "decodeToRaw": {
+        "wallSeconds": 0.13425787503365427,
+        "exitCode": 0,
+        "peakRssBytes": 120799232,
+        "peakFootprintBytes": 108544696
+      },
+      "processing": {
+        "wallSeconds": 5.324313624994829,
+        "exitCode": 0,
+        "peakRssBytes": 242778112,
+        "peakFootprintBytes": 288474072
+      },
+      "status": "completed",
+      "sceneCutInputFrame": 24,
+      "native": {
+        "afterInputFrame30ProcessSeconds": 1.5937097916612402,
+        "first30CallSeconds": 2.9173254998167977,
+        "firstCallSeconds": 0.1687250416725874,
+        "inputFrames": 48,
+        "outputFrames": 96,
+        "peakRssBytes": 242778112,
+        "processCalls": 46,
+        "processSeconds": 4.417148333159275,
+        "rawReadAndConvertSeconds": 0.05842537502758205,
+        "rawWriteAndConvertSeconds": 0.34635666653048247,
+        "sessionStartSeconds": 0.1316958334064111,
+        "thermalState": 0
+      },
+      "processingOutputFps": 18.03049308540558,
+      "algorithmCallsPerSecond": 10.413958629073123,
+      "midpoints": {
+        "distinctMidpoints": 46,
+        "checkedMidpoints": 46,
+        "boundaryHolds": 2
+      },
+      "encode": {
+        "wallSeconds": 0.13872175000142306,
+        "exitCode": 0,
+        "peakRssBytes": 251658240,
+        "peakFootprintBytes": 239862672
+      },
+      "stream": {
+        "width": 1920,
+        "height": 1080,
+        "avg_frame_rate": "48/1",
+        "nb_read_frames": "96"
+      },
+      "sample": "wide24-low-latency-interpolation.mp4",
+      "qualityHeldOutFrames": {
+        "psnrDb": 33.649267,
+        "psnrInfinite": false,
+        "ssim": 0.974064
+      }
+    },
+    {
+      "backend": "frame-rate-conversion",
+      "input": [1920, 1080, 24],
+      "output": [1920, 1080, 48],
+      "decodeToRaw": {
+        "wallSeconds": 0.2545041659614071,
+        "exitCode": 0,
+        "peakRssBytes": 216121344,
+        "peakFootprintBytes": 203883264
+      },
+      "processing": {
+        "wallSeconds": 3.2441825000569224,
+        "exitCode": 0,
+        "peakRssBytes": 89636864,
+        "peakFootprintBytes": 326960040
+      },
+      "status": "completed",
+      "sceneCutInputFrame": 24,
+      "native": {
+        "afterInputFrame30ProcessSeconds": 0.5387207500170916,
+        "first30CallSeconds": 1.2837143754586577,
+        "firstCallSeconds": 0.35697570838965476,
+        "inputFrames": 48,
+        "outputFrames": 96,
+        "peakRssBytes": 89636864,
+        "processCalls": 46,
+        "processSeconds": 1.7916903755394742,
+        "rawReadAndConvertSeconds": 0.16523754119407386,
+        "rawWriteAndConvertSeconds": 0.9758396249962971,
+        "sessionStartSeconds": 0.19456504157278687,
+        "thermalState": 0
+      },
+      "processingOutputFps": 29.59143019799767,
+      "algorithmCallsPerSecond": 25.674078863179414,
+      "midpoints": {
+        "distinctMidpoints": 46,
+        "checkedMidpoints": 46,
+        "boundaryHolds": 2
+      },
+      "encode": {
+        "wallSeconds": 0.1735102499369532,
+        "exitCode": 0,
+        "peakRssBytes": 365641728,
+        "peakFootprintBytes": 353846184
+      },
+      "stream": {
+        "width": 1920,
+        "height": 1080,
+        "avg_frame_rate": "48/1",
+        "nb_read_frames": "96"
+      },
+      "sample": "wide24-frame-rate-conversion.mp4",
+      "qualityHeldOutFrames": {
+        "psnrDb": 22.741575,
+        "psnrInfinite": false,
+        "ssim": 0.947656
+      }
+    },
+    {
+      "backend": "duplicate",
+      "status": "completed",
+      "input": [1080, 1920, 24],
+      "output": [1080, 1920, 48],
+      "decodeFilterLosslessWrite": {
+        "wallSeconds": 0.25390558305662125,
+        "exitCode": 0,
+        "peakRssBytes": 157548544,
+        "peakFootprintBytes": 145539792
+      },
+      "encode": {
+        "wallSeconds": 0.18312145804520696,
+        "exitCode": 0,
+        "peakRssBytes": 265764864,
+        "peakFootprintBytes": 253264784
+      },
+      "stream": {
+        "width": 1080,
+        "height": 1920,
+        "sample_aspect_ratio": "1:1",
+        "avg_frame_rate": "48/1",
+        "nb_read_frames": "96"
+      },
+      "sample": "portrait24-duplicate.mp4",
+      "qualityHeldOutFrames": {
+        "psnrDb": 26.646308,
+        "psnrInfinite": false,
+        "ssim": 0.959342
+      }
+    },
+    {
+      "backend": "low-latency-interpolation",
+      "input": [1080, 1920, 24],
+      "output": [1080, 1920, 48],
+      "decodeToRaw": {
+        "wallSeconds": 0.09568216698244214,
+        "exitCode": 0,
+        "peakRssBytes": 106086400,
+        "peakFootprintBytes": 93815456
+      },
+      "processing": {
+        "wallSeconds": 4.860160541953519,
+        "exitCode": 0,
+        "peakRssBytes": 245350400,
+        "peakFootprintBytes": 292029424
+      },
+      "status": "completed",
+      "sceneCutInputFrame": 24,
+      "native": {
+        "afterInputFrame30ProcessSeconds": 1.5986117917345837,
+        "first30CallSeconds": 2.863294499577023,
+        "firstCallSeconds": 0.13746904162690043,
+        "inputFrames": 48,
+        "outputFrames": 96,
+        "peakRssBytes": 245350400,
+        "processCalls": 46,
+        "processSeconds": 4.367863166378811,
+        "rawReadAndConvertSeconds": 0.051609833841212094,
+        "rawWriteAndConvertSeconds": 0.28013254166580737,
+        "sessionStartSeconds": 0.09493491670582443,
+        "thermalState": 0
+      },
+      "processingOutputFps": 19.752433931207804,
+      "algorithmCallsPerSecond": 10.531465443807944,
+      "midpoints": {
+        "distinctMidpoints": 46,
+        "checkedMidpoints": 46,
+        "boundaryHolds": 2
+      },
+      "encode": {
+        "wallSeconds": 0.13406975008547306,
+        "exitCode": 0,
+        "peakRssBytes": 253034496,
+        "peakFootprintBytes": 241238928
+      },
+      "stream": {
+        "width": 1080,
+        "height": 1920,
+        "avg_frame_rate": "48/1",
+        "nb_read_frames": "96"
+      },
+      "sample": "portrait24-low-latency-interpolation.mp4",
+      "qualityHeldOutFrames": {
+        "psnrDb": 33.416049,
+        "psnrInfinite": false,
+        "ssim": 0.975594
+      }
+    },
+    {
+      "backend": "frame-rate-conversion",
+      "input": [1080, 1920, 24],
+      "output": [1080, 1920, 48],
+      "decodeToRaw": {
+        "wallSeconds": 0.1315150000154972,
+        "exitCode": 0,
+        "peakRssBytes": 207241216,
+        "peakFootprintBytes": 194986728
+      },
+      "processing": {
+        "wallSeconds": 3.9410861249780282,
+        "exitCode": 0,
+        "peakRssBytes": 89784320,
+        "peakFootprintBytes": 442942496
+      },
+      "status": "completed",
+      "sceneCutInputFrame": 24,
+      "native": {
+        "afterInputFrame30ProcessSeconds": 0.8246277916477993,
+        "first30CallSeconds": 1.7168272085255012,
+        "firstCallSeconds": 0.3203998750541359,
+        "inputFrames": 48,
+        "outputFrames": 96,
+        "peakRssBytes": 89784320,
+        "processCalls": 46,
+        "processSeconds": 2.4991154168965295,
+        "rawReadAndConvertSeconds": 0.18183312530163676,
+        "rawWriteAndConvertSeconds": 1.0275415417272598,
+        "sessionStartSeconds": 0.10656541667412966,
+        "thermalState": 0
+      },
+      "processingOutputFps": 24.358767343744667,
+      "algorithmCallsPerSecond": 18.406512836099452,
+      "midpoints": {
+        "distinctMidpoints": 46,
+        "checkedMidpoints": 46,
+        "boundaryHolds": 2
+      },
+      "encode": {
+        "wallSeconds": 0.17740420799236745,
+        "exitCode": 0,
+        "peakRssBytes": 367083520,
+        "peakFootprintBytes": 355287976
+      },
+      "stream": {
+        "width": 1080,
+        "height": 1920,
+        "avg_frame_rate": "48/1",
+        "nb_read_frames": "96"
+      },
+      "sample": "portrait24-frame-rate-conversion.mp4",
+      "qualityHeldOutFrames": {
+        "psnrDb": 22.681756,
+        "psnrInfinite": false,
+        "ssim": 0.945525
+      }
+    },
+    {
+      "backend": "duplicate",
+      "status": "completed",
+      "input": [1920, 1080, 30],
+      "output": [1920, 1080, 60],
+      "decodeFilterLosslessWrite": {
+        "wallSeconds": 0.3283739589387551,
+        "exitCode": 0,
+        "peakRssBytes": 158564352,
+        "peakFootprintBytes": 146555600
+      },
+      "encode": {
+        "wallSeconds": 0.20894641696941108,
+        "exitCode": 0,
+        "peakRssBytes": 265125888,
+        "peakFootprintBytes": 252642216
+      },
+      "stream": {
+        "width": 1920,
+        "height": 1080,
+        "sample_aspect_ratio": "1:1",
+        "avg_frame_rate": "60/1",
+        "nb_read_frames": "120"
+      },
+      "sample": "wide30-duplicate.mp4",
+      "qualityHeldOutFrames": {
+        "psnrDb": 26.763559,
+        "psnrInfinite": false,
+        "ssim": 0.956837
+      }
+    },
+    {
+      "backend": "low-latency-interpolation",
+      "input": [1920, 1080, 30],
+      "output": [1920, 1080, 60],
+      "decodeToRaw": {
+        "wallSeconds": 0.10645774996373802,
+        "exitCode": 0,
+        "peakRssBytes": 105988096,
+        "peakFootprintBytes": 93717152
+      },
+      "processing": {
+        "wallSeconds": 6.095627375063486,
+        "exitCode": 0,
+        "peakRssBytes": 242827264,
+        "peakFootprintBytes": 288474072
+      },
+      "status": "completed",
+      "sceneCutInputFrame": 30,
+      "native": {
+        "afterInputFrame30ProcessSeconds": 2.7376367084216326,
+        "first30CallSeconds": 2.86700404190924,
+        "firstCallSeconds": 0.13179912499617785,
+        "inputFrames": 60,
+        "outputFrames": 120,
+        "peakRssBytes": 242827264,
+        "processCalls": 58,
+        "processSeconds": 5.510618375381455,
+        "rawReadAndConvertSeconds": 0.06057104200590402,
+        "rawWriteAndConvertSeconds": 0.35948158241808414,
+        "sessionStartSeconds": 0.09476383333094418,
+        "thermalState": 0
+      },
+      "processingOutputFps": 19.68624271406521,
+      "algorithmCallsPerSecond": 10.525134576386835,
+      "midpoints": {
+        "distinctMidpoints": 58,
+        "checkedMidpoints": 58,
+        "boundaryHolds": 2
+      },
+      "encode": {
+        "wallSeconds": 0.15254912502132356,
+        "exitCode": 0,
+        "peakRssBytes": 251510784,
+        "peakFootprintBytes": 239698832
+      },
+      "stream": {
+        "width": 1920,
+        "height": 1080,
+        "avg_frame_rate": "60/1",
+        "nb_read_frames": "120"
+      },
+      "sample": "wide30-low-latency-interpolation.mp4",
+      "qualityHeldOutFrames": {
+        "psnrDb": 33.707034,
+        "psnrInfinite": false,
+        "ssim": 0.974197
+      }
+    },
+    {
+      "backend": "frame-rate-conversion",
+      "input": [1920, 1080, 30],
+      "output": [1920, 1080, 60],
+      "decodeToRaw": {
+        "wallSeconds": 0.13578691706061363,
+        "exitCode": 0,
+        "peakRssBytes": 216875008,
+        "peakFootprintBytes": 204636928
+      },
+      "processing": {
+        "wallSeconds": 4.536794416955672,
+        "exitCode": 0,
+        "peakRssBytes": 89767936,
+        "peakFootprintBytes": 326861736
+      },
+      "status": "completed",
+      "sceneCutInputFrame": 30,
+      "native": {
+        "afterInputFrame30ProcessSeconds": 1.4424725412391126,
+        "first30CallSeconds": 1.3971083334181458,
+        "firstCallSeconds": 0.30612554168328643,
+        "inputFrames": 60,
+        "outputFrames": 120,
+        "peakRssBytes": 89767936,
+        "processCalls": 58,
+        "processSeconds": 2.775270249694586,
+        "rawReadAndConvertSeconds": 0.21019616723060608,
+        "rawWriteAndConvertSeconds": 1.3226310411700979,
+        "sessionStartSeconds": 0.10858650004956871,
+        "thermalState": 0
+      },
+      "processingOutputFps": 26.450394038468172,
+      "algorithmCallsPerSecond": 20.898865617279185,
+      "midpoints": {
+        "distinctMidpoints": 58,
+        "checkedMidpoints": 58,
+        "boundaryHolds": 2
+      },
+      "encode": {
+        "wallSeconds": 0.2088158749975264,
+        "exitCode": 0,
+        "peakRssBytes": 368197632,
+        "peakFootprintBytes": 356402088
+      },
+      "stream": {
+        "width": 1920,
+        "height": 1080,
+        "avg_frame_rate": "60/1",
+        "nb_read_frames": "120"
+      },
+      "sample": "wide30-frame-rate-conversion.mp4",
+      "qualityHeldOutFrames": {
+        "psnrDb": 22.769304,
+        "psnrInfinite": false,
+        "ssim": 0.949043
+      }
+    },
+    {
+      "backend": "duplicate",
+      "status": "completed",
+      "input": [1080, 1920, 30],
+      "output": [1080, 1920, 60],
+      "decodeFilterLosslessWrite": {
+        "wallSeconds": 0.2853333340026438,
+        "exitCode": 0,
+        "peakRssBytes": 158416896,
+        "peakFootprintBytes": 146408144
+      },
+      "encode": {
+        "wallSeconds": 0.1918867079075426,
+        "exitCode": 0,
+        "peakRssBytes": 265732096,
+        "peakFootprintBytes": 253215608
+      },
+      "stream": {
+        "width": 1080,
+        "height": 1920,
+        "sample_aspect_ratio": "1:1",
+        "avg_frame_rate": "60/1",
+        "nb_read_frames": "120"
+      },
+      "sample": "portrait30-duplicate.mp4",
+      "qualityHeldOutFrames": {
+        "psnrDb": 26.693265,
+        "psnrInfinite": false,
+        "ssim": 0.958379
+      }
+    },
+    {
+      "backend": "low-latency-interpolation",
+      "input": [1080, 1920, 30],
+      "output": [1080, 1920, 60],
+      "decodeToRaw": {
+        "wallSeconds": 0.10012395808007568,
+        "exitCode": 0,
+        "peakRssBytes": 103596032,
+        "peakFootprintBytes": 91325088
+      },
+      "processing": {
+        "wallSeconds": 5.976201666984707,
+        "exitCode": 0,
+        "peakRssBytes": 245415936,
+        "peakFootprintBytes": 295191536
+      },
+      "status": "completed",
+      "sceneCutInputFrame": 30,
+      "native": {
+        "afterInputFrame30ProcessSeconds": 2.664346791454591,
+        "first30CallSeconds": 2.7863102082628757,
+        "firstCallSeconds": 0.12909887498244643,
+        "inputFrames": 60,
+        "outputFrames": 120,
+        "peakRssBytes": 245415936,
+        "processCalls": 58,
+        "processSeconds": 5.361854791408405,
+        "rawReadAndConvertSeconds": 0.06001312518492341,
+        "rawWriteAndConvertSeconds": 0.3997817919589579,
+        "sessionStartSeconds": 0.091067208442837,
+        "thermalState": 0
+      },
+      "processingOutputFps": 20.079643674499025,
+      "algorithmCallsPerSecond": 10.81715232067392,
+      "midpoints": {
+        "distinctMidpoints": 58,
+        "checkedMidpoints": 58,
+        "boundaryHolds": 2
+      },
+      "encode": {
+        "wallSeconds": 0.1422305409796536,
+        "exitCode": 0,
+        "peakRssBytes": 252968960,
+        "peakFootprintBytes": 241140624
+      },
+      "stream": {
+        "width": 1080,
+        "height": 1920,
+        "avg_frame_rate": "60/1",
+        "nb_read_frames": "120"
+      },
+      "sample": "portrait30-low-latency-interpolation.mp4",
+      "qualityHeldOutFrames": {
+        "psnrDb": 33.550682,
+        "psnrInfinite": false,
+        "ssim": 0.976053
+      }
+    },
+    {
+      "backend": "frame-rate-conversion",
+      "input": [1080, 1920, 30],
+      "output": [1080, 1920, 60],
+      "decodeToRaw": {
+        "wallSeconds": 0.23452354199253023,
+        "exitCode": 0,
+        "peakRssBytes": 208044032,
+        "peakFootprintBytes": 195805952
+      },
+      "processing": {
+        "wallSeconds": 4.37817533290945,
+        "exitCode": 0,
+        "peakRssBytes": 89391104,
+        "peakFootprintBytes": 442336264
+      },
+      "status": "completed",
+      "sceneCutInputFrame": 30,
+      "native": {
+        "afterInputFrame30ProcessSeconds": 1.1694488748908043,
+        "first30CallSeconds": 1.5261350416112691,
+        "firstCallSeconds": 0.33305799996014684,
+        "inputFrames": 60,
+        "outputFrames": 120,
+        "peakRssBytes": 89391104,
+        "processCalls": 58,
+        "processSeconds": 2.6504426666069776,
+        "rawReadAndConvertSeconds": 0.22339708369690925,
+        "rawWriteAndConvertSeconds": 1.2658629581565037,
+        "sessionStartSeconds": 0.114735999959521,
+        "thermalState": 0
+      },
+      "processingOutputFps": 27.40867847342601,
+      "algorithmCallsPerSecond": 21.883137006034534,
+      "midpoints": {
+        "distinctMidpoints": 58,
+        "checkedMidpoints": 58,
+        "boundaryHolds": 2
+      },
+      "encode": {
+        "wallSeconds": 0.1852264170302078,
+        "exitCode": 0,
+        "peakRssBytes": 287637504,
+        "peakFootprintBytes": 275759992
+      },
+      "stream": {
+        "width": 1080,
+        "height": 1920,
+        "avg_frame_rate": "60/1",
+        "nb_read_frames": "120"
+      },
+      "sample": "portrait30-frame-rate-conversion.mp4",
+      "qualityHeldOutFrames": {
+        "psnrDb": 22.683418,
+        "psnrInfinite": false,
+        "ssim": 0.945491
+      }
+    },
+    {
+      "backend": "lanczos",
+      "status": "completed",
+      "input": [1280, 720, 24],
+      "output": [1920, 1080, 24],
+      "decodeFilterLosslessWrite": {
+        "wallSeconds": 0.1651741659734398,
+        "exitCode": 0,
+        "peakRssBytes": 140050432,
+        "peakFootprintBytes": 127730360
+      },
+      "encode": {
+        "wallSeconds": 0.1520272910129279,
+        "exitCode": 0,
+        "peakRssBytes": 255672320,
+        "peakFootprintBytes": 243155832
+      },
+      "stream": {
+        "width": 1920,
+        "height": 1080,
+        "sample_aspect_ratio": "1:1",
+        "avg_frame_rate": "24/1",
+        "nb_read_frames": "48"
+      },
+      "sample": "wide-1080h-lanczos.mp4",
+      "quality": {
+        "psnrDb": 35.601041,
+        "psnrInfinite": false,
+        "ssim": 0.974674
+      }
+    },
+    {
+      "backend": "low-latency-super-resolution",
+      "input": [1280, 720, 24],
+      "output": [1920, 1080, 24],
+      "decodeToRaw": {
+        "wallSeconds": 0.07082433393225074,
+        "exitCode": 0,
+        "peakRssBytes": 66813952,
+        "peakFootprintBytes": 54526600
+      },
+      "processing": {
+        "wallSeconds": 0.5828894580481574,
+        "exitCode": 0,
+        "peakRssBytes": 46923776,
+        "peakFootprintBytes": 229491504
+      },
+      "status": "completed",
+      "native": {
+        "afterInputFrame30ProcessSeconds": 0.06335495819803327,
+        "first30CallSeconds": 0.11311754176858813,
+        "firstCallSeconds": 0.009355958318337798,
+        "inputFrames": 48,
+        "outputFrames": 48,
+        "peakRssBytes": 46923776,
+        "processCalls": 48,
+        "processSeconds": 0.1764724999666214,
+        "rawReadAndConvertSeconds": 0.022294875350780785,
+        "rawWriteAndConvertSeconds": 0.25012166693340987,
+        "sessionStartSeconds": 0.07970837492030114,
+        "thermalState": 0
+      },
+      "processingOutputFps": 82.3483755577448,
+      "algorithmCallsPerSecond": 271.99705341670165,
+      "encode": {
+        "wallSeconds": 0.08402558299712837,
+        "exitCode": 0,
+        "peakRssBytes": 251461632,
+        "peakFootprintBytes": 239649680
+      },
+      "stream": {
+        "width": 1920,
+        "height": 1080,
+        "avg_frame_rate": "24/1",
+        "nb_read_frames": "48"
+      },
+      "sample": "wide-1080h-low-latency-super-resolution.mp4",
+      "quality": {
+        "psnrDb": 34.408571,
+        "psnrInfinite": false,
+        "ssim": 0.970401
+      }
+    },
+    {
+      "backend": "video-super-resolution",
+      "input": [1280, 720, 24],
+      "output": [5120, 2880, 24],
+      "decodeToRaw": {
+        "wallSeconds": 0.07545045798178762,
+        "exitCode": 0,
+        "peakRssBytes": 102039552,
+        "peakFootprintBytes": 89719432
+      },
+      "processing": {
+        "wallSeconds": 20.53096787503455,
+        "exitCode": 0,
+        "peakRssBytes": 362905600,
+        "peakFootprintBytes": 2929870048
+      },
+      "status": "completed",
+      "sceneCutInputFrame": 24,
+      "native": {
+        "afterInputFrame30ProcessSeconds": 6.637540416326374,
+        "first30CallSeconds": 11.272813500021584,
+        "firstCallSeconds": 0.5589197500376031,
+        "inputFrames": 48,
+        "outputFrames": 48,
+        "peakRssBytes": 362905600,
+        "processCalls": 48,
+        "processSeconds": 17.910353916347958,
+        "rawReadAndConvertSeconds": 0.08094604138750583,
+        "rawWriteAndConvertSeconds": 2.023451458197087,
+        "sessionStartSeconds": 0.31232308328617364,
+        "thermalState": 0
+      },
+      "processingOutputFps": 2.3379316694741665,
+      "algorithmCallsPerSecond": 2.6800140423907113
+    },
+    {
+      "backend": "lanczos",
+      "status": "completed",
+      "input": [1280, 720, 4],
+      "output": [3840, 2160, 4],
+      "decodeFilterLosslessWrite": {
+        "wallSeconds": 0.10646441602148116,
+        "exitCode": 0,
+        "peakRssBytes": 396492800,
+        "peakFootprintBytes": 384287608
+      },
+      "encode": {
+        "wallSeconds": 0.13477500004228204,
+        "exitCode": 0,
+        "peakRssBytes": 252379136,
+        "peakFootprintBytes": 240223624
+      },
+      "stream": {
+        "width": 3840,
+        "height": 2160,
+        "sample_aspect_ratio": "1:1",
+        "avg_frame_rate": "4/1",
+        "nb_read_frames": "4"
+      },
+      "sample": "wide-2160h-lanczos.mp4",
+      "quality": {
+        "psnrDb": 33.352647,
+        "psnrInfinite": false,
+        "ssim": 0.967235
+      }
+    },
+    {
+      "backend": "low-latency-super-resolution",
+      "input": [1280, 720, 4],
+      "output": [3840, 2160, 4],
+      "decodeToRaw": {
+        "wallSeconds": 0.04669891600497067,
+        "exitCode": 0,
+        "peakRssBytes": 34816000,
+        "peakFootprintBytes": 22512240
+      },
+      "processing": {
+        "wallSeconds": 0.01408295810688287,
+        "exitCode": 1,
+        "peakRssBytes": 26787840,
+        "peakFootprintBytes": 2720416,
+        "error": "Configuration rejected for this size, scale or pixel format"
+      },
+      "status": "failed"
+    },
+    {
+      "backend": "video-super-resolution",
+      "input": [1280, 720, 4],
+      "output": [5120, 2880, 4],
+      "decodeToRaw": {
+        "wallSeconds": 0.04779037495609373,
+        "exitCode": 0,
+        "peakRssBytes": 44433408,
+        "peakFootprintBytes": 32064088
+      },
+      "processing": {
+        "wallSeconds": 2.232528083026409,
+        "exitCode": 0,
+        "peakRssBytes": 361873408,
+        "peakFootprintBytes": 2929542248
+      },
+      "status": "completed",
+      "native": {
+        "afterInputFrame30ProcessSeconds": 0,
+        "first30CallSeconds": 1.6690360000357032,
+        "firstCallSeconds": 0.5735054583055899,
+        "inputFrames": 4,
+        "outputFrames": 4,
+        "peakRssBytes": 361873408,
+        "processCalls": 4,
+        "processSeconds": 1.6690360000357032,
+        "rawReadAndConvertSeconds": 0.0066792917205020785,
+        "rawWriteAndConvertSeconds": 0.15176033333409578,
+        "sessionStartSeconds": 0.2927615833468735,
+        "thermalState": 0
+      },
+      "processingOutputFps": 1.791690787861271,
+      "algorithmCallsPerSecond": 2.396593003335119
+    },
+    {
+      "backend": "upscayl-standard-4x",
+      "status": "completed",
+      "input": [1280, 720, 4],
+      "output": [3840, 2160, 4],
+      "decodeToPng": {
+        "wallSeconds": 0.0621211250545457,
+        "exitCode": 0,
+        "peakRssBytes": 53313536,
+        "peakFootprintBytes": 40911496
+      },
+      "modelLoadInferencePngIo": {
+        "wallSeconds": 46.35279491706751,
+        "exitCode": 0,
+        "peakRssBytes": 637255680,
+        "peakFootprintBytes": 1657504968
+      },
+      "encode": {
+        "wallSeconds": 0.23520762496627867,
+        "exitCode": 0,
+        "peakRssBytes": 315375616,
+        "peakFootprintBytes": 303613200
+      },
+      "processingOutputFps": 0.08629468853294894,
+      "stream": {
+        "width": 3840,
+        "height": 2160,
+        "avg_frame_rate": "4/1",
+        "nb_read_frames": "4"
+      },
+      "sample": "wide-2160h-upscayl.mp4",
+      "quality": {
+        "psnrDb": 29.274749,
+        "psnrInfinite": false,
+        "ssim": 0.944475
+      }
+    },
+    {
+      "backend": "lanczos",
+      "status": "completed",
+      "input": [720, 1280, 24],
+      "output": [1080, 1920, 24],
+      "decodeFilterLosslessWrite": {
+        "wallSeconds": 0.15756370895542204,
+        "exitCode": 0,
+        "peakRssBytes": 139968512,
+        "peakFootprintBytes": 127648440
+      },
+      "encode": {
+        "wallSeconds": 0.13245041703339666,
+        "exitCode": 0,
+        "peakRssBytes": 265879552,
+        "peakFootprintBytes": 253379472
+      },
+      "stream": {
+        "width": 1080,
+        "height": 1920,
+        "sample_aspect_ratio": "1:1",
+        "avg_frame_rate": "24/1",
+        "nb_read_frames": "48"
+      },
+      "sample": "portrait-1920h-lanczos.mp4",
+      "quality": {
+        "psnrDb": 35.711354,
+        "psnrInfinite": false,
+        "ssim": 0.976469
+      }
+    },
+    {
+      "backend": "low-latency-super-resolution",
+      "input": [720, 1280, 24],
+      "output": [1080, 1920, 24],
+      "decodeToRaw": {
+        "wallSeconds": 0.06986820790916681,
+        "exitCode": 0,
+        "peakRssBytes": 69091328,
+        "peakFootprintBytes": 56803976
+      },
+      "processing": {
+        "wallSeconds": 0.5806625840486959,
+        "exitCode": 0,
+        "peakRssBytes": 47710208,
+        "peakFootprintBytes": 235455280
+      },
+      "status": "completed",
+      "native": {
+        "afterInputFrame30ProcessSeconds": 0.06546945834998041,
+        "first30CallSeconds": 0.11683845799416304,
+        "firstCallSeconds": 0.008040583343245089,
+        "inputFrames": 48,
+        "outputFrames": 48,
+        "peakRssBytes": 47710208,
+        "processCalls": 48,
+        "processSeconds": 0.18230791634414345,
+        "rawReadAndConvertSeconds": 0.02366049971897155,
+        "rawWriteAndConvertSeconds": 0.2051570003386587,
+        "sessionStartSeconds": 0.11226212501060218,
+        "thermalState": 0
+      },
+      "processingOutputFps": 82.66418625653104,
+      "algorithmCallsPerSecond": 263.2908156845487,
+      "encode": {
+        "wallSeconds": 0.08448141708504409,
+        "exitCode": 0,
+        "peakRssBytes": 252968960,
+        "peakFootprintBytes": 241189776
+      },
+      "stream": {
+        "width": 1080,
+        "height": 1920,
+        "avg_frame_rate": "24/1",
+        "nb_read_frames": "48"
+      },
+      "sample": "portrait-1920h-low-latency-super-resolution.mp4",
+      "quality": {
+        "psnrDb": 34.030774,
+        "psnrInfinite": false,
+        "ssim": 0.965362
+      }
+    },
+    {
+      "backend": "video-super-resolution",
+      "input": [720, 1280, 24],
+      "output": [2880, 5120, 24],
+      "decodeToRaw": {
+        "wallSeconds": 0.07456029206514359,
+        "exitCode": 0,
+        "peakRssBytes": 97746944,
+        "peakFootprintBytes": 85426824
+      },
+      "processing": {
+        "wallSeconds": 0.009550084010697901,
+        "exitCode": 1,
+        "peakRssBytes": 8978432,
+        "peakFootprintBytes": 2327128,
+        "error": "2026-11-15 00:24:55.514 processor[8086:13951952] Invalid input height"
+      },
+      "status": "failed",
+      "sceneCutInputFrame": 24
+    },
+    {
+      "backend": "lanczos",
+      "status": "completed",
+      "input": [720, 1280, 4],
+      "output": [2160, 3840, 4],
+      "decodeFilterLosslessWrite": {
+        "wallSeconds": 0.09960233396850526,
+        "exitCode": 0,
+        "peakRssBytes": 392445952,
+        "peakFootprintBytes": 380240760
+      },
+      "encode": {
+        "wallSeconds": 0.13195212499704212,
+        "exitCode": 0,
+        "peakRssBytes": 251379712,
+        "peakFootprintBytes": 239174976
+      },
+      "stream": {
+        "width": 2160,
+        "height": 3840,
+        "sample_aspect_ratio": "1:1",
+        "avg_frame_rate": "4/1",
+        "nb_read_frames": "4"
+      },
+      "sample": "portrait-3840h-lanczos.mp4",
+      "quality": {
+        "psnrDb": 33.118732,
+        "psnrInfinite": false,
+        "ssim": 0.96272
+      }
+    },
+    {
+      "backend": "low-latency-super-resolution",
+      "input": [720, 1280, 4],
+      "output": [2160, 3840, 4],
+      "decodeToRaw": {
+        "wallSeconds": 0.045704666059464216,
+        "exitCode": 0,
+        "peakRssBytes": 36093952,
+        "peakFootprintBytes": 23790192
+      },
+      "processing": {
+        "wallSeconds": 0.012281624949537218,
+        "exitCode": 1,
+        "peakRssBytes": 26787840,
+        "peakFootprintBytes": 2720416,
+        "error": "Configuration rejected for this size, scale or pixel format"
+      },
+      "status": "failed"
+    },
+    {
+      "backend": "video-super-resolution",
+      "input": [720, 1280, 4],
+      "output": [2880, 5120, 4],
+      "decodeToRaw": {
+        "wallSeconds": 0.044718375080265105,
+        "exitCode": 0,
+        "peakRssBytes": 44384256,
+        "peakFootprintBytes": 32047728
+      },
+      "processing": {
+        "wallSeconds": 0.009204583009704947,
+        "exitCode": 1,
+        "peakRssBytes": 8978432,
+        "peakFootprintBytes": 2327128,
+        "error": "2026-11-15 00:24:56.405 processor[8111:13952507] Invalid input height"
+      },
+      "status": "failed"
+    },
+    {
+      "backend": "upscayl-standard-4x",
+      "status": "completed",
+      "input": [720, 1280, 4],
+      "output": [2160, 3840, 4],
+      "decodeToPng": {
+        "wallSeconds": 0.06034462503157556,
+        "exitCode": 0,
+        "peakRssBytes": 53608448,
+        "peakFootprintBytes": 41206408
+      },
+      "modelLoadInferencePngIo": {
+        "wallSeconds": 46.42810399993323,
+        "exitCode": 0,
+        "peakRssBytes": 632832000,
+        "peakFootprintBytes": 1641874656
+      },
+      "encode": {
+        "wallSeconds": 0.2379838339984417,
+        "exitCode": 0,
+        "peakRssBytes": 314540032,
+        "peakFootprintBytes": 302761208
+      },
+      "processingOutputFps": 0.08615471353311677,
+      "stream": {
+        "width": 2160,
+        "height": 3840,
+        "avg_frame_rate": "4/1",
+        "nb_read_frames": "4"
+      },
+      "sample": "portrait-3840h-upscayl.mp4",
+      "quality": {
+        "psnrDb": 29.046127,
+        "psnrInfinite": false,
+        "ssim": 0.939943
+      }
+    },
+    {
+      "backend": "temporal-noise-filter",
+      "input": [1920, 1080, 24],
+      "output": [1920, 1080, 24],
+      "decodeToRaw": {
+        "wallSeconds": 0.08657962491270155,
+        "exitCode": 0,
+        "peakRssBytes": 160382976,
+        "peakFootprintBytes": 147538616
+      },
+      "processing": {
+        "wallSeconds": 0.01680162490811199,
+        "exitCode": 1,
+        "peakRssBytes": 8650752,
+        "peakFootprintBytes": 2966032,
+        "error": "Processor unavailable on this OS or hardware"
+      },
+      "status": "failed",
+      "sceneCutInputFrame": 24
+    },
+    {
+      "backend": "hqdn3d",
+      "status": "completed",
+      "input": [1920, 1080, 24],
+      "output": [1920, 1080, 24],
+      "decodeFilterLosslessWrite": {
+        "wallSeconds": 0.3613330830121413,
+        "exitCode": 0,
+        "peakRssBytes": 209108992,
+        "peakFootprintBytes": 196444904
+      },
+      "encode": {
+        "wallSeconds": 0.32141095807310194,
+        "exitCode": 0,
+        "peakRssBytes": 279691264,
+        "peakFootprintBytes": 267207592
+      },
+      "stream": {
+        "width": 1920,
+        "height": 1080,
+        "sample_aspect_ratio": "1:1",
+        "avg_frame_rate": "24/1",
+        "nb_read_frames": "48"
+      },
+      "sample": "wide-hqdn3d.mp4",
+      "quality": {
+        "psnrDb": 39.958599,
+        "psnrInfinite": false,
+        "ssim": 0.955537
+      },
+      "baselineQuality": {
+        "psnrDb": 29.531882,
+        "psnrInfinite": false,
+        "ssim": 0.935943
+      }
+    },
+    {
+      "backend": "temporal-noise-filter",
+      "input": [1080, 1920, 24],
+      "output": [1080, 1920, 24],
+      "decodeToRaw": {
+        "wallSeconds": 0.08739545894786716,
+        "exitCode": 0,
+        "peakRssBytes": 157138944,
+        "peakFootprintBytes": 144294584
+      },
+      "processing": {
+        "wallSeconds": 0.016000207979232073,
+        "exitCode": 1,
+        "peakRssBytes": 8683520,
+        "peakFootprintBytes": 2998800,
+        "error": "Processor unavailable on this OS or hardware"
+      },
+      "status": "failed",
+      "sceneCutInputFrame": 24
+    },
+    {
+      "backend": "hqdn3d",
+      "status": "completed",
+      "input": [1080, 1920, 24],
+      "output": [1080, 1920, 24],
+      "decodeFilterLosslessWrite": {
+        "wallSeconds": 0.3641984590794891,
+        "exitCode": 0,
+        "peakRssBytes": 213008384,
+        "peakFootprintBytes": 200344296
+      },
+      "encode": {
+        "wallSeconds": 0.3230899169575423,
+        "exitCode": 0,
+        "peakRssBytes": 278495232,
+        "peakFootprintBytes": 265995152
+      },
+      "stream": {
+        "width": 1080,
+        "height": 1920,
+        "sample_aspect_ratio": "1:1",
+        "avg_frame_rate": "24/1",
+        "nb_read_frames": "48"
+      },
+      "sample": "portrait-hqdn3d.mp4",
+      "quality": {
+        "psnrDb": 39.803066,
+        "psnrInfinite": false,
+        "ssim": 0.956351
+      },
+      "baselineQuality": {
+        "psnrDb": 31.058148,
+        "psnrInfinite": false,
+        "ssim": 0.938567
+      }
+    },
+    {
+      "backend": "low-latency-interpolation",
+      "input": [1080, 1920, 30],
+      "output": [1080, 1920, 60],
+      "decodeToRaw": {
+        "wallSeconds": 2.5755666670156643,
+        "exitCode": 0,
+        "peakRssBytes": 130646016,
+        "peakFootprintBytes": 118375096
+      },
+      "processing": {
+        "wallSeconds": 179.76430050004274,
+        "exitCode": 0,
+        "peakRssBytes": 245579776,
+        "peakFootprintBytes": 295371784
+      },
+      "status": "completed",
+      "native": {
+        "afterInputFrame30ProcessSeconds": 163.8215006242972,
+        "first30CallSeconds": 2.8263869582442567,
+        "firstCallSeconds": 0.1398403332568705,
+        "inputFrames": 1800,
+        "outputFrames": 3600,
+        "peakRssBytes": 245579776,
+        "processCalls": 1799,
+        "processSeconds": 166.64788758254144,
+        "rawReadAndConvertSeconds": 2.1712334969779477,
+        "rawWriteAndConvertSeconds": 10.43840191711206,
+        "sessionStartSeconds": 0.1319503333652392,
+        "thermalState": 0
+      },
+      "processingOutputFps": 20.026223171041373,
+      "algorithmCallsPerSecond": 10.79521634565543,
+      "sustainedSourceSeconds": 60
+    }
+  ],
+  "upscayl": {
+    "version": "2.15.0",
+    "model": "upscayl-standard-4x",
+    "nativeScale": 4,
+    "outputScale": 3,
+    "sha256": {
+      "upscayl-bin": "32fc7ada575dea981d158be032b92df9c98300b1e7c29f78ce532bd9fd6cfd07",
+      "upscayl-standard-4x.bin": "713ee713b0353afaa27976f0563a64a5043bd70b9bd8936c2e26e25ebcdbcddf",
+      "upscayl-standard-4x.param": "35330ececcea33b6c397a72548e788d5d53becee4734c50b7fada36e89f10a86"
+    }
+  }
+}

@@ -1,0 +1,614 @@
+{
+  "version": 1,
+  "dateUTC": "2026-11-14T16:28:54Z",
+  "system": {
+    "systemInspectVersion": 1,
+    "os": {
+      "platform": "darwin",
+      "macOSVersion": "27.0.1",
+      "kernelRelease": "27.0.0"
+    },
+    "architecture": {
+      "host": "arm64",
+      "process": "arm64"
+    },
+    "model": "MacBookPro18,2",
+    "cpu": {
+      "name": "Apple M1 Max",
+      "logicalCores": 10,
+      "availableParallelism": 10
+    },
+    "gpu": [
+      {
+        "name": "Apple M1 Max",
+        "cores": 24
+      }
+    ],
+    "memory": {
+      "installedBytes": 34359738368,
+      "unified": true
+    },
+    "videoToolbox": {
+      "status": "probed",
+      "codecs": {
+        "decoders": {
+          "av1": false,
+          "h264": true,
+          "hevc": true,
+          "prores422": true,
+          "prores4444": true,
+          "vp9": false
+        },
+        "encoders": {
+          "av1": {
+            "availableAt1920x1080": false,
+            "osStatus": -12908
+          },
+          "h264": {
+            "availableAt1920x1080": true,
+            "osStatus": 0
+          },
+          "hevc": {
+            "availableAt1920x1080": true,
+            "osStatus": 0
+          },
+          "prores422": {
+            "availableAt1920x1080": true,
+            "osStatus": 0
+          },
+          "prores4444": {
+            "availableAt1920x1080": true,
+            "osStatus": 0
+          },
+          "vp9": {
+            "availableAt1920x1080": false,
+            "osStatus": -12908
+          }
+        }
+      },
+      "frameProcessors": {
+        "frame-rate-conversion": {
+          "minimumMacOS": "15.4",
+          "status": "reported-supported",
+          "testedSizes": [
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 360,
+              "width": 640
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 720,
+              "width": 1280
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 1280,
+              "width": 720
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 1080,
+              "width": 1920
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 1920,
+              "width": 1080
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 2160,
+              "width": 3840
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 3840,
+              "width": 2160
+            }
+          ]
+        },
+        "low-latency-interpolation": {
+          "minimumMacOS": "26.0",
+          "status": "reported-supported",
+          "testedSizes": [
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 360,
+              "width": 640
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 720,
+              "width": 1280
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 1280,
+              "width": 720
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 1080,
+              "width": 1920
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 1920,
+              "width": 1080
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 2160,
+              "width": 3840
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 3840,
+              "width": 2160
+            }
+          ]
+        },
+        "low-latency-super-resolution": {
+          "minimumMacOS": "26.0",
+          "status": "reported-supported",
+          "testedSizes": [
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1.5,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                },
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 2,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 360,
+              "width": 640
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1.5,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 720,
+              "width": 1280
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [875704438],
+                  "modelStatus": "not-reported",
+                  "scale": 1.5,
+                  "sourcePixelFormats": [875704438],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 1280,
+              "width": 720
+            },
+            {
+              "configurations": [],
+              "height": 1080,
+              "width": 1920
+            },
+            {
+              "configurations": [],
+              "height": 1920,
+              "width": 1080
+            },
+            {
+              "configurations": [],
+              "height": 2160,
+              "width": 3840
+            },
+            {
+              "configurations": [],
+              "height": 3840,
+              "width": 2160
+            }
+          ]
+        },
+        "temporal-noise-filter": {
+          "minimumMacOS": "26.0",
+          "status": "hardware-unsupported"
+        },
+        "video-super-resolution": {
+          "minimumMacOS": "26.0",
+          "status": "reported-supported",
+          "testedSizes": [
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "ready",
+                  "scale": 4,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 360,
+              "width": 640
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "ready",
+                  "scale": 4,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 720,
+              "width": 1280
+            },
+            {
+              "configurations": [
+                {
+                  "scale": 4,
+                  "status": "configuration-rejected"
+                }
+              ],
+              "height": 1280,
+              "width": 720
+            },
+            {
+              "configurations": [
+                {
+                  "destinationPixelFormats": [1380411457],
+                  "modelStatus": "ready",
+                  "scale": 4,
+                  "sourcePixelFormats": [1380411457],
+                  "status": "configuration-accepted"
+                }
+              ],
+              "height": 1080,
+              "width": 1920
+            },
+            {
+              "configurations": [
+                {
+                  "scale": 4,
+                  "status": "configuration-rejected"
+                }
+              ],
+              "height": 1920,
+              "width": 1080
+            },
+            {
+              "configurations": [
+                {
+                  "scale": 4,
+                  "status": "configuration-rejected"
+                }
+              ],
+              "height": 2160,
+              "width": 3840
+            },
+            {
+              "configurations": [
+                {
+                  "scale": 4,
+                  "status": "configuration-rejected"
+                }
+              ],
+              "height": 3840,
+              "width": 2160
+            }
+          ]
+        }
+      },
+      "gpuDevices": [
+        {
+          "hasUnifiedMemory": true,
+          "maxBufferBytes": 20100448256,
+          "name": "Apple M1 Max",
+          "recommendedMaxWorkingSetBytes": 26800603136
+        }
+      ],
+      "thermalState": 0
+    }
+  },
+  "ffmpeg": "ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers",
+  "reference": "Generated moving text and rectangles, with a known midpoint cut in two-shot fixtures.",
+  "targetMacBookAirM4_16GB": "untested",
+  "cases": [
+    {
+      "backend": "video-super-resolution",
+      "input": [1280, 720, 4],
+      "output": [3840, 2160, 4],
+      "decodeToRaw": {
+        "wallSeconds": 0.04491133301053196,
+        "exitCode": 0,
+        "peakRssBytes": 48103424,
+        "peakFootprintBytes": 35766896
+      },
+      "processing": {
+        "wallSeconds": 2.8710876250406727,
+        "exitCode": 0,
+        "peakRssBytes": 361742336,
+        "peakFootprintBytes": 2929083472
+      },
+      "status": "completed",
+      "native": {
+        "afterInputFrame30ProcessSeconds": 0,
+        "first30CallSeconds": 1.6704197500366718,
+        "firstCallSeconds": 0.582447791704908,
+        "inputFrames": 4,
+        "outputFrames": 4,
+        "peakRssBytes": 361742336,
+        "processCalls": 4,
+        "processSeconds": 1.6704197500366718,
+        "rawReadAndConvertSeconds": 0.006586208357475698,
+        "rawWriteAndConvertSeconds": 0.2845550832571462,
+        "sessionStartSeconds": 0.2865175000624731,
+        "thermalState": 0
+      },
+      "processingOutputFps": 1.3932002510523638,
+      "algorithmCallsPerSecond": 2.394607702592229,
+      "encode": {
+        "wallSeconds": 0.13444395805709064,
+        "exitCode": 0,
+        "peakRssBytes": 411533312,
+        "peakFootprintBytes": 399934784
+      },
+      "nativeOutput": [5120, 2880, 4],
+      "nativeInput": [1280, 720, 4],
+      "rotatedForProcessing": false,
+      "stream": {
+        "width": 3840,
+        "height": 2160,
+        "sample_aspect_ratio": "1:1",
+        "avg_frame_rate": "4/1",
+        "nb_read_frames": "4"
+      },
+      "sample": "wide-apple-video-sr-uhd.mp4",
+      "quality": {
+        "psnrDb": 29.678069,
+        "psnrInfinite": false,
+        "ssim": 0.954206
+      }
+    },
+    {
+      "backend": "video-super-resolution",
+      "input": [720, 1280, 4],
+      "output": [2160, 3840, 4],
+      "decodeToRaw": {
+        "wallSeconds": 0.04535416699945927,
+        "exitCode": 0,
+        "peakRssBytes": 44466176,
+        "peakFootprintBytes": 32129648
+      },
+      "processing": {
+        "wallSeconds": 2.117814959026873,
+        "exitCode": 0,
+        "peakRssBytes": 361889792,
+        "peakFootprintBytes": 2929624240
+      },
+      "status": "completed",
+      "native": {
+        "afterInputFrame30ProcessSeconds": 0,
+        "first30CallSeconds": 1.6620135001139715,
+        "firstCallSeconds": 0.5679195000557229,
+        "inputFrames": 4,
+        "outputFrames": 4,
+        "peakRssBytes": 361889792,
+        "processCalls": 4,
+        "processSeconds": 1.6620135001139715,
+        "rawReadAndConvertSeconds": 0.0063890001038089395,
+        "rawWriteAndConvertSeconds": 0.14807191665749997,
+        "sessionStartSeconds": 0.20028729166369885,
+        "thermalState": 0
+      },
+      "processingOutputFps": 1.8887391379263763,
+      "algorithmCallsPerSecond": 2.4067193195035435,
+      "encode": {
+        "wallSeconds": 0.13093666697386652,
+        "exitCode": 0,
+        "peakRssBytes": 422969344,
+        "peakFootprintBytes": 411452760
+      },
+      "nativeOutput": [5120, 2880, 4],
+      "nativeInput": [1280, 720, 4],
+      "rotatedForProcessing": true,
+      "stream": {
+        "width": 2160,
+        "height": 3840,
+        "sample_aspect_ratio": "1:1",
+        "avg_frame_rate": "4/1",
+        "nb_read_frames": "4"
+      },
+      "sample": "portrait-apple-video-sr-uhd.mp4",
+      "quality": {
+        "psnrDb": 29.875299,
+        "psnrInfinite": false,
+        "ssim": 0.95156
+      }
+    },
+    {
+      "backend": "low-latency-interpolation",
+      "input": [1080, 1920, 30],
+      "output": [1080, 1920, 60],
+      "decodeToRaw": {
+        "wallSeconds": 0.08950500003993511,
+        "exitCode": 0,
+        "peakRssBytes": 131874816,
+        "peakFootprintBytes": 118997688
+      },
+      "processing": {
+        "wallSeconds": 5.934219042072073,
+        "exitCode": 0,
+        "peakRssBytes": 245432320,
+        "peakFootprintBytes": 295191536
+      },
+      "status": "completed",
+      "sceneCutInputFrame": 30,
+      "native": {
+        "afterInputFrame30ProcessSeconds": 2.6646138748619705,
+        "first30CallSeconds": 2.80207479163073,
+        "firstCallSeconds": 0.14152362500317395,
+        "inputFrames": 60,
+        "outputFrames": 120,
+        "peakRssBytes": 245432320,
+        "processCalls": 58,
+        "processSeconds": 5.374600041541271,
+        "rawReadAndConvertSeconds": 0.06015566678252071,
+        "rawWriteAndConvertSeconds": 0.3425864583114162,
+        "sessionStartSeconds": 0.09305183333344758,
+        "thermalState": 0
+      },
+      "processingOutputFps": 20.221700471322535,
+      "algorithmCallsPerSecond": 10.791500679437975,
+      "midpoints": {
+        "distinctMidpoints": 58,
+        "checkedMidpoints": 58,
+        "boundaryHolds": 2
+      },
+      "encode": {
+        "wallSeconds": 0.14315666595939547,
+        "exitCode": 0,
+        "peakRssBytes": 252968960,
+        "peakFootprintBytes": 241140624
+      },
+      "inputStorageGeometry": [1920, 1080],
+      "inputDisplayRotationDegrees": 90,
+      "stream": {
+        "width": 1080,
+        "height": 1920,
+        "avg_frame_rate": "60/1",
+        "nb_read_frames": "120"
+      },
+      "sample": "portrait-display-rotation-low-latency.mp4",
+      "qualityHeldOutFrames": {
+        "psnrDb": 33.550682,
+        "psnrInfinite": false,
+        "ssim": 0.976053
+      }
+    }
+  ]
+}

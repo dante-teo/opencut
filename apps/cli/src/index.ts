@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
+import { formatSystem, inspectSystem, systemHelp } from './system.js';
 import { discovery } from './discovery.js';
 import {
   inspectionHelp,
@@ -64,6 +65,7 @@ const help = `Usage: opencut [command] [options]
 OpenCut — project and timeline editing, scripting, visual inspection and headless rendering.
 
 Commands:
+  system inspect [--json]              Inspect hardware and local VideoToolbox capabilities
   help --json                         Discover commands, arguments, capabilities and schemas
   run <script.ts> --project <project-file>
                                        Execute a trusted TypeScript script (run --help)
@@ -369,6 +371,15 @@ async function runCli(args: string[]): Promise<void> {
     (['project', 'timeline'].includes(command ?? '') && file === 'inspect')
   )
     return runInspectionCommand(args);
+  if (command === 'system' && !values.help) {
+    if (Object.keys(values).some((key) => key !== 'json'))
+      throw new UsageError('system inspect accepts only --json and --help.');
+    if (file !== 'inspect' || positionals.length !== 2)
+      throw new UsageError(systemHelp);
+    const result = await inspectSystem();
+    output(result, formatSystem(result), values.json);
+    return;
+  }
   for (const option of Object.keys(
     inspectionOptions,
   ) as (keyof typeof inspectionOptions)[]) {
@@ -404,7 +415,8 @@ async function runCli(args: string[]): Promise<void> {
     )
       throw new UsageError('help accepts only --json and --help.');
     let usage = help;
-    if (group === 'run') usage = scriptHelp;
+    if (group === 'system') usage = systemHelp;
+    else if (group === 'run') usage = scriptHelp;
     else if (group === 'online') usage = onlineHelp;
     else if (group === 'cache') usage = cacheHelp;
     else if (

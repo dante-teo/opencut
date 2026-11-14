@@ -82,6 +82,10 @@ with the CLI or SDK. Open a saved project in Electron to inspect its revision,
 play the timeline, compare it with its source or rendered preview, and export
 the selected revision.
 
+T42 adds [system diagnostics](CLI.md#system-diagnostics) and records the
+[Apple Silicon video effects decision](adr/0017-apple-silicon-video-effects-gate.md).
+The benchmark prototypes are isolated from project editing and export.
+
 ## Quick start (macOS)
 
 Run the commands below from the repository root.

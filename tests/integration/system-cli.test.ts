@@ -1,0 +1,105 @@
+import { spawnSync } from 'node:child_process';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+} from 'node:fs';
+import { join } from 'node:path';
+import { totalmem, tmpdir } from 'node:os';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { describe, expect, it } from 'vitest';
+
+const entry = fileURLToPath(
+  new URL('../../apps/cli/dist/index.js', import.meta.url),
+);
+const helper = new URL('../../apps/cli/dist/system-probe', import.meta.url);
+const runNode = (...args: string[]) =>
+  spawnSync(process.execPath, args, {
+    encoding: 'utf8',
+    cwd: tmpdir(),
+    timeout: 20000,
+  });
+const run = (...args: string[]) => runNode(entry, ...args);
+
+describe('system inspect', () => {
+  it('reports this host without a project or disclosing device identifiers', () => {
+    const { status, stdout, stderr } = run('system', 'inspect', '--json');
+    expect(status).toBe(0);
+    expect(stderr).toBe('');
+    const report = JSON.parse(stdout);
+    expect(report).toMatchObject({
+      systemInspectVersion: 1,
+      os: { platform: process.platform },
+      architecture: { process: process.arch },
+      memory: { installedBytes: totalmem() },
+    });
+    expect(stdout).not.toMatch(
+      /serial_number|platform_UUID|provisioning_UDID/u,
+    );
+    const vt = report.videoToolbox;
+    if (process.platform !== 'darwin') {
+      expect(vt.status).toBe('not-applicable');
+    } else if (existsSync(helper)) {
+      expect(vt.status).toBe('probed');
+      expect(vt.codecs.decoders.h264).toBeTypeOf('boolean');
+      expect(vt.codecs.encoders.hevc.availableAt1920x1080).toBeTypeOf(
+        'boolean',
+      );
+      expect(vt.frameProcessors['frame-rate-conversion'].minimumMacOS).toBe(
+        '15.4',
+      );
+      expect(vt.frameProcessors['temporal-noise-filter'].minimumMacOS).toBe(
+        '26.0',
+      );
+    } else {
+      expect(vt).toMatchObject({
+        status: 'unavailable',
+        reason: expect.stringContaining('Native probe was not built'),
+      });
+    }
+  });
+
+  it.skipIf(process.platform !== 'darwin')(
+    'keeps hardware diagnostics available without the native helper',
+    () => {
+      const staging = mkdtempSync(join(tmpdir(), 'opencut-system-test-'));
+      try {
+        const module = join(staging, 'dist', 'system.mjs');
+        mkdirSync(join(staging, 'dist'));
+        copyFileSync(new URL('./system.js', pathToFileURL(entry)), module);
+        const result = runNode(
+          '--input-type=module',
+          '-e',
+          'const { inspectSystem } = await import(process.argv[1]); console.log(JSON.stringify(await inspectSystem()));',
+          pathToFileURL(module).href,
+        );
+        expect(result.status).toBe(0);
+        expect(result.stderr).toBe('');
+        expect(JSON.parse(result.stdout)).toMatchObject({
+          memory: { installedBytes: totalmem() },
+          videoToolbox: {
+            status: 'unavailable',
+            reason: expect.stringContaining('Native probe was not built'),
+          },
+        });
+      } finally {
+        rmSync(staging, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('advertises the command and rejects operands and project options', () => {
+    const help = run('help', 'system', 'inspect', '--json');
+    expect(JSON.parse(help.stdout).commands).toEqual([
+      expect.objectContaining({ name: 'system inspect', arguments: [] }),
+    ]);
+    for (const args of [['another-file'], ['--width', '1920']]) {
+      const result = run('system', 'inspect', '--json', ...args);
+      expect(result.status).toBe(2);
+      expect(result.stdout).toBe('');
+      expect(JSON.parse(result.stderr).ok).toBe(false);
+    }
+  });
+});

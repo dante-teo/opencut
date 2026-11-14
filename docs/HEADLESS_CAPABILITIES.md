@@ -23,6 +23,10 @@ and exports saved projects and follows revisions committed by either interface.
 | Preview and export                                                      | `preview`, `render`, `project cache-preview`                  | `project.previewFrame()`, `project.previewContactSheet()`, `project.render()`, `project.cachePreview()` | Media tools and source files are required.                                                               |
 | Undo and redo                                                           | `edit undo/redo/history`                                      | `project.undo()`, `project.redo()`, `project.history()`, then save                                      | Undo and redo advance the revision.                                                                      |
 
+For hardware and VideoToolbox capabilities, use the
+[CLI system diagnostics](CLI.md#system-diagnostics). This command runs without
+a project and is available through the CLI.
+
 ## Contract limitations
 
 - Discovery checks FFmpeg and ffprobe availability at runtime. Network access,

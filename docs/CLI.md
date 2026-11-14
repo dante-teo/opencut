@@ -1679,3 +1679,32 @@ Inspect the project and history before retrying.
 `unavailable` or `unknown`, with missing and unchecked prerequisites. FFmpeg
 and ffprobe are probed locally. Network access and the dialogue model remain
 unknown until execution.
+
+## System diagnostics
+
+`opencut system inspect --json` reports the host and process architecture, OS,
+CPU, GPU, installed memory and local VideoToolbox capabilities. It works without
+a project. The report omits machine serial numbers and unique device identifiers.
+
+On macOS, the CLI build includes a native helper when a macOS 26 or newer SDK is
+available (`SDKROOT` can select it). The built command needs neither Xcode nor
+FFmpeg. The JSON report has `systemInspectVersion: 1`. Check
+`videoToolbox.status` before reading codec or frame processor results:
+
+- `probed` means the native helper returned results. Individual codecs or
+  processors can still be unavailable.
+- `unavailable` means the helper is missing or failed. The `reason` field
+  explains the failure, and host hardware information remains available.
+- `not-applicable` means the host is outside macOS. The report still includes
+  OS, CPU, architecture, and installed memory information.
+
+The encoder probe requires hardware acceleration and prepares a 1920×1080
+session. Decode results are VideoToolbox's codec support query; neither check
+covers every profile, bit depth, resolution, or concurrent workload. Results
+reflect the permissions and services of the current process. Frame processor
+results distinguish API availability, reported hardware support, tested sizes,
+pixel formats (numeric Core Video FourCCs), supported scales, and model status
+where Apple exposes it. An accepted configuration does not guarantee a
+successful session. Metal working-set limits, when reported, are recommendations
+and do not measure free memory. The command does not download models or enable AI
+editing.

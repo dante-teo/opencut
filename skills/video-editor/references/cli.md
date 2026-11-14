@@ -255,3 +255,10 @@ opencut transition remove project.json TRANSITION_ID --json
 Use `timeline list --json` to find stored transition IDs. The dissolve spans
 the cut using trimmed source handles. Use at least two project frames and
 leave enough source on both sides at the clips' playback speeds.
+
+## System diagnostics
+
+Use `opencut system inspect --json` to check host hardware, memory and local
+VideoToolbox capabilities without a project. Treat reported processor
+configurations and model status as diagnostics; the CLI has no AI editing
+commands, and a configuration reported as supported may still fail at runtime.

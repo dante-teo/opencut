@@ -339,6 +339,13 @@ type Definition = {
 };
 const definitions: Definition[] = [
   {
+    name: 'system inspect',
+    description:
+      'Inspect host hardware and probe local VideoToolbox capabilities without installing tools or models.',
+    args: [],
+    options: [],
+  },
+  {
     name: 'help',
     description:
       'Discover commands, arguments, constraints, capability status and output schemas.',
