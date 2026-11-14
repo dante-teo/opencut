@@ -64,8 +64,15 @@ scripts need the supplied `@opencut/sdk` package.
    follows committed revisions. Check the toolbar revision before review and
    confirm the revision captured by the export job. Make all edits through
    the CLI or SDK, including undo and redo.
-5. **Export and verify.** Choose a new MP4 path in an existing directory.
-   For CLI rendering, require exit 0 and a terminal `completed` JSONL event.
+5. **Export and verify.** For foreground CLI rendering, choose a new MP4 path
+   in an existing directory and require exit 0 and a terminal `completed` JSONL
+   event. For detached export from the saved project, use
+   `jobs submit PROJECT --expected-revision N --idempotency-key KEY --json`.
+   Poll `jobs status JOB_ID --json` and use `result.path` after completion.
+   Reuse the same key and request after an uncertain submission. For a
+   retryable attempt, use `jobs retry JOB_ID --attempt N --json` with the
+   attempt observed in status. Use `jobs cancel JOB_ID --json` to stop a job.
+   Keep original media in place through completion.
    Probe the published file for the expected streams, dimensions and duration.
    Play it or decode it through the end. Report the editable project and output
    paths, and distinguish what you saw or heard from automated checks. For

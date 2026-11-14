@@ -176,6 +176,15 @@ for short range MP4 previews from a saved project. The SDK exposes saved-project
 operations and snapshot previews. Desktop playback, selection, untitled projects
 and cache controls stay in their existing interfaces.
 
+## Durable background renders
+
+Use `LocalJobs` from `@opencut/sdk` to submit a saved project revision and inspect
+the resulting job from another process. Save pending draft edits before
+submitting if they belong in the export. The job records the saved revision at
+submission, and `status(id)` reports the verified file in `result.path` when the
+state is `completed`. See the [durable jobs guide](JOBS.md#typescript-sdk) for a
+TypeScript example, idempotency keys, and attempt-based retries.
+
 ## Editable subtitles
 
 ```ts

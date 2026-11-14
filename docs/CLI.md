@@ -308,7 +308,8 @@ reuses a full timeline MP4 with mixed audio. It returns `path`, `hit`, `key`,
 `revision`, `frameCount`, and `frameRate`. `--size` caps the longest side at
 64–1920 pixels and defaults to 960. Desktop **Render full timeline** uses
 the same cache. It samples VFR footage by source presentation time onto the
-project frame grid. Use `project render` for a durable export.
+project frame grid. For exports, use `project render` in the foreground or
+[submit a background job](#durable-background-rendering-t43).
 
 `opencut desktop control "$PROJECT" request.json --json` requires the saved
 project to be open in OpenCut desktop on macOS or Linux. Run
@@ -341,6 +342,14 @@ checkpoint. Set `OPENCUT_DIALOGUE_PYTHON` to that environment's Python
 executable before launching OpenCut or the CLI if it differs from `python3`.
 OpenCut invokes the local inference API and requires FFmpeg and ffprobe.
 The current integration accepts sources with a known duration of up to ten minutes.
+
+## Durable background rendering (T43)
+
+Submit a saved project with `jobs submit PROJECT --idempotency-key KEY --json`.
+The command can exit once it returns a job ID. Poll `jobs status JOB_ID --json`
+and read `result.path` when the state is `completed`. Job commands return a single
+JSON value per invocation. `jobs list` returns an array.
+See [durable local jobs](JOBS.md) for cancellation, retries, limits and recovery.
 
 ## Headless project ownership and Electron review (T41)
 

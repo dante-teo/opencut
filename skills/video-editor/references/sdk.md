@@ -218,3 +218,15 @@ and specify an explicit ripple or insert scope when shifting other clips.
 `project.apply(...operations)` returns detached operation results. To change
 the draft, stage another operation and save. A save commits the staged edits
 as one history entry.
+
+## Durable render jobs
+
+Import `LocalJobs` from `@opencut/sdk`. Use
+`await jobs.submit({ type: 'render', projectPath, expectedRevision }, { idempotencyKey })`
+with a saved project. Save draft edits before submitting if they belong in
+the export. Inspect `await jobs.status(id)` and use `result.path` once the state
+is `completed`. Use `jobs.list()`, `jobs.cancel(id)` and `jobs.retry(id, attempt)` to
+recover and manage jobs from another process. The retry attempt comes from the
+status response. Inspect the retry response to see whether it recovered the
+original attempt or queued another one. Reuse the same submission key and
+request after a client timeout.

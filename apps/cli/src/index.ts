@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
 import { formatSystem, inspectSystem, systemHelp } from './system.js';
+import { jobsHelp, runJobsCommand } from './jobs.js';
 import { discovery } from './discovery.js';
 import {
   inspectionHelp,
@@ -80,6 +81,7 @@ Commands:
   project validate <project-file>       Check project data and media references
   project render <project-file> --output <new.mp4>
                                        Composite video, images, text and subtitles and mix audio
+  jobs submit|status|list|cancel|retry  Manage persistent background exports (jobs --help)
   project cache-preview <project-file> Render or reuse a full timeline preview
   desktop control <project-file> <request.json>
                                        Control an open desktop project
@@ -295,11 +297,16 @@ async function runCli(args: string[]): Promise<void> {
     (arg) => !['--json', '--help', '-h'].includes(arg),
   );
   const leadingCommand = args[commandPosition];
-  if (leadingCommand === 'run' || leadingCommand === 'cache') {
+  if (
+    leadingCommand === 'run' ||
+    leadingCommand === 'cache' ||
+    leadingCommand === 'jobs'
+  ) {
     const commandArgs = [
       ...args.slice(0, commandPosition),
       ...args.slice(commandPosition + 1),
     ];
+    if (leadingCommand === 'jobs') return runJobsCommand(commandArgs);
     return leadingCommand === 'run'
       ? runScriptCommand(commandArgs)
       : runCacheCommand(commandArgs);
@@ -419,6 +426,7 @@ async function runCli(args: string[]): Promise<void> {
     else if (group === 'run') usage = scriptHelp;
     else if (group === 'online') usage = onlineHelp;
     else if (group === 'cache') usage = cacheHelp;
+    else if (group === 'jobs') usage = jobsHelp;
     else if (
       group === 'preview' ||
       (action === 'inspect' && (group === 'project' || group === 'timeline'))

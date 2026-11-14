@@ -16,6 +16,55 @@ type Option = {
   maximum?: number;
 };
 const options: Record<string, Option> = {
+  'idempotency-key': {
+    type: 'string',
+    description: 'Stable caller key unique within the local job queue.',
+  },
+  attempt: {
+    type: 'string',
+    description:
+      'Attempt number observed in job status for an idempotent retry.',
+    minimum: 1,
+    maximum: 3,
+  },
+  state: {
+    type: 'string',
+    description: 'Filter jobs by state.',
+    enum: [
+      'queued',
+      'running',
+      'completed',
+      'failed',
+      'cancelled',
+      'interrupted',
+    ],
+  },
+  concurrency: {
+    type: 'string',
+    description: 'Maximum simultaneous attempts in this queue.',
+    minimum: 1,
+    maximum: 8,
+  },
+  'cpu-seconds': {
+    type: 'string',
+    description: 'Sampled process group CPU time per attempt.',
+    minimum: 1,
+    maximum: 86400,
+  },
+  'job-memory-mib': {
+    type: 'string',
+    description: 'Resident memory budget shared across attempt slots.',
+    minimum: 1,
+    maximum: 1048576,
+    unit: 'MiB',
+  },
+  'scratch-mib': {
+    type: 'string',
+    description: 'Temporary output budget shared across attempt slots.',
+    minimum: 1,
+    maximum: 16777216,
+    unit: 'MiB',
+  },
   help: { type: 'boolean', description: 'Show command help.' },
   result: {
     type: 'string',
@@ -780,6 +829,59 @@ const definitions: Definition[] = [
       'music-volume': 0.25,
     },
     tools: ['ffmpeg', 'ffprobe'],
+  },
+  {
+    name: 'jobs submit',
+    description: 'Queue a detached render from the saved project revision.',
+    args: ['project-file'],
+    options: [
+      'directory',
+      'idempotency-key',
+      'expected-revision',
+      'quality',
+      'resolution',
+      'codec',
+      'no-subtitles',
+    ],
+    tools: ['ffmpeg', 'ffprobe'],
+  },
+  ...['status', 'cancel', 'retry'].map((action): Definition => ({
+    name: `jobs ${action}`,
+    description: `${action[0]!.toUpperCase() + action.slice(1)} a persistent local job.`,
+    args: ['job-id'],
+    options: action === 'retry' ? ['directory', 'attempt'] : ['directory'],
+    required: action === 'retry' ? ['attempt'] : [],
+  })),
+  {
+    name: 'jobs list',
+    description: 'List durable jobs in this queue.',
+    args: [],
+    options: ['directory', 'state'],
+  },
+  {
+    name: 'jobs start',
+    description: 'Wake the local worker and reconcile interrupted attempts.',
+    args: [],
+    options: ['directory'],
+  },
+  {
+    name: 'jobs limits',
+    description: 'Read resource budgets for this queue.',
+    args: [],
+    options: ['directory'],
+  },
+  {
+    name: 'jobs configure',
+    description: 'Set resource budgets while no attempts are running.',
+    args: [],
+    options: [
+      'directory',
+      'concurrency',
+      'cpu-seconds',
+      'job-memory-mib',
+      'scratch-mib',
+    ],
+    required: ['concurrency', 'cpu-seconds', 'job-memory-mib', 'scratch-mib'],
   },
   ...['status', 'cleanup', 'clear'].map((action): Definition => ({
     name: `cache ${action}`,

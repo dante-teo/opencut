@@ -1,7 +1,33 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { execFile } from 'node:child_process';
 import { access, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { resolve } from 'node:path';
+
+type MediaTool = 'ffmpeg' | 'ffprobe';
+const jobTools = new AsyncLocalStorage<Readonly<Record<MediaTool, string>>>();
+
+/** Use the captured executables and local-only media policy for this job. */
+export function withLocalRenderTools<T>(
+  tools: Readonly<Record<MediaTool, string>>,
+  run: () => T,
+): T {
+  return jobTools.run(tools, run);
+}
+
+export function mediaExecutable(tool: MediaTool): string {
+  return jobTools.getStore()?.[tool] ?? tool;
+}
+
+export function renderSourceInputArgs() {
+  if (!jobTools.getStore()) return [];
+  return [
+    '-protocol_whitelist',
+    'file',
+    '-format_whitelist',
+    'image2,jpeg_pipe,png_pipe,apng,gif,gif_pipe,webp_pipe,bmp_pipe,tiff_pipe,mp3,ogg,wav,flac,mov,matroska,webm,avi,aiff,mpeg,mpegts,flv,asf',
+  ];
+}
 
 export class MediaError extends Error {
   override name = 'MediaError';
@@ -64,7 +90,7 @@ export async function runMediaTool(
       killTimer = setTimeout(() => child.kill('SIGKILL'), 2000);
     };
     const child = execFile(
-      tool,
+      mediaExecutable(tool),
       args,
       {
         encoding: 'buffer',

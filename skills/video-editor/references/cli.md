@@ -18,7 +18,8 @@ arguments and `help edit apply --json` for new batch operations.
 
 Use `project cache-preview PROJECT --size 960 --json` to render or reuse an
 MP4 with mixed audio and VFR footage sampled on the project frame grid. Use
-`project render` for a durable export. Use
+`project render` for a foreground export or `jobs submit` for a background
+export. Use
 `desktop control PROJECT REQUEST.json --json` for an open, saved project on
 macOS or Linux. Discover the request
 schema with `opencut help desktop control --json`. A `render-preview` reply
@@ -262,3 +263,17 @@ Use `opencut system inspect --json` to check host hardware, memory and local
 VideoToolbox capabilities without a project. Treat reported processor
 configurations and model status as diagnostics; the CLI has no AI editing
 commands, and a configuration reported as supported may still fail at runtime.
+
+## Durable render jobs
+
+`jobs submit PROJECT --expected-revision N --idempotency-key KEY --json` captures
+the saved revision and lets the CLI exit. Use `jobs list --json` to recover a job
+ID, then `jobs status JOB_ID --json` for progress, attempt logs, errors and the
+verified output path. `jobs cancel JOB_ID` requests cancellation and
+`jobs retry JOB_ID --attempt N` retries the captured inputs. Check `error.retryable`
+before retrying a failed or interrupted attempt. After a worker crash or reboot,
+`jobs start` wakes the queue. For `PUBLICATION_UNCERTAIN` or `RECOVERY_BLOCKED`,
+resolve the reported filesystem issue before retrying with the same attempt
+number. Check the returned state because recovery may publish the original
+verified result without starting a new render. A project edit after submission
+leaves the captured revision and render content intact.

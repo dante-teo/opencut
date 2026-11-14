@@ -27,7 +27,12 @@ import { constants } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
 import { probeMedia } from './probe.js';
 import type { MediaMetadata } from './probe.js';
-import { checkRenderSignal, MediaError, runMediaTool } from './process.js';
+import {
+  checkRenderSignal,
+  MediaError,
+  renderSourceInputArgs,
+  runMediaTool,
+} from './process.js';
 import { renderProgress } from './render-progress.js';
 import type { RenderProgress } from './render-progress.js';
 import { fitVisual } from './video-filter.js';
@@ -858,7 +863,7 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
       rotated ? displayWidth : displayHeight,
       clip,
     );
-    args.push('-threads', '1', '-i', source.path);
+    args.push('-threads', '1', ...renderSourceInputArgs(), '-i', source.path);
     inputs.set(clip.clipId, input);
     filters.push(
       `[${input++}:${video.index}]${sampling},` +
@@ -1145,7 +1150,7 @@ async function prepareTimeline(options: VideoTimelineOptions, png = false) {
     let audioInput = inputs.get(first.clipId);
     if (audioInput === undefined) {
       audioInput = input++;
-      args.push('-threads', '1', '-i', source.path);
+      args.push('-threads', '1', ...renderSourceInputArgs(), '-i', source.path);
     }
     const speed = first.retiming ? seconds(first.retiming.speed) : 1;
     // Keep one tempo filter across contiguous pieces. Only the run tail needs

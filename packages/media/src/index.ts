@@ -7,6 +7,7 @@ export {
   MediaError,
   RenderCancelledError,
   sourceFileStamp,
+  withLocalRenderTools,
 } from './process.js';
 export type { MediaMetadata, MediaStream } from './probe.js';
 export type { FrameResult } from './frame.js';

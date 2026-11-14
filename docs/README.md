@@ -86,6 +86,10 @@ T42 adds [system diagnostics](CLI.md#system-diagnostics) and records the
 [Apple Silicon video effects decision](adr/0017-apple-silicon-video-effects-gate.md).
 The benchmark prototypes are isolated from project editing and export.
 
+T43 adds [durable local jobs](JOBS.md). Submit, inspect, cancel or retry a
+background render through the CLI and SDK without keeping the submitting
+process alive.
+
 ## Quick start (macOS)
 
 Run the commands below from the repository root.

@@ -80,6 +80,23 @@ export {
 } from '@opencut/core/node';
 export type { DesktopControlRequest } from '@opencut/core/node';
 export { MediaError, RenderCancelledError } from '@opencut/media';
+export { defaultJobLimits, JobError, LocalJobs } from '@opencut/core/jobs';
+export type {
+  JobBackend,
+  JobDetails,
+  JobFailure,
+  JobInputs,
+  JobLimits,
+  JobLog,
+  JobProgress,
+  JobResources,
+  JobState,
+  JobStatus,
+  JobSubmissionOptions,
+  JobToolIdentity,
+  LocalJobRequest,
+  LocalJobsOptions,
+} from '@opencut/core/jobs';
 export type {
   CreateProjectOptions,
   EditOperation,

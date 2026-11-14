@@ -89,3 +89,10 @@ Composition and source trims stay on the project grid; conversion samples the
 finished composition and rounds duration up to a complete output frame, extending
 the last picture and audio silence as needed. CLI flags and defaults are unchanged.
 See [desktop export](../EXPORT.md) for settings, lifecycle and supported bounds.
+
+## T43 durable jobs
+
+The [durable job queue](../JOBS.md) reuses render verification in independent
+worker processes and adds persistent immutable inputs, recoverable publication
+and attempt leases. This is a separate entry point from the foreground CLI and
+desktop exports described above.
