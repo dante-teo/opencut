@@ -639,6 +639,15 @@ publication and preserves typed timeline/format errors. The CLI implements this
 adapter; T09 records its edits through the shared transaction history. See
 [the CLI editing contract](CLI.md#timeline-editing) for flags and JSON fields.
 
+## Creator timeline editing (T39)
+
+Tracks can store optional locked flags. Clips can store an optional linkId
+shared by clips that move as a group. A project's optional markers array
+holds records with a stable id, a nonnegative project frame, and a name.
+All three fields are saved in history snapshots. Existing project files
+without these fields still load. Earlier strict readers may reject them.
+See [Timeline editing](TIMELINE_EDITING.md) for operation semantics.
+
 ## Transactions and history API
 
 T09 extends prerelease schema version 1 with optional top-level `editing`:
@@ -651,9 +660,10 @@ use a T09-capable reader for edited projects.
 
 Both stacks contain strict `{ id, label, committedAt, before, after }` entries.
 IDs use the normal stable-ID syntax, labels are nonblank and `committedAt` is a
-millisecond UTC timestamp. Each snapshot contains exactly the version 1 project
+millisecond UTC timestamp. Each snapshot contains the version 1 project
 content fields (`schemaVersion`, `metadata`, `settings`, `assets`, `tracks`,
-`clips`), with no nested history/revision. Snapshots receive the same structural
+`clips` and optional content fields such as subtitles, transitions and markers),
+with no nested history/revision. Snapshots receive the same structural
 and semantic validation as current content, including project identity checks.
 The next undo/redo is at the end of its stack. History operations check snapshot
 continuity and the current content against the cursor; inconsistent/manual edits

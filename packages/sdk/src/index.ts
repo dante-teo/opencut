@@ -4,6 +4,8 @@ import { dirname, resolve } from 'node:path';
 import {
   checkProjectRevision,
   commitEdit,
+  copyClips,
+  clipClipboardSchema,
   createProject as createDocument,
   EditError,
   getEditHistory,
@@ -75,6 +77,8 @@ export type {
   EditOperation,
   FrameRate,
   ClipSpeed,
+  ClipClipboard,
+  RippleScope,
   AnimatedProperty,
   KeyframeEasing,
   VisualKeyframe,
@@ -170,8 +174,12 @@ export interface ProjectDraft {
     file: string,
   ): Promise<{ format: 'srt' | 'vtt'; cueCount: number }>;
   exportSubtitles(output: string): ReturnType<typeof writeSubtitleFile>;
+  copyClips(ids: string[]): ReturnType<typeof copyClips>;
+  cutClips(ids: string[]): ReturnType<typeof copyClips>;
   /** Apply one or more existing edit commands as an atomic group in the draft. */
-  apply(...operations: EditOperation[]): void;
+  apply(
+    ...operations: EditOperation[]
+  ): ReturnType<typeof previewTransaction>['results'];
   /** Stage one history step. Save it separately from other edits. */
   undo(): void;
   redo(): void;
@@ -469,12 +477,19 @@ function editProject(
           signal,
         );
       }),
+    copyClips: (ids) => copyClips(draft, ids),
+    cutClips: (ids) => {
+      const [result] = project.apply({ type: 'clips.cut', ids });
+      return clipClipboardSchema.parse(result?.clipboard);
+    },
     apply: (...operations) => {
       ensureEditable();
-      draft = previewTransaction(draft, {
+      const result = previewTransaction(draft, {
         expectedRevision: projectRevision(base),
         operations,
-      }).project;
+      });
+      draft = result.project;
+      return structuredClone(result.results);
     },
     undo: () => restore(undoEdit),
     redo: () => restore(redoEdit),

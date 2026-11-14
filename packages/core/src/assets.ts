@@ -7,6 +7,7 @@ import { validateProject } from './project.js';
 import { clipSourceTime, clipTimelineEnd } from './clip-timing.js';
 import { compareTimes, frameTime } from './time.js';
 import { insertFreeze } from './timeline.js';
+import { editableTracks } from './timeline-layout.js';
 import { previewTransaction, projectRevision } from './editing.js';
 import {
   canonicalProjectFilePath,
@@ -328,6 +329,7 @@ export async function prepareFreezeFrame(
       'INVALID_MEDIA',
       'Choose a playhead frame inside a video clip and a positive duration.',
     );
+  editableTracks(project, [clip.trackId]);
   const source = await assetInfo(project, path, asset);
   if (source.source.status !== 'available')
     throw new AssetError('SOURCE_UNAVAILABLE', source.source.message);

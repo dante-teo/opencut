@@ -72,8 +72,9 @@ to an open project updates Electron and shares its undo/redo history.
 Use `project.relinkMedia(assetId, file)` to replace a source reference,
 `project.importFont(titleOrCueId, file)` to embed a font, and
 `project.freezeFrame(clipId, at, frames, outputPng)` to write a PNG and stage
-the timeline edit. Call `editor.save()` to publish the edit. The PNG is
-written immediately and remains if you discard the SDK draft.
+the timeline edit. A locked track is rejected before any PNG is created.
+Call `editor.save()` to publish a successful edit. Its PNG is written
+immediately and remains if you discard the SDK draft.
 `project.separateDialogue(assetId, directory)` writes two WAV files using the
 [local model](CLI.md#dialogue-separation). Use `project.copyProject(destination, true)`
 for a portable package or omit `true` for a project snapshot. Save
@@ -288,3 +289,15 @@ await editor.save({ label: 'Remove opening dissolve' });
 For a fade use `{ kind: 'fade-in', clipId: 'opening', frames: 8 }` or
 `kind: 'fade-out'`. The [project format](PROJECT_FORMAT.md#video-transitions-t38)
 describes validation and ownership.
+
+## Group timeline editing
+
+Use the shared [timeline operations](TIMELINE_EDITING.md) with
+`project.apply(...operations)`. It returns one result per operation.
+The results are detached from the draft, so changing a returned clip has no
+effect on a subsequent save. Stage another operation to change the draft.
+
+`project.copyClips(ids)` returns a typed clipboard without staging an edit.
+`project.cutClips(ids)` returns the same clipboard format and stages removal.
+Use that clipboard with `clips.paste` in the same project. Use `clips.remove`
+for linked groups. A single `editor.save()` commits the staged edits together.

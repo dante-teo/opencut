@@ -19,6 +19,16 @@ it('maps macOS and other-platform command keys and excludes modified typing, rep
       'redo',
     );
     expect(shortcutAction(key('s', modifier), mac)).toBe('save');
+    for (const [shortcut, action] of [
+      ['c', 'copy'],
+      ['x', 'cut'],
+      ['v', 'paste'],
+      ['d', 'duplicate'],
+    ] as const)
+      expect(shortcutAction(key(shortcut, modifier), mac)).toBe(action);
+    expect(shortcutAction(key('V', { ...modifier, shiftKey: true }), mac)).toBe(
+      'insert',
+    );
     expect(
       shortcutAction(key('s', { ...modifier, shiftKey: true }), mac),
     ).toBeNull();
@@ -29,6 +39,13 @@ it('maps macOS and other-platform command keys and excludes modified typing, rep
       ),
     ).toBeNull();
   }
+  expect(shortcutAction(key('Delete', { shiftKey: true }), true)).toBe(
+    'rippleDelete',
+  );
+  expect(shortcutAction(key('Backspace', { shiftKey: true }), true)).toBe(
+    'rippleDelete',
+  );
+  expect(shortcutAction(key('s', { shiftKey: true }), true)).toBeNull();
   for (const [value, action] of [
     [' ', 'play'],
     ['s', 'split'],
@@ -42,7 +59,6 @@ it('maps macOS and other-platform command keys and excludes modified typing, rep
       { altKey: true },
       { repeat: true },
       { isComposing: true },
-      { shiftKey: true },
     ])
       expect(shortcutAction(key(value!, flags), true)).toBeNull();
   }

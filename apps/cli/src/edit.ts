@@ -20,6 +20,8 @@ export const editHelp = `Usage: opencut edit apply <project-file> <batch.json> [
 Batch JSON: { "expectedRevision": 0, "label": "Optional description", "operations": [
   { "type": "track.add", "id": "v1", "name": "Video", "mediaType": "video" }
 ] }
+Group operations: clips.move/remove/copy/cut/paste/duplicate/link, clip.insert, timeline.close-gap, track.lock, marker.add/remove.
+See the JSON schema for fields. Copy and cut return a project-specific clipboard under results[].clipboard.
 Operations: track.add/remove, clip.add/move/trim/split/remove/audio/visual/speed, text.add/set, canvas.set.
 Keyframe operations: clip.keyframe.add/set/remove take id, property (x/y/scale/rotation/opacity) and exact clip-local time. Add takes value and optional easing. Set takes optional newTime, value and easing. Easing applies to the next keyframe.
 Subtitle operations: subtitle.import/add/set/move/split/merge/remove/style. Subtitle times are exact { numerator, denominator } seconds.

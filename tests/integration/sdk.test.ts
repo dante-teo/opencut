@@ -10,7 +10,12 @@ import {
 } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createProject, openProject, parseClipSpeed } from '@opencut/sdk';
+import {
+  createProject,
+  openProject,
+  parseClipSpeed,
+  type EditOperation,
+} from '@opencut/sdk';
 
 const root = resolve('tests/fixtures/generated');
 const cli = resolve('apps/cli/dist/index.js');
@@ -47,6 +52,178 @@ async function seedOffline() {
 }
 
 describe('public SDK', () => {
+  it('returns detached edit results for a no-op on a locked clip', async () => {
+    await seedOffline();
+    const editor = await openProject(path);
+    editor.project.apply(
+      videoTrack,
+      {
+        type: 'clip.add',
+        id: 'locked-clip',
+        assetId: 'offline',
+        trackId: 'video',
+        at: 0,
+        in: 0,
+        out: 30,
+      },
+      { type: 'track.lock', id: 'video', locked: true },
+    );
+    const { revision } = await editor.save();
+    const [result] = editor.project.apply({
+      type: 'clip.move',
+      id: 'locked-clip',
+      at: 0,
+    });
+    const returned = result?.clip as { timelineStart: { numerator: number } };
+    returned.timelineStart.numerator = 7;
+    expect(editor.project.inspect().clips[0]?.timelineStart.numerator).toBe(0);
+    expect(await editor.save()).toMatchObject({ changed: false, revision });
+    expect(
+      (await openProject(path)).project.inspect().clips[0]?.timelineStart
+        .numerator,
+    ).toBe(0);
+  });
+
+  it('rejects singular removal of linked clips in the SDK and CLI', async () => {
+    await seedOffline();
+    const editor = await openProject(path);
+    editor.project.apply(
+      videoTrack,
+      {
+        type: 'clip.add',
+        id: 'first',
+        assetId: 'offline',
+        trackId: 'video',
+        at: 0,
+        in: 0,
+        out: 30,
+      },
+      {
+        type: 'clip.add',
+        id: 'second',
+        assetId: 'offline',
+        trackId: 'video',
+        at: 60,
+        in: 0,
+        out: 30,
+      },
+      { type: 'clips.link', ids: ['first', 'second'], linked: true },
+    );
+    const { revision } = await editor.save();
+    const original = await readFile(path, 'utf8');
+    expect(() =>
+      editor.project.apply({ type: 'clip.remove', id: 'first' }),
+    ).toThrow('Use clips.remove');
+    expect(editor.project.inspect().clips.map((clip) => clip.id)).toEqual([
+      'first',
+      'second',
+    ]);
+    const denied = spawnSync(
+      process.execPath,
+      [cli, 'clip', 'remove', path, 'first', '--json'],
+      { encoding: 'utf8' },
+    );
+    expect(denied.status).toBe(1);
+    expect(JSON.parse(denied.stderr).error.message).toContain(
+      'Use clips.remove',
+    );
+    expect(await readFile(path, 'utf8')).toBe(original);
+
+    const batch = join(directory, 'remove-group.json');
+    await writeFile(
+      batch,
+      JSON.stringify({
+        expectedRevision: revision,
+        operations: [{ type: 'clips.remove', ids: ['first'] }],
+      }),
+    );
+    const removed = spawnSync(
+      process.execPath,
+      [cli, 'edit', 'apply', path, batch, '--json'],
+      { encoding: 'utf8' },
+    );
+    expect(removed.status, removed.stderr).toBe(0);
+    expect(JSON.parse(removed.stdout).results[0].removedClipIds).toEqual([
+      'first',
+      'second',
+    ]);
+    expect((await openProject(path)).project.inspect().clips).toEqual([]);
+  });
+
+  it('shares project clipboard and group timeline operations with the CLI', async () => {
+    await seedOffline();
+    const editor = await openProject(path);
+    editor.project.apply(
+      videoTrack,
+      {
+        type: 'clip.add',
+        id: 'first',
+        assetId: 'offline',
+        trackId: 'video',
+        at: 0,
+        in: 0,
+        out: 30,
+      },
+      {
+        type: 'clip.add',
+        id: 'second',
+        assetId: 'offline',
+        trackId: 'video',
+        at: 60,
+        in: 0,
+        out: 30,
+      },
+    );
+    const { revision } = await editor.save();
+    const batch = join(directory, 'group.json');
+    const run = (...args: string[]) => {
+      const result = spawnSync(process.execPath, [cli, ...args, '--json'], {
+        encoding: 'utf8',
+      });
+      expect(result.status, result.stderr).toBe(0);
+      return JSON.parse(result.stdout);
+    };
+    const operations = [
+      { type: 'clips.copy', ids: ['first'] },
+      { type: 'timeline.close-gap', trackIds: ['video'], at: 45 },
+      { type: 'clips.move', ids: ['first', 'second'], frames: 15 },
+    ] satisfies EditOperation[];
+    const clipboard = editor.project.copyClips(['first']);
+    const sdkResults = editor.project.apply(...operations);
+    await writeFile(
+      batch,
+      JSON.stringify({ expectedRevision: revision, operations }),
+    );
+    const result = run('edit', 'apply', path, batch);
+    expect(result.results).toEqual(sdkResults);
+    expect(result.results[0].clipboard).toEqual(clipboard);
+    const saved = await openProject(path);
+    expect(saved.project.inspect().clips).toEqual(
+      editor.project.inspect().clips,
+    );
+    saved.project.apply({
+      type: 'clips.paste',
+      clipboard,
+      at: 75,
+      insert: 'selected-tracks',
+    });
+    await saved.save();
+    expect(run('timeline', 'list', path).tracks[0].clips).toHaveLength(3);
+    run('edit', 'undo', path);
+    expect(run('project', 'inspect', path).clips).toEqual(
+      editor.project.inspect().clips,
+    );
+
+    const cutting = await openProject(path);
+    expect(cutting.project.cutClips(['first'])).toEqual(
+      editor.project.copyClips(['first']),
+    );
+    expect(cutting.project.inspect().clips.map((clip) => clip.id)).toEqual([
+      'second',
+    ]);
+    expect((await openProject(path)).project.inspect().clips).toHaveLength(2);
+  });
+
   it('shares keyframe transactions, inspection and history with the built CLI', async () => {
     await seedOffline();
     const editor = await openProject(path);

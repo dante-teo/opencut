@@ -1,12 +1,13 @@
 import { animatedProperties, evaluateVisual } from '@opencut/shared';
 import type { VisualKeyframe } from '@opencut/shared';
-import { transitionUsesClip } from './transitions.js';
+import { transitionSchema, transitionUsesClip } from './transitions.js';
 import type { Transition, TransitionInput } from './transitions.js';
 import { retimeKeyframes, trimKeyframes } from './keyframes.js';
 import type { KeyframeEdit } from './keyframes.js';
 import type { Project, TimelineClip, Track } from './project.js';
-import { validateProject } from './project.js';
-import { addTimes, compareTimes, subtractTimes } from './time.js';
+import { clipSchema, markerSchema, validateProject } from './project.js';
+import { addTimes, compareTimes, frameTime, subtractTimes } from './time.js';
+import { z } from 'zod';
 import type { RationalTime } from './time.js';
 import {
   clipDuration,
@@ -23,21 +24,25 @@ import {
   sliceAudioFades,
   sliceGainKeys,
 } from './audio.js';
+import { TimelineError } from './timeline-error.js';
+import {
+  ZERO,
+  invalid,
+  linkedSelection,
+  requireSelection,
+  editableTracks,
+  scopeTracks,
+  checkLinkedShifts,
+  shiftLinkedClips,
+  clipIntervals,
+  closeIntervals,
+  destinationTracks,
+  type RippleScope,
+} from './timeline-layout.js';
 
-export class TimelineError extends Error {
-  override name = 'TimelineError';
-  constructor(
-    public readonly code:
-      | 'TRACK_NOT_FOUND'
-      | 'CLIP_NOT_FOUND'
-      | 'TRACK_NOT_EMPTY'
-      | 'INVALID_EDIT'
-      | 'SPLIT_BOUNDS',
-    message: string,
-  ) {
-    super(message);
-  }
-}
+export { linkedSelection } from './timeline-layout.js';
+export type { RippleScope } from './timeline-layout.js';
+export { TimelineError } from './timeline-error.js';
 
 function copyProject(project: Project): Project {
   const result = validateProject(project);
@@ -62,6 +67,7 @@ function newId(project: Project, requested?: string): string {
     ...project.clips.map((clip) => clip.id),
     ...(project.subtitles?.cues.map((cue) => cue.id) ?? []),
     ...(project.transitions?.map((transition) => transition.id) ?? []),
+    ...(project.markers?.map((marker) => marker.id) ?? []),
   ]);
   let id = globalThis.crypto.randomUUID();
   while (ids.has(id)) id = globalThis.crypto.randomUUID();
@@ -102,6 +108,7 @@ export function listTimeline(project: Project) {
     tracks,
     ...(validated.subtitles ? { subtitles: validated.subtitles } : {}),
     ...(validated.transitions ? { transitions: validated.transitions } : {}),
+    ...(validated.markers ? { markers: validated.markers } : {}),
   };
 }
 
@@ -144,7 +151,7 @@ export interface AddClipOptions
   extends
     Omit<
       TimelineClip,
-      'id' | 'assetId' | 'text' | 'speed' | keyof ClipAudioOptions
+      'id' | 'assetId' | 'text' | 'speed' | 'linkId' | keyof ClipAudioOptions
     >,
     ClipAudioOptions {
   id?: string;
@@ -154,6 +161,12 @@ export interface AddClipOptions
 /** Explicit 1x source range; unknown asset durations have no inferred bound. */
 export function addClip(project: Project, options: AddClipOptions) {
   const next = copyProject(project);
+  const clip = appendClip(next, options);
+  const updated = finish(next);
+  return { project: updated, clip: requireClip(updated, clip.id) };
+}
+
+function appendClip(next: Project, options: AddClipOptions) {
   const clip: TimelineClip = {
     id: newId(next, options.id),
     assetId: options.assetId,
@@ -165,8 +178,7 @@ export function addClip(project: Project, options: AddClipOptions) {
   };
   applyClipAudioSettings(clip, options);
   next.clips.push(clip);
-  const updated = finish(next);
-  return { project: updated, clip: requireClip(updated, clip.id) };
+  return clip;
 }
 
 export interface AddTextOptions {
@@ -215,6 +227,13 @@ export function setText(
     duration?: RationalTime | undefined;
   },
 ) {
+  if (
+    (options.timelineStart || options.duration) &&
+    linkedSelection(project, [id]).length > 1
+  )
+    invalid(
+      'Unlink these clips before changing their timing or source independently.',
+    );
   const next = copyProject(project);
   const clip = requireClip(next, id);
   if (!clip.text)
@@ -278,6 +297,21 @@ export function moveClip(
     (options.timelineStart === undefined ||
       compareTimes(options.timelineStart, clip.timelineStart) === 0);
   if (unchanged) return { project: next, clip };
+  if (clip.linkId) {
+    const at = options.timelineStart ?? clip.timelineStart;
+    const backwards = compareTimes(at, clip.timelineStart) < 0;
+    const delta = backwards
+      ? subtractTimes(clip.timelineStart, at)
+      : subtractTimes(at, clip.timelineStart);
+    const moved = moveClips(
+      next,
+      [id],
+      delta,
+      backwards,
+      options.trackId ? { [clip.trackId]: options.trackId } : {},
+    );
+    return { project: moved.project, clip: requireClip(moved.project, id) };
+  }
   if (options.trackId !== undefined) {
     clip.trackId = options.trackId;
     if (
@@ -291,6 +325,279 @@ export function moveClip(
   return { project: updated, clip: requireClip(updated, id) };
 }
 
+/** Move clips together, validating only the final arrangement. */
+export function moveClips(
+  project: Project,
+  ids: string[],
+  delta: RationalTime,
+  backwards: boolean,
+  tracks: Record<string, string> = {},
+) {
+  const next = copyProject(project);
+  const clips = requireSelection(next, ids);
+  editableTracks(
+    next,
+    clips.map((clip) => clip.trackId),
+  );
+  const destinations = destinationTracks(next, clips, tracks, 'Group moves');
+  for (const [index, clip] of clips.entries()) {
+    clip.trackId = destinations[index]!;
+    if (delta.numerator)
+      clip.timelineStart = backwards
+        ? subtractTimes(clip.timelineStart, delta)
+        : addTimes(clip.timelineStart, delta);
+  }
+  return { project: finish(next), clipIds: clips.map((clip) => clip.id) };
+}
+
+/** Remove clips together. Ripple removes the union of the selected time ranges. */
+export function removeClips(
+  project: Project,
+  ids: string[],
+  ripple?: RippleScope,
+) {
+  const next = copyProject(project);
+  const clips = requireSelection(next, ids);
+  const tracks = scopeTracks(
+    next,
+    clips.map((clip) => clip.trackId),
+    ripple,
+  );
+  const removedClipIds = clips.map((clip) => clip.id);
+  const selected = new Set(removedClipIds);
+  next.clips = next.clips.filter((clip) => !selected.has(clip.id));
+  if (next.transitions) {
+    next.transitions = next.transitions.filter(
+      (transition) =>
+        !removedClipIds.some((id) => transitionUsesClip(transition, id)),
+    );
+    if (!next.transitions.length) delete next.transitions;
+  }
+  if (ripple) closeIntervals(next, tracks, clipIntervals(clips));
+  return { project: finish(next), removedClipIds };
+}
+
+/** Close the common gap containing the requested time across the named tracks. */
+export function closeGap(
+  project: Project,
+  trackIds: string[],
+  at: RationalTime,
+) {
+  const next = copyProject(project);
+  const tracks = editableTracks(next, trackIds);
+  let start = ZERO;
+  let end: RationalTime | undefined;
+  for (const clip of next.clips) {
+    if (!tracks.has(clip.trackId)) continue;
+    const stop = clipTimelineEnd(clip);
+    if (compareTimes(stop, at) <= 0) {
+      if (compareTimes(stop, start) > 0) start = stop;
+    } else if (compareTimes(clip.timelineStart, at) <= 0) {
+      invalid('The playhead must be in a gap on every selected track.');
+    } else if (!end || compareTimes(clip.timelineStart, end) < 0) {
+      end = clip.timelineStart;
+    }
+  }
+  if (!end) invalid('There are no clips after this gap.');
+  closeIntervals(next, tracks, [{ start, end }]);
+  return { project: finish(next), start, end };
+}
+
+export const clipClipboardSchema = z.strictObject({
+  projectId: z.string(),
+  clips: z.array(clipSchema).min(1),
+  transitions: z.array(transitionSchema),
+});
+export type ClipClipboard = z.infer<typeof clipClipboardSchema>;
+
+export function copyClips(project: Project, ids: string[]): ClipClipboard {
+  const clips = requireSelection(project, ids);
+  const selected = new Set(clips.map((clip) => clip.id));
+  return structuredClone({
+    projectId: project.metadata.id,
+    clips,
+    transitions: (project.transitions ?? []).filter((transition) =>
+      transition.kind === 'cross-dissolve'
+        ? selected.has(transition.from) && selected.has(transition.to)
+        : selected.has(transition.clipId),
+    ),
+  });
+}
+
+function insertSpace(
+  project: Project,
+  tracks: Set<string>,
+  at: RationalTime,
+  duration: RationalTime,
+) {
+  const crossing = project.clips.filter(
+    (clip) =>
+      tracks.has(clip.trackId) &&
+      compareTimes(clip.timelineStart, at) < 0 &&
+      compareTimes(at, clipTimelineEnd(clip)) < 0,
+  );
+  const crossingIds = new Set(crossing.map((clip) => clip.id));
+  const affectedLinks = new Set(
+    crossing.flatMap((clip) => (clip.linkId ? [clip.linkId] : [])),
+  );
+  if (
+    project.clips.some(
+      (clip) =>
+        clip.linkId &&
+        affectedLinks.has(clip.linkId) &&
+        !crossingIds.has(clip.id),
+    )
+  )
+    invalid('The insert point must split all parts of a linked clip together.');
+  const rightLinks = new Map<string, string>();
+  for (const clip of crossing) {
+    const right = splitClipInPlace(project, clip.id, at);
+    if (clip.linkId) {
+      const linkId =
+        rightLinks.get(clip.linkId) ?? globalThis.crypto.randomUUID();
+      rightLinks.set(clip.linkId, linkId);
+      right.linkId = linkId;
+    }
+  }
+  const shifted = new Map(
+    project.clips
+      .filter(
+        (clip) =>
+          tracks.has(clip.trackId) && compareTimes(clip.timelineStart, at) >= 0,
+      )
+      .map((clip) => [clip.id, duration]),
+  );
+  shiftLinkedClips(project, shifted);
+}
+
+export function pasteClips(
+  project: Project,
+  input: ClipClipboard,
+  at?: RationalTime,
+  insert?: RippleScope,
+  tracks: Record<string, string> = {},
+) {
+  const clipboard = clipClipboardSchema.parse(input);
+  if (clipboard.projectId !== project.metadata.id)
+    invalid('The clipboard belongs to another project.');
+  const next = copyProject(project);
+  let start = clipboard.clips[0]!.timelineStart;
+  let end = clipTimelineEnd(clipboard.clips[0]!);
+  for (const clip of clipboard.clips.slice(1)) {
+    if (compareTimes(clip.timelineStart, start) < 0) start = clip.timelineStart;
+    const stop = clipTimelineEnd(clip);
+    if (compareTimes(stop, end) > 0) end = stop;
+  }
+  const destination = at ?? end;
+  const targets = destinationTracks(next, clipboard.clips, tracks, 'Paste');
+  if (insert)
+    insertSpace(
+      next,
+      scopeTracks(next, targets, insert),
+      destination,
+      subtractTimes(end, start),
+    );
+  const ids = new Map<string, string>();
+  const links = new Map<string, string>();
+  for (const [index, clip] of clipboard.clips.entries()) {
+    if (ids.has(clip.id)) invalid('Clipboard clip IDs must be unique.');
+    const id = newId(next);
+    ids.set(clip.id, id);
+    const copy = {
+      ...clip,
+      id,
+      trackId: targets[index]!,
+      timelineStart: addTimes(
+        destination,
+        subtractTimes(clip.timelineStart, start),
+      ),
+    };
+    if (clip.linkId) {
+      const linkId = links.get(clip.linkId) ?? globalThis.crypto.randomUUID();
+      links.set(clip.linkId, linkId);
+      copy.linkId = linkId;
+    }
+    next.clips.push(copy);
+  }
+  const copiedId = (id: string) =>
+    ids.get(id) ?? invalid('Clipboard transition references an uncopied clip.');
+  for (const transition of clipboard.transitions) {
+    const copy =
+      transition.kind === 'cross-dissolve'
+        ? {
+            ...transition,
+            from: copiedId(transition.from),
+            to: copiedId(transition.to),
+          }
+        : { ...transition, clipId: copiedId(transition.clipId) };
+    (next.transitions ??= []).push({ ...copy, id: newId(next) });
+  }
+  return { project: finish(next), clipIds: [...ids.values()] };
+}
+
+export function insertClip(
+  project: Project,
+  options: AddClipOptions,
+  scope: RippleScope,
+) {
+  const next = copyProject(project);
+  const tracks = scopeTracks(next, [options.trackId], scope);
+  const duration = subtractTimes(options.sourceOut, options.sourceIn);
+  if (!duration.numerator)
+    invalid('An inserted clip must have positive duration.');
+  insertSpace(next, tracks, options.timelineStart, duration);
+  const clip = appendClip(next, options);
+  const updated = finish(next);
+  return { project: updated, clip: requireClip(updated, clip.id) };
+}
+
+export function setTrackLock(project: Project, id: string, locked: boolean) {
+  const next = copyProject(project);
+  const track = next.tracks.find((track) => track.id === id);
+  if (!track) invalid("Track '" + id + "' does not exist.");
+  if (locked) track.locked = true;
+  else delete track.locked;
+  return { project: finish(next), track };
+}
+
+export function setClipLinks(project: Project, ids: string[], linked: boolean) {
+  const next = copyProject(project);
+  const clips = requireSelection(next, ids);
+  editableTracks(
+    next,
+    clips.map((clip) => clip.trackId),
+  );
+  if (linked && clips.length < 2) invalid('Select at least two clips to link.');
+  const linkId = globalThis.crypto.randomUUID();
+  for (const clip of clips) {
+    if (linked) clip.linkId = linkId;
+    else delete clip.linkId;
+  }
+  return { project: finish(next), clipIds: clips.map((clip) => clip.id) };
+}
+
+export function addMarker(
+  project: Project,
+  frame: number,
+  name: string,
+  id?: string,
+) {
+  const next = copyProject(project);
+  frameTime(frame, project.settings.frameRate);
+  const marker = markerSchema.parse({ id: newId(next, id), frame, name });
+  (next.markers ??= []).push(marker);
+  return { project: finish(next), marker };
+}
+
+export function removeMarker(project: Project, id: string) {
+  const next = copyProject(project);
+  if (!next.markers?.some((marker) => marker.id === id))
+    invalid('Marker does not exist.');
+  next.markers = next.markers.filter((marker) => marker.id !== id);
+  if (!next.markers.length) delete next.markers;
+  return { project: finish(next), removedMarkerId: id };
+}
+
 export function replaceClipAsset(
   project: Project,
   id: string,
@@ -301,6 +608,10 @@ export function replaceClipAsset(
     ripple?: boolean | undefined;
   },
 ) {
+  if (linkedSelection(project, [id]).length > 1)
+    invalid(
+      'Unlink these clips before changing their timing or source independently.',
+    );
   const next = copyProject(project);
   const clip = requireClip(next, id);
   if (!clip.assetId)
@@ -353,18 +664,25 @@ export function replaceClipAsset(
     if (options.ripple) {
       const oldEnd = clipTimelineEnd(previous);
       const newEnd = clipTimelineEnd(clip);
-      for (const neighbor of next.clips) {
-        if (
-          neighbor.id === id ||
-          neighbor.trackId !== clip.trackId ||
-          compareTimes(neighbor.timelineStart, oldEnd) < 0
-        )
-          continue;
+      const neighbors = next.clips.filter(
+        (neighbor) =>
+          neighbor.id !== id &&
+          neighbor.trackId === clip.trackId &&
+          compareTimes(neighbor.timelineStart, oldEnd) >= 0,
+      );
+      const grows = compareTimes(newEnd, oldEnd) > 0;
+      const shift = grows
+        ? subtractTimes(newEnd, oldEnd)
+        : subtractTimes(oldEnd, newEnd);
+      checkLinkedShifts(
+        next,
+        new Map(neighbors.map((neighbor) => [neighbor.id, shift])),
+      );
+      for (const neighbor of neighbors)
         neighbor.timelineStart = addTimes(
           newEnd,
           subtractTimes(neighbor.timelineStart, oldEnd),
         );
-      }
     }
   }
   const updated = finish(next);
@@ -388,7 +706,9 @@ export function detachClipAudio(project: Project, id: string) {
     name: `${track.name} audio`,
     type: 'audio',
   };
+  delete audioTrack.locked;
   next.tracks.push(audioTrack);
+  clip.linkId ??= globalThis.crypto.randomUUID();
   const audioClip: TimelineClip = {
     ...clip,
     id: newId(next),
@@ -452,6 +772,13 @@ export function dissolveClips(
   to: string,
   duration: RationalTime,
 ) {
+  if (
+    linkedSelection(project, [from]).length > 1 ||
+    linkedSelection(project, [to]).length > 1
+  )
+    invalid(
+      'Unlink these clips before changing their timing or source independently.',
+    );
   const next = copyProject(project);
   const outgoing = requireClip(next, from);
   const incoming = requireClip(next, to);
@@ -632,17 +959,12 @@ export function insertFreeze(
       'INVALID_EDIT',
       'Choose a video frame within the clip and a positive freeze duration.',
     );
-  const next =
-    compareTimes(at, clip.timelineStart) === 0
-      ? copyProject(project)
-      : splitClip(project, id, at).project;
-  for (const neighbor of next.clips) {
-    if (
-      neighbor.trackId === clip.trackId &&
-      compareTimes(neighbor.timelineStart, at) >= 0
-    )
-      neighbor.timelineStart = addTimes(neighbor.timelineStart, duration);
-  }
+  if (linkedSelection(project, [id]).length > 1)
+    invalid(
+      'Unlink these clips before inserting a freeze frame independently.',
+    );
+  const next = copyProject(project);
+  insertSpace(next, editableTracks(next, [clip.trackId]), at, duration);
   const frozen: TimelineClip = {
     id: newId(next),
     assetId: stillId,
@@ -707,6 +1029,10 @@ export function setTrackAudio(
   id: string,
   options: TrackAudioOptions,
 ) {
+  if (linkedSelection(project, [id]).length > 1)
+    invalid(
+      'Unlink these clips before changing their timing or source independently.',
+    );
   const next = copyProject(project);
   const track = next.tracks.find((track) => track.id === id);
   if (!track)
@@ -860,6 +1186,10 @@ export function setCanvas(
 
 /** Preserve timeline start, source bounds and fade times. Validation rejects collisions. */
 export function setClipSpeed(project: Project, id: string, speed: ClipSpeed) {
+  if (linkedSelection(project, [id]).length > 1)
+    invalid(
+      'Unlink these clips before changing their timing or source independently.',
+    );
   const next = copyProject(project);
   const clip = requireClip(next, id);
   if (
@@ -897,6 +1227,10 @@ export function trimClip(
   id: string,
   options: TrimClipOptions,
 ) {
+  if (linkedSelection(project, [id]).length > 1)
+    invalid(
+      'Unlink these clips before changing their timing or source independently.',
+    );
   const next = copyProject(project);
   const clip = requireClip(next, id);
   if (options.sourceIn === undefined && options.sourceOut === undefined)
@@ -966,7 +1300,24 @@ export function splitClip(
   at: RationalTime,
   rightId?: string,
 ) {
+  if (linkedSelection(project, [id]).length > 1)
+    invalid('Unlink these clips before splitting one independently.');
   const next = copyProject(project);
+  const right = splitClipInPlace(next, id, at, rightId);
+  const updated = finish(next);
+  return {
+    project: updated,
+    left: requireClip(updated, id),
+    right: requireClip(updated, right.id),
+  };
+}
+
+function splitClipInPlace(
+  next: Project,
+  id: string,
+  at: RationalTime,
+  rightId?: string,
+) {
   const clip = requireClip(next, id);
   if (
     compareTimes(at, clip.timelineStart) <= 0 ||
@@ -1023,25 +1374,15 @@ export function splitClip(
     if (transition.kind === 'fade-out' && transition.clipId === id)
       transition.clipId = right.id;
   }
-  const updated = finish(next);
-  return {
-    project: updated,
-    left: requireClip(updated, id),
-    right: requireClip(updated, right.id),
-  };
+  return right;
 }
 
 export function removeClip(project: Project, id: string) {
-  const next = copyProject(project);
-  requireClip(next, id);
-  next.clips = next.clips.filter((clip) => clip.id !== id);
-  if (next.transitions) {
-    next.transitions = next.transitions.filter(
-      (entry) => !transitionUsesClip(entry, id),
+  if (linkedSelection(project, [id]).length > 1)
+    invalid(
+      'Use clips.remove to delete a linked group, or unlink the clip first.',
     );
-    if (!next.transitions.length) delete next.transitions;
-  }
-  return { project: finish(next), removedClipId: id };
+  return { project: removeClips(project, [id]).project, removedClipId: id };
 }
 
 /** Edit one exact clip-local timestamp, keeping all other channels unchanged. */

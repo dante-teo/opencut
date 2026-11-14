@@ -4,6 +4,8 @@ import { renderTimelineFrame, separateDialogue } from '@opencut/media';
 import {
   createProject,
   commitEdit,
+  clipClipboardSchema,
+  type ClipClipboard,
   addAssetClip,
   serializeProject,
   projectRevision,
@@ -46,6 +48,7 @@ import type {
   AssetClipInput,
   HistoryInput,
 } from '../bridge.js';
+import { timelineOperationTypes } from '../bridge.js';
 import type { OnlineMediaLibrary } from './online-media.js';
 
 export interface ProjectDialogs {
@@ -325,6 +328,7 @@ export class ProjectSession {
     let discardFreeze: (() => Promise<void>) | undefined;
     try {
       let canceled = false;
+      let clipboard: ClipClipboard | undefined;
       let notice: string | undefined;
       switch (action) {
         case 'create': {
@@ -407,7 +411,7 @@ export class ProjectSession {
                     action === 'relinkAsset' ||
                     action === 'separateDialogue'
                   ? ['assetId']
-                  : ['assetId', 'trackId', 'mediaType', 'at']),
+                  : ['assetId', 'trackId', 'mediaType', 'at', 'insert']),
           ];
           if (
             !input ||
@@ -569,6 +573,8 @@ export class ProjectSession {
               if (
                 (request.mediaType !== 'video' &&
                   request.mediaType !== 'audio') ||
+                (request.insert !== undefined &&
+                  typeof request.insert !== 'boolean') ||
                 !Number.isSafeInteger(request.at) ||
                 (request.at as number) < 0 ||
                 (request.trackId !== undefined &&
@@ -580,6 +586,7 @@ export class ProjectSession {
                 project,
                 request as unknown as AssetClipInput,
               );
+              if (request.insert) notice = 'Media inserted.';
             }
           }
           const media = await checkProjectMedia(project, path);
@@ -653,46 +660,28 @@ export class ProjectSession {
             if (
               transaction.operations.some(
                 (operation) =>
-                  ![
-                    'clip.move',
-                    'clip.trim',
-                    'clip.split',
-                    'clip.remove',
-                    'clip.audio',
-                    'clip.speed',
-                    'clip.replace',
-                    'clip.detach-audio',
-                    'clip.grade',
-                    'clip.gain-keys',
-                    'clip.effects',
-                    'clip.dissolve',
-                    'transition.add',
-                    'transition.set',
-                    'transition.remove',
-                    'clip.flash',
-                    'clip.fade',
-                    'canvas.set',
-                    'clip.keyframe.add',
-                    'clip.keyframe.set',
-                    'clip.keyframe.remove',
-                    'track.audio',
-                    'clip.visual',
-                    'text.add',
-                    'text.set',
-                    'subtitle.add',
-                    'subtitle.set',
-                    'subtitle.move',
-                    'subtitle.split',
-                    'subtitle.merge',
-                    'subtitle.remove',
-                    'subtitle.style',
-                    'subtitle.effects',
-                    'subtitle.words',
-                  ].includes(operation.type),
+                  !timelineOperationTypes.some(
+                    (type) => type === operation.type,
+                  ),
               )
             )
               throw new Error('Only timeline clip editing is available.');
-            project = executeTransaction(before, transaction).project;
+            const result = executeTransaction(before, transaction);
+            project = result.project;
+            const cut = result.results.findLast(
+              (entry) => entry.type === 'clips.cut',
+            );
+            if (cut) clipboard = clipClipboardSchema.parse(cut.clipboard);
+            if (
+              transaction.operations.some(
+                (op) =>
+                  op.type === 'clip.insert' ||
+                  (op.type === 'clips.paste' && op.insert) ||
+                  (op.type === 'clips.remove' && op.ripple) ||
+                  op.type === 'timeline.close-gap',
+              )
+            )
+              notice = transaction.label;
           } else {
             project =
               action === 'undo'
@@ -858,6 +847,7 @@ export class ProjectSession {
         state: structuredClone(this.state),
         canceled,
         ...(notice ? { notice } : {}),
+        ...(clipboard ? { clipboard } : {}),
       };
     } catch (error) {
       await discardDownload?.().catch(() => {});

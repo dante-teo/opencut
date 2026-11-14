@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, PointerEvent } from 'react';
 import {
   addTimes,
+  frameTime,
   compareTimes,
   audioFadeEdges,
   resolveAudioFade,
@@ -26,7 +27,10 @@ import {
   Captions,
   Volume2,
   VolumeX,
+  Lock,
+  Unlock,
 } from 'lucide-react';
+import type { TimelineAction } from './shortcuts.js';
 import { NumberProperty } from './clip-properties.js';
 import { TransitionControls, transitionNames } from './transition-controls.js';
 import { ClipArtwork } from './clip-artwork.js';
@@ -34,6 +38,8 @@ import { ASSET_DRAG_TYPE, readAssetDrag } from './media-library.js';
 import type { AssetClipInput, TimelineOperation } from '../bridge.js';
 import {
   proposeEdit,
+  snapTargets,
+  snapFrames,
   proposeSubtitleEdit,
   createTimelinePreview,
   type EditProposal,
@@ -66,7 +72,9 @@ export const exactTime = (value: RationalTime) =>
 export function ProjectTimeline({
   project,
   selected,
+  selectedIds,
   onSelect,
+  onTimelineAction,
   position = ZERO,
   onSeek,
   onKeyframeSelect,
@@ -82,7 +90,9 @@ export function ProjectTimeline({
 }: {
   project: Project | undefined;
   selected: string | null;
-  onSelect: (id: string) => void;
+  selectedIds: string[];
+  onSelect: (id: string, mode?: 'toggle' | 'range') => void;
+  onTimelineAction: (action: TimelineAction) => void;
   position?: RationalTime;
   onSeek?: (time: RationalTime) => void;
   onKeyframeSelect?: (
@@ -110,12 +120,14 @@ export function ProjectTimeline({
     clip: TimelineClip;
     kind: GestureKind;
     moved: boolean;
+    ids: string[];
   } | null>(null);
   const [proposal, setProposal] = useState<EditProposal | null>(null);
   const editingFade =
     gesture.current?.kind === 'fadeIn' || gesture.current?.kind === 'fadeOut';
   const [editError, setEditError] = useState('');
   const [snapPixels, setSnapPixels] = useState(8);
+  const [insertMode, setInsertMode] = useState(false);
   const [snapping, setSnapping] = useState(true);
   const index = useMemo(() => indexTimeline(project), [project]);
   const previewProject = useMemo(
@@ -196,35 +208,6 @@ export function ProjectTimeline({
     if (operations.length && !disabled && !gesture.current && onEdit)
       void onEdit(operations, label);
   }
-  function splitSelected() {
-    if (selectedClip && canSplit)
-      commit(
-        [
-          {
-            ...(selectedSubtitle
-              ? { type: 'subtitle.split' as const, at: position }
-              : {
-                  type: 'clip.split' as const,
-                  at: Number(frameIndex(position, rate, true)),
-                }),
-            id: selectedClip.id,
-          },
-        ],
-        selectedSubtitle ? 'Split subtitle' : 'Split clip',
-      );
-  }
-  function deleteSelected() {
-    if (selectedClip)
-      commit(
-        [
-          {
-            type: selectedSubtitle ? 'subtitle.remove' : 'clip.remove',
-            id: selectedClip.id,
-          },
-        ],
-        selectedSubtitle ? 'Delete subtitle' : 'Delete clip',
-      );
-  }
   function cancelGesture() {
     const current = gesture.current;
     gesture.current = null;
@@ -256,7 +239,12 @@ export function ProjectTimeline({
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.focus({ preventScroll: true });
-    onSelect(clip.id);
+    if (kind === 'move' && (event.shiftKey || event.metaKey || event.ctrlKey)) {
+      onSelect(clip.id, event.shiftKey ? 'range' : 'toggle');
+      return;
+    }
+    const inSelection = kind === 'move' && selectedIds.includes(clip.id);
+    if (!inSelection) onSelect(clip.id);
     setEditError('');
     gesture.current = {
       pointer: event.pointerId,
@@ -268,6 +256,7 @@ export function ProjectTimeline({
       clip,
       kind,
       moved: false,
+      ids: inSelection ? selectedIds : [clip.id],
     };
     scrollRef.current!.setPointerCapture(event.pointerId);
   }
@@ -319,6 +308,7 @@ export function ProjectTimeline({
           position,
           zoom,
           snapping ? snapPixels : 0,
+          current.ids,
         );
     if (current.project !== project)
       next.error = 'Project changed during the interaction. Try again.';
@@ -351,6 +341,7 @@ export function ProjectTimeline({
           position,
           zoom,
           0,
+          selectedIds.includes(clip.id) ? selectedIds : [clip.id],
         );
     setEditError(next.error ?? '');
     if (!next.error) commit(next.operations, editLabel(kind, clip));
@@ -469,27 +460,15 @@ export function ProjectTimeline({
         rate,
         true,
       );
-      if (snapping) {
-        let distance = snapPixels;
-        const target = framePosition(at, rate);
-        for (const candidate of [
-          ZERO,
-          position,
-          ...project.clips.flatMap((clip) => [
-            clip.timelineStart,
-            clipTimelineEnd(clip),
-          ]),
-        ]) {
-          const frame = frameIndex(candidate, rate, true);
-          if (compareTimes(framePosition(frame, rate), candidate) !== 0)
-            continue;
-          const pixels = Math.abs(relativePixels(candidate, target, zoom));
-          if (pixels <= distance) {
-            at = frame;
-            distance = pixels;
-          }
-        }
-      }
+      if (snapping && snapPixels > 0)
+        at = snapFrames(
+          at,
+          [0n],
+          snapTargets(project, position),
+          rate,
+          zoom,
+          snapPixels,
+        ).value;
       const frame = Number(at);
       if (!Number.isSafeInteger(frame))
         throw new Error('Drop is outside the supported frame range.');
@@ -501,6 +480,7 @@ export function ProjectTimeline({
         ...(track ? { trackId: track.id } : {}),
         mediaType: mediaType ?? track!.type,
         at: frame,
+        ...(insertMode && track ? { insert: true as const } : {}),
       });
     } catch (error) {
       setEditError(error instanceof Error ? error.message : String(error));
@@ -539,32 +519,20 @@ export function ProjectTimeline({
       className="timeline-panel"
       aria-label="Timeline"
       onKeyDown={(event) => {
+        if (gesture.current && event.key !== 'Escape') {
+          event.stopPropagation();
+          return;
+        }
         if (event.key === 'Escape') {
           cancelGesture();
           if (subtitleMenu.current) subtitleMenu.current.open = false;
+          const editMenu =
+            event.currentTarget.querySelector<HTMLDetailsElement>(
+              '.clip-edit-menu',
+            );
+          if (editMenu) editMenu.open = false;
           setEditError('');
           return;
-        }
-        const target = event.target as Element;
-        if (
-          event.defaultPrevented ||
-          event.repeat ||
-          event.nativeEvent.isComposing ||
-          target.closest(
-            'input, select, textarea, [contenteditable]:not([contenteditable="false"])',
-          ) ||
-          disabled ||
-          event.ctrlKey ||
-          event.metaKey ||
-          event.altKey
-        )
-          return;
-        if (event.key === 'Delete' || event.key === 'Backspace') {
-          event.preventDefault();
-          deleteSelected();
-        } else if (event.key.toLowerCase() === 's') {
-          event.preventDefault();
-          splitSelected();
         }
       }}
     >
@@ -670,7 +638,7 @@ export function ProjectTimeline({
           )}
           <button
             disabled={disabled || !canSplit || !!proposal}
-            onClick={splitSelected}
+            onClick={() => onTimelineAction('split')}
             aria-label="Split at playhead"
             title="Split at playhead (S)"
           >
@@ -678,7 +646,7 @@ export function ProjectTimeline({
           </button>
           <button
             disabled={disabled || !selectedClip || !!proposal}
-            onClick={deleteSelected}
+            onClick={() => onTimelineAction('delete')}
             aria-label={selectedSubtitle ? 'Delete subtitle' : 'Delete clip'}
             title={
               selectedSubtitle
@@ -688,6 +656,60 @@ export function ProjectTimeline({
           >
             <Trash2 aria-hidden="true" />
           </button>
+          <details className="clip-edit-menu">
+            <summary>
+              Edit clips
+              {selectedIds.length > 1 ? ' (' + selectedIds.length + ')' : ''}
+            </summary>
+            <div className="subtitle-actions">
+              {(
+                [
+                  ['copy', 'Copy'],
+                  ['cut', 'Cut'],
+                  ['paste', 'Paste at playhead'],
+                  ['duplicate', 'Duplicate'],
+                  ['insert', 'Insert at playhead'],
+                  ['rippleDelete', 'Ripple delete on selected tracks'],
+                  ['rippleAll', 'Ripple delete on all unlocked tracks'],
+                  ['closeGap', 'Close gap at playhead'],
+                  ['link', 'Link clips'],
+                  ['unlink', 'Unlink clips'],
+                  ['marker', 'Add marker at playhead'],
+                ] as const
+              ).map(([action, label]) => (
+                <button
+                  key={action}
+                  disabled={
+                    disabled ||
+                    !project ||
+                    !!proposal ||
+                    (action === 'link'
+                      ? selectedIds.length < 2
+                      : !['paste', 'insert', 'marker'].includes(action) &&
+                        !selectedIds.length)
+                  }
+                  onClick={(event) => {
+                    const menu = event.currentTarget.closest('details');
+                    if (menu) menu.open = false;
+                    onTimelineAction(action);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+              <label title="Shift later clips when dropping media onto a track">
+                <input
+                  type="checkbox"
+                  checked={insertMode}
+                  disabled={disabled || !!proposal}
+                  onChange={(event) =>
+                    setInsertMode(event.currentTarget.checked)
+                  }
+                />{' '}
+                Insert drops
+              </label>
+            </div>
+          </details>
           <label>
             <input
               type="checkbox"
@@ -781,7 +803,10 @@ export function ProjectTimeline({
           const current = gesture.current;
           const next = updateGesture(event);
           cancelGesture();
-          if (!next) return;
+          if (!next) {
+            onSelect(current.clip.id);
+            return;
+          }
           setEditError(next.error ?? '');
           if (!next.error)
             commit(next.operations, editLabel(current.kind, current.clip));
@@ -880,6 +905,32 @@ export function ProjectTimeline({
                   </text>
                 </g>
               ))}
+              {(project?.markers ?? []).map((marker) => {
+                const x = relativePixels(
+                  frameTime(marker.frame, rate),
+                  origin,
+                  zoom,
+                );
+                return (
+                  x >= 0 &&
+                  x <= width && (
+                    <path
+                      key={marker.id}
+                      className="timeline-marker"
+                      d={'M ' + (x - 4) + ' 16 h 8 v 7 l -4 5 l -4 -5 z'}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        commit(
+                          [{ type: 'marker.remove', id: marker.id }],
+                          'Remove marker',
+                        );
+                      }}
+                    >
+                      <title>{marker.name} (right-click to remove)</title>
+                    </path>
+                  )
+                );
+              })}
             </svg>
           </div>
           {!trackCount && (
@@ -914,6 +965,31 @@ export function ProjectTimeline({
                     <strong>{track.name}</strong>
                     {track.type !== 'subtitle' && (
                       <div className="track-audio-controls">
+                        <button
+                          type="button"
+                          aria-label={'Lock ' + track.name + ' track'}
+                          title={track.locked ? 'Unlock track' : 'Lock track'}
+                          aria-pressed={track.locked ?? false}
+                          disabled={disabled || !onEdit}
+                          onClick={() =>
+                            commit(
+                              [
+                                {
+                                  type: 'track.lock',
+                                  id: track.id,
+                                  locked: !track.locked,
+                                },
+                              ],
+                              track.locked ? 'Unlock track' : 'Lock track',
+                            )
+                          }
+                        >
+                          {track.locked ? (
+                            <Lock size={13} />
+                          ) : (
+                            <Unlock size={13} />
+                          )}
+                        </button>
                         <NumberProperty
                           label={`${track.name} track volume`}
                           value={track.volume ?? 1}
@@ -1019,9 +1095,11 @@ export function ProjectTimeline({
                           role="button"
                           tabIndex={0}
                           aria-label={`Inspect ${track.type === 'subtitle' ? 'subtitle' : 'clip'} ${clip.id}`}
-                          aria-pressed={selected === clip.id}
+                          aria-pressed={
+                            selected === clip.id ||
+                            selectedIds.includes(clip.id)
+                          }
                           className={`timeline-clip ${track.type === 'subtitle' ? 'subtitle' : clip.text ? 'text' : track.type}`}
-                          onClick={() => onSelect(clip.id)}
                           onPointerDown={(event) =>
                             beginEdit(event, clip, 'move')
                           }
@@ -1077,7 +1155,14 @@ export function ProjectTimeline({
                             }
                             if (event.key === 'Enter' || event.key === ' ') {
                               event.preventDefault();
-                              onSelect(clip.id);
+                              onSelect(
+                                clip.id,
+                                event.shiftKey
+                                  ? 'range'
+                                  : event.metaKey || event.ctrlKey
+                                    ? 'toggle'
+                                    : undefined,
+                              );
                             }
                           }}
                         >
@@ -1355,17 +1440,6 @@ export function ProjectTimeline({
           {proposal &&
             !editingFade &&
             (() => {
-              const row = index.rows.findIndex(
-                (track) => track.id === proposal.clip.trackId,
-              );
-              const x = Math.max(
-                0,
-                relativePixels(proposal.clip.timelineStart, origin, zoom),
-              );
-              const right = Math.min(
-                width,
-                relativePixels(clipTimelineEnd(proposal.clip), origin, zoom),
-              );
               return (
                 <svg
                   className={`edit-preview ${proposal.error ? 'invalid' : ''}`}
@@ -1373,13 +1447,33 @@ export function ProjectTimeline({
                   width={viewport.width}
                   height={viewport.height}
                 >
-                  <rect
-                    x={LABEL_WIDTH + x}
-                    y={RULER_HEIGHT + row * TRACK_HEIGHT - viewport.top + 5}
-                    width={Math.max(0, right - x)}
-                    height="54"
-                    rx="4"
-                  />
+                  {(proposal.clips ?? [proposal.clip]).map((clip) => {
+                    const row = index.rows.findIndex(
+                      (track) => track.id === clip.trackId,
+                    );
+                    const x = Math.max(
+                      0,
+                      relativePixels(clip.timelineStart, origin, zoom),
+                    );
+                    const right = Math.min(
+                      width,
+                      relativePixels(clipTimelineEnd(clip), origin, zoom),
+                    );
+                    return (
+                      right > x && (
+                        <rect
+                          key={clip.id}
+                          x={LABEL_WIDTH + x}
+                          y={
+                            RULER_HEIGHT + row * TRACK_HEIGHT - viewport.top + 5
+                          }
+                          width={right - x}
+                          height="54"
+                          rx="4"
+                        />
+                      )
+                    );
+                  })}
                   {proposal.snap && (
                     <line
                       className="snap-guide"

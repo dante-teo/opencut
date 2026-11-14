@@ -148,6 +148,7 @@ export type ProjectReply =
       state: DesktopProject | null;
       canceled: boolean;
       notice?: string;
+      clipboard?: import('@opencut/core').ClipClipboard;
     }
   | { ok: false; error: string };
 
@@ -155,38 +156,56 @@ export interface HistoryInput {
   projectId: string;
   expectedRevision: number;
 }
+export const timelineOperationTypes = [
+  'clips.move',
+  'clips.remove',
+  'clips.cut',
+  'clips.paste',
+  'clips.duplicate',
+  'clips.link',
+  'timeline.close-gap',
+  'track.lock',
+  'marker.add',
+  'marker.remove',
+  'clip.insert',
+  'clip.move',
+  'clip.trim',
+  'clip.split',
+  'clip.remove',
+  'clip.audio',
+  'clip.speed',
+  'clip.replace',
+  'clip.detach-audio',
+  'clip.grade',
+  'clip.gain-keys',
+  'clip.effects',
+  'clip.dissolve',
+  'transition.add',
+  'transition.set',
+  'transition.remove',
+  'clip.flash',
+  'clip.fade',
+  'canvas.set',
+  'clip.keyframe.add',
+  'clip.keyframe.set',
+  'clip.keyframe.remove',
+  'track.audio',
+  'clip.visual',
+  'text.add',
+  'text.set',
+  'subtitle.add',
+  'subtitle.set',
+  'subtitle.move',
+  'subtitle.split',
+  'subtitle.merge',
+  'subtitle.remove',
+  'subtitle.style',
+  'subtitle.effects',
+  'subtitle.words',
+] as const satisfies readonly EditOperation['type'][];
 export type TimelineOperation = Extract<
   EditOperation,
-  {
-    type:
-      | 'clip.move'
-      | 'clip.trim'
-      | 'clip.split'
-      | 'clip.remove'
-      | 'clip.audio'
-      | 'clip.speed'
-      | 'clip.replace'
-      | 'clip.detach-audio'
-      | 'clip.grade'
-      | 'clip.gain-keys'
-      | 'clip.effects'
-      | 'clip.dissolve'
-      | 'transition.add'
-      | 'transition.set'
-      | 'transition.remove'
-      | 'clip.flash'
-      | 'clip.fade'
-      | 'canvas.set'
-      | 'track.audio'
-      | 'clip.visual'
-      | `clip.keyframe.${string}`
-      | 'text.add'
-      | 'text.set'
-      | Exclude<
-          Extract<EditOperation['type'], `subtitle.${string}`>,
-          'subtitle.import'
-        >;
-  }
+  { type: (typeof timelineOperationTypes)[number] }
 >;
 export interface TimelineEditInput extends HistoryInput {
   operations: TimelineOperation[];
@@ -205,6 +224,7 @@ export interface AssetRemoveInput extends HistoryInput {
   assetId: string;
 }
 export interface AssetClipInput extends AssetRemoveInput {
+  insert?: boolean;
   trackId?: string;
   mediaType: 'video' | 'audio';
   at: number;

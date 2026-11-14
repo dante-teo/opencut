@@ -8,6 +8,7 @@ import {
   type Page,
 } from '@playwright/test';
 import {
+  createProject,
   deserializeProject,
   executeTransaction,
   frameTime,
@@ -15,7 +16,11 @@ import {
   serializeProject,
   type Project,
 } from '@opencut/core';
-import { writeProjectFile, updateProjectFile } from '@opencut/core/node';
+import {
+  controlDesktopProject,
+  writeProjectFile,
+  updateProjectFile,
+} from '@opencut/core/node';
 import { launchDesktop } from './helpers.js';
 
 const root = resolve('tests/fixtures/generated');
@@ -460,6 +465,202 @@ test('undo/redo of CLI media removal refreshes library availability and survives
     expect((await current(page)).assets).toContainEqual(
       expect.objectContaining({ id: 'unused' }),
     );
+  } finally {
+    await application.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('moves, ripples and inserts a video/audio selection and verifies the saved timeline through CLI', async () => {
+  test.setTimeout(45_000);
+  await mkdir(root, { recursive: true });
+  const directory = await mkdtemp(join(root, 't39-'));
+  const path = join(directory, 'project.json');
+  const rate = { numerator: 30, denominator: 1 };
+  const time = (frame: number) => frameTime(frame, rate);
+  const media = spawnSync(
+    'ffmpeg',
+    [
+      '-nostdin',
+      '-v',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=s=128x96:r=30:d=3',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=440:sample_rate=48000:duration=3',
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      join(directory, 'interview.mp4'),
+    ],
+    { encoding: 'utf8' },
+  );
+  expect(media.status, media.stderr).toBe(0);
+  const project = createProject({
+    name: 'Creator workflow',
+    settings: { width: 128, height: 96, frameRate: rate },
+  });
+  project.assets.push({
+    id: 'source',
+    name: 'Interview',
+    file: { type: 'relative', path: 'interview.mp4' },
+    mediaTypes: ['video', 'audio'],
+  });
+  project.tracks.push(
+    { id: 'v', name: 'Camera', type: 'video' },
+    { id: 'a', name: 'Dialogue', type: 'audio' },
+  );
+  project.clips.push(
+    ...['v', 'a'].flatMap((trackId) => [
+      {
+        id: trackId + '0',
+        trackId,
+        assetId: 'source',
+        timelineStart: time(0),
+        sourceIn: time(0),
+        sourceOut: time(30),
+      },
+      {
+        id: trackId + '1',
+        trackId,
+        assetId: 'source',
+        timelineStart: time(90),
+        sourceIn: time(0),
+        sourceOut: time(60),
+        linkId: 'second-take',
+      },
+    ]),
+  );
+  await writeProjectFile(project, path);
+  const { application, page } = await launchDesktop({
+    OPENCUT_MEDIA_CACHE: join(directory, 'cache'),
+  });
+  try {
+    await open(application, page, path);
+    const body = (id: string) =>
+      clip(page, id).locator(':scope > rect').first();
+    await body('v0').click();
+    await body('a0').click({ modifiers: ['Shift'] });
+    await expect(clip(page, 'v0')).toHaveAttribute('aria-pressed', 'true');
+    await expect(clip(page, 'a0')).toHaveAttribute('aria-pressed', 'true');
+    const primary = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await body('a0').click({ modifiers: [primary] });
+    await expect(clip(page, 'a0')).toHaveAttribute('aria-pressed', 'false');
+    await body('a0').click({ modifiers: [primary] });
+    await expect(clip(page, 'a0')).toHaveAttribute('aria-pressed', 'true');
+    await page.keyboard.press(primary + '+c');
+    await startDrag(page, 'v0', 80);
+    await expect(page.getByTestId('edit-preview').locator('rect')).toHaveCount(
+      2,
+    );
+    await release(page);
+    const starts = async (ids: string[]) =>
+      (await current(page)).clips
+        .filter((entry) => ids.includes(entry.id))
+        .map((entry) => entry.timelineStart);
+    await expect.poll(() => starts(['v0', 'a0'])).toEqual([time(30), time(30)]);
+    await page.keyboard.press('Shift+Delete');
+    await expect.poll(() => starts(['v1', 'a1'])).toEqual([time(60), time(60)]);
+    await expect.poll(() => starts(['v0', 'a0'])).toEqual([]);
+    await controlDesktopProject(path, { action: 'seek', frame: 90 });
+    await expect(
+      page.getByRole('slider', { name: 'Timeline playhead' }),
+    ).toHaveAttribute('aria-valuenow', '90');
+    await page.locator('.timeline-scroll').focus();
+    await page.keyboard.press(primary + '+Shift+v');
+    await expect.poll(async () => (await current(page)).clips.length).toBe(6);
+    await page.keyboard.press(primary + '+z');
+    await expect.poll(async () => (await current(page)).clips.length).toBe(2);
+    await page.keyboard.press(primary + '+Shift+z');
+    await expect.poll(async () => (await current(page)).clips.length).toBe(6);
+    await page
+      .getByRole('button', { name: 'Save project', exact: true })
+      .click();
+    await expect
+      .poll(async () => (await readFile(path, 'utf8')).includes('Insert clips'))
+      .toBe(true);
+    const timeline = cli('timeline', 'list', path);
+    expect(
+      timeline.tracks.map(
+        (track: {
+          clips: { timelineStart: unknown; timelineEnd: unknown }[];
+        }) =>
+          track.clips.map((entry) => [entry.timelineStart, entry.timelineEnd]),
+      ),
+    ).toEqual(
+      Array.from({ length: 2 }, () => [
+        [time(60), time(90)],
+        [time(90), time(120)],
+        [time(120), time(150)],
+      ]),
+    );
+    expect(timeline.tracks[0].clips[2].linkId).toBe(
+      timeline.tracks[1].clips[2].linkId,
+    );
+    expect(timeline.tracks[0].clips[2].linkId).not.toBe('second-take');
+    await open(application, page, path);
+    await expect.poll(async () => (await current(page)).clips.length).toBe(6);
+    await body('v1').click();
+    await expect(clip(page, 'a1')).toHaveAttribute('aria-pressed', 'true');
+    await expect(
+      page.evaluate(async () => {
+        const reply = await window.opencut.getProject();
+        if (!reply.ok || !reply.state) throw new Error('No project state');
+        const project = reply.state.project;
+        return window.opencut.editTimeline({
+          projectId: project.metadata.id,
+          expectedRevision: project.editing?.revision ?? 0,
+          operations: [{ type: 'clip.remove', id: 'v1' }],
+          label: 'Remove one linked clip',
+        });
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining('Use clips.remove'),
+    });
+    expect((await current(page)).clips).toHaveLength(6);
+
+    const width = page.getByRole('spinbutton', { name: 'Timeline position' });
+    await expect(width).toBeVisible();
+    await width.focus({ timeout: 3000 });
+    const revision = projectRevision(await current(page));
+    await page.keyboard.press(primary + '+x');
+    expect(projectRevision(await current(page))).toBe(revision);
+    await page.locator('.timeline-scroll').focus();
+    await page.keyboard.press(primary + '+x');
+    await expect.poll(async () => (await current(page)).clips.length).toBe(4);
+    await controlDesktopProject(path, { action: 'seek', frame: 60 });
+    await expect(
+      page.getByRole('slider', { name: 'Timeline playhead' }),
+    ).toHaveAttribute('aria-valuenow', '60');
+    await page.keyboard.press(primary + '+v');
+    await expect.poll(async () => (await current(page)).clips.length).toBe(6);
+    const lastId = timeline.tracks[0].clips[2].id as string;
+    await body(lastId).click();
+    await page.keyboard.press(primary + '+d');
+    await expect.poll(async () => (await current(page)).clips.length).toBe(8);
+    await controlDesktopProject(path, { action: 'seek', frame: 30 });
+    await expect(
+      page.getByRole('slider', { name: 'Timeline playhead' }),
+    ).toHaveAttribute('aria-valuenow', '30');
+    await page.locator('summary').filter({ hasText: 'Edit clips' }).click();
+    await page
+      .getByRole('button', { name: 'Close gap at playhead', exact: true })
+      .click({ timeout: 3000 });
+    await expect
+      .poll(async () =>
+        (await current(page)).clips
+          .map((entry) => entry.timelineStart.numerator)
+          .includes(0),
+      )
+      .toBe(true);
   } finally {
     await application.close();
     await rm(directory, { recursive: true, force: true });

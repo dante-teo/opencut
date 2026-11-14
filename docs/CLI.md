@@ -228,8 +228,9 @@ errors include a usage hint.
 
 - `project freeze PROJECT CLIP --at FRAME --frames COUNT --output NEW.png`
   extracts the covering source frame and inserts a still. The edit shifts later
-  clips on that track and participates in undo. The PNG is retained for redo.
-  OpenCut removes the PNG after a confirmed edit rejection. If the commit
+  clips on that track and participates in undo. A locked track is rejected
+  before any PNG is created. The PNG is retained for redo after a successful
+  edit. OpenCut removes the PNG after a confirmed edit rejection. If the commit
   outcome is unknown, inspect the project before retrying.
 - `project snapshot PROJECT --output NEW.opencut.json` writes a separate copy
   of the current revision. `project package PROJECT --output NEW_FOLDER` also
@@ -518,6 +519,9 @@ review it before removing it. Parent directories are not created automatically.
 
 ## Timeline editing
 
+See [group timeline editing](TIMELINE_EDITING.md) for clipboard operations,
+ripple scopes, and insert semantics.
+
 T08 uses the shared, filesystem-free core operations. The CLI is a parsing and
 persistence adapter. Every command takes an explicit project path, resolved from
 cwd, and supports `--json` and `--help`. No Electron, FFmpeg, ffprobe, decoding or
@@ -591,6 +595,8 @@ node apps/cli/dist/index.js track remove /work/demo.opencut.json TRACK_ID --json
   are preserved. Changes that collide with another clip on the same track or
   invalidate existing fades are rejected. Use `--speed 1` to restore normal speed.
 - `clip remove` leaves a gap and preserves all assets, tracks and other clips.
+  It rejects clips in a linked group. Use `clips.remove` in an edit batch to
+  delete the group, or unlink the clip before removing it individually.
 
 Clips default to 1×. Source ranges must be nonnegative, nonempty and end no later
 than the asset's recorded rational duration when known. **Unknown-duration assets,

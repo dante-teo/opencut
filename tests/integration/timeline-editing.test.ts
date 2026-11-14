@@ -340,3 +340,34 @@ describe('shared-core GUI edit proposals', () => {
     expect(() => createTimelinePreview(invalid)).toThrow();
   });
 });
+
+it('snaps any selected edge to a marker using the same pixel threshold at each zoom', () => {
+  const project = fixture();
+  project.markers = [{ id: 'marker', frame: 350, name: 'Beat' }];
+  const group = (zoom: number) =>
+    proposeEdit(
+      project,
+      project.clips[0]!,
+      'move',
+      22n,
+      'v1',
+      frameTime(0, rate),
+      zoom,
+      8,
+      ['clip', 'later'],
+    );
+  const near = group(80);
+  expect(near.error).toBeNull();
+  expect(near.snap).toEqual(frameTime(350, rate));
+  expect(near.clips?.map((clip) => clip.timelineStart)).toEqual([
+    frameTime(80, rate),
+    frameTime(260, rate),
+  ]);
+  const far = group(320);
+  expect(far.error).toBeNull();
+  expect(far.snap).toBeNull();
+  expect(far.clips?.map((clip) => clip.timelineStart)).toEqual([
+    frameTime(82, rate),
+    frameTime(262, rate),
+  ]);
+});

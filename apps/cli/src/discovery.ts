@@ -625,7 +625,8 @@ const definitions: Definition[] = [
   },
   {
     name: 'clip remove',
-    description: 'Remove a clip.',
+    description:
+      'Remove one clip. Use clips.remove in an edit batch for a linked group.',
     args: ['project-file', 'clip-id'],
     options: edit,
     mutates: true,

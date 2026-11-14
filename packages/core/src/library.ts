@@ -8,6 +8,7 @@ export function addAssetClip(
   input: {
     assetId: string;
     trackId?: string;
+    insert?: boolean;
     mediaType: 'video' | 'audio';
     at: number;
   },
@@ -46,7 +47,9 @@ export function addAssetClip(
   if (input.trackId !== undefined && track?.type !== input.mediaType)
     throw new Error('Choose a compatible timeline track.');
   operations.push({
-    type: 'clip.add',
+    ...(input.insert
+      ? { type: 'clip.insert' as const, scope: 'selected-tracks' as const }
+      : { type: 'clip.add' as const }),
     assetId: asset.id,
     trackId,
     at: input.at,
@@ -55,7 +58,7 @@ export function addAssetClip(
   });
   return executeTransaction(project, {
     expectedRevision: projectRevision(project),
-    label: 'Add media clip',
+    label: input.insert ? 'Insert media clip' : 'Add media clip',
     operations,
   }).project;
 }

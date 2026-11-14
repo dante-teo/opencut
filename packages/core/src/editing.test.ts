@@ -61,6 +61,38 @@ const apply = (value = project(), edits = operations) =>
   }).project;
 
 describe('headless editing transactions', () => {
+  it('moves and removes clips atomically and restores them in one undo', () => {
+    const original = apply();
+    const moved = apply(original, [
+      { type: 'clips.move', ids: ['c1', 'right'], frames: 60 },
+    ]);
+    expect(moved.clips.find((clip) => clip.id === 'c1')!.timelineStart).toEqual(
+      { numerator: 1001, denominator: 500 },
+    );
+    expect(
+      moved.clips.find((clip) => clip.id === 'right')!.timelineStart,
+    ).toEqual({ numerator: 1001, denominator: 250 });
+    expect(projectSnapshot(undoEdit(moved))).toEqual(projectSnapshot(original));
+    const removed = apply(moved, [
+      { type: 'clips.remove', ids: ['c1', 'right'] },
+    ]);
+    expect(removed.clips).toHaveLength(0);
+    expect(projectSnapshot(undoEdit(removed))).toEqual(projectSnapshot(moved));
+    expect(() =>
+      apply(original, [
+        {
+          type: 'clips.move',
+          ids: ['c1', 'right'],
+          frames: 1,
+          backwards: true,
+        },
+      ]),
+    ).toThrow();
+    expect(() =>
+      apply(original, [{ type: 'clips.remove', ids: ['c1', 'c1'] }]),
+    ).toThrow('unique');
+  });
+
   it('preserves the gain curve when a trim cuts into a flat segment before a ramp', () => {
     const time = (numerator: number) => ({ numerator, denominator: 1 });
     const keys = [

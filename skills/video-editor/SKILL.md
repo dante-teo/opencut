@@ -40,6 +40,11 @@ scripts need the supplied `@opencut/sdk` package.
    to embed a font in a title or cue. `project freeze` inserts a held frame.
    Discover replacement, transitions, color, audio automation, ordered
    effects and subtitle styling through `help edit apply --json`.
+   For group edits, use `clips.move`, the `clips.*` clipboard operations,
+   or `clips.remove`. Use `clips.remove` for linked groups. The singular
+   `clip remove` command rejects linked members. Choose a ripple scope
+   explicitly, and use `clip.insert` or `timeline.close-gap` to shift later
+   clips. Inspect linked clip timing and locked tracks before and after the edit.
    Use `subtitle.words` for cue-relative word timing. Check timed highlights
    in rendered frames and use SRT or WebVTT for cue-level text and timing.
    Set fades with `clip audio --fade-in/--fade-out` in project frames. Use

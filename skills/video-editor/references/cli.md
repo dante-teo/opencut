@@ -71,22 +71,32 @@ For a group of timeline edits, write a batch JSON with `expectedRevision` from
 the latest inspection, a nonempty `operations` array, and an optional `label`.
 Supply explicit new IDs to refer to a track or clip later in the batch.
 
-| Operation      | Fields besides `type`                                                                                                                                                   |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `track.add`    | `name`, `mediaType` (`video` or `audio`), optional `id`                                                                                                                 |
-| `track.audio`  | `id` and at least one of `volume` (linear 0–1), `muted` (boolean)                                                                                                       |
-| `track.remove` | `id` of an empty track                                                                                                                                                  |
-| `clip.add`     | `assetId`, `trackId`, `at`, `in`, `out`; optional `id`, `volume`, `muted`, `fadeIn`, `fadeOut`, `visual`                                                                |
-| `clip.move`    | `id` and `at`, `trackId`, or both                                                                                                                                       |
-| `clip.trim`    | `id` and at least one of `in`, `out`, `inTime`, `outTime`                                                                                                               |
-| `clip.split`   | `id`, `at`, optional `rightId`                                                                                                                                          |
-| `clip.remove`  | `id`                                                                                                                                                                    |
-| `clip.speed`   | `id` and `speed` with integer `numerator` and `denominator`, from 1/4 to 4                                                                                              |
-| `clip.audio`   | `id` and at least one of `volume`, `muted`, `fadeIn`, `fadeOut`                                                                                                         |
-| `clip.visual`  | `id` and at least one of `x`, `y` (pixel offsets from center), `scale` (0.01–4), `rotation` (clockwise degrees), `opacity` (0–1), `fit` (`contain`, `cover`, `stretch`) |
-| `text.add`     | `at`, positive `duration`, `text` with `content`; optional `id`, video `trackId`, `visual` (x/y/scale/rotation/opacity)                                                 |
-| `text.set`     | `id` and at least one of `text` patch, `at`, `duration`                                                                                                                 |
-| `canvas.set`   | At least one of `width`, `height`, `backgroundColor`                                                                                                                    |
+| Operation                  | Fields besides `type`                                                                                                                                                   |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `track.add`                | `name`, `mediaType` (`video` or `audio`), optional `id`                                                                                                                 |
+| `track.audio`              | `id` and at least one of `volume` (linear 0–1), `muted` (boolean)                                                                                                       |
+| `track.remove`             | `id` of an empty track                                                                                                                                                  |
+| `clip.add`                 | `assetId`, `trackId`, `at`, `in`, `out`; optional `id`, `volume`, `muted`, `fadeIn`, `fadeOut`, `visual`                                                                |
+| clips.move                 | ids, nonnegative frames, optional backwards and tracks (track ID map)                                                                                                   |
+| clips.remove               | ids, optional ripple: selected-tracks or all-unlocked                                                                                                                   |
+| clips.copy / clips.cut     | ids; results contains the same-project clipboard                                                                                                                        |
+| clips.paste                | clipboard, at, optional insert scope and tracks                                                                                                                         |
+| clips.duplicate            | ids and optional at (defaults to end of selection)                                                                                                                      |
+| clips.link                 | ids and linked                                                                                                                                                          |
+| clip.insert                | clip.add fields plus scope: selected-tracks or all-unlocked                                                                                                             |
+| timeline.close-gap         | trackIds and at, inside a shared gap                                                                                                                                    |
+| track.lock                 | id and locked                                                                                                                                                           |
+| marker.add / marker.remove | at and name, or id for removal                                                                                                                                          |
+| `clip.move`                | `id` and `at`, `trackId`, or both                                                                                                                                       |
+| `clip.trim`                | `id` and at least one of `in`, `out`, `inTime`, `outTime`                                                                                                               |
+| `clip.split`               | `id`, `at`, optional `rightId`                                                                                                                                          |
+| `clip.remove`              | `id` of a clip outside a linked group                                                                                                                                   |
+| `clip.speed`               | `id` and `speed` with integer `numerator` and `denominator`, from 1/4 to 4                                                                                              |
+| `clip.audio`               | `id` and at least one of `volume`, `muted`, `fadeIn`, `fadeOut`                                                                                                         |
+| `clip.visual`              | `id` and at least one of `x`, `y` (pixel offsets from center), `scale` (0.01–4), `rotation` (clockwise degrees), `opacity` (0–1), `fit` (`contain`, `cover`, `stretch`) |
+| `text.add`                 | `at`, positive `duration`, `text` with `content`; optional `id`, video `trackId`, `visual` (x/y/scale/rotation/opacity)                                                 |
+| `text.set`                 | `id` and at least one of `text` patch, `at`, `duration`                                                                                                                 |
+| `canvas.set`               | At least one of `width`, `height`, `backgroundColor`                                                                                                                    |
 
 Use `clip speed PROJECT CLIP_ID --speed 1.5 --json` to retime an existing
 video or audio clip. Speed changes preserve source points, clip start, timeline

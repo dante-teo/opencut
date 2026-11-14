@@ -6,9 +6,11 @@ import {
   clipSourceTime,
   compareTimes,
   frameTime,
+  linkedSelection,
   previewTransaction,
   projectRevision,
   projectSnapshot,
+  type FrameRate,
   type Project,
   type RationalTime,
   type TimelineClip,
@@ -26,6 +28,7 @@ export type GestureKind = 'move' | 'left' | 'right' | AudioFadeEdge;
 export interface EditProposal {
   operations: TimelineOperation[];
   clip: TimelineClip;
+  clips?: TimelineClip[];
   error: string | null;
   snap: RationalTime | null;
 }
@@ -54,12 +57,137 @@ function previewClipEdit(
     expectedRevision: projectRevision(project),
     operations,
   }).project;
+  const group = operations.find((operation) => operation.type === 'clips.move');
   return {
     operations,
+    ...(group ? { clips: linkedSelection(preview, group.ids) } : {}),
     clip: preview.clips.find((entry) => entry.id === clip.id)!,
     error: null,
     snap,
   };
+}
+
+export function snapTargets(
+  project: Project,
+  playhead: RationalTime,
+  excluded: Set<string> = new Set(),
+) {
+  return [
+    playhead,
+    ...(project.markers ?? []).map((marker) =>
+      frameTime(marker.frame, project.settings.frameRate),
+    ),
+    ZERO,
+    ...project.clips
+      .filter((clip) => !excluded.has(clip.id))
+      .flatMap((clip) => [clip.timelineStart, clipTimelineEnd(clip)]),
+  ];
+}
+
+/** Snap a frame position or signed shift by comparing each eligible moving edge. */
+export function snapFrames(
+  desired: bigint,
+  edges: readonly bigint[],
+  candidates: RationalTime[],
+  rate: FrameRate,
+  zoom: number,
+  threshold: number,
+  minimum = 0n,
+) {
+  let value = desired;
+  let snap: RationalTime | null = null;
+  let distance = threshold;
+  if (threshold <= 0 || desired < minimum) return { value, snap };
+  for (const time of candidates) {
+    const frame = exactFrame(time, rate);
+    if (frame === null) continue;
+    for (const edge of edges) {
+      const candidate = frame - edge;
+      if (candidate < minimum) continue;
+      const pixels =
+        (Math.abs(Number(candidate - desired)) * zoom * rate.denominator) /
+        rate.numerator;
+      if (pixels <= distance && (!snap || pixels < distance)) {
+        value = candidate;
+        snap = time;
+        distance = pixels;
+      }
+    }
+  }
+  return { value, snap };
+}
+
+function exactFrame(time: RationalTime, rate: FrameRate) {
+  const ticks = BigInt(time.numerator) * BigInt(rate.numerator);
+  const step = BigInt(time.denominator) * BigInt(rate.denominator);
+  return ticks % step === 0n ? ticks / step : null;
+}
+
+function proposeGroupMove(
+  project: Project,
+  clip: TimelineClip,
+  ids: string[],
+  delta: bigint,
+  trackId: string,
+  playhead: RationalTime,
+  zoom: number,
+  pixels: number,
+): EditProposal {
+  const rate = project.settings.frameRate;
+  const group = linkedSelection(project, ids);
+  const earliest = group.reduce(
+    (start, member) =>
+      compareTimes(start, member.timelineStart) <= 0
+        ? start
+        : member.timelineStart,
+    clip.timelineStart,
+  );
+  const minimum = -frameIndex(earliest, rate);
+  const edges = group
+    .flatMap((member) => [member.timelineStart, clipTimelineEnd(member)])
+    .map((time) => exactFrame(time, rate))
+    .filter((frame) => frame !== null);
+  const { value: shift, snap } = snapFrames(
+    delta < minimum ? minimum : delta,
+    edges,
+    pixels > 0
+      ? snapTargets(
+          project,
+          playhead,
+          new Set(group.map((member) => member.id)),
+        )
+      : [],
+    rate,
+    zoom,
+    pixels,
+    minimum,
+  );
+  const row = (id: string) =>
+    project.tracks.findIndex((track) => track.id === id);
+  if (row(trackId) < 0) throw new Error('Drop onto a timeline track.');
+  const offset = row(trackId) - row(clip.trackId);
+  const tracks = Object.fromEntries(
+    group.map((member) => {
+      const track = project.tracks[row(member.trackId) + offset];
+      if (!track)
+        throw new Error('The selection does not fit on those tracks.');
+      return [member.trackId, track.id];
+    }),
+  );
+  return previewClipEdit(
+    project,
+    clip,
+    [
+      {
+        type: 'clips.move',
+        ids,
+        tracks,
+        frames: safeFrame(shift < 0n ? -shift : shift),
+        backwards: shift < 0n,
+      },
+    ],
+    snap,
+  );
 }
 
 /** UI coordinate policy only. The core validates and produces every proposed clip. */
@@ -72,11 +200,23 @@ export function proposeEdit(
   playhead: RationalTime,
   zoom: number,
   snapPixels: number,
+  ids: string[] = [clip.id],
 ): EditProposal {
   let operations: TimelineOperation[] = [];
   let snap: RationalTime | null = null;
   try {
     const rate = project.settings.frameRate;
+    if (kind === 'move' && (ids.length > 1 || clip.linkId))
+      return proposeGroupMove(
+        project,
+        clip,
+        ids,
+        delta,
+        trackId,
+        playhead,
+        zoom,
+        snapPixels,
+      );
     if (kind === 'fadeIn' || kind === 'fadeOut') {
       const unchanged = { operations, clip, error: null, snap };
       if (delta === 0n) return unchanged;
@@ -119,49 +259,19 @@ export function proposeEdit(
       throw new Error(
         'Align clip start and source-in to project frames before edge trimming.',
       );
-    const candidates = [
-      ZERO,
-      playhead,
-      ...project.clips
-        .filter((other) => other.id !== clip.id)
-        .flatMap((other) => [other.timelineStart, clipTimelineEnd(other)]),
-    ];
-    const unsnappedTarget = target;
-    let bestDistance = Math.max(0, snapPixels);
     const duration = clipDuration(clip);
     const durationFrame = frameIndex(duration, rate, true);
-    for (const candidate of candidates) {
-      const candidateFrame = frameIndex(candidate, rate, true);
-      let candidateTime;
-      try {
-        candidateTime = frameTime(safeFrame(candidateFrame), rate);
-      } catch {
-        continue;
-      }
-      if (compareTimes(candidateTime, candidate) !== 0) continue;
-      const anchors = [candidateFrame];
-      if (
-        kind === 'move' &&
-        compareTimes(frameTime(safeFrame(durationFrame), rate), duration) === 0
-      )
-        anchors.push(candidateFrame - durationFrame);
-      for (const anchor of anchors) {
-        if (anchor < 0n || target < 0n) continue;
-        const snapped = frameTime(safeFrame(anchor), rate);
-        const distance = Math.abs(
-          relativePixels(
-            snapped,
-            frameTime(safeFrame(unsnappedTarget), rate),
-            zoom,
-          ),
-        );
-        if (snapPixels > 0 && distance <= bestDistance) {
-          bestDistance = distance;
-          target = anchor;
-          snap = candidate;
-        }
-      }
-    }
+    const tail = kind === 'move' ? exactFrame(duration, rate) : null;
+    const snapped = snapFrames(
+      target,
+      tail === null ? [0n] : [0n, tail],
+      snapPixels > 0 ? snapTargets(project, playhead, new Set([clip.id])) : [],
+      rate,
+      zoom,
+      snapPixels,
+    );
+    target = snapped.value;
+    snap = snapped.snap;
     const change = target - boundary;
     if (kind === 'move') {
       operations = [

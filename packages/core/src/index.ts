@@ -68,12 +68,17 @@ export {
   splitClip,
   removeClip,
   listTimeline,
+  copyClips,
+  clipClipboardSchema,
+  linkedSelection,
   addTransition,
   setTransition,
   removeTransition,
 } from './timeline.js';
 export type {
   AddTrackOptions,
+  ClipClipboard,
+  RippleScope,
   AddClipOptions,
   AddTextOptions,
   MoveClipOptions,

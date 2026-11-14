@@ -22,6 +22,17 @@ import {
   addText,
   addTrack,
   moveClip,
+  moveClips,
+  removeClips,
+  copyClips,
+  pasteClips,
+  insertClip,
+  closeGap,
+  setTrackLock,
+  setClipLinks,
+  addMarker,
+  removeMarker,
+  clipClipboardSchema,
   replaceClipAsset,
   detachClipAudio,
   dissolveClips,
@@ -57,6 +68,19 @@ const clipAudioOptions = {
 const name = z
   .string()
   .refine((value) => value.trim().length > 0, 'Must not be blank.');
+const clipPlacement = {
+  id: id.optional(),
+  assetId: id,
+  trackId: id,
+  at: frame,
+  in: frame,
+  out: frame,
+  ...clipAudioOptions,
+  visual: clipVisualSchema.optional(),
+};
+const ids = z.array(id).min(1);
+const scope = z.enum(['selected-tracks', 'all-unlocked']);
+const trackMap = z.record(id, id);
 const operationSchema = z.discriminatedUnion('type', [
   ...subtitleOperations,
   keyframeEdits.add.extend({ id }),
@@ -88,14 +112,52 @@ const operationSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('track.audio'), id, ...trackAudioShape }),
   z.strictObject({
     type: z.literal('clip.add'),
-    id: id.optional(),
-    assetId: id,
-    trackId: id,
+    ...clipPlacement,
+  }),
+  z.strictObject({
+    type: z.literal('clips.move'),
+    ids,
+    frames: frame,
+    backwards: z.boolean().optional(),
+    tracks: trackMap.optional(),
+  }),
+  z.strictObject({
+    type: z.literal('clips.remove'),
+    ids,
+    ripple: scope.optional(),
+  }),
+  z.strictObject({ type: z.literal('clips.copy'), ids }),
+  z.strictObject({ type: z.literal('clips.cut'), ids }),
+  z.strictObject({
+    type: z.literal('clips.paste'),
+    clipboard: clipClipboardSchema,
     at: frame,
-    in: frame,
-    out: frame,
-    ...clipAudioOptions,
-    visual: clipVisualSchema.optional(),
+    insert: scope.optional(),
+    tracks: trackMap.optional(),
+  }),
+  z.strictObject({
+    type: z.literal('clips.duplicate'),
+    ids,
+    at: frame.optional(),
+  }),
+  z.strictObject({ type: z.literal('clips.link'), ids, linked: z.boolean() }),
+  z.strictObject({
+    type: z.literal('timeline.close-gap'),
+    trackIds: ids,
+    at: frame,
+  }),
+  z.strictObject({ type: z.literal('track.lock'), id, locked: z.boolean() }),
+  z.strictObject({
+    type: z.literal('marker.add'),
+    id: id.optional(),
+    at: frame,
+    name,
+  }),
+  z.strictObject({ type: z.literal('marker.remove'), id }),
+  z.strictObject({
+    type: z.literal('clip.insert'),
+    ...clipPlacement,
+    scope,
   }),
   z.strictObject({
     type: z.literal('clip.move'),
@@ -294,6 +356,33 @@ function checkHistory(project: Project): void {
     );
 }
 
+export function checkLockedTracks(before: Project, after: Project) {
+  const locked = new Set(
+    before.tracks.filter((track) => track.locked).map((track) => track.id),
+  );
+  if (!locked.size) return;
+  const lockedClips = (project: Project) =>
+    project.clips.filter((clip) => locked.has(clip.trackId));
+  const clips = lockedClips(before);
+  const lockedIds = new Set(clips.map((clip) => clip.id));
+  const transitions = (project: Project) =>
+    (project.transitions ?? []).filter((transition) =>
+      transition.kind === 'cross-dissolve'
+        ? lockedIds.has(transition.from) || lockedIds.has(transition.to)
+        : lockedIds.has(transition.clipId),
+    );
+  if (
+    JSON.stringify(clips) !== JSON.stringify(lockedClips(after)) ||
+    JSON.stringify(transitions(before)) !==
+      JSON.stringify(transitions(after)) ||
+    [...locked].some((id) => !after.tracks.some((track) => track.id === id))
+  )
+    throw new EditError(
+      'INVALID_TRANSACTION',
+      'The edit affects a locked track. Unlock it first.',
+    );
+}
+
 /** Record one already validated edit; the caller retains its original project on failure. */
 export function commitEdit(
   project: Project,
@@ -373,6 +462,7 @@ export function previewTransaction(project: Project, input: EditTransaction) {
           changed = removeTrack(next, operation.id);
           break;
         case 'clip.add':
+        case 'clip.insert':
         case 'clip.audio': {
           const { volume, muted, fadeIn, fadeOut } = operation;
           const audio = {
@@ -385,7 +475,7 @@ export function previewTransaction(project: Project, input: EditTransaction) {
             changed = setClipAudio(next, operation.id, audio);
             break;
           }
-          changed = addClip(next, {
+          const options = {
             ...(operation.id !== undefined ? { id: operation.id } : {}),
             assetId: operation.assetId,
             trackId: operation.trackId,
@@ -394,7 +484,11 @@ export function previewTransaction(project: Project, input: EditTransaction) {
             sourceOut: time(operation.out),
             ...audio,
             visual: operation.visual,
-          });
+          };
+          changed =
+            operation.type === 'clip.insert'
+              ? insertClip(next, options, operation.scope)
+              : addClip(next, options);
           break;
         }
         case 'text.add':
@@ -417,6 +511,61 @@ export function previewTransaction(project: Project, input: EditTransaction) {
                 ? undefined
                 : time(operation.duration),
           });
+          break;
+        case 'clips.move':
+          changed = moveClips(
+            next,
+            operation.ids,
+            time(operation.frames),
+            operation.backwards ?? false,
+            operation.tracks,
+          );
+          break;
+        case 'clips.remove':
+          changed = removeClips(next, operation.ids, operation.ripple);
+          break;
+        case 'clips.copy':
+          changed = {
+            project: next,
+            clipboard: copyClips(next, operation.ids),
+          };
+          break;
+        case 'clips.cut':
+          changed = {
+            clipboard: copyClips(next, operation.ids),
+            ...removeClips(next, operation.ids),
+          };
+          break;
+        case 'clips.paste':
+          changed = pasteClips(
+            next,
+            operation.clipboard,
+            time(operation.at),
+            operation.insert,
+            operation.tracks,
+          );
+          break;
+        case 'clips.duplicate':
+          changed = pasteClips(
+            next,
+            copyClips(next, operation.ids),
+            operation.at === undefined ? undefined : time(operation.at),
+          );
+          break;
+        case 'clips.link':
+          changed = setClipLinks(next, operation.ids, operation.linked);
+          break;
+        case 'timeline.close-gap':
+          changed = closeGap(next, operation.trackIds, time(operation.at));
+          break;
+        case 'track.lock':
+          changed = setTrackLock(next, operation.id, operation.locked);
+          break;
+        case 'marker.add':
+          changed = addMarker(next, operation.at, operation.name, operation.id);
+          break;
+        case 'marker.remove':
+          changed = removeMarker(next, operation.id);
           break;
         case 'clip.move':
           changed = moveClip(next, operation.id, {
@@ -546,6 +695,7 @@ export function previewTransaction(project: Project, input: EditTransaction) {
           break;
       }
       const { project: updated, ...result } = changed;
+      checkLockedTracks(next, updated);
       next = updated;
       results.push({ type: operation.type, ...result });
     } catch (cause) {

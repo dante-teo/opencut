@@ -38,6 +38,7 @@ import { TimelineError } from './timeline.js';
 import {
   checkProjectRevision,
   commitEdit,
+  checkLockedTracks,
   EditError,
   getEditHistory,
   projectRevision,
@@ -594,7 +595,10 @@ export async function acquireProjectWriter(projectFilePath: string) {
                 'REVISION_CONFLICT',
                 'Project revision conflict: session changed while preparing the edit. Reload and retry.',
               );
-            return deserializeProject(request.json);
+            const changed = deserializeProject(request.json);
+            if (request.options.history !== 'restore')
+              checkLockedTracks(project, changed);
+            return changed;
           },
         });
         return { committed: true };
@@ -642,6 +646,8 @@ async function updateProjectDisk<T>(
     const snapshot = serializeProject(project);
     const changed = await update(project, path);
     const baseline = deserializeProject(snapshot);
+    if (options.history !== 'restore' && options.history !== 'preserve')
+      checkLockedTracks(baseline, changed.project);
     const updated =
       options.history === 'restore' || options.history === 'preserve'
         ? changed.project

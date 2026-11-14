@@ -144,6 +144,12 @@ export function indexTimeline(project: Project | undefined) {
   const tracks = new Map<string, { clip: TimelineClip; end: RationalTime }[]>();
   const assets = new Map(project?.assets.map((asset) => [asset.id, asset]));
   let end = ZERO;
+  if (project)
+    for (const marker of project.markers ?? []) {
+      const at = frameTime(marker.frame, project.settings.frameRate);
+      if (compareTimes(at, end) > 0) end = at;
+    }
+
   for (const clip of project?.clips ?? []) {
     const clipEnd = clipTimelineEnd(clip);
     if (compareTimes(clipEnd, end) > 0) end = clipEnd;

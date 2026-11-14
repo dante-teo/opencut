@@ -10,6 +10,7 @@ import {
   addTimes,
   compareTimes,
   frameRateSchema,
+  frameTime,
   subtractTimes,
   timeSchema,
 } from './time.js';
@@ -100,6 +101,7 @@ const trackSchema = z.strictObject({
   name,
   type: mediaType,
   ...trackAudioShape,
+  locked: z.boolean().optional(),
 });
 export const clipVisualSchema = z.strictObject({
   crop: z
@@ -159,6 +161,7 @@ export const clipSchema = z.strictObject({
   speed: clipSpeedSchema.optional(),
   ...clipAudioShape,
   detachedAudio: z.literal(true).optional(),
+  linkId: id.optional(),
   visual: clipVisualSchema.optional(),
   grade: colorGradeSchema.optional(),
   keyframes: visualKeyframesSchema.optional(),
@@ -178,6 +181,11 @@ const settingsSchema = z.strictObject({
   height: z.int().positive(),
   frameRate: frameRateSchema,
 });
+export const markerSchema = z.strictObject({
+  id,
+  frame: z.int().nonnegative(),
+  name,
+});
 export const snapshotSchema = z.strictObject({
   schemaVersion: z.literal(PROJECT_SCHEMA_VERSION),
   metadata: z.strictObject({
@@ -192,6 +200,7 @@ export const snapshotSchema = z.strictObject({
   clips: z.array(persistedClipSchema),
   subtitles: subtitleTrackSchema.optional(),
   transitions: z.array(transitionSchema).optional(),
+  markers: z.array(markerSchema).optional(),
 });
 
 const historyEntrySchema = z.strictObject({
@@ -276,6 +285,24 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
       ids.add(entity.id);
     });
   }
+  project.markers?.forEach((marker, index) => {
+    if (ids.has(marker.id))
+      add(
+        `/markers/${index}/id`,
+        'duplicate_id',
+        `ID '${marker.id}' is already in use.`,
+      );
+    ids.add(marker.id);
+    try {
+      frameTime(marker.frame, project.settings.frameRate);
+    } catch {
+      add(
+        `/markers/${index}/frame`,
+        'time_overflow',
+        'Marker time exceeds the supported range.',
+      );
+    }
+  });
   project.subtitles?.cues.forEach((cue, index) => {
     const location = `/subtitles/cues/${index}`;
     if (ids.has(cue.id))

@@ -360,6 +360,16 @@ export async function runTimelineCommand(
             : `  Clip: ${clip.id}; asset ${clip.assetId}; timeline [${time(clip.timelineStart)}, ${time(clip.timelineEnd)}); source [${time(clip.sourceIn)}, ${time(clip.sourceOut)}); speed ${clipSpeed(clip).numerator}/${clipSpeed(clip).denominator}×; volume ${clip.volume ?? 1}; muted ${clip.muted ?? false}; fade in ${clip.fadeIn ? time(clip.fadeIn.duration) : '0s'}; fade out ${clip.fadeOut ? time(clip.fadeOut.duration) : '0s'}; visual ${JSON.stringify(clip.visual ?? {})}`,
         ),
       ]),
+      ...(result.markers ?? []).map(
+        (marker) =>
+          'Marker: ' +
+          marker.id +
+          ' at frame ' +
+          marker.frame +
+          ' (' +
+          marker.name +
+          ')',
+      ),
       ...(result.transitions ?? []).map(
         (entry) =>
           `Transition: ${entry.id} (${entry.kind}, ${entry.frames} frames); ${entry.kind === 'cross-dissolve' ? `${entry.from} → ${entry.to}` : entry.clipId}`,

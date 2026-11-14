@@ -68,6 +68,9 @@ T35 adds [audio fades, track controls, and stereo peak meters](TIMELINE_PLAYBACK
 T36 adds [constant clip playback speed and time remapping](TIMELINE_PLAYBACK.md#playback-speed-t36).
 T37 adds [clip keyframe animation](PRODUCT.md#keyframe-animation-t37).
 T38 adds [video cross-dissolves and canvas fades](TIMELINE_PLAYBACK.md#video-transitions-t38).
+T39 adds [group timeline editing](TIMELINE_EDITING.md), including multi-clip
+selection, a project clipboard, ripple delete, insert edits, gap closing,
+track locks, and marker snapping.
 
 Select a media clip to edit **Timeline position**, **Duration**, **Source in/out** in
 whole project frames, **Volume** (linear 0–1), **Mute**, **Fade in/out**, and video **Position X/Y**

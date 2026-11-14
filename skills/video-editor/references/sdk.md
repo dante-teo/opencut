@@ -202,3 +202,10 @@ A fade takes `{ kind: 'fade-in', clipId: 'intro', frames: 6 }` or
 `kind: 'fade-out'`. Use `{ type: 'transition.set', id, frames }` to adjust the
 duration and `{ type: 'transition.remove', id }` to delete it.
 `project.inspect().transitions` lists the records.
+
+Use `project.copyClips(ids)` to capture a typed same-project clipboard, or
+`project.cutClips(ids)` to also stage removal. Pass the clipboard to `clips.paste`
+and specify an explicit ripple or insert scope when shifting other clips.
+`project.apply(...operations)` returns detached operation results. To change
+the draft, stage another operation and save. A save commits the staged edits
+as one history entry.

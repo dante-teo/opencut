@@ -12,6 +12,9 @@ import { Preview } from './video-preview.js';
 import { TimelinePreview, type TimelineTransport } from './timeline-preview.js';
 import {
   clipTimelineEnd,
+  copyClips,
+  linkedSelection,
+  type ClipClipboard,
   compareTimes,
   addTimes,
   type SubtitleFormat,
@@ -28,7 +31,11 @@ import {
 import { ProjectTimeline } from './project-timeline.js';
 import { MediaLibrary } from './media-library.js';
 import { ProjectInspector } from './project-inspector.js';
-import { shortcutAction, shortcutOwnsKeys } from './shortcuts.js';
+import {
+  shortcutAction,
+  shortcutOwnsKeys,
+  type TimelineAction,
+} from './shortcuts.js';
 import type { PreviewTransport } from './video-preview.js';
 
 export function ProjectWorkspace() {
@@ -81,6 +88,11 @@ export function ProjectWorkspace() {
   const [selection, setSelection] = useState<{
     kind: 'asset' | 'clip';
     id: string;
+    ids?: string[];
+  } | null>(null);
+  const clipboard = useRef<{
+    path: string | null;
+    content: ClipClipboard;
   } | null>(null);
   function selectAsset(id: string) {
     setSelection({ kind: 'asset', id });
@@ -199,6 +211,7 @@ export function ProjectWorkspace() {
             label !== 'Packaging project…' &&
             !editing
           ) {
+            clipboard.current = null;
             setSelection(null);
             setPlayhead(ZERO);
             setLinkedClipId(null);
@@ -207,6 +220,14 @@ export function ProjectWorkspace() {
             setPreviewSession((value) => value + 1);
             setTimelineSession((value) => value + 1);
           }
+          if (
+            label === 'Saving project…' &&
+            before?.path === null &&
+            reply.state?.path &&
+            clipboard.current?.content.projectId ===
+              reply.state.project.metadata.id
+          )
+            clipboard.current.path = reply.state.path;
           if (editing) {
             const next = reply.state?.project;
             // Retain the selection ID while absent so undo restores selection too.
@@ -223,9 +244,18 @@ export function ProjectWorkspace() {
             setPreviewPosition(undefined);
             setViewer('project');
           }
+          if (reply.clipboard)
+            clipboard.current = {
+              path: reply.state?.path ?? null,
+              content: reply.clipboard,
+            };
           setNotice(
             reply.notice ??
-              (label === 'Saving project…' ? 'Project saved.' : ''),
+              (reply.clipboard
+                ? 'Clips cut.'
+                : label === 'Saving project…'
+                  ? 'Project saved.'
+                  : ''),
           );
         }
       }
@@ -291,6 +321,169 @@ export function ProjectWorkspace() {
     else if (!creating && dialog?.open) dialog.close();
   }, [creating]);
   const project = state?.project;
+  const selectedIds =
+    selection?.kind === 'clip' && project
+      ? linkedSelection(project, selection.ids ?? [selection.id]).map(
+          (clip) => clip.id,
+        )
+      : [];
+  const selectedClip = selection?.kind === 'clip' ? selection.id : null;
+  function selectClip(id: string, mode?: 'toggle' | 'range') {
+    const clicked = project?.clips.find((clip) => clip.id === id);
+    if (!mode || !project || !clicked) {
+      setSelection({ kind: 'clip', id });
+      return;
+    }
+    const members = linkedSelection(project, [id]).map((clip) => clip.id);
+    const ids = new Set(selectedIds);
+    if (mode === 'range') {
+      const first = project.clips.find((clip) => clip.id === selectedClip);
+      if (first?.trackId === clicked.trackId) {
+        const [low, high] = [first.timelineStart, clicked.timelineStart].sort(
+          compareTimes,
+        );
+        for (const clip of project.clips)
+          if (
+            clip.trackId === clicked.trackId &&
+            compareTimes(clip.timelineStart, low!) >= 0 &&
+            compareTimes(clip.timelineStart, high!) <= 0
+          )
+            ids.add(clip.id);
+      }
+      for (const member of members) ids.add(member);
+    } else if (ids.has(id)) {
+      for (const member of members) ids.delete(member);
+    } else {
+      for (const member of members) ids.add(member);
+    }
+    const primary = ids.has(id) ? id : [...ids].at(-1);
+    setSelection(primary ? { kind: 'clip', id: primary, ids: [...ids] } : null);
+  }
+
+  function timelineAction(action: TimelineAction) {
+    if (!project || busy) return;
+    const at = Number(frameIndex(playhead, project.settings.frameRate, true));
+    const ids = selectedIds;
+    const send = (operation: TimelineOperation, label: string) =>
+      void edit([operation], label);
+    switch (action) {
+      case 'delete':
+      case 'split': {
+        if (!selectedClip) return;
+        const cue = project.subtitles?.cues.find(
+          (cue) => cue.id === selectedClip,
+        );
+        if (cue) {
+          if (action === 'delete')
+            send({ type: 'subtitle.remove', id: cue.id }, 'Delete subtitle');
+          else if (
+            compareTimes(playhead, cue.start) > 0 &&
+            compareTimes(playhead, cue.end) < 0
+          )
+            send(
+              { type: 'subtitle.split', id: cue.id, at: playhead },
+              'Split subtitle',
+            );
+          return;
+        }
+        if (action === 'delete') {
+          if (ids.length)
+            send(
+              { type: 'clips.remove', ids },
+              ids.length === 1 ? 'Delete clip' : 'Delete clips',
+            );
+        } else {
+          const clip = project.clips.find((clip) => clip.id === selectedClip);
+          if (
+            clip &&
+            compareTimes(playhead, clip.timelineStart) > 0 &&
+            compareTimes(playhead, clipTimelineEnd(clip)) < 0
+          )
+            send({ type: 'clip.split', id: clip.id, at }, 'Split clip');
+        }
+        break;
+      }
+
+      case 'copy':
+      case 'cut': {
+        if (!ids.length) return;
+        if (action === 'copy') {
+          clipboard.current = {
+            path: state?.path ?? null,
+            content: copyClips(project, ids),
+          };
+          setNotice('Clips copied.');
+        } else {
+          send({ type: 'clips.cut', ids }, 'Cut clips');
+        }
+        break;
+      }
+      case 'paste':
+      case 'insert': {
+        const entry = clipboard.current;
+        if (
+          !entry ||
+          entry.path !== state?.path ||
+          entry.content.projectId !== project.metadata.id
+        ) {
+          setError('Copy or cut clips from this project first.');
+          return;
+        }
+        send(
+          {
+            type: 'clips.paste',
+            clipboard: entry.content,
+            at,
+            ...(action === 'insert'
+              ? { insert: 'selected-tracks' as const }
+              : {}),
+          },
+          action === 'insert' ? 'Insert clips' : 'Paste clips',
+        );
+        break;
+      }
+      case 'duplicate':
+        if (ids.length)
+          send({ type: 'clips.duplicate', ids }, 'Duplicate clips');
+        break;
+      case 'rippleDelete':
+      case 'rippleAll':
+        if (ids.length)
+          send(
+            {
+              type: 'clips.remove',
+              ids,
+              ripple:
+                action === 'rippleAll' ? 'all-unlocked' : 'selected-tracks',
+            },
+            'Ripple delete',
+          );
+        break;
+      case 'closeGap': {
+        const trackIds = [
+          ...new Set(
+            project.clips
+              .filter((clip) => ids.includes(clip.id))
+              .map((clip) => clip.trackId),
+          ),
+        ];
+        if (trackIds.length)
+          send({ type: 'timeline.close-gap', trackIds, at }, 'Close gap');
+        break;
+      }
+      case 'link':
+      case 'unlink':
+        if (ids.length)
+          send(
+            { type: 'clips.link', ids, linked: action === 'link' },
+            action === 'link' ? 'Link clips' : 'Unlink clips',
+          );
+        break;
+      case 'marker':
+        send({ type: 'marker.add', name: 'Marker', at }, 'Add marker');
+        break;
+    }
+  }
   function importMedia(files?: File[]) {
     if (!project) return;
     void run(
@@ -329,7 +522,7 @@ export function ProjectWorkspace() {
     properties = false,
   ) {
     if (!project) return Promise.resolve();
-    let rejected = true;
+    let accepted = false;
     return run(
       label,
       async () => {
@@ -339,12 +532,12 @@ export function ProjectWorkspace() {
           operations,
           label,
         });
-        rejected = !reply.ok;
+        accepted = reply.ok && !reply.canceled;
         return reply;
       },
       properties ? 'properties' : true,
     ).then(() => {
-      if (properties && rejected) throw new Error('Property edit rejected.');
+      if (properties && !accepted) throw new Error('Property edit rejected.');
     });
   }
   function history(direction: 'undo' | 'redo') {
@@ -373,6 +566,11 @@ export function ProjectWorkspace() {
         return;
       const action = shortcutAction(event);
       if (!action) return;
+      if (
+        (action === 'copy' || action === 'cut' || action === 'duplicate') &&
+        !selectedIds.length
+      )
+        return;
       event.preventDefault();
       if (busy && action !== 'save' && action !== 'undo' && action !== 'redo')
         return;
@@ -387,48 +585,8 @@ export function ProjectWorkspace() {
         const direction = action === 'previousFrame' ? -1 : 1;
         if (viewer === 'source') transport.current?.step(direction);
         else projectTransport.current?.step(direction);
-      } else if (selection?.kind === 'clip' && project) {
-        const cue = project.subtitles?.cues.find(
-          (cue) => cue.id === selection.id,
-        );
-        if (cue) {
-          if (action === 'delete')
-            void edit(
-              [{ type: 'subtitle.remove', id: cue.id }],
-              'Delete subtitle',
-            );
-          else if (
-            action === 'split' &&
-            compareTimes(playhead, cue.start) > 0 &&
-            compareTimes(playhead, cue.end) < 0
-          )
-            void edit(
-              [{ type: 'subtitle.split', id: cue.id, at: playhead }],
-              'Split subtitle',
-            );
-          return;
-        }
-        const clip = project.clips.find((clip) => clip.id === selection.id);
-        if (!clip) return;
-        if (action === 'delete')
-          void edit([{ type: 'clip.remove', id: clip.id }], 'Delete clip');
-        else if (
-          action === 'split' &&
-          compareTimes(playhead, clip.timelineStart) > 0 &&
-          compareTimes(playhead, clipTimelineEnd(clip)) < 0
-        )
-          void edit(
-            [
-              {
-                type: 'clip.split',
-                id: clip.id,
-                at: Number(
-                  frameIndex(playhead, project.settings.frameRate, true),
-                ),
-              },
-            ],
-            'Split clip',
-          );
+      } else if (action !== 'save') {
+        timelineAction(action);
       }
     }
     window.addEventListener('keydown', shortcut);
@@ -826,8 +984,10 @@ export function ProjectWorkspace() {
           setPreviewRequest((value) => value + 1);
           setViewer('source');
         }}
-        selected={selection?.kind === 'clip' ? selection.id : null}
-        onSelect={(id) => setSelection({ kind: 'clip', id })}
+        selected={selectedClip}
+        selectedIds={selectedIds}
+        onSelect={selectClip}
+        onTimelineAction={timelineAction}
       />
       <dialog
         ref={formDialog}

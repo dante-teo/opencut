@@ -1835,11 +1835,13 @@ button {
   white-space: nowrap;
 }
 
-.subtitle-menu {
+.subtitle-menu,
+.clip-edit-menu {
   position: relative;
   z-index: 4;
 }
-.subtitle-menu summary {
+.subtitle-menu summary,
+.clip-edit-menu summary {
   display: flex;
   align-items: center;
   gap: 5px;
@@ -2114,4 +2116,19 @@ button {
 
 .transition-actions input[type='number'] {
   width: 5rem;
+}
+
+.timeline-marker {
+  fill: #efbe65;
+  cursor: context-menu;
+}
+
+.clip-edit-menu .subtitle-actions {
+  inset: auto auto calc(100% + 4px) 0;
+  max-height: min(430px, 60vh);
+  overflow-y: auto;
+}
+
+.timeline-panel:has(.clip-edit-menu[open]) {
+  overflow: visible;
 }
