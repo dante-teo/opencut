@@ -1,10 +1,17 @@
 import assert from 'node:assert/strict';
-import { execFileSync, fork, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
-import { createProject, openProject } from '@opencut/sdk';
+import { OnlineMediaLibrary } from '@opencut/sdk';
 
 const generated = resolve('tests/fixtures/generated');
 const cli = resolve('apps/cli/dist/index.js');
@@ -14,7 +21,7 @@ const query = {
   query: 'fixture',
 } as const;
 
-test('public SDK and CLI import licensed online media without Electron', async (t) => {
+test('public SDK and CLI download licensed online media without Electron', async (t) => {
   await mkdir(generated, { recursive: true });
   const root = await mkdtemp(join(generated, 'online-headless-'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -56,35 +63,60 @@ test('public SDK and CLI import licensed online media without Electron', async (
     throw new Error(`Unexpected fetch: ${url}`);
   };
   try {
-    const sdkPath = join(root, 'sdk.json');
-    const editor = await createProject(sdkPath, { name: 'Online SDK' });
-    await editor.save();
-    const opened = await openProject(sdkPath);
-    const page = await opened.project.searchOnlineMedia(query);
+    const library = new OnlineMediaLibrary();
+    const page = await library.search(query);
     assert.equal(page.results.length, 1);
     assert.equal(page.results[0]!.previewUrl, null);
-    const imported = await opened.project.importOnlineMedia(
+    const downloaded = await library.download(
       page.results[0]!.id,
       join(root, 'sdk-media'),
     );
-    assert.equal(imported.asset.provenance?.license, 'CC BY 4.0');
-    await opened.save();
-    assert.equal(
-      (await openProject(sdkPath)).project.inspect().assets.length,
-      1,
-    );
+    assert.equal(downloaded.provenance.license, 'CC BY 4.0');
+    assert.deepEqual(await readFile(downloaded.path), bytes);
   } finally {
     globalThis.fetch = originalFetch;
   }
   const preload = join(root, 'mock-fetch.mjs');
   await writeFile(
     preload,
-    `import { readFileSync } from 'node:fs';\nconst body = ${JSON.stringify(providerResponse)};\nglobalThis.fetch = async (input) => String(input).startsWith('https://api.openverse.org/') ? new Response(JSON.stringify(body), {headers: {'content-type':'application/json'}}) : new Response(readFileSync(${JSON.stringify(png)}), {headers: {'content-type':'image/png'}});\n`,
+    `
+      import { readFileSync } from 'node:fs';
+      const body = ${JSON.stringify(providerResponse)};
+      globalThis.fetch = async (input, { signal } = {}) => {
+        if (String(input).startsWith('https://api.openverse.org/'))
+          return Response.json(body);
+        const bytes = readFileSync(${JSON.stringify(png)});
+        const headers = { 'content-type': 'image/png' };
+        if (!process.env.OPENCUT_TEST_SLOW_DOWNLOAD)
+          return new Response(bytes, { headers });
+        let timer;
+        let abort;
+        return new Response(new ReadableStream({
+          start(controller) {
+            abort = () => {
+              clearTimeout(timer);
+              controller.error(signal.reason);
+            };
+            signal.addEventListener('abort', abort, { once: true });
+            controller.enqueue(bytes.subarray(0, 8));
+            process.stderr.write('download started\\n');
+            timer = setTimeout(() => {
+              signal.removeEventListener('abort', abort);
+              process.stderr.write('download finished\\n');
+              controller.enqueue(bytes.subarray(8));
+              controller.close();
+            }, 1500);
+          },
+          cancel() {
+            clearTimeout(timer);
+            signal.removeEventListener('abort', abort);
+          },
+        }), { headers });
+      };
+    `,
   );
   const request = join(root, 'request.json');
   await writeFile(request, JSON.stringify(query));
-  const cliPath = join(root, 'cli.json');
-  await (await createProject(cliPath, { name: 'Online CLI' })).save();
   const run = (...args: string[]) =>
     spawnSync(process.execPath, [cli, ...args, '--json'], {
       encoding: 'utf8',
@@ -105,104 +137,95 @@ test('public SDK and CLI import licensed online media without Electron', async (
   assert.equal(search.status, 0, search.stderr);
   const selectedId = JSON.parse(search.stdout).results[0].id as string;
   assert.match(selectedId, /^[0-9a-f-]{36}$/);
-  const importResult = run(
+  const download = run(
     'online',
-    'import',
-    cliPath,
+    'download',
     request,
     '--result',
     selectedId,
     '--directory',
     join(root, 'cli-media'),
-    '--expected-revision',
-    '0',
   );
-  assert.equal(importResult.status, 0, importResult.stderr);
-  assert.equal(
-    JSON.parse(importResult.stdout).asset.provenance.license,
-    'CC BY 4.0',
-  );
-  const retry = run(
-    'online',
-    'import',
-    cliPath,
-    request,
-    '--result',
-    selectedId,
-    '--directory',
-    join(root, 'cli-media'),
-    '--expected-revision',
-    '0',
-  );
-  assert.equal(retry.status, 1);
-  assert.equal(JSON.parse(retry.stderr).error.code, 'REVISION_CONFLICT');
-  const sdkAsset = (await openProject(join(root, 'sdk.json'))).project.inspect()
-    .assets[0]!;
-  const cliAsset = (await openProject(cliPath)).project.inspect().assets[0]!;
-  assert.deepEqual(cliAsset.provenance, sdkAsset.provenance);
-  assert.equal(cliAsset.name, sdkAsset.name);
+  assert.equal(download.status, 0, download.stderr);
+  const artifact = JSON.parse(download.stdout);
+  assert.equal(artifact.provenance.license, 'CC BY 4.0');
+  assert.deepEqual(await readFile(artifact.path), bytes);
 
-  await rm(JSON.parse(importResult.stdout).artifact);
-  const restored = run(
-    'online',
-    'import',
-    cliPath,
-    request,
-    '--result',
-    selectedId,
-    '--directory',
-    join(root, 'cli-media'),
-    '--expected-revision',
-    '1',
+  const definition = join(root, 'online.video.json');
+  await writeFile(
+    definition,
+    JSON.stringify({
+      canvas: { width: 64, height: 64, frameRate: 24 },
+      assets: {
+        licensed: {
+          kind: 'image',
+          path: artifact.path.slice(root.length + 1),
+          provenance: artifact.provenance,
+        },
+      },
+      tracks: [
+        { type: 'image', clips: [{ asset: 'licensed', at: 0, duration: 1 }] },
+      ],
+    }),
   );
-  assert.equal(restored.status, 0, restored.stderr);
-  assert.equal(JSON.parse(restored.stdout).imported, true);
-  const reopened = await openProject(cliPath);
-  assert.equal(reopened.project.inspect().assets.length, 2);
-  assert.equal(
-    (await reopened.project.checkMedia()).find(
-      (asset) => asset.assetId === JSON.parse(restored.stdout).asset.id,
-    )?.status,
-    'available',
+  const inspected = run('inspect', definition);
+  assert.equal(inspected.status, 0, inspected.stderr);
+  assert.deepEqual(
+    JSON.parse(inspected.stdout).assets[0].provenance,
+    artifact.provenance,
   );
 
-  const lostPath = join(root, 'viewer-crash.json');
-  await (await createProject(lostPath, { name: 'Viewer crash' })).save();
-  const worker = fork(
-    resolve('tests/integration/session-worker.ts'),
-    [lostPath],
-    {
-      execArgv: ['--import', 'tsx'],
-      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+  await t.test(
+    'SIGINT discards an in-flight download',
+    { skip: process.platform === 'win32' },
+    async () => {
+      const directory = join(root, 'cancelled-media');
+      const child = spawn(
+        process.execPath,
+        [
+          '--import',
+          preload,
+          cli,
+          'online',
+          'download',
+          request,
+          '--result',
+          selectedId,
+          '--directory',
+          directory,
+          '--json',
+        ],
+        {
+          env: { ...process.env, OPENCUT_TEST_SLOW_DOWNLOAD: '1' },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      );
+      let output = '';
+      let diagnostics = '';
+      let cancelled = false;
+      child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+        output += chunk;
+      });
+      child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
+        diagnostics += chunk;
+        if (!cancelled && diagnostics.includes('download started')) {
+          cancelled = true;
+          child.kill('SIGINT');
+        }
+      });
+      try {
+        const [code] = await once(child, 'close', {
+          signal: AbortSignal.timeout(10_000),
+        });
+        assert.ok(cancelled, diagnostics);
+        assert.equal(code, 130, diagnostics);
+        assert.doesNotMatch(diagnostics, /download finished/);
+        assert.equal(output, '');
+        assert.deepEqual(await readdir(directory), []);
+      } finally {
+        if (child.exitCode === null && child.signalCode === null)
+          child.kill('SIGKILL');
+      }
     },
   );
-  try {
-    const exited = once(worker, 'exit');
-    const [ready] = await once(worker, 'message');
-    assert.equal((ready as { ok: boolean }).ok, true);
-    worker.kill('SIGKILL');
-    await exited;
-    const imported = run(
-      'online',
-      'import',
-      lostPath,
-      request,
-      '--result',
-      selectedId,
-      '--directory',
-      join(root, 'lost-media'),
-      '--expected-revision',
-      '0',
-    );
-    assert.equal(imported.status, 0, imported.stderr);
-    const committed = await openProject(lostPath);
-    assert.equal(committed.project.inspect().assets.length, 1);
-    assert.equal(
-      (await committed.project.checkMedia())[0]?.status,
-      'available',
-    );
-  } finally {
-    if (worker.exitCode === null && worker.signalCode === null)
-      worker.kill('SIGKILL');
-  }
 });

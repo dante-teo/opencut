@@ -6,10 +6,7 @@ export default defineConfig(({ command }) => ({
     build: {
       outDir: 'dist/main',
       rollupOptions: {
-        input: {
-          index: resolve('src/main/index.ts'),
-          'media-worker': resolve('src/main/media-worker.ts'),
-        },
+        input: resolve('src/main/index.ts'),
       },
     },
   },

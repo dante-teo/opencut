@@ -1,25 +1,19 @@
+import {
+  addFixtureClip,
+  renderFixture,
+  splitFixtureClip,
+} from './render-fixture.js';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import {
-  addClip,
-  createProject,
-  frameTime,
-  serializeProject,
-  setClipAudio,
-  splitClip,
-  trimClip,
-} from '@opencut/core';
+import { createProject, frameTime } from '@opencut/core';
 import type { FrameRate, Project } from '@opencut/core';
 import { requireTool, runTool } from '../../scripts/fixture-lib.js';
 
-const entry = fileURLToPath(
-  new URL('../../apps/cli/dist/index.js', import.meta.url),
-);
 const generated = fileURLToPath(
   new URL('../fixtures/generated/', import.meta.url),
 );
@@ -63,7 +57,7 @@ function add(
   volume = 1,
 ) {
   const at = (n: number) => frameTime(n, project.settings.frameRate);
-  return addClip(project, {
+  return addFixtureClip(project, {
     id,
     assetId,
     trackId,
@@ -71,7 +65,19 @@ function add(
     sourceIn: at(sourceIn),
     sourceOut: at(sourceOut),
     volume,
-  }).project;
+  });
+}
+function audioVariant(
+  project: Project,
+  id: string,
+  options: { muted?: boolean; volume?: number },
+) {
+  const result = structuredClone(project);
+  Object.assign(
+    result.clips.find((clip) => clip.id === id)!,
+    options,
+  );
+  return result;
 }
 function pcm(file: string): Float32Array {
   const result = spawnSync(
@@ -126,7 +132,7 @@ function tone(samples: Float32Array, hz: number, start: number, length = 0.04) {
   return (2 * Math.hypot(real, imaginary)) / window.length;
 }
 
-test('native T11 audio rendering through the built CLI', async (t) => {
+test('native T11 audio rendering through the media engine', async (t) => {
   requireTool('ffmpeg');
   requireTool('ffprobe');
   const before = await Promise.all(
@@ -135,26 +141,10 @@ test('native T11 audio rendering through the built CLI', async (t) => {
   const directory = await mkdtemp(join(generated, 't11-'));
   const path = join(directory, 'project.json');
   const render = async (project: Project, name: string) => {
-    const snapshot = serializeProject(project);
-    await writeFile(path, snapshot);
+    const snapshot = structuredClone(project);
     const output = join(directory, `${name}.mp4`);
-    const result = spawnSync(
-      process.execPath,
-      [entry, 'project', 'render', path, '--output', output, '--json'],
-      { encoding: 'utf8', timeout: 120000 },
-    );
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stderr, '');
-    assert.equal(await readFile(path, 'utf8'), snapshot);
-    const events = result.stdout
-      .trim()
-      .split('\n')
-      .map((line: string) => JSON.parse(line));
-    const report = events.at(-1);
-    assert.equal(report.event, 'completed');
-    assert.ok(
-      events.some((event: { event: string }) => event.event === 'progress'),
-    );
+    const report = await renderFixture(project, path, output);
+    assert.deepEqual(project, snapshot);
     const probe = JSON.parse(
       runTool('ffprobe', [
         '-v',
@@ -256,13 +246,13 @@ test('native T11 audio rendering through the built CLI', async (t) => {
         );
         const full = await render(base, 'gain-full');
         const half = await render(
-          setClipAudio(base, 'bg', { volume: 0.5 }).project,
+          audioVariant(base, 'bg', { volume: 0.5 }),
           'gain-half',
         );
         const ratio = rms(half.samples, 0.4, 0.2) / rms(full.samples, 0.4, 0.2);
         assert.ok(Math.abs(ratio - 0.5) < 0.03, `half gain ratio ${ratio}`);
         const pair = add(
-          setClipAudio(base, 'bg', { volume: 0.25 }).project,
+          audioVariant(base, 'bg', { volume: 0.25 }),
           'bg2',
           'asset3',
           'other',
@@ -282,15 +272,12 @@ test('native T11 audio rendering through the built CLI', async (t) => {
           ['muted', { muted: true }],
           ['zero', { volume: 0 }],
         ] as const) {
-          const silent = await render(
-            setClipAudio(base, 'bg', options).project,
-            name,
-          );
+          const silent = await render(audioVariant(base, 'bg', options), name);
           assert.ok(rms(silent.samples, 0.4, 0.2) < 0.00001, name);
         }
         const original = add(example(), 'v', 'asset0', 'video', 0, 0, 60);
         const muted = await render(
-          setClipAudio(original, 'v', { muted: true }).project,
+          audioVariant(original, 'v', { muted: true }),
           'original-muted',
         );
         assert.ok(rms(muted.samples, 0.03) < 0.00001, 'video audio mute');
@@ -305,13 +292,9 @@ test('native T11 audio rendering through the built CLI', async (t) => {
     await t.test(
       'preserves trim/split synchronization and interior gaps with visual/audio markers',
       async () => {
-        let project = add(example(), 'v', 'asset0', 'video', 9, 0, 90);
-        project = trimClip(project, 'v', {
-          sourceIn: frameTime(15, rate),
-          sourceOut: frameTime(75, rate),
-        }).project;
+        const project = add(example(), 'v', 'asset0', 'video', 9, 15, 75);
         const whole = await render(project, 'sync-whole');
-        project = splitClip(project, 'v', frameTime(30, rate), 'right').project;
+        splitFixtureClip(project, 'v', frameTime(30, rate), 'right');
         const split = await render(project, 'sync-split');
         assert.equal(split.report.frameCount, 69);
         for (const start of [0.05, 0.4, 0.65, 1.3, 1.65, 2.1])
@@ -354,7 +337,7 @@ test('native T11 audio rendering through the built CLI', async (t) => {
 
         // A separately placed audio-track clip must use the same trimmed source
         // mapping as original video audio, including after an independent split.
-        let independent = add(
+        const independent = add(
           example(),
           'silent-video',
           'asset2',
@@ -363,17 +346,13 @@ test('native T11 audio rendering through the built CLI', async (t) => {
           0,
           60,
         );
-        independent = add(independent, 'sound', 'asset0', 'music', 9, 0, 90);
-        independent = trimClip(independent, 'sound', {
-          sourceIn: frameTime(15, rate),
-          sourceOut: frameTime(75, rate),
-        }).project;
-        independent = splitClip(
+        add(independent, 'sound', 'asset0', 'music', 9, 15, 75);
+        splitFixtureClip(
           independent,
           'sound',
           frameTime(30, rate),
           'sound-right',
-        ).project;
+        );
         const audioTrack = await render(independent, 'audio-track-sync');
         for (const start of [0.82, 1.82])
           assert.ok(rms(audioTrack.samples, start) > 0.04);
@@ -386,7 +365,7 @@ test('native T11 audio rendering through the built CLI', async (t) => {
       'keeps fractional-rate one-frame audio splits aligned without cumulative drift',
       async () => {
         const fractional = { numerator: 30000, denominator: 1001 };
-        let project = add(
+        const project = add(
           example(fractional),
           'v',
           'asset0',
@@ -397,12 +376,12 @@ test('native T11 audio rendering through the built CLI', async (t) => {
         );
         const whole = await render(project, 'fraction-whole');
         for (let n = 1; n < 60; n++)
-          project = splitClip(
+          splitFixtureClip(
             project,
             n === 1 ? 'v' : `p${n - 1}`,
             frameTime(n + 2, fractional),
             `p${n}`,
-          ).project;
+          );
         const split = await render(project, 'fraction-split');
         assert.equal(split.report.frameCount, 62);
         let difference = 0;
@@ -459,9 +438,7 @@ test('native T11 audio rendering through the built CLI', async (t) => {
           tone(result.samples, 880, 0.4) > 0.08,
           'delayed audio begins at timeline 0.35',
         );
-        project = trimClip(project, 'v', {
-          sourceIn: frameTime(6, rate),
-        }).project;
+        project.clips[0]!.sourceIn = frameTime(6, rate);
         const trimmed = await render(project, 'delayed-trim');
         assert.ok(
           rms(trimmed.samples, 0.105, 0.025) < 0.00001,
@@ -524,22 +501,8 @@ test('native T11 audio rendering through the built CLI', async (t) => {
             missing ? 30 : 150,
           );
           if (missing) project.assets[3]!.file.path = '../video-short.mp4';
-          await writeFile(path, serializeProject(project));
-          const result = spawnSync(
-            process.execPath,
-            [
-              entry,
-              'project',
-              'render',
-              path,
-              '--output',
-              join(directory, 'invalid.mp4'),
-            ],
-            { encoding: 'utf8' },
-          );
-          assert.equal(result.status, 1);
-          assert.match(
-            result.stderr,
+          await assert.rejects(
+            renderFixture(project, path, join(directory, 'invalid.mp4')),
             missing ? /requires an audio stream/ : /current audio duration/,
           );
           await assert.rejects(readFile(join(directory, 'invalid.mp4')));

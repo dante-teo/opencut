@@ -1,9 +1,9 @@
 import { sourceColorMatrix } from '@opencut/shared';
-import { open } from 'node:fs/promises';
-import { extname, resolve } from 'node:path';
+import { link, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { dirname, extname, join, resolve } from 'node:path';
 import { probeMedia } from './probe.js';
 import type { MediaMetadata } from './probe.js';
-import { MediaError, renderSourceInputArgs, runMediaTool } from './process.js';
+import { MediaError, runMediaTool } from './process.js';
 
 export interface FrameResult {
   path: string;
@@ -16,6 +16,7 @@ export async function extractFrame(
   file: string,
   timestampSeconds: number,
   output: string,
+  signal?: AbortSignal,
 ): Promise<FrameResult> {
   if (!Number.isFinite(timestampSeconds) || timestampSeconds < 0) {
     throw new MediaError(
@@ -26,7 +27,7 @@ export async function extractFrame(
   if (extname(path).toLowerCase() !== '.png') {
     throw new MediaError('Frame output must have a .png extension.');
   }
-  const media = await probeMedia(file);
+  const media = await probeMedia(file, signal);
   const { video } = media;
   if (!video) throw new MediaError('Media has no video stream to extract.');
   // -ss is relative to the input start; a stream's duration is only its length.
@@ -66,18 +67,25 @@ export async function extractFrame(
       'pipe:1',
     ],
     64 * 1024 * 1024,
+    60_000,
+    { signal },
   );
   if (!png.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))) {
     throw new MediaError(
       'ffmpeg produced no PNG frame at the requested timestamp (possibly beyond the last decodable frame).',
     );
   }
-  // Exclusive creation also refuses symlinks and aliases of the source file.
-  // Decode first so executable/decoder failures cannot leave a partial output.
-  let destination;
+  signal?.throwIfAborted();
+  let directory: string | undefined;
   try {
-    destination = await open(path, 'wx');
+    directory = await mkdtemp(join(dirname(path), '.opencut-frame-'));
+    const staged = join(directory, 'frame.png');
+    await writeFile(staged, png, { flag: 'wx', signal });
+    signal?.throwIfAborted();
+    // Publish the completed file exclusively, including when the path is a symlink.
+    await link(staged, path);
   } catch (error) {
+    signal?.throwIfAborted();
     const exists =
       error instanceof Error && 'code' in error && error.code === 'EEXIST';
     throw new MediaError(
@@ -86,15 +94,8 @@ export async function extractFrame(
         : `Cannot create frame output '${path}'.`,
       { cause: error },
     );
-  }
-  try {
-    await destination.writeFile(png);
-  } catch (error) {
-    throw new MediaError(`Cannot write frame output '${path}'.`, {
-      cause: error,
-    });
   } finally {
-    await destination.close();
+    if (directory) await rm(directory, { recursive: true, force: true });
   }
   return {
     path,
@@ -135,7 +136,6 @@ export async function decodeStillFrame(
       'error',
       '-threads',
       '2',
-      ...renderSourceInputArgs(),
       '-select_streams',
       String(video.index),
       '-read_intervals',
@@ -173,7 +173,6 @@ export async function decodeStillFrame(
       '2',
       '-ss',
       seek.toFixed(6),
-      ...renderSourceInputArgs(),
       '-i',
       source.path,
       '-map',

@@ -6,7 +6,7 @@ Date: 2026-10-25
 
 T36 extends version 1 with an optional clip speed. The model still derives
 duration from stored values and defaults omitted speed to 1×. See the
-[current project format](../PROJECT_FORMAT.md#exact-time).
+current project format.
 
 ## Context
 
@@ -63,7 +63,7 @@ main project API still has no filesystem or media-tool access. Imported images
 use visual (`video`) media types with a metadata kind of `image`; no image track
 or timeline editing behavior is introduced.
 
-The full schema and API contract live in [PROJECT_FORMAT.md](../PROJECT_FORMAT.md).
+The schema and API contract were documented with the saved format.
 
 ## Rationale and alternatives
 
@@ -103,3 +103,5 @@ project-frame indices; the core retains exact rational inputs and offline editin
 T09 follow-up: [ADR 0006](0006-snapshot-transactions-and-history.md) extends
 prerelease version 1 with optional editing revision and snapshot-history stacks.
 Legacy files remain readable; older strict binaries cannot read the new field.
+
+The saved project format was retired. See [video definitions](../VIDEO_DEFINITIONS.md) for current authoring.

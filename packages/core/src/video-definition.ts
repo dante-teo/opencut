@@ -81,12 +81,11 @@ const track = trackSchema.omit({ id: true, name: true, type: true }).extend({
 });
 const visualOnlyTrack = track.omit({ volume: true, muted: true });
 const asset = assetSchema
-  .omit({ id: true, file: true })
+  .pick({ name: true, freezeFrame: true, provenance: true })
   .partial()
   .extend({
     path: relativeMediaPathSchema,
     kind: z.enum(['video', 'image', 'audio']),
-    metadata: assetSchema.shape.metadata.nullable(),
   });
 const font = z.union([
   z.strictObject({ path: relativeMediaPathSchema }),

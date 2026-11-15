@@ -1,6 +1,7 @@
 import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { renderVideo } from '@opencut/sdk';
 import { launchDesktop } from './helpers.js';
 
 test('reviews consecutive definition builds and keeps the last playable revision on error', async () => {
@@ -22,6 +23,9 @@ test('reviews consecutive definition builds and keeps the last playable revision
         filePaths: [path],
       });
     }, path);
+    await expect(
+      page.getByRole('button', { name: 'Open a project' }),
+    ).toHaveCount(0);
     await page.getByRole('button', { name: 'Open definition' }).click();
     const workspace = page.getByLabel('Definition review');
     const status = workspace.getByRole('status', {
@@ -82,8 +86,23 @@ test('reviews consecutive definition builds and keeps the last playable revision
       workspace.getByRole('heading', { name: 'Helper changed edited' }),
     ).toBeVisible({ timeout: 25_000 });
     await expect(movie).not.toHaveAttribute('src', secondURL!);
+    const output = join(directory, 'review.mp4');
+    await application.evaluate(({ dialog }, path) => {
+      dialog.showSaveDialog = async () => ({ canceled: false, filePath: path });
+    }, output);
+    await workspace.getByRole('button', { name: 'Export MP4' }).click();
+    await expect(workspace.getByLabel('Export result')).toContainText(
+      'review.mp4',
+    );
+    const direct = join(directory, 'foreground.mp4');
+    await renderVideo(path, direct);
+    expect(await readFile(output)).toEqual(await readFile(direct));
+    await workspace.getByRole('button', { name: 'Export MP4' }).click();
+    await expect(workspace.getByRole('alert')).toContainText(
+      'Refusing to overwrite',
+    );
     await workspace.getByRole('button', { name: 'Close definition' }).click();
-    await expect(page.getByLabel('Project workspace')).toBeVisible();
+    await expect(page.getByLabel('Review workspace')).toBeVisible();
   } finally {
     await application.close();
     await rm(directory, { recursive: true, force: true });

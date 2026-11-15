@@ -71,28 +71,6 @@ export function clipTimelineEnd(clip: ClipTiming): RationalTime {
   return addTimes(clip.timelineStart, clipDuration(clip));
 }
 
-export function timelineToSourceOffset(
-  clip: Pick<ClipTiming, 'speed'>,
-  timelineOffset: RationalTime,
-) {
-  const { numerator, denominator } = clipSpeed(clip);
-  return rationalTime(
-    BigInt(timelineOffset.numerator) * BigInt(numerator),
-    BigInt(timelineOffset.denominator) * BigInt(denominator),
-  );
-}
-
-export function clipTimelinePosition(
-  clip: ClipTiming,
-  sourceTime: RationalTime,
-) {
-  const { numerator, denominator } = clipSpeed(clip);
-  return mapPosition(sourceTime, clip.sourceIn, clip.timelineStart, {
-    numerator: denominator,
-    denominator: numerator,
-  });
-}
-
 export function clipSourcePosition(
   clip: ClipTiming,
   timelineTime: RationalTime,

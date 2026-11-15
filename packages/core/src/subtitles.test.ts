@@ -3,19 +3,14 @@ import { describe, expect, it } from 'vitest';
 import {
   createProject,
   createTimelineEvaluator,
-  deserializeProject,
   evaluateTimeline,
   evaluateTimelineFrame,
-  executeTransaction,
   inspectTimeline,
   parseSubtitleTime,
   parseSubtitles,
   planProjectRender,
-  redoEdit,
-  serializeProject,
   serializeSubtitles,
   subtitleLanes,
-  undoEdit,
 } from './index.js';
 
 const ms = (numerator: number) => ({ numerator, denominator: 1000 });
@@ -151,99 +146,13 @@ describe('subtitle sidecars', () => {
   });
 });
 
-describe('subtitle transactions', () => {
-  it('edits exact time, shares style, preserves stable IDs and restores the whole track', () => {
-    const project = createProject({ name: 'Subtitles' });
-    const changed = executeTransaction(project, {
-      expectedRevision: 0,
-      operations: [
-        {
-          type: 'subtitle.add',
-          id: 'first',
-          start: ms(105),
-          end: ms(605),
-          text: 'Hello\r\n你好',
-        },
-        { type: 'subtitle.split', id: 'first', at: ms(305), rightId: 'right' },
-        { type: 'subtitle.move', id: 'right', start: ms(315) },
-        { type: 'subtitle.set', id: 'right', duration: ms(100), text: '中文' },
-        { type: 'subtitle.merge', ids: ['right', 'first'] },
-        {
-          type: 'subtitle.add',
-          id: 'spare',
-          start: ms(0),
-          end: ms(20),
-          text: '',
-        },
-        { type: 'subtitle.remove', id: 'spare' },
-        {
-          type: 'subtitle.style',
-          style: {
-            fontFamily: 'Noto Sans SC',
-            fontSize: 32,
-            x: 7,
-            y: 110,
-            color: '#ffffaa',
-            stroke: null,
-            background: { color: '#33445580', padding: 4 },
-          },
-        },
-      ],
-    }).project;
-    const restored = deserializeProject(serializeProject(changed));
-    expect(restored.subtitles?.cues).toEqual([
-      {
-        id: 'first',
-        start: ms(105),
-        end: { numerator: 83, denominator: 200 },
-        text: 'Hello\n你好\n中文',
-      },
-    ]);
-    expect(restored.clips).toEqual([]);
-    expect(undoEdit(restored).subtitles).toBeUndefined();
-    expect(redoEdit(undoEdit(restored)).subtitles).toEqual(restored.subtitles);
-    expect(evaluateTimeline(restored, ms(106)).visualClips[0]).toMatchObject({
-      subtitle: true,
-      text: {
-        fontSize: 32,
-        color: '#ffffaa',
-        stroke: null,
-        background: { padding: 4 },
-      },
-      visual: { x: 7 },
-    });
-    expect(() =>
-      executeTransaction(restored, {
-        expectedRevision: 1,
-        operations: [
-          { type: 'subtitle.remove', id: 'first' },
-          { type: 'subtitle.add', start: ms(50), end: ms(0), text: 'invalid' },
-        ],
-      }),
-    ).toThrow('end must be later');
-    expect(restored.subtitles?.cues).toHaveLength(1);
-  });
-
+describe('subtitle evaluation', () => {
   it('keeps resolved subtitle timing and style detached from subsequent project mutations', () => {
-    const project = executeTransaction(
-      createProject({ name: 'Detached preview' }),
-      {
-        expectedRevision: 0,
-        operations: [
-          {
-            type: 'subtitle.add',
-            id: 'cue',
-            start: ms(0),
-            end: ms(500),
-            text: '你好',
-          },
-          {
-            type: 'subtitle.style',
-            style: { stroke: { color: '#fff123', width: 3 } },
-          },
-        ],
-      },
-    ).project;
+    const project = createProject({ name: 'Detached preview' });
+    project.subtitles = {
+      cues: [{ id: 'cue', start: ms(0), end: ms(500), text: '你好' }],
+      style: { stroke: { color: '#fff123', width: 3 } },
+    };
     const evaluate = createTimelineEvaluator(project, true);
     project.subtitles!.cues[0]!.end.numerator = 1;
     project.subtitles!.style.stroke!.width = 1;
@@ -296,15 +205,11 @@ describe('subtitle transactions', () => {
   it('evaluates an exact subtitle interval whose elapsed offset would overflow', () => {
     const start = { numerator: 1, denominator: Number.MAX_SAFE_INTEGER };
     const end = { numerator: 1, denominator: 1 };
-    const project = executeTransaction(
-      createProject({ name: 'Precise subtitle' }),
-      {
-        expectedRevision: 0,
-        operations: [
-          { type: 'subtitle.add', id: 'cue', start, end, text: '你好' },
-        ],
-      },
-    ).project;
+    const project = createProject({ name: 'Precise subtitle' });
+    project.subtitles = {
+      style: {},
+      cues: [{ id: 'cue', start, end, text: '你好' }],
+    };
 
     expect(evaluateTimelineFrame(project, 0).visualClips).toEqual([]);
     expect(
@@ -328,15 +233,14 @@ describe('subtitle transactions', () => {
   });
 
   it('resolves overlapping cue layers on half-open boundaries and samples only at render time', () => {
-    const project = executeTransaction(createProject({ name: 'Overlap' }), {
-      expectedRevision: 0,
-      operations: [
-        {
-          type: 'subtitle.import',
-          cues: parseSubtitles(fixtures('vtt'), 'vtt'),
-        },
-      ],
-    }).project;
+    const project = createProject({ name: 'Overlap' });
+    project.subtitles = {
+      style: {},
+      cues: parseSubtitles(fixtures('vtt'), 'vtt').map((cue, index) => ({
+        ...cue,
+        id: `cue-${index}`,
+      })),
+    };
     const [first, second] = project.subtitles!.cues;
     expect(subtitleLanes(project.subtitles!.cues)).toHaveLength(2);
     expect(

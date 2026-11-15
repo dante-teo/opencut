@@ -1,23 +1,19 @@
+import {
+  addFixtureClip,
+  renderFixture,
+  splitFixtureClip,
+} from './render-fixture.js';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import {
-  addClip,
-  createProject,
-  frameTime,
-  serializeProject,
-  splitClip,
-} from '@opencut/core';
-import type { ClipVisualOptions, Project } from '@opencut/core';
+import { createProject, frameTime } from '@opencut/core';
+import type { TimelineClip, Project } from '@opencut/core';
 import { requireTool, runTool } from '../../scripts/fixture-lib.js';
 
-const entry = fileURLToPath(
-  new URL('../../apps/cli/dist/index.js', import.meta.url),
-);
 const generated = fileURLToPath(
   new URL('../fixtures/generated/', import.meta.url),
 );
@@ -84,10 +80,10 @@ function add(
   at: number,
   sourceIn: number,
   sourceOut: number,
-  visual?: ClipVisualOptions,
+  visual?: NonNullable<TimelineClip['visual']>,
 ) {
   const time = (frame: number) => frameTime(frame, project.settings.frameRate);
-  return addClip(project, {
+  return addFixtureClip(project, {
     id,
     assetId,
     trackId,
@@ -96,19 +92,14 @@ function add(
     sourceOut: time(sourceOut),
     volume: 0.5,
     ...(visual ? { visual } : {}),
-  }).project;
+  });
 }
 
-test('native T12 visual compositing through the built CLI', async (t) => {
+test('native T12 visual compositing through the media engine', async (t) => {
   requireTool('ffmpeg');
   requireTool('ffprobe');
   const directory = await mkdtemp(join(generated, 't12-'));
   const projectFile = join(directory, 'project.json');
-  const run = (...args: string[]) =>
-    spawnSync(process.execPath, [entry, ...args], {
-      encoding: 'utf8',
-      timeout: 120000,
-    });
   const names = [
     'red.mp4',
     'blue.mp4',
@@ -213,29 +204,10 @@ test('native T12 visual compositing through the built CLI', async (t) => {
       return project;
     }
     const render = async (project: Project, name: string) => {
-      const snapshot = serializeProject(project);
-      await writeFile(projectFile, snapshot);
+      const snapshot = structuredClone(project);
       const output = join(directory, `${name}.mp4`);
-      const result = run(
-        'project',
-        'render',
-        projectFile,
-        '--output',
-        output,
-        '--json',
-      );
-      assert.equal(result.status, 0, result.stderr);
-      assert.equal(result.stderr, '');
-      assert.equal(await readFile(projectFile, 'utf8'), snapshot);
-      const events = result.stdout
-        .trim()
-        .split('\n')
-        .map((line: string) => JSON.parse(line));
-      const report = events.at(-1);
-      assert.equal(report.event, 'completed');
-      assert.ok(
-        events.some((event: { event: string }) => event.event === 'progress'),
-      );
+      const report = await renderFixture(project, projectFile, output);
+      assert.deepEqual(project, snapshot);
       const probe = JSON.parse(
         runTool('ffprobe', [
           '-v',
@@ -333,17 +305,12 @@ test('native T12 visual compositing through the built CLI', async (t) => {
     await t.test(
       'transparent and partially transparent PNG duration, source range, opacity multiplication and splits',
       async () => {
-        let project = add(example(), 'red', 'a0', 'base', 0, 0, 30);
-        project = add(project, 'image', 'a2', 'top', 5, 90, 96, {
+        const project = add(example(), 'red', 'a0', 'base', 0, 0, 30);
+        add(project, 'image', 'a2', 'top', 5, 90, 96, {
           fit: 'stretch',
           scale: 0.5,
         });
-        project = splitClip(
-          project,
-          'image',
-          frameTime(8, rate),
-          'image-right',
-        ).project;
+        splitFixtureClip(project, 'image', frameTime(8, rate), 'image-right');
         const result = await render(project, 'image');
         for (const n of [4, 11])
           pixel(result.bytes, 160, 90, n, 100, 45, [255, 0, 0]);
@@ -452,96 +419,6 @@ test('native T12 visual compositing through the built CLI', async (t) => {
         for (const n of [0, 2, 3, 4, 5])
           pixel(bytes, 160, 90, n, 120, 45, [18, 52, 86]);
         pixel(bytes, 160, 90, 1, 120, 45, [137, 154, 171]);
-      },
-    );
-    await t.test(
-      'image import and visual/canvas CLI mutations preserve history, dry run and undo',
-      async () => {
-        const initial = example();
-        initial.assets = initial.assets.filter((asset) => asset.id !== 'a2');
-        await writeFile(projectFile, serializeProject(initial));
-        const imported = run(
-          'media',
-          'import',
-          projectFile,
-          join(directory, 'alpha.png'),
-          '--json',
-        );
-        assert.equal(imported.status, 0, imported.stderr);
-        const asset = JSON.parse(imported.stdout).asset;
-        assert.equal(asset.metadata.kind, 'image');
-        const added = run(
-          'clip',
-          'add',
-          projectFile,
-          asset.id,
-          '--track',
-          'top',
-          '--at',
-          '3',
-          '--in',
-          '0',
-          '--out',
-          '12',
-          '--scale',
-          '0.5',
-          '--json',
-        );
-        assert.equal(added.status, 0, added.stderr);
-        const id = JSON.parse(added.stdout).clip.id;
-        let result = run(
-          'clip',
-          'visual',
-          projectFile,
-          id,
-          '--x=-20',
-          '--opacity',
-          '0.5',
-          '--json',
-        );
-        assert.equal(result.status, 0, result.stderr);
-        assert.deepEqual(JSON.parse(result.stdout).clip.visual, {
-          x: -20,
-          scale: 0.5,
-          opacity: 0.5,
-        });
-        const beforeCanvas = await readFile(projectFile, 'utf8');
-        result = run(
-          'canvas',
-          'set',
-          projectFile,
-          '--width',
-          '90',
-          '--height',
-          '160',
-          '--background-color',
-          '#ABCDEF',
-          '--dry-run',
-          '--json',
-        );
-        assert.equal(result.status, 0, result.stderr);
-        assert.equal(await readFile(projectFile, 'utf8'), beforeCanvas);
-        result = run(
-          'canvas',
-          'set',
-          projectFile,
-          '--width',
-          '90',
-          '--height',
-          '160',
-          '--background-color',
-          '#ABCDEF',
-          '--json',
-        );
-        assert.equal(result.status, 0, result.stderr);
-        const configured = JSON.parse(await readFile(projectFile, 'utf8'));
-        assert.equal(configured.settings.backgroundColor, '#ABCDEF');
-        result = run('edit', 'undo', projectFile, '--json');
-        assert.equal(result.status, 0, result.stderr);
-        assert.deepEqual(
-          JSON.parse(await readFile(projectFile, 'utf8')).settings,
-          example().settings,
-        );
       },
     );
     assert.deepEqual(

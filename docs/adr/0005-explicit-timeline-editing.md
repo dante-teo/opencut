@@ -59,10 +59,12 @@ replacement guarantees, not a transaction spanning several commands.
 
 Undo/redo, project rendering and GUI timeline integration remain deferred. The
 [CLI contract](../CLI.md#timeline-editing) and
-[core API contract](../PROJECT_FORMAT.md#timeline-editing-api) define the supported
+core API contract define the supported
 commands, results, invariants and error behavior.
 
 T09 follow-up: [ADR 0006](0006-snapshot-transactions-and-history.md) adds atomic
 batches, persistent undo/redo and revision checks over these same operations.
 Individual CLI mutations participate in the shared history. Project rendering
 and GUI timeline integration remain deferred.
+
+The saved project format was retired. See [video definitions](../VIDEO_DEFINITIONS.md) for current authoring.

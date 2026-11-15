@@ -16,7 +16,7 @@ flashes white for approximately the first 0.1 seconds of each second. Video
 audio pulses use the same time rule, supporting later frame and A/V sync tests.
 Audio volume changes occur at audio-frame boundaries; the marker is approximate,
 not a sample-accurate synchronization reference. Inputs begin at timestamp zero.
-These fixtures cover media inspection, extraction and the T03 composition spike.
+These fixtures cover media inspection, extraction, rendering, and preview.
 
 ## Generate and validate
 
@@ -46,30 +46,14 @@ and rejects a truncated copy whose header still claims all frames exist. It clea
 up its temporary files without touching generated fixtures. Ordinary `pnpm test`
 does not run this test or require native media tools.
 
-Run `pnpm test:media` for optional T02 probing/extraction and T03 composition tests using
-these existing fixtures. It requires all five generated files and FFmpeg/ffprobe,
-checks metadata and timestamp-selected pixels, and removes only its own output
-subdirectory under `generated/`. That subdirectory also holds derived MP4 inputs
-whose video starts 5 seconds after audio, with zero and nonzero container starts,
-to check input-relative timestamp handling. It is cleaned on success or failure.
-The suite never regenerates or changes the five base fixtures.
-T03 additionally renders mixed-property clips with music, verifies metadata,
-readable frame counts and full decoding, compares source/output frames and
-letterboxing, and checks mixed audio frequencies and A/V pulse/flash timing.
-Derived 44.1 kHz early/delayed audio and fractional-rate video cover nonzero
-timestamps. Gain/mute controls, music looping, output protection and source hashes
-are checked. Each suite cleans only its owned subdirectory under `generated/`.
-One-frame 60/120 fps inputs verify that reducing the output frame rate retains
-each clip; PCM music with 80ms and one-second timestamp gaps verifies silence in
-those gaps and audible music after the gaps and through a loop boundary. These
-inputs are derived from the existing fixtures inside the suite's owned directory.
+Run `pnpm test:media` with the five generated fixtures and FFmpeg/ffprobe. It
+covers probing and extraction, TypeScript and JSON rendering, compositing,
+audio and subtitle timing, preview recovery, and cancellation. Tests that
+create derived media use and clean up their own subdirectories under
+`generated/`.
 
-Run `pnpm test:e2e` for the complete T14 public-CLI edit/export workflow twice.
-It reuses the generator only when `generated/` is absent; an existing fixture set
-must pass validation and is never overwritten. Each run removes only its own
-`t14-e2e-*` directory. Use `pnpm e2e --keep` to retain a successful render and its
-verification artifacts. See the [CLI workflow](../../docs/CLI.md#complete-end-to-end-workflow)
-for reproduction and same-toolchain repeatability limits.
+Run `pnpm test:consistency` for the focused preview and export checks,
+including Electron. See [preview and export consistency](../../docs/PREVIEW_EXPORT_CONSISTENCY.md).
 
 The generator exclusively creates `generated/` and uses FFmpeg's no-overwrite
 mode. It refuses an existing directory or symlink. On failure, it removes only

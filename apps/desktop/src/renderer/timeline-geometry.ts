@@ -1,7 +1,5 @@
 import {
   clipTimelineEnd,
-  clipTimelinePosition,
-  clipSourcePosition,
   subtitleLanes,
   subtractTimes,
   type SubtitleCue,
@@ -264,39 +262,4 @@ export function rulerTicks(
     ticks.push({ frame, x, label: frameTimecode(frame, rate) });
   }
   return ticks;
-}
-
-export function sourceToTimeline(
-  clip: TimelineClip,
-  seconds: number,
-  rate?: FrameRate,
-): RationalTime {
-  const source = {
-    numerator: Math.max(0, Math.round(seconds * 1_000_000)),
-    denominator: 1_000_000,
-  };
-  if (compareTimes(source, clip.sourceIn) < 0) return clip.timelineStart;
-  if (compareTimes(source, clip.sourceOut) >= 0) return clipTimelineEnd(clip);
-  const { numerator, denominator } = clipTimelinePosition(clip, source);
-  const clock = rate ?? { numerator: 1_000_000, denominator: 1 };
-  const frameNumerator = numerator * BigInt(clock.numerator);
-  const frameDenominator = denominator * BigInt(clock.denominator);
-  const frame = (frameNumerator + frameDenominator / 2n) / frameDenominator;
-  const snapped = framePosition(frame, clock);
-  return compareTimes(snapped, clip.timelineStart) < 0
-    ? clip.timelineStart
-    : clampTime(snapped, clipTimelineEnd(clip));
-}
-
-export function timelineToSource(
-  clip: TimelineClip,
-  time: RationalTime,
-): number | undefined {
-  if (
-    compareTimes(time, clip.timelineStart) < 0 ||
-    compareTimes(time, clipTimelineEnd(clip)) >= 0
-  )
-    return undefined;
-  const { numerator, denominator } = clipSourcePosition(clip, time);
-  return Number(numerator) / Number(denominator);
 }

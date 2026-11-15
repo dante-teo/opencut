@@ -1,19 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   createProject,
-  createPlaybackTimelineEvaluator,
   createTimelineEvaluator,
-  deserializeProject,
-  editClipKeyframe,
   evaluateTimeline,
-  executeTransaction,
-  moveClip,
-  redoEdit,
-  serializeProject,
-  setClipSpeed,
-  splitClip,
-  trimClip,
-  undoEdit,
   validateProject,
   type KeyframeEasing,
 } from './index.js';
@@ -51,26 +40,14 @@ function fixture() {
 }
 
 function animate(easing: KeyframeEasing) {
-  return executeTransaction(fixture(), {
-    expectedRevision: 0,
-    operations: [
-      {
-        type: 'clip.keyframe.add',
-        id: 'clip',
-        property: 'x',
-        time: seconds(1),
-        value: 0,
-        easing,
-      },
-      {
-        type: 'clip.keyframe.add',
-        id: 'clip',
-        property: 'x',
-        time: seconds(3),
-        value: 80,
-      },
+  const project = fixture();
+  project.clips[0]!.keyframes = {
+    x: [
+      { time: seconds(1), value: 0, easing },
+      { time: seconds(3), value: 80, easing: 'linear' },
     ],
-  }).project;
+  };
+  return project;
 }
 
 describe('clip-local keyframes', () => {
@@ -94,21 +71,13 @@ describe('clip-local keyframes', () => {
     },
   );
 
-  it('shares frame sampling with playback while retaining detached public keys', () => {
-    const project = animate('ease-in');
-    const evaluate = createTimelineEvaluator(project, true);
-    const playback = createPlaybackTimelineEvaluator(project);
+  it('returns frame samples with detached keys', () => {
+    const evaluate = createTimelineEvaluator(animate('ease-in'), true);
     const at = seconds(401, 100);
-    const publicClip = evaluate(at).visualClips[0]!;
-    expect(playback(at).visualClips[0]).toMatchObject({
-      animated: true,
-      visual: publicClip.visual,
-      sourceTime: publicClip.sourceTime,
-    });
-    expect(playback(at).visualClips[0]).not.toHaveProperty('keyframes');
-    publicClip.keyframes!.x![0]!.value = 999;
+    const clip = evaluate(at).visualClips[0]!;
+    expect(clip.visual.x).toBe(20);
+    clip.keyframes!.x![0]!.value = 999;
     expect(evaluate(at).visualClips[0]?.keyframes?.x?.[0]?.value).toBe(0);
-    expect(playback(at).visualClips[0]?.visual.x).toBe(20);
   });
 
   it('samples narrowed easing at finite precision near a flat endpoint', () => {
@@ -119,114 +88,18 @@ describe('clip-local keyframes', () => {
     );
   });
 
-  it('edits, moves and deletes channels atomically through persistent history', () => {
-    const original = animate('ease-in');
-    const project = executeTransaction(original, {
-      expectedRevision: 1,
-      operations: [
-        {
-          type: 'clip.keyframe.set',
-          id: 'clip',
-          property: 'x',
-          time: seconds(2, 2),
-          newTime: seconds(0),
-          value: -24,
-          easing: 'ease-out',
-        },
-        {
-          type: 'clip.keyframe.remove',
-          id: 'clip',
-          property: 'x',
-          time: seconds(3),
-        },
-        {
-          type: 'clip.keyframe.add',
-          id: 'clip',
-          property: 'rotation',
-          time: seconds(4),
-          value: 720,
-        },
-        {
-          type: 'clip.keyframe.add',
-          id: 'clip',
-          property: 'opacity',
-          time: seconds(0),
-          value: 0,
-        },
-      ],
-    }).project;
-    const saved = deserializeProject(serializeProject(project));
-    expect(saved.clips[0]?.keyframes).toEqual({
-      x: [{ time: seconds(0), value: -24, easing: 'ease-out' }],
-      rotation: [{ time: seconds(4), value: 720, easing: 'linear' }],
-      opacity: [{ time: seconds(0), value: 0, easing: 'linear' }],
-    });
-    const evaluation = evaluateTimeline(saved, seconds(3));
-    expect(evaluation.visualClips[0]).toMatchObject({
-      visible: false,
-      visual: { x: -24, opacity: 0, rotation: 720 },
-    });
-    expect(undoEdit(saved).clips).toEqual(original.clips);
-    expect(redoEdit(undoEdit(saved)).clips).toEqual(saved.clips);
-    const removed = editClipKeyframe(saved, 'clip', {
-      type: 'clip.keyframe.remove',
-      property: 'x',
-      time: seconds(0),
-    }).project;
-    expect(evaluateTimeline(removed, seconds(3)).visualClips[0]?.visual.x).toBe(
-      -12,
-    );
-    expect(() =>
-      executeTransaction(original, {
-        expectedRevision: 1,
-        operations: [
-          {
-            type: 'clip.keyframe.remove',
-            id: 'clip',
-            property: 'x',
-            time: seconds(1),
-          },
-          {
-            type: 'clip.keyframe.add',
-            id: 'clip',
-            property: 'x',
-            time: seconds(41, 10),
-            value: 3,
-          },
-        ],
-      }),
-    ).toThrow(/duration/);
-    expect(original.clips[0]?.keyframes?.x).toHaveLength(2);
-  });
-
-  it('rejects duplicates, invalid property values, and animation on audio tracks', () => {
-    const original = animate('linear');
-    expect(() =>
-      editClipKeyframe(original, 'clip', {
-        type: 'clip.keyframe.add',
-        property: 'x',
-        time: seconds(2, 2),
-        value: 9,
-      }),
-    ).toThrow(/already exists/);
-    expect(() =>
-      editClipKeyframe(original, 'clip', {
-        type: 'clip.keyframe.set',
-        property: 'x',
-        time: seconds(1),
-        newTime: seconds(6, 2),
-      }),
-    ).toThrow(/strictly increasing/);
-    expect(() =>
-      editClipKeyframe(original, 'clip', {
-        type: 'clip.keyframe.add',
-        property: 'scale',
-        time: seconds(1),
-        value: 0,
-      }),
-    ).toThrow();
-    original.clips[0]!.trackId = 'audio';
-    expect(validateProject(original).success).toBe(false);
+  it('rejects duplicate keys, invalid property values, and animation on audio tracks', () => {
+    const duplicate = animate('linear');
+    duplicate.clips[0]!.keyframes!.x![1]!.time = seconds(2, 2);
+    expect(validateProject(duplicate).success).toBe(false);
+    const scale = animate('linear');
+    scale.clips[0]!.keyframes!.scale = [
+      { time: seconds(1), value: 0, easing: 'linear' },
+    ];
+    expect(validateProject(scale).success).toBe(false);
+    const audio = animate('linear');
+    audio.clips[0]!.trackId = 'audio';
+    expect(validateProject(audio).success).toBe(false);
   });
 
   it('reports a malformed saved time at the keyframe path', () => {
@@ -242,60 +115,5 @@ describe('clip-local keyframes', () => {
         ]),
       },
     });
-  });
-
-  it('samples two synthetic boundaries when a trim stays within one easing segment', () => {
-    const original = animate('ease-in');
-    const clipped = trimClip(original, 'clip', {
-      sourceIn: seconds(11, 2),
-      sourceOut: seconds(13, 2),
-    }).project;
-    expect(clipped.clips[0]?.keyframes?.x).toEqual([
-      { time: seconds(0), value: 5, easing: 'ease-in', curve: [0.25, 0.75] },
-      { time: seconds(1), value: 45, easing: 'linear' },
-    ]);
-    expect(
-      evaluateTimeline(clipped, seconds(5, 2)).visualClips[0]?.visual.x,
-    ).toBe(20);
-  });
-
-  it('preserves easing through trim, split, exact fractional retiming and repositioning', () => {
-    const original = animate('ease-in-out');
-    const trimmed = trimClip(original, 'clip', {
-      sourceIn: seconds(21, 4),
-      sourceOut: seconds(27, 4),
-    }).project;
-    const split = splitClip(trimmed, 'clip', seconds(23, 8), 'right').project;
-    for (let i = 0; i < 12; i++) {
-      expect(
-        evaluateTimeline(split, seconds(16 + i, 8)).visualClips[0]?.visual.x,
-      ).toBeCloseTo(
-        evaluateTimeline(original, seconds(26 + i, 8)).visualClips[0]!.visual.x,
-        10,
-      );
-    }
-    const fast = setClipSpeed(original, 'clip', seconds(3, 2)).project;
-    expect(fast.clips[0]?.keyframes?.x?.map(({ time }) => time)).toEqual([
-      seconds(2, 3),
-      seconds(2),
-    ]);
-    const moved = moveClip(fast, 'clip', { timelineStart: seconds(5) }).project;
-    expect(evaluateTimeline(moved, seconds(6)).visualClips[0]?.visual.x).toBe(
-      10,
-    );
-    const extended = trimClip(trimmed, 'clip', {
-      sourceIn: seconds(5),
-      sourceOut: seconds(7),
-    }).project;
-    expect(
-      evaluateTimeline(extended, seconds(2)).visualClips[0]?.visual.x,
-    ).toBeCloseTo(
-      evaluateTimeline(trimmed, seconds(2)).visualClips[0]!.visual.x,
-    );
-    expect(
-      evaluateTimeline(extended, seconds(15, 4)).visualClips[0]?.visual.x,
-    ).toBeCloseTo(
-      evaluateTimeline(original, seconds(19, 4)).visualClips[0]!.visual.x,
-    );
   });
 });

@@ -33,7 +33,7 @@ independently of encoded worker memory. Unknown-alpha occlusion is not optimized
 
 ## Consequences
 
-The [playback contract](../TIMELINE_PLAYBACK.md#composition-and-export-agreement-t26)
+The former playback contract
 defines coordinates, alpha, timing, tolerance gates, diagnostics and reproducible
 Electron conformance/performance checks. Geometry agrees at project-pixel precision;
 lossy encoding, scaling kernels, source-frame sampling and SDR/browser conversions
@@ -41,3 +41,6 @@ prevent pixel-identical output. Browser codec limits, asynchronous joins and the
 16-source-run ceiling (including still images) remain visible limitations. Audio routing and its existing
 compressor/FFmpeg limiter distinction remain unchanged. Transitions, keyframes,
 advanced effects, new editing operations and T27 are deferred.
+
+T47 replaced the live project compositor with watched definition playback.
+See [preview and export consistency](../PREVIEW_EXPORT_CONSISTENCY.md).

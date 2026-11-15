@@ -67,10 +67,12 @@ lock acquisition. On macOS, first Save in Electron can fail on exFAT with
 `Writer sidecar changed during acquisition` before writing the project file.
 CLI and SDK creation can still publish a new project there through the
 exclusive-copy fallback. Existing-project updates require the writer lock.
-See the [project file persistence contract](../PROJECT_FORMAT.md#api-and-errors).
+See the project file persistence contract.
 Network filesystems and Windows session transport are unsupported. Unix
 transport targets macOS/Linux. Only macOS has live desktop validation.
 
 History travels as complete snapshots, so large histories incur serialization,
 IPC and save costs and can exceed the transport bound. No watcher/polling loop,
 network server, media change, playback engine or T23 editing feature is added.
+
+The saved project format was retired. See [video definitions](../VIDEO_DEFINITIONS.md) for current authoring.

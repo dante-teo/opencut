@@ -9,39 +9,20 @@ test('built desktop displays React through the sandboxed bridge', async () => {
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await expect(
-      page.getByRole('button', { name: 'Open a project' }),
+      page.getByRole('button', { name: 'Open definition' }),
     ).toBeVisible();
     await expect(page.getByRole('status')).toHaveText(
       'OpenCut is running · v0.1.0',
     );
     expect(await page.evaluate(() => Object.keys(window.opencut))).toEqual([
+      'exportDefinition',
+      'cancelDefinitionExport',
+      'onDefinitionExportProgress',
       'openDefinition',
       'closeDefinition',
       'onDefinitionChanged',
-      'renderTimeline',
-      'onDesktopControl',
-      'chooseExportOutput',
-      'getExport',
-      'startExport',
-      'cancelExport',
-      'onExportChanged',
-      'onProjectChanged',
-      'copyProject',
-      'exportFrame',
-      'exportSubtitles',
-      'assetThumbnail',
-      'getProject',
-      'openProject',
-      'closeProject',
       'getApplicationInfo',
       'openPreview',
-      'previewAsset',
-      'timelinePreview',
-      'mediaCache',
-      'timelineFrame',
-      'timelineText',
-      'timelineArtwork',
-      'cancelTimelineArtwork',
       'releasePreview',
       'getPreviewMetrics',
     ]);
@@ -158,66 +139,37 @@ test('built desktop displays React through the sandboxed bridge', async () => {
   }
 });
 
-test('studio panels stay reachable at compact, default and large window sizes', async () => {
+test('definition and local source actions stay reachable at supported window sizes', async () => {
   const { application, page } = await launchDesktop();
   try {
     for (const [width, height] of [
       [640, 480],
       [1080, 720],
       [1440, 900],
-    ]) {
+    ] as const) {
       await application.evaluate(
-        ({ BrowserWindow }, size) => {
-          BrowserWindow.getAllWindows()[0]!.setContentSize(
-            size.width!,
-            size.height!,
-          );
+        ({ BrowserWindow }, { width, height }) => {
+          BrowserWindow.getAllWindows()[0]!.setContentSize(width, height);
         },
         { width, height },
       );
       await expect(
-        page.getByRole('button', { name: 'Open a project' }),
-      ).toBeVisible();
+        page.getByRole('button', { name: 'Open definition' }),
+      ).toBeInViewport();
+      await expect(
+        page.getByRole('button', { name: 'Open video' }),
+      ).toBeInViewport();
       expect(
         await page.evaluate(
           () => document.documentElement.scrollWidth <= window.innerWidth,
         ),
       ).toBe(true);
-      const timelineBounds = await page
-        .locator('.timeline-panel')
-        .boundingBox();
-      const workspaceBounds = await page.locator('.workspace').boundingBox();
-      expect(
-        workspaceBounds!.y + workspaceBounds!.height,
-      ).toBeGreaterThanOrEqual(timelineBounds!.y + timelineBounds!.height);
-      const panels = page.locator('.editor-panels');
-      await panels.evaluate((element) => {
-        element.scrollLeft = element.scrollWidth;
-      });
-      await expect(
-        page.getByRole('heading', { name: 'Inspector', exact: true }),
-      ).toBeInViewport();
-      await panels.evaluate((element) => {
-        element.scrollLeft = 0;
-      });
-      await expect(
-        page.getByRole('searchbox', { name: 'Search media' }),
-      ).toBeInViewport();
-      await page.screenshot({
-        path: `test-results/studio-${width}.png`,
-        animations: 'disabled',
-      });
     }
     await application.evaluate(({ dialog }) => {
       dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] });
     });
-    await page.getByRole('button', { name: 'Open a project' }).click();
-    await expect(
-      page.getByRole('heading', { name: 'No project', exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole('button', { name: 'Open a project' }),
-    ).toBeEnabled();
+    await page.getByRole('button', { name: 'Open definition' }).click();
+    await expect(page.getByLabel('Review workspace')).toBeVisible();
   } finally {
     await application.close();
   }

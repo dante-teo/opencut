@@ -16,8 +16,6 @@ import {
 } from './time.js';
 import type { RationalTime } from './time.js';
 
-export const PROJECT_SCHEMA_VERSION = 1;
-
 export const entityIdSchema = z
   .string()
   .regex(
@@ -104,7 +102,6 @@ export const trackSchema = z.strictObject({
   name: entityNameSchema,
   type: mediaType,
   ...trackAudioShape,
-  locked: z.boolean().optional(),
 });
 export const clipVisualSchema = z.strictObject({
   crop: z
@@ -164,12 +161,11 @@ export const clipSchema = z.strictObject({
   speed: clipSpeedSchema.optional(),
   ...clipAudioShape,
   detachedAudio: z.literal(true).optional(),
-  linkId: entityIdSchema.optional(),
   visual: clipVisualSchema.optional(),
   grade: colorGradeSchema.optional(),
   keyframes: visualKeyframesSchema.optional(),
 });
-const persistedClipSchema = clipSchema.refine(
+const snapshotClipSchema = clipSchema.refine(
   ({ assetId, text }) => (assetId === undefined) !== (text === undefined),
   {
     message: 'A clip must specify exactly one of assetId or text.',
@@ -191,7 +187,6 @@ export const markerSchema = z.strictObject({
   name: entityNameSchema,
 });
 export const snapshotSchema = z.strictObject({
-  schemaVersion: z.literal(PROJECT_SCHEMA_VERSION),
   metadata: z.strictObject({
     id: entityIdSchema,
     name: entityNameSchema,
@@ -201,37 +196,18 @@ export const snapshotSchema = z.strictObject({
   settings: settingsSchema,
   assets: z.array(assetSchema),
   tracks: z.array(trackSchema),
-  clips: z.array(persistedClipSchema),
+  clips: z.array(snapshotClipSchema),
   subtitles: subtitleTrackSchema.optional(),
   transitions: z.array(transitionSchema).optional(),
   markers: z.array(markerSchema).optional(),
 });
-
-const historyEntrySchema = z.strictObject({
-  id: entityIdSchema,
-  label: entityNameSchema,
-  committedAt: z.iso.datetime({ precision: 3 }),
-  before: snapshotSchema,
-  after: snapshotSchema,
-});
-const projectSchema = snapshotSchema.extend({
-  editing: z
-    .strictObject({
-      revision: z.int().nonnegative(),
-      undo: z.array(historyEntrySchema),
-      redo: z.array(historyEntrySchema),
-    })
-    .optional(),
-});
-export type ProjectSnapshot = z.infer<typeof snapshotSchema>;
-export type HistoryEntry = z.infer<typeof historyEntrySchema>;
 
 export type MediaReference = z.infer<typeof mediaReferenceSchema>;
 export type MediaAsset = z.infer<typeof assetSchema>;
 export type Track = z.infer<typeof trackSchema>;
 export type TimelineClip = z.infer<typeof clipSchema>;
 export type ProjectSettings = z.infer<typeof settingsSchema>;
-export type Project = z.infer<typeof projectSchema>;
+export type Project = z.infer<typeof snapshotSchema>;
 export type ProjectMetadata = Project['metadata'];
 
 export interface ProjectIssue {
@@ -243,17 +219,11 @@ export interface ProjectIssue {
 
 export class ProjectFormatError extends Error {
   override name = 'ProjectFormatError';
-  constructor(
-    public readonly code:
-      'INVALID_JSON' | 'INVALID_PROJECT' | 'UNSUPPORTED_VERSION',
-    public readonly issues: readonly ProjectIssue[],
-    options?: ErrorOptions,
-  ) {
+  constructor(public readonly issues: readonly ProjectIssue[]) {
     super(
       issues
         .map((issue) => `${issue.path || '/'}: ${issue.message}`)
         .join('\n'),
-      options,
     );
   }
 }
@@ -629,30 +599,11 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
 
 /** Pure data validation. No media, filesystem or tool access occurs here. */
 export function validateProject(value: unknown): ProjectValidationResult {
-  if (
-    typeof value === 'object' &&
-    value !== null &&
-    'schemaVersion' in value &&
-    Number.isSafeInteger(value.schemaVersion) &&
-    value.schemaVersion !== PROJECT_SCHEMA_VERSION
-  ) {
-    return {
-      success: false,
-      error: new ProjectFormatError('UNSUPPORTED_VERSION', [
-        {
-          path: '/schemaVersion',
-          code: 'unsupported_version',
-          message: `Unsupported project schema version ${String(value.schemaVersion)}; supported version is ${PROJECT_SCHEMA_VERSION}.`,
-        },
-      ]),
-    };
-  }
-  const parsed = projectSchema.safeParse(value);
+  const parsed = snapshotSchema.safeParse(value);
   if (!parsed.success) {
     return {
       success: false,
       error: new ProjectFormatError(
-        'INVALID_PROJECT',
         parsed.error.issues.map((issue) => ({
           path: pointer(issue.path),
           code: issue.code,
@@ -662,28 +613,10 @@ export function validateProject(value: unknown): ProjectValidationResult {
     };
   }
   const issues = collectSemanticIssues(parsed.data);
-  for (const stack of ['undo', 'redo'] as const) {
-    parsed.data.editing?.[stack].forEach((entry, index) => {
-      for (const side of ['before', 'after'] as const) {
-        const snapshot = entry[side];
-        for (const issue of collectSemanticIssues(snapshot))
-          issues.push({
-            ...issue,
-            path: `/editing/${stack}/${index}/${side}${issue.path}`,
-          });
-        if (snapshot.metadata.id !== parsed.data.metadata.id)
-          issues.push({
-            path: `/editing/${stack}/${index}/${side}/metadata/id`,
-            code: 'history_project',
-            message: 'History must belong to this project.',
-          });
-      }
-    });
-  }
   return issues.length
     ? {
         success: false,
-        error: new ProjectFormatError('INVALID_PROJECT', issues),
+        error: new ProjectFormatError(issues),
       }
     : { success: true, project: parsed.data };
 }
@@ -701,25 +634,9 @@ export interface CreateProjectOptions {
   settings?: ProjectSettings;
 }
 
-/** Validated metadata and collection counts; does not check media availability. */
-export function getProjectInfo(project: Project) {
-  const validated = requireProject(project);
-  return {
-    schemaVersion: validated.schemaVersion,
-    metadata: validated.metadata,
-    settings: validated.settings,
-    statistics: {
-      assets: validated.assets.length,
-      tracks: validated.tracks.length,
-      clips: validated.clips.length,
-    },
-  };
-}
-
 export function createProject(options: CreateProjectOptions): Project {
   const now = options.createdAt ?? new Date().toISOString();
   return requireProject({
-    schemaVersion: PROJECT_SCHEMA_VERSION,
     metadata: {
       id: options.id ?? globalThis.crypto.randomUUID(),
       name: options.name,
@@ -735,96 +652,4 @@ export function createProject(options: CreateProjectOptions): Project {
     tracks: [],
     clips: [],
   });
-}
-
-/** Schema parsing fixes object key order without sorting semantically ordered arrays. */
-export function serializeProject(project: Project): string {
-  const fonts: string[] = [];
-  const ids = new Map<string, number>();
-  const document = { ...requireProject(project), embeddedFonts: fonts };
-  return (
-    JSON.stringify(
-      document,
-      (key, value: unknown) => {
-        if (key === 'embeddedFonts') return fonts.length ? fonts : undefined;
-        if (key !== 'embeddedFont' || typeof value !== 'string') return value;
-        let index = ids.get(value);
-        if (index === undefined) {
-          index = fonts.length;
-          ids.set(value, index);
-          fonts.push(value);
-        }
-        return { font: index };
-      },
-      2,
-    ) + '\n'
-  );
-}
-
-export function deserializeProject(json: string): Project {
-  let value: unknown;
-  try {
-    value = JSON.parse(json) as unknown;
-  } catch (cause) {
-    throw new ProjectFormatError(
-      'INVALID_JSON',
-      [
-        {
-          path: '',
-          code: 'invalid_json',
-          message:
-            'Malformed project JSON; expected one JSON object with no comments or trailing commas.',
-        },
-      ],
-      { cause },
-    );
-  }
-  const isObject = (value: unknown): value is Record<string, unknown> =>
-    value !== null && typeof value === 'object' && !Array.isArray(value);
-  if (!isObject(value) || !('embeddedFonts' in value))
-    return requireProject(value);
-  const { embeddedFonts, ...document } = value;
-  const fontTable = z
-    .array(textLayerSchema.shape.embeddedFont.unwrap().unwrap())
-    .safeParse(embeddedFonts);
-  if (!fontTable.success)
-    throw new ProjectFormatError('INVALID_PROJECT', [
-      {
-        path: '/embeddedFonts',
-        code: 'invalid_font_table',
-        message: 'Expected a table of embedded font data.',
-      },
-    ]);
-  const snapshots = [document];
-  if (isObject(document.editing)) {
-    for (const stack of [document.editing.undo, document.editing.redo])
-      if (Array.isArray(stack))
-        for (const entry of stack)
-          if (isObject(entry))
-            for (const snapshot of [entry.before, entry.after])
-              if (isObject(snapshot)) snapshots.push(snapshot);
-  }
-  const restore = (style: unknown) => {
-    if (!isObject(style) || !isObject(style.embeddedFont)) return;
-    const reference = style.embeddedFont;
-    if (
-      Object.keys(reference).length === 1 &&
-      typeof reference.font === 'number' &&
-      Number.isSafeInteger(reference.font) &&
-      reference.font >= 0 &&
-      reference.font < fontTable.data.length
-    )
-      style.embeddedFont = fontTable.data[reference.font];
-  };
-  for (const snapshot of snapshots) {
-    if (Array.isArray(snapshot.clips))
-      for (const clip of snapshot.clips) if (isObject(clip)) restore(clip.text);
-    if (isObject(snapshot.subtitles)) {
-      restore(snapshot.subtitles.style);
-      if (Array.isArray(snapshot.subtitles.cues))
-        for (const cue of snapshot.subtitles.cues)
-          if (isObject(cue)) restore(cue.style);
-    }
-  }
-  return requireProject(document);
 }

@@ -58,6 +58,7 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
     maxDimension: options.maxDimension ?? 640,
     quality: 'draft' as const,
   };
+  const renders = new Map<Promise<unknown>, Set<string>>();
   let published: Published | undefined;
   let active: AbortController | undefined;
   let generation = 0;
@@ -105,6 +106,7 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
           if (!closing && next === generation) emit('error', next, error);
         } finally {
           active = undefined;
+          await pruneSnapshots();
         }
       });
     }, 180);
@@ -250,13 +252,27 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
       }
       if (published?.revision.playback.path !== output)
         await rm(output, { force: true });
-      for (const [key, snapshot] of snapshots) {
-        if (published?.media.has(key)) continue;
-        snapshots.delete(key);
-        probes.delete(snapshot);
-        await rm(snapshot, { force: true });
-      }
     }
+  }
+
+  async function pruneSnapshots() {
+    if (closing || active) return;
+    const retained = [...renders.values()];
+    const unused: string[] = [];
+    for (const [key, snapshot] of snapshots) {
+      if (published?.media.has(key) || retained.some((media) => media.has(key)))
+        continue;
+      snapshots.delete(key);
+      probes.delete(snapshot);
+      unused.push(snapshot);
+    }
+    // Remove entries before yielding so a subsequent build cannot reuse them.
+    await Promise.all(unused.map((path) => rm(path, { force: true }))).catch(
+      (error: unknown) =>
+        process.emitWarning(
+          `OpenCut could not remove preview media: ${String(error)}`,
+        ),
+    );
   }
 
   // Poll exact paths, including missing imports. No directory enumeration is needed.
@@ -270,9 +286,10 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
     clearTimeout(debounce);
     clearInterval(poll);
     active?.abort();
-    closing = work.finally(() =>
-      rm(directory, { recursive: true, force: true }),
-    );
+    closing = work.finally(async () => {
+      await Promise.allSettled(renders.keys());
+      await rm(directory, { recursive: true, force: true });
+    });
     return closing;
   }
 
@@ -283,5 +300,25 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
   options.signal?.addEventListener('abort', abort, { once: true });
   if (options.signal?.aborted) await close();
   else schedule();
-  return { path, close };
+  // Keep media snapshots alive if a newer revision arrives during export.
+  async function withCurrent<T>(
+    generation: number,
+    run: (video: CompiledVideo) => Promise<T>,
+  ): Promise<T> {
+    if (closing || !published || published.revision.generation !== generation)
+      throw new VideoDefinitionError(
+        'The preview changed. Start export again.',
+      );
+    const { revision, media } = published;
+    const render = Promise.resolve().then(() => run(revision.video));
+    renders.set(render, media);
+    try {
+      return await render;
+    } finally {
+      renders.delete(render);
+      await pruneSnapshots();
+    }
+  }
+
+  return { path, close, withCurrent };
 }

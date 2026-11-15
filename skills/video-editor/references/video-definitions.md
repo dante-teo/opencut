@@ -70,7 +70,7 @@ slashes. Inspect the source with `opencut probe` to choose valid source points.
   `fade-out` for video opacity at the clip edges.
 - Use `subtitles: { style, cues }` with exact timeline seconds for cue
   bounds, clip-independent per-cue styling and cue-relative word timings.
-  Validation and migration enforce the 256-cue full-render limit. A frame
+  Validation enforces the 256-cue full-render limit. A frame
   preview counts only the cues visible in that frame.
   Use a named `font` on a title or subtitle style with a matching `fonts`
   entry. A font entry takes a definition-relative TTF/OTF path or base64 data.
@@ -106,10 +106,3 @@ send a second SIGINT (Ctrl-C) or SIGTERM to terminate the command. Review
 frames at meaningful boundaries and verify duration,
 frame rate, dimensions and audio after rendering. For complete 20-second
 definitions and fixture setup, see [Video as code](../../../docs/VIDEO_DEFINITIONS.md).
-
-For existing projects, use `opencut migrate PROJECT --output NEW.video.json --json`.
-Use a `.video.ts` extension to generate a TypeScript default export. Migration
-rebases paths from the original project to the new definition. It checks that
-the render plan matches and reports omitted history. See the
-[complete field reference](../../../docs/VIDEO_DEFINITIONS.md#author-a-definition)
-before changing a migrated definition.

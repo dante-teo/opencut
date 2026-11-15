@@ -1,12 +1,9 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { extname, join } from 'node:path';
 import {
   renderContactSheet,
   renderTimelineFrame,
   renderVideoTimeline,
 } from '@opencut/media';
-import type { RenderControls, VideoTimelineOptions } from '@opencut/media';
+import type { RenderControls } from '@opencut/media';
 import {
   inspectProject,
   inspectTimeline,
@@ -14,13 +11,10 @@ import {
   previewFrameSchema,
   previewSheetSchema,
 } from './inspection.js';
-import { projectRevision } from './editing.js';
-import type { Project } from './project.js';
 import { frameTime, timeSchema } from './time.js';
 import type { FrameRate, RationalTime } from './time.js';
 import type { CompiledVideo } from './video-compiler.js';
-import { resolveProjectRender } from './render-files.js';
-import { copyVideoInput } from './video-input.js';
+import { withRenderSources } from './render-sources.js';
 
 export type PreviewPosition = number | RationalTime;
 export type VideoPreviewOptions = Pick<
@@ -30,17 +24,7 @@ export type VideoPreviewOptions = Pick<
 export type VideoPreviewRange = { startFrame?: number; endFrame?: number };
 export class VideoPreviewRangeError extends RangeError {}
 
-type BoundPlan = Awaited<ReturnType<typeof resolveProjectRender>> &
-  Pick<VideoTimelineOptions, 'sourceMetadata' | 'snapshotSource'>;
-type UseRenderPlan = <T>(
-  signal: AbortSignal | undefined,
-  run: (plan: BoundPlan) => Promise<T>,
-) => Promise<T>;
-
-export function previewFrameIndex(
-  position: PreviewPosition,
-  rate: FrameRate,
-): number {
+function previewFrameIndex(position: PreviewPosition, rate: FrameRate): number {
   if (typeof position === 'number') return position;
   const { numerator, denominator } = timeSchema.parse(position);
   return Number(
@@ -49,20 +33,14 @@ export function previewFrameIndex(
   );
 }
 
-function timelinePreview(
-  {
-    project,
-    path,
-    frameCount,
-  }: { project: Project; path: string; frameCount: number },
-  useRenderPlan: UseRenderPlan,
-) {
+/** Inspect and render a compiled definition on its project frame grid. */
+export function previewVideo(video: CompiledVideo) {
+  const { project, path, frameCount } = video;
   const { frameRate } = project.settings;
   const base = {
     inspectionVersion: 1,
     projectPath: path,
     projectId: project.metadata.id,
-    revision: projectRevision(project),
     frameRate,
   };
   function range(startFrame: number, endFrame: number) {
@@ -90,7 +68,7 @@ function timelinePreview(
     ) {
       const frame = previewFrameIndex(position, frameRate);
       const selection = range(frame, frame + 1);
-      const result = await useRenderPlan(options.signal, (plan) =>
+      const result = await withRenderSources(video, options.signal, (plan) =>
         renderTimelineFrame({
           ...plan,
           signal: options.signal,
@@ -141,7 +119,7 @@ function timelinePreview(
             ? 0
             : Math.floor(((endFrame - startFrame - 1) * i) / (count - 1))),
       );
-      const result = await useRenderPlan(signal, (plan) =>
+      const result = await withRenderSources(video, signal, (plan) =>
         renderContactSheet(
           { ...plan, signal, maxDimension, output },
           frames,
@@ -180,7 +158,7 @@ function timelinePreview(
           'Preview clips are limited to 30 seconds; select a shorter range.',
         );
       const { path, width, height, frameCount, durationSeconds, quality } =
-        await useRenderPlan(options.signal, (plan) =>
+        await withRenderSources(video, options.signal, (plan) =>
           renderVideoTimeline({
             ...plan,
             signal: options.signal,
@@ -207,42 +185,4 @@ function timelinePreview(
       });
     },
   };
-}
-
-export async function previewProject(project: Project, path: string) {
-  const plan = await resolveProjectRender(project, path);
-  return timelinePreview(
-    { project, path, frameCount: plan.frameCount },
-    (_signal, render) => render(plan),
-  );
-}
-
-/** Inspect and render a compiled definition on its project frame grid. */
-export function previewVideo(video: CompiledVideo) {
-  return timelinePreview(video, async (signal, run) => {
-    const plan = await video.resolveRender();
-    const staged = new Map<string, string>();
-    let directory: string | undefined;
-    try {
-      return await run({
-        ...plan,
-        async snapshotSource(path) {
-          const existing = staged.get(path);
-          if (existing) return existing;
-          directory ??= await mkdtemp(join(tmpdir(), 'opencut-preview-'));
-          const snapshot = join(directory, `${staged.size}${extname(path)}`);
-          await copyVideoInput(
-            path,
-            video.sourceIdentity(path)!,
-            snapshot,
-            signal,
-          );
-          staged.set(path, snapshot);
-          return snapshot;
-        },
-      });
-    } finally {
-      if (directory) await rm(directory, { recursive: true, force: true });
-    }
-  });
 }

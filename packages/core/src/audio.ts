@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { addTimes, compareTimes, subtractTimes, timeSchema } from './time.js';
+import { compareTimes, timeSchema } from './time.js';
 import type { RationalTime } from './time.js';
 
 const gain = z.number().finite().min(0).max(1);
@@ -29,15 +29,6 @@ export const audioEffectSchema = z.discriminatedUnion('type', [
 ]);
 export type AudioEffect = z.infer<typeof audioEffectSchema>;
 export const audioEffectsSchema = z.array(audioEffectSchema).max(12);
-export const audioPresets = {
-  Dialogue: [
-    { type: 'eq', frequency: 300, db: -3 },
-    { type: 'de-esser', amount: 0.4 },
-    { type: 'compressor', threshold: -18, ratio: 3 },
-    { type: 'limiter', ceiling: -2 },
-  ],
-  Room: [{ type: 'reverb', mix: 0.16 }],
-} satisfies Record<string, AudioEffect[]>;
 export const trackAudioShape = {
   volume: gain.optional(),
   muted: z.boolean().optional(),
@@ -81,37 +72,6 @@ export function keyframeGain(keys: GainKeys, time: RationalTime): number {
   return linearFadeGain(left.value, right.value, ratio);
 }
 
-export function sliceGainKeys(
-  keys: GainKeys,
-  start: RationalTime,
-  end: RationalTime,
-): GainKeys {
-  const sliced = keys
-    .filter(
-      (key) =>
-        compareTimes(key.time, start) >= 0 && compareTimes(key.time, end) <= 0,
-    )
-    .map((key) => ({ ...key, time: subtractTimes(key.time, start) }));
-  const duration = subtractTimes(end, start);
-  const first = keys[0]!.time;
-  const last = keys.at(-1)!.time;
-  const insideCurve = (time: RationalTime) =>
-    compareTimes(time, first) > 0 && compareTimes(time, last) < 0;
-  if (
-    insideCurve(end) &&
-    (!sliced.length || compareTimes(sliced.at(-1)!.time, duration) < 0)
-  )
-    sliced.push({ time: duration, value: keyframeGain(keys, end) });
-  if (insideCurve(start) && sliced[0]?.time.numerator !== 0)
-    sliced.unshift({ time: zero, value: keyframeGain(keys, start) });
-  return sliced.length
-    ? sliced
-    : [{ time: zero, value: keyframeGain(keys, start) }];
-}
-
-export function shiftGainKeys(keys: GainKeys, shift: RationalTime): GainKeys {
-  return keys.map((key) => ({ ...key, time: addTimes(key.time, shift) }));
-}
 export type AudioFade = z.infer<typeof fadeSchema>;
 interface ClipFades {
   fadeIn?: AudioFade | undefined;
@@ -119,7 +79,6 @@ interface ClipFades {
 }
 export const audioFadeEdges = ['fadeIn', 'fadeOut'] as const;
 export type AudioFadeEdge = (typeof audioFadeEdges)[number];
-const zero: RationalTime = { numerator: 0, denominator: 1 };
 const timeSeconds = (time: RationalTime) => time.numerator / time.denominator;
 
 export function resolveAudioFade(edge: AudioFadeEdge, fade: AudioFade) {
@@ -180,41 +139,4 @@ export function baseAudioGain(clip: {
   return clip.muted || clip.trackMuted || clip.audioPresence === 'absent'
     ? 0
     : clip.volume * (clip.trackVolume ?? 1);
-}
-
-/** Keep only the part of each linear ramp intersecting a split piece. */
-export function sliceAudioFades(
-  fades: ClipFades,
-  duration: RationalTime,
-  start: RationalTime,
-  end: RationalTime,
-): ClipFades {
-  const result: ClipFades = {};
-  for (const edge of audioFadeEdges) {
-    const fade = fades[edge];
-    if (!fade) continue;
-    const ramp = resolveAudioFade(edge, fade);
-    const rampStart =
-      edge === 'fadeIn' ? zero : subtractTimes(duration, ramp.duration);
-    const rampEnd = edge === 'fadeIn' ? ramp.duration : duration;
-    const first = compareTimes(start, rampStart) > 0 ? start : rampStart;
-    const last = compareTimes(end, rampEnd) < 0 ? end : rampEnd;
-    if (compareTimes(first, last) >= 0) continue;
-    const gainAt = (time: RationalTime) =>
-      linearFadeGain(
-        ramp.from,
-        ramp.to,
-        timeSeconds(subtractTimes(time, rampStart)) /
-          timeSeconds(ramp.duration),
-      );
-    const from =
-      compareTimes(first, rampStart) === 0 ? fade.from : gainAt(first);
-    const to = compareTimes(last, rampEnd) === 0 ? fade.to : gainAt(last);
-    result[edge] = {
-      duration: subtractTimes(last, first),
-      ...(from === undefined ? {} : { from }),
-      ...(to === undefined ? {} : { to }),
-    };
-  }
-  return result;
 }

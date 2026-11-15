@@ -99,7 +99,7 @@ and use version 1 when omitted. The optional top-level `name` defaults to
 - Visual clips accept `visual` with center-relative `x`, `y`, `scale`,
   `rotation` and `opacity`. Media accepts `fit` and fractional `crop` insets.
   `keyframes` maps x, y, scale, rotation and opacity to arrays of
-  `{ time, value, easing }` using the [project easing rules](PROJECT_FORMAT.md#visual-keyframes-t37).
+  `{ time, value, easing }` using the [easing rules](#visual-keyframe-easing).
   Key times are rational seconds from the clip's timeline start. Changing a
   source in point or speed leaves those offsets intact. Keys must fit within
   the resulting playback duration.
@@ -111,7 +111,7 @@ saturation, curve }`. Curve points have increasing `input` and an
   `duration` and optional gains `from` and `to`. `gainKeys` holds
   `{ time, value }` pairs with linear interpolation. Both envelopes use
   clip-local timeline time. Use `detachedAudio: true` on a video asset's
-  audio-track clip for the legacy behavior that pads short audio to match
+  audio-track clip to pad short audio to match
   picture. Mute the picture clip to avoid mixing its audio twice.
 - `text` requires `content` and supports font size, weight, alignment, wrap
   width, rotation, emphasis, color, stroke, shadow, background and canvas
@@ -137,6 +137,19 @@ saturation, curve }`. Curve points have increasing `input` and an
   for the clip's full duration. Clips that hold the same source frame share
   one temporary PNG per preview or export and can apply different styling.
 
+### Visual keyframe easing
+
+Each animated property holds a nonempty array of keys in strictly increasing
+clip-local time. Channels are `x`, `y`, `scale`, `rotation`, and `opacity`.
+Times extend from zero through the clip's duration, inclusive. The nearest
+key holds outside the channel's key span. Rotation interpolates the specified
+numbers directly, so 0 to 360 is one clockwise turn.
+
+A key's easing applies to the segment that follows it. Use `linear`,
+`ease-in`, `ease-out`, or `ease-in-out` for quadratic easing. An optional
+`curve: [from, to]` selects a strictly increasing subrange of `[0, 1]`.
+Sampling renormalizes the easing within that subrange.
+
 ### Evaluation order
 
 The compositor selects the source frame, grades its pixels, applies crop,
@@ -145,9 +158,7 @@ weight the fitted layers before they composite over lower tracks and the
 canvas. The audio renderer maps and retimes each source, applies its
 `effects` array in order, then applies the clip envelope and clip/track
 gain before mixing and limiting the result. The effect types are
-`eq`, `compressor`, `limiter`, `de-esser` and `reverb`. See the
-[project format](PROJECT_FORMAT.md) and [CLI reference](CLI.md) for the
-shared property limits.
+`eq`, `compressor`, `limiter`, `de-esser` and `reverb`. See the [CLI reference](CLI.md) for export controls.
 
 Clips on the same track can touch at exclusive boundaries. A declared
 canvas duration must cover all clips and subtitles. The current renderer
@@ -215,12 +226,12 @@ script code, and external state are outside the tracked inputs.
 `validate` checks the schema, timeline, media kinds, source bounds and
 full-render constraints. Its JSON output includes `{ ok, path, frameCount }`.
 The frame count is available for both declared and inferred durations.
-`inspect --json` returns the compiled project fields, exact rational duration
-and revision 0. Both commands use ffprobe for declared media and can run without
+`inspect --json` returns the compiled snapshot and its exact rational duration.
+Both commands use ffprobe for declared media and can run without
 media tools for asset-free definitions.
 
 Full renders support up to 256 distinct subtitle cues that appear on the
-output frame grid. `validate`, `inspect` and `migrate` check this limit before
+output frame grid. `validate` and `inspect` check this limit before
 any render. `preview frame --frame N --output FRAME.png` counts only the cues
 visible in the selected frame, so a long subtitle track can still be reviewed
 one frame at a time. `render --json` prints one result on stdout after verified
@@ -233,43 +244,9 @@ history. Render and preview commands publish a new output only after
 verification. Send SIGINT (Ctrl-C) or SIGTERM to request cancellation.
 Watch can cancel the worker that evaluates TypeScript. If TypeScript evaluation
 stalls in a one-shot CLI command, send a second signal to terminate the CLI.
-Saved projects continue to use `project render` and the
-project editing commands.
 
 SDK callers can pass `await compileVideo(file, { signal, preview: true })`
 to `previewVideo` for project inspection, exact frame inspection, PNGs,
 contact sheets and clips. `watchVideo(file, { onStatus, signal })` delivers
 playable revisions and build errors. The SDK reference documents the lifetime
-of these revisions. [SDK reference](SDK.md#video-definition-preview)
-
-## Convert a saved project
-
-```sh
-opencut migrate edit.opencut.json --output edit.video.json --json
-opencut migrate edit.opencut.json --output edit.video.ts
-```
-
-Migration reads the saved snapshot and publishes a new definition. It retains
-the canvas and duration mode, stable IDs, track stacking, exact rational
-times, effects, subtitle metadata, markers, embedded fonts and referenced
-media. It re-expresses media paths relative to the new definition's directory.
-Keep those referenced files available. Existing freeze-frame PNGs stay
-referenced as image assets. Repeated embedded font bytes are stored once in
-the definition. Saved editing history is omitted and reported as
-`historyOmitted` in JSON output.
-
-Conversion checks the source project, probes its media and checks that the
-compiled definition has the same render plan before writing. Unknown format
-versions, unsupported render settings, missing media, and paths that cannot
-be rebased cause an explicit error. The source project and its assets are
-read-only. The destination must be a new file in an existing directory.
-
-The SDK also exposes `migrateProject(source, output, { signal })`, which
-returns `{ path, sourcePath, historyOmitted }` on success.
-
-The native migration test covers mixed video and stills, eased visual animation,
-a cross-dissolve, canvas fades, grading, ordered audio effects, exact gain and
-source times, and styled subtitles with word timing. It compares matching
-preview PNGs and MP4 exports from the original and converted compositions.
-The comparison is exact for both outputs in that fixture. PNG-to-MP4
-comparisons can show the encoder's color and chroma differences.
+of these revisions. [SDK reference](SDK.md)

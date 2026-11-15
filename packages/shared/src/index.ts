@@ -1,8 +1,6 @@
 export * from './keyframes.js';
 export * from './color-grade.js';
 
-export const WAVEFORM_CHUNK_SECONDS = 16;
-export const WAVEFORM_BINS_PER_SECOND = 100;
 export const roomEchoes = [
   { seconds: 0.029, gain: 0.45 },
   { seconds: 0.047, gain: 0.32 },

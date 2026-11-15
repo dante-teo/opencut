@@ -34,12 +34,7 @@ import {
   audioSourceDuration,
 } from './probe.js';
 import type { MediaMetadata } from './probe.js';
-import {
-  checkRenderSignal,
-  MediaError,
-  renderSourceInputArgs,
-  runMediaTool,
-} from './process.js';
+import { checkRenderSignal, MediaError, runMediaTool } from './process.js';
 import { renderProgress } from './render-progress.js';
 import type { RenderProgress } from './render-progress.js';
 import { fitVisual } from './video-filter.js';
@@ -934,7 +929,7 @@ async function prepareTimeline(
       rotated ? displayWidth : displayHeight,
       clip,
     );
-    args.push('-threads', '1', ...renderSourceInputArgs(), '-i', inputPath);
+    args.push('-threads', '1', '-i', inputPath);
     if (!held) inputs.set(clip.clipId, input);
     filters.push(
       `[${input++}:${stream}]${sampling},` +
@@ -1219,13 +1214,7 @@ async function prepareTimeline(
     let audioInput = inputs.get(first.clipId);
     if (audioInput === undefined) {
       audioInput = input++;
-      args.push(
-        '-threads',
-        '1',
-        ...renderSourceInputArgs(),
-        '-i',
-        await inputPathFor(source.path),
-      );
+      args.push('-threads', '1', '-i', await inputPathFor(source.path));
     }
     const speed = first.retiming ? seconds(first.retiming.speed) : 1;
     // Keep one tempo filter across contiguous pieces. Only the run tail needs

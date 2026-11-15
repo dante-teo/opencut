@@ -82,6 +82,8 @@ describe('frame extraction', () => {
         'pipe:1',
       ]),
       64 * 1024 * 1024,
+      60_000,
+      { signal: undefined },
     );
   });
 

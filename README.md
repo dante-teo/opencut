@@ -1,6 +1,6 @@
 # OpenCut
 
-OpenCut is a local video editor for authoring and rendering video as code.
+OpenCut is a local video rendering engine for video as code.
 Define a complete video in one TypeScript or JSON file and render it from
 the CLI.
 
@@ -11,8 +11,8 @@ opencut render my-video.video.ts --output final.mp4
 ```
 
 The CLI, TypeScript SDK and Electron review app share the same timeline
-evaluator and rendering pipeline. Saved projects also support persistent
-undo and redo for interactive editing through the CLI or SDK.
+evaluator and rendering pipeline. Use Electron to watch a definition and
+export a reviewed revision.
 
 ## Run from source
 
@@ -24,14 +24,13 @@ pnpm install
 pnpm dev
 ```
 
-Install FFmpeg and ffprobe for media import, rendered previews, and video
-export. See the [full quick start](docs/README.md#quick-start-macos) for
+Install FFmpeg and ffprobe for rendered previews and video export. See the [full quick start](docs/README.md) for
 details.
 
 ## Documentation
 
 - [Video-as-Code reference and runnable examples](docs/VIDEO_DEFINITIONS.md)
-- [Timeline editing and shortcuts](docs/TIMELINE_EDITING.md)
+- [Architecture and compatibility](docs/ARCHITECTURE.md)
 - [CLI reference](docs/CLI.md)
 - [TypeScript SDK](docs/SDK.md)
 - [OpenCut Agent Skill](skills/video-editor/SKILL.md)

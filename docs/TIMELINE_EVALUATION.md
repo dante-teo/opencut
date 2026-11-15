@@ -125,14 +125,13 @@ video audio, and keeps existing integer project-grid, dimensions, duration and
 clip-count limits. Evaluation itself has none of those export-specific limits.
 Export requires frame-aligned title boundaries. The render plan places
 media and subtitle boundaries at the first project tick at or after their
-exact stored times. The Project viewer and export sample subtitle
-visibility and animated transforms at each project frame's start.
+exact stored times. Preview and export sample subtitle visibility and animated transforms at
+each project frame's start.
 
 FFmpeg samples video at the project rate and loops still images. Export
 uses stream origins and rounds audio boundaries on a 48 kHz grid. Contiguous
 pieces of a retimed clip share a tempo pass before their per-clip effects.
-T26 shares geometry and RGB composition between preview and export. See
-[the composition contract](TIMELINE_PLAYBACK.md#composition-and-export-agreement-t26).
+See [preview and export consistency](PREVIEW_EXPORT_CONSISTENCY.md).
 
 `evaluateTimeline` and `evaluateTimelineFrame` validate and resolve a fresh snapshot
 on each call. `createTimelineEvaluator(project)` instead validates and resolves
@@ -144,12 +143,5 @@ edits; mutating the original project or an earlier result does not update it.
 `resolveTimeline(project)` also exposes validated ordered clip ranges/defaults
 without a point query for adapters that need lookahead.
 
-The desktop [playback adapter](TIMELINE_PLAYBACK.md) uses
-`createPlaybackTimelineEvaluator(project)`. It shares the same frame-sampled
-evaluation and returns the sampled transforms and an `animated` flag for each
-clip. It omits the stored keyframe arrays from playback results to avoid copying
-them on each query. The desktop adapter handles decoding, clock and audio routing.
-
-T29 exposes exact point evaluation through `timeline inspect PROJECT --frame N --json`.
-See [CLI inspection and previews](CLI.md#agent-discovery-and-visual-inspection-t29)
-for the versioned structured contract and headless composited output commands.
+Use `timeline inspect DEFINITION --frame N --json` for frame evaluation in
+the CLI. See the [CLI overview](CLI.md) for composited output commands.

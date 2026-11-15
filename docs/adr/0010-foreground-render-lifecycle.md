@@ -92,7 +92,9 @@ See [desktop export](../EXPORT.md) for settings, lifecycle and supported bounds.
 
 ## T43 durable jobs
 
-The [durable job queue](../JOBS.md) reuses render verification in independent
+The former durable job queue reused render verification in independent
 worker processes and adds persistent immutable inputs, recoverable publication
 and attempt leases. This is a separate entry point from the foreground CLI and
 desktop exports described above.
+
+T47 retired the queue. See the [current architecture](../ARCHITECTURE.md).

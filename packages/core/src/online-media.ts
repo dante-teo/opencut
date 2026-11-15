@@ -183,9 +183,13 @@ function candidate(
   };
 }
 
-async function getJson(url: URL) {
-  const signal = AbortSignal.timeout(15000);
+async function getJson(url: URL, callerSignal?: AbortSignal) {
+  const deadline = AbortSignal.timeout(15000);
+  const signal = callerSignal
+    ? AbortSignal.any([callerSignal, deadline])
+    : deadline;
   try {
+    signal.throwIfAborted();
     const response = await fetch(url, {
       headers: { 'User-Agent': userAgent, Accept: 'application/json' },
       redirect: 'error',
@@ -202,9 +206,12 @@ async function getJson(url: URL) {
       );
     }
     const body = new Response(limitBytes(response.body, 2 * 1024 * 1024));
-    return record(await body.json());
+    const data = await body.json();
+    signal.throwIfAborted();
+    return record(data);
   } catch (error) {
-    if (signal.aborted)
+    callerSignal?.throwIfAborted();
+    if (deadline.aborted)
       throw new Error(
         'The provider took too long to respond. Try again shortly.',
       );
@@ -216,7 +223,10 @@ async function getJson(url: URL) {
   }
 }
 
-async function commonsSearch(input: OnlineMediaSearch): Promise<SearchPage> {
+async function commonsSearch(
+  input: OnlineMediaSearch,
+  signal?: AbortSignal,
+): Promise<SearchPage> {
   const url = new URL('https://commons.wikimedia.org/w/api.php');
   const video = input.kind === 'video';
   url.search = new URLSearchParams({
@@ -241,7 +251,7 @@ async function commonsSearch(input: OnlineMediaSearch): Promise<SearchPage> {
         }),
     ...(input.kind === 'image' ? { iiurlwidth: '640' } : {}),
   }).toString();
-  const data = await getJson(url);
+  const data = await getJson(url, signal);
   if (data.error)
     throw new Error('Wikimedia Commons could not complete the search.');
   const pages = list(record(data.query).pages).map(record);
@@ -277,7 +287,10 @@ async function commonsSearch(input: OnlineMediaSearch): Promise<SearchPage> {
   };
 }
 
-async function openverseSearch(input: OnlineMediaSearch): Promise<SearchPage> {
+async function openverseSearch(
+  input: OnlineMediaSearch,
+  signal?: AbortSignal,
+): Promise<SearchPage> {
   const collection = input.kind === 'image' ? 'images' : 'audio';
   const url = new URL(`https://api.openverse.org/v1/${collection}/`);
   const page = Number(input.page ?? '1');
@@ -287,7 +300,7 @@ async function openverseSearch(input: OnlineMediaSearch): Promise<SearchPage> {
     page: String(page),
     page_size: String(pageSize),
   }).toString();
-  const data = await getJson(url);
+  const data = await getJson(url, signal);
   const results = list(data.results).flatMap((value) => {
     const file = record(value);
     const version = file.license_version;
@@ -400,14 +413,15 @@ export class OnlineMediaLibrary {
     { provider: OnlineMediaProvider; item: Candidate }
   >();
 
-  async search(value: unknown): Promise<OnlineMediaPage> {
+  async search(value: unknown, signal?: AbortSignal): Promise<OnlineMediaPage> {
     const input = searchInput(value);
     let page: SearchPage;
     try {
       page = await (input.provider === 'commons'
-        ? commonsSearch(input)
-        : openverseSearch(input));
+        ? commonsSearch(input, signal)
+        : openverseSearch(input, signal));
     } catch (cause) {
+      signal?.throwIfAborted();
       throw new OnlineMediaError(
         'PROCESSING_FAILED',
         cause instanceof Error ? cause.message : String(cause),
@@ -480,19 +494,24 @@ export class OnlineMediaLibrary {
     return new Response(body, { status: response.status, headers });
   }
 
-  async download(id: unknown, root: string) {
+  async download(id: unknown, root: string, callerSignal?: AbortSignal) {
     const { provider, item } = this.result(id);
     if (!item.original)
       throw new OnlineMediaError(
         'UNSUPPORTED_CAPABILITY',
         'Download this file from its source and import it locally.',
       );
-    const signal = AbortSignal.timeout(120000);
+    const deadline = AbortSignal.timeout(120000);
+    const signal = callerSignal
+      ? AbortSignal.any([callerSignal, deadline])
+      : deadline;
+    signal.throwIfAborted();
     await mkdir(root, { recursive: true, mode: 0o700 });
     const directory = await mkdtemp(join(root, 'asset-'));
     const path = join(directory, `media${item.original.extension}`);
     const discard = () => rm(directory, { recursive: true, force: true });
     try {
+      signal.throwIfAborted();
       const { body } = await fetchMedia(item.original, signal);
       await pipeline(
         body,
@@ -501,6 +520,7 @@ export class OnlineMediaLibrary {
           signal,
         },
       );
+      signal.throwIfAborted();
       return {
         path,
         discard,
@@ -516,6 +536,7 @@ export class OnlineMediaLibrary {
       };
     } catch (error) {
       await discard();
+      callerSignal?.throwIfAborted();
       throw new OnlineMediaError(
         'PROCESSING_FAILED',
         error instanceof Error ? error.message : String(error),

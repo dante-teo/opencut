@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { evaluateTimelineFrame, serializeProject } from '@opencut/core';
+import { evaluateTimelineFrame } from '@opencut/core';
 import { compileVideo, defineVideo } from '@opencut/sdk';
 import type { VideoDefinition } from '@opencut/sdk';
 
@@ -77,10 +77,7 @@ describe('whole-video definitions', () => {
     const path = await writeDefinition(input);
     const first = await compileVideo(path);
     const second = await compileVideo(path);
-    expect(serializeProject(first.project)).toBe(
-      serializeProject(second.project),
-    );
-    expect(first.project.editing).toBeUndefined();
+    expect(first.project).toEqual(second.project);
     expect(first.project.clips[0]?.timelineStart).toEqual({
       numerator: 1001,
       denominator: 2000,
@@ -206,7 +203,6 @@ describe('whole-video definitions', () => {
     const inspect = run('inspect', path);
     expect(inspect.status, inspect.stderr).toBe(0);
     expect(JSON.parse(inspect.stdout)).toMatchObject({
-      revision: 0,
       settings: { durationFrames: 600 },
       duration: { numerator: 1001, denominator: 50 },
     });
@@ -365,7 +361,7 @@ describe('whole-video definitions', () => {
   });
 });
 
-describe('T45 definitions and migration', () => {
+describe('definition validation', () => {
   it('shares validation for TypeScript and JSON for duplicate IDs and subtitle timing', async () => {
     const input = definition();
     for (const [value, message] of [
@@ -489,7 +485,7 @@ describe('T45 definitions and migration', () => {
     ]);
   });
 
-  it('enforces the full-render subtitle cap during validation and migration', async () => {
+  it('enforces the full-render subtitle cap during validation', async () => {
     const input = definition();
     const cues = Array.from({ length: 257 }, (_, i) => ({
       id: `cue-${i}`,
@@ -501,101 +497,21 @@ describe('T45 definitions and migration', () => {
     const path = await writeDefinition(input);
     const valid = run('validate', path);
     expect(valid.status, valid.stderr).toBe(0);
-    const original = (await compileVideo(path)).project;
     input.subtitles.cues = cues;
     await writeDefinition(input);
     const invalid = run('validate', path);
     expect(invalid.status).toBe(1);
     expect(invalid.stderr).toMatch(/up to 256 visible subtitle cues/);
-    const source = join(directory, 'subtitles.opencut.json');
-    await writeFile(
-      source,
-      serializeProject({ ...original, subtitles: input.subtitles }),
-    );
-    const migration = run(
-      'migrate',
-      source,
-      '--output',
-      'converted.video.json',
-    );
-    expect(migration.status).toBe(1);
-    expect(migration.stderr).toMatch(/up to 256 visible subtitle cues/);
-    expect(await readdir(directory)).not.toContain('converted.video.json');
   });
 
-  it('converts the saved content and ignores history-only assets', async () => {
-    const original = structuredClone(
-      (await compileVideo(await writeDefinition(definition()))).project,
+  it('rejects a saved snapshot even when named like a definition', async () => {
+    const compiled = await compileVideo(await writeDefinition(definition()));
+    const path = join(directory, 'snapshot.video.json');
+    await writeFile(path, JSON.stringify(compiled.project));
+    const result = run('validate', path);
+    expect(result.status).toBe(1);
+    expect(JSON.parse(result.stderr).error.code).toBe(
+      'INVALID_VIDEO_DEFINITION',
     );
-    const before = structuredClone(original);
-    before.assets.push({
-      id: 'missing',
-      name: 'Missing history-only asset',
-      mediaTypes: ['video'],
-      file: { type: 'relative', path: 'missing.mov' },
-    });
-    original.editing = {
-      revision: 1,
-      undo: [
-        {
-          id: 'undo',
-          label: 'Remove asset',
-          committedAt: original.metadata.updatedAt,
-          before,
-          after: structuredClone(original),
-        },
-      ],
-      redo: [],
-    };
-    const source = join(directory, 'source.opencut.json');
-    const snapshot = serializeProject(original);
-    await writeFile(source, snapshot);
-    const json = join(directory, 'converted.video.json');
-    const result = run('migrate', source, '--output', json);
-    expect(result.status, result.stderr).toBe(0);
-    expect(JSON.parse(result.stdout)).toMatchObject({ historyOmitted: true });
-    const converted = await compileVideo(json);
-    const content = { ...original, editing: undefined };
-    expect(serializeProject(converted.project)).toBe(serializeProject(content));
-    expect(await readFile(source, 'utf8')).toBe(snapshot);
-    expect((await readFile(json, 'utf8')).includes('missing.mov')).toBe(false);
-    const existing = run('migrate', source, '--output', json);
-    expect(existing.status).toBe(1);
-    expect(existing.stderr).toMatch(/Refusing to overwrite/);
-  });
-
-  it('rejects unsupported versions and unrenderable projects without publishing a definition', async () => {
-    const source = join(directory, 'source.opencut.json');
-    const output = 'converted.video.json';
-    const original = structuredClone(
-      (await compileVideo(await writeDefinition(definition()))).project,
-    );
-    for (const [project, message] of [
-      [
-        { ...original, schemaVersion: 100 },
-        /Unsupported project schema version 100/,
-      ],
-      [
-        { ...original, settings: { ...original.settings, width: 319 } },
-        /even dimensions/,
-      ],
-      [
-        {
-          ...original,
-          settings: { ...original.settings, durationFrames: undefined },
-          clips: [],
-        },
-        /Video tracks are empty/,
-      ],
-    ] as const) {
-      await writeFile(source, JSON.stringify(project));
-      const failed = run('migrate', source, '--output', output);
-      expect(failed.status, failed.stderr).toBe(1);
-      expect(JSON.parse(failed.stderr).error).toMatchObject({
-        code: 'VIDEO_MIGRATION_FAILED',
-        message,
-      });
-      expect(await readdir(directory)).not.toContain(output);
-    }
   });
 });

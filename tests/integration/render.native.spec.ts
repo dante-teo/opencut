@@ -1,31 +1,19 @@
+import {
+  addFixtureClip,
+  renderFixture,
+  splitFixtureClip,
+} from './render-fixture.js';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import {
-  mkdtemp,
-  readFile,
-  readdir,
-  rm,
-  symlink,
-  writeFile,
-} from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import {
-  addClip,
-  createProject,
-  frameTime,
-  serializeProject,
-  splitClip,
-  trimClip,
-} from '@opencut/core';
+import { createProject, frameTime } from '@opencut/core';
 import type { FrameRate, Project } from '@opencut/core';
 import { requireTool, runTool } from '../../scripts/fixture-lib.js';
 
-const entry = fileURLToPath(
-  new URL('../../apps/cli/dist/index.js', import.meta.url),
-);
 const generated = fileURLToPath(
   new URL('../fixtures/generated/', import.meta.url),
 );
@@ -66,14 +54,14 @@ function add(
   sourceOut: number,
 ) {
   const time = (n: number) => frameTime(n, project.settings.frameRate);
-  return addClip(project, {
+  return addFixtureClip(project, {
     id,
     assetId,
     trackId: 'video',
     timelineStart: time(at),
     sourceIn: time(sourceIn),
     sourceOut: time(sourceOut),
-  }).project;
+  });
 }
 function pixels(file: string, filter?: string): Buffer {
   const result = spawnSync(
@@ -117,7 +105,7 @@ function close(actual: Buffer, expected: Buffer, label: string): void {
 }
 const fit = `scale=${width}:${height}:force_original_aspect_ratio=decrease:force_divisible_by=2:reset_sar=1,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`;
 
-// Every subtest invokes the built standalone CLI and independently probes/decodes its output.
+// Independently probe and decode every output.
 test('native T10 saved timeline rendering', async (t) => {
   requireTool('ffmpeg');
   requireTool('ffprobe');
@@ -132,40 +120,15 @@ test('native T10 saved timeline rendering', async (t) => {
   );
   const directory = await mkdtemp(join(generated, 't10-'));
   const projectFile = join(directory, 'project.json');
-  const run = (...args: string[]) =>
-    spawnSync(process.execPath, [entry, ...args], {
-      encoding: 'utf8',
-      cwd: directory,
-      timeout: 120000,
-    });
   const render = async (
     project: Project,
     name: string,
     location = projectFile,
   ) => {
-    await writeFile(projectFile, serializeProject(project));
-    const snapshot = await readFile(projectFile, 'utf8');
+    const snapshot = structuredClone(project);
     const output = join(directory, name);
-    const result = run(
-      'project',
-      'render',
-      location,
-      '--output',
-      output,
-      '--json',
-    );
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stderr, '');
-    assert.equal(await readFile(projectFile, 'utf8'), snapshot);
-    const events = result.stdout
-      .trim()
-      .split('\n')
-      .map((line: string) => JSON.parse(line));
-    const report = events.at(-1);
-    assert.equal(report.event, 'completed');
-    assert.ok(
-      events.some((event: { event: string }) => event.event === 'progress'),
-    );
+    const report = await renderFixture(project, location, output);
+    assert.deepEqual(project, snapshot);
     const probe = JSON.parse(
       runTool('ffprobe', [
         '-v',
@@ -202,15 +165,13 @@ test('native T10 saved timeline rendering', async (t) => {
       'renders sorted, trimmed, split clips and exact black-gap boundaries at different source rates',
       async () => {
         let project = add(example(), 'first', 'asset0', 5, 7, 50);
-        project = trimClip(project, 'first', {
-          sourceOut: frameTime(47, rate30),
-        }).project;
-        project = splitClip(
-          project,
-          'first',
-          frameTime(18, rate30),
-          'right',
-        ).project;
+        Object.assign(
+          project.clips.find((clip) => clip.id === 'first')!,
+          {
+            sourceOut: frameTime(47, rate30),
+          },
+        );
+        splitFixtureClip(project, 'first', frameTime(18, rate30), 'right');
         project = add(project, 'long', 'asset1', 52, 10, 40);
         project = add(project, 'short', 'asset2', 82, 0, 15);
         project.clips.reverse();
@@ -240,15 +201,10 @@ test('native T10 saved timeline rendering', async (t) => {
         );
         for (const n of [82, 96])
           close(frame(decoded, n), frame(short, n - 82), `Third clip ${n}`);
-        const repeated = run(
-          'project',
-          'render',
-          projectFile,
-          '--output',
-          join(directory, 'ordered.mp4'),
+        await assert.rejects(
+          renderFixture(project, projectFile, join(directory, 'ordered.mp4')),
+          /overwrite/,
         );
-        assert.equal(repeated.status, 1);
-        assert.match(repeated.stderr, /overwrite/);
       },
     );
 
@@ -258,14 +214,14 @@ test('native T10 saved timeline rendering', async (t) => {
         const rate = { numerator: 30000, denominator: 1001 };
         const whole = add(example(rate), 'whole', 'asset2', 0, 9, 41);
         const unsplit = await render(whole, 'whole.mp4');
-        let split = whole;
+        const split = structuredClone(whole);
         for (let i = 1; i < 32; i++)
-          split = splitClip(
+          splitFixtureClip(
             split,
             i === 1 ? 'whole' : `part${i - 1}`,
             frameTime(i, rate),
             `part${i}`,
-          ).project;
+          );
         const result = await render(split, 'split.mp4');
         assert.equal(result.report.frameCount, 32);
         assert.equal(result.report.durationSeconds, (32 * 1001) / 30000);
@@ -290,28 +246,6 @@ test('native T10 saved timeline rendering', async (t) => {
           ]),
         ).frames;
         for (let i = 0; i < 32; i++) assert.equal(timestamps[i].pts, i * 1001);
-      },
-    );
-
-    await t.test(
-      'uses the physical project directory through an alias, ignoring unused offline assets',
-      async () => {
-        const alias = join(directory, 'alias');
-        await symlink(directory, alias, 'dir');
-        const project = add(example(), 'clip', 'asset0', 0, 0, 2);
-        project.assets.push({
-          id: 'offline',
-          name: 'Unused',
-          mediaTypes: ['video'],
-          file: { type: 'relative', path: 'missing.mp4' },
-        });
-        const result = await render(
-          project,
-          'alias.mp4',
-          join(alias, 'project.json'),
-        );
-        assert.equal(result.report.frameCount, 2);
-        assert.equal(result.report.projectPath, projectFile);
       },
     );
 
@@ -390,19 +324,11 @@ test('native T10 saved timeline rendering', async (t) => {
         p.clips.push({ ...p.clips[0]!, id: 'overlap' });
         cases.push([p, /overlaps/]);
         for (const [index, [project, error]] of cases.entries()) {
-          await writeFile(projectFile, JSON.stringify(project));
           const output = join(directory, `invalid${index}.mp4`);
-          const result = run(
-            'project',
-            'render',
-            projectFile,
-            '--output',
-            output,
-            '--json',
+          await assert.rejects(
+            renderFixture(project, projectFile, output),
+            error,
           );
-          assert.equal(result.status, 1, result.stderr);
-          assert.equal(JSON.parse(result.stdout).event, 'failed');
-          assert.match(result.stderr, error);
           assert.ok(
             !(await readdir(directory)).includes(`invalid${index}.mp4`),
           );

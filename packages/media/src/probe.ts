@@ -2,7 +2,6 @@ import {
   checkRenderSignal,
   localFile,
   MediaError,
-  renderSourceInputArgs,
   runMediaTool,
 } from './process.js';
 
@@ -176,7 +175,7 @@ export async function probeMedia(
             '-format_whitelist',
             'image2,jpeg_pipe,png_pipe,apng,gif,gif_pipe,webp_pipe,mp3,ogg,wav,flac,mov,matroska,webm',
           ]
-        : renderSourceInputArgs()),
+        : []),
       '-show_format',
       '-show_streams',
       '-of',

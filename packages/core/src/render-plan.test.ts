@@ -1,13 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  addClip,
-  addTrack,
-  createProject,
-  frameTime,
-  splitClip,
-  setClipSpeed,
-  trimClip,
-} from './index.js';
+import { createProject, frameTime } from './index.js';
 import { planProjectRender } from './render-plan.js';
 import type { Project } from './project.js';
 
@@ -39,22 +31,22 @@ function clip(
   sourceIn: number,
   sourceOut: number,
 ) {
-  return addClip(project, {
+  project.clips.push({
     id,
     assetId: 'source',
     trackId: 'video',
     timelineStart: at(start),
     sourceIn: at(sourceIn),
     sourceOut: at(sourceOut),
-  }).project;
+  });
+  return project;
 }
 
 describe('pure project render planning', () => {
-  it('reuses trims/splits, sorts clips, inserts leading/interior gaps and preserves the input', () => {
-    let project = clip(example(), 'a', 3, 6, 36);
-    project = trimClip(project, 'a', { sourceOut: at(30) }).project;
-    project = splitClip(project, 'a', at(13), 'b').project;
-    project = clip(project, 'c', 30, 0, 2);
+  it('sorts adjacent clips, inserts leading/interior gaps and preserves the input', () => {
+    const project = clip(example(), 'a', 3, 6, 16);
+    clip(project, 'b', 13, 16, 30);
+    clip(project, 'c', 30, 0, 2);
     project.clips.reverse();
     const before = structuredClone(project);
     expect(planProjectRender(project)).toMatchObject({
@@ -127,12 +119,10 @@ describe('pure project render planning', () => {
   );
 
   it('shares a tempo run only when adjacent media pieces keep the same mapping', () => {
-    const base = clip(example(), 'a', 0, 15, 45);
-    const slow = setClipSpeed(base, 'a', {
-      numerator: 1,
-      denominator: 4,
-    }).project;
-    const split = splitClip(slow, 'a', at(8), 'b').project;
+    const split = clip(example(), 'a', 0, 15, 17);
+    clip(split, 'b', 8, 17, 45);
+    for (const piece of split.clips)
+      piece.speed = { numerator: 1, denominator: 4 };
     split.clips[1]!.muted = true;
     const plan = planProjectRender(split);
     expect(plan.audioClips.map(({ tempoRunId }) => tempoRunId)).toEqual([
@@ -150,26 +140,22 @@ describe('pure project render planning', () => {
 
   it('allows multiple and empty video/audio tracks, requiring at least one visual clip', () => {
     const project = clip(example(), 'a', 0, 0, 30);
-    expect(
-      planProjectRender(
-        addTrack(project, { name: 'Extra', type: 'video' }).project,
-      ).visualClips,
-    ).toHaveLength(1);
-    expect(
-      planProjectRender(
-        addTrack(project, { name: 'Audio', type: 'audio' }).project,
-      ).frameCount,
-    ).toBe(30);
+    project.tracks.push(
+      { id: 'extra', name: 'Extra', type: 'video' },
+      { id: 'audio', name: 'Audio', type: 'audio' },
+    );
+    expect(planProjectRender(project).visualClips).toHaveLength(1);
+    expect(planProjectRender(project).frameCount).toBe(30);
     project.tracks[0]!.type = 'audio';
     project.assets[0]!.mediaTypes = ['audio'];
     expect(() => planProjectRender(project)).toThrow(/empty/);
   });
 
   it('plans overlapping audio and extends black video to the longest audio end', () => {
-    let project = clip(example(), 'video-clip', 0, 0, 3);
+    const project = clip(example(), 'video-clip', 0, 0, 3);
     project.tracks.unshift({ id: 'music', name: 'Music', type: 'audio' });
     project.assets[0]!.mediaTypes.push('audio');
-    project = addClip(project, {
+    project.clips.push({
       id: 'sound',
       assetId: 'source',
       trackId: 'music',
@@ -178,7 +164,7 @@ describe('pure project render planning', () => {
       sourceOut: at(10),
       volume: 0.25,
       muted: true,
-    }).project;
+    });
     const plan = planProjectRender(project);
     expect(plan.frameCount).toBe(7);
     expect(plan.visualClips[0]).toMatchObject({

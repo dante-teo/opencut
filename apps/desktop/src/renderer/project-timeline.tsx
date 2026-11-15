@@ -15,8 +15,6 @@ import {
   type Project,
   type RationalTime,
 } from '@opencut/core';
-import { Captions, Clapperboard, Lock, VolumeX } from 'lucide-react';
-import { ClipArtwork } from './clip-artwork.js';
 import {
   clampTime,
   frameIndex,
@@ -51,16 +49,12 @@ export function ProjectTimeline({
   onSelect,
   position,
   onSeek,
-  onPreviewClip,
-  linkedClipId,
 }: {
   project: Project | undefined;
   selected: string | null;
   onSelect: (id: string) => void;
   position: RationalTime;
   onSeek: (time: RationalTime) => void;
-  onPreviewClip?: (id: string) => void;
-  linkedClipId: string | null;
 }) {
   const index = useMemo(() => indexTimeline(project), [project]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -82,18 +76,6 @@ export function ProjectTimeline({
   const rate = project?.settings.frameRate ?? { numerator: 30, denominator: 1 };
   const ticks = rulerTicks(origin, width, zoom, rate);
   const playheadX = relativePixels(position, origin, zoom);
-  const selectedClip = project?.clips.find(({ id }) => id === selected);
-  const selectedAsset =
-    selectedClip?.assetId && index.assets.get(selectedClip.assetId);
-  const linkedVideo =
-    selectedAsset &&
-    selectedAsset.mediaTypes.includes('video') &&
-    (selectedAsset.metadata?.kind ?? 'video') === 'video' &&
-    project?.tracks.some(
-      ({ id, type }) => id === selectedClip?.trackId && type === 'video',
-    )
-      ? selectedClip
-      : undefined;
   const cueCount = project?.subtitles?.cues.length ?? 0;
   const transitionWindows = useMemo(() => {
     if (!project?.transitions?.length) return [];
@@ -200,16 +182,6 @@ export function ProjectTimeline({
           >
             {timelineTimecode(position, rate)} NDF
           </span>
-          {onPreviewClip && (
-            <button
-              aria-label="Preview selected clip"
-              title="Preview selected clip"
-              disabled={!linkedVideo}
-              onClick={() => linkedVideo && onPreviewClip(linkedVideo.id)}
-            >
-              <Clapperboard aria-hidden="true" />
-            </button>
-          )}
           <button
             aria-label="Zoom out"
             disabled={zoom === ZOOM_LEVELS[0]}
@@ -369,8 +341,6 @@ export function ProjectTimeline({
           {index.rows.slice(firstTrack, lastTrack).map((track, offset) => {
             const trackIndex = firstTrack + offset;
             const top = RULER_HEIGHT + trackIndex * TRACK_HEIGHT - viewport.top;
-            const artworkVisible =
-              top < viewport.height && top + TRACK_HEIGHT > RULER_HEIGHT;
             const clips = index.tracks.get(track.id) ?? [];
             return (
               <div
@@ -383,20 +353,13 @@ export function ProjectTimeline({
               >
                 <div className="track-heading" title={track.name}>
                   <span className={`track-badge ${track.type}`}>
-                    {track.type === 'subtitle' ? (
-                      <Captions aria-hidden="true" size={14} />
-                    ) : (
-                      `${track.type === 'video' ? 'V' : 'A'}${trackIndex + 1}`
-                    )}
+                    {track.type === 'subtitle'
+                      ? 'CC'
+                      : `${track.type === 'video' ? 'V' : 'A'}${trackIndex + 1}`}
                   </span>
                   <div className="track-name">
                     <strong>{track.name}</strong>
-                    {'locked' in track && track.locked && (
-                      <Lock size={13} aria-label="Locked track" />
-                    )}
-                    {'muted' in track && track.muted && (
-                      <VolumeX size={13} aria-label="Muted track" />
-                    )}
+                    {'muted' in track && track.muted && <small>Muted</small>}
                   </div>
                 </div>
                 <svg
@@ -494,20 +457,6 @@ export function ProjectTimeline({
                             height="52"
                             overflow="hidden"
                           >
-                            {onPreviewClip &&
-                              project &&
-                              artworkVisible &&
-                              !clip.text && (
-                                <ClipArtwork
-                                  project={project}
-                                  clip={clip}
-                                  asset={asset}
-                                  audio={track.type === 'audio'}
-                                  offset={Math.max(0, x + 1 - clipLeft)}
-                                  width={artworkWidth}
-                                  zoom={zoom}
-                                />
-                              )}
                             <text className="clip-name" x="8" y="14">
                               {speedLabel}
                               {title}
@@ -575,7 +524,6 @@ export function ProjectTimeline({
           )}
         </div>
       </div>
-      {linkedClipId && <div className="timeline-footer">Source linked</div>}
     </section>
   );
 }

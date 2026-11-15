@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 import {
   audioSourceDuration,
   probeMedia,
@@ -8,17 +9,15 @@ import {
   validateSubtitleBurnIn,
 } from '@opencut/media';
 import type { MediaMetadata } from '@opencut/media';
-import { describeMediaAsset, readEmbeddedFont } from './assets.js';
-import { resolveMediaReference } from './project-files.js';
-import { PROJECT_SCHEMA_VERSION, validateProject } from './project.js';
+import { describeMediaAsset, readEmbeddedFont } from './video-assets.js';
+import { validateProject } from './project.js';
 import type { MediaAsset, Project, TimelineClip } from './project.js';
-import { bindRenderSources } from './render-files.js';
+import { bindRenderSources } from './render-sources.js';
 import { planProjectRender } from './render-plan.js';
 import { frameTime, rationalTime } from './time.js';
 import type { FrameRate, RationalTime } from './time.js';
 import { videoDefinitionSchema } from './video-definition.js';
 import type { VideoDefinition } from './video-definition.js';
-import { validateTransitions } from './transitions.js';
 import { identifyVideoInput, videoInputIdentity } from './video-input.js';
 import type { RecordVideoInput } from './video-input.js';
 
@@ -34,7 +33,7 @@ export function definitionLoadError(path: string, cause: unknown) {
   );
 }
 
-export function stableId(kind: string, ...parts: unknown[]) {
+function stableId(kind: string, ...parts: unknown[]) {
   return (
     kind +
     '-' +
@@ -57,14 +56,13 @@ function freeze<T>(value: T): T {
   return value;
 }
 
-type BoundRenderPlan = Awaited<ReturnType<typeof bindRenderSources>>;
+type BoundRenderPlan = ReturnType<typeof bindRenderSources>;
 type AuthoredTrack = VideoDefinition['tracks'][number];
 type AuthoredClip = AuthoredTrack['clips'][number];
 type AuthoredTime = AuthoredClip['at'];
 type AuthoredAsset = NonNullable<VideoDefinition['assets']>[string];
 type CompiledAsset = {
   asset: MediaAsset;
-  current: MediaAsset;
   source: MediaMetadata;
   sourceIdentity: string;
 };
@@ -120,9 +118,9 @@ export async function compileDefinition(
   try {
     const plan = planProjectRender(project);
     if (!preview) validateSubtitleBurnIn(plan.visualClips);
-    renderPlan = await bindRenderSources(
+    renderPlan = bindRenderSources(
       plan,
-      ({ assetId }) => assets.get(assetId)!.source.path,
+      (assetId) => assets.get(assetId)!.source.path,
     );
   } catch (cause) {
     throw new VideoDefinitionError(
@@ -154,20 +152,6 @@ export async function compileDefinition(
   });
 }
 
-function describeVideoSource(source: MediaMetadata) {
-  const described = describeMediaAsset(source);
-  if (
-    described.metadata.kind === 'video' &&
-    !described.metadata.videoDuration
-  ) {
-    const end = videoSourceDuration(source);
-    const numerator = Math.round((end ?? 0) * 1_000_000);
-    if (Number.isSafeInteger(numerator) && numerator > 0)
-      described.metadata.videoDuration = { numerator, denominator: 1_000_000 };
-  }
-  return described;
-}
-
 async function buildProject(
   path: string,
   definition: VideoDefinition,
@@ -190,7 +174,6 @@ async function buildProject(
       ? { numerator: authoredRate, denominator: 1 }
       : authoredRate;
   const project: Project = {
-    schemaVersion: PROJECT_SCHEMA_VERSION,
     metadata: { name, id, createdAt, updatedAt },
     settings: { ...settings, frameRate },
     assets: [],
@@ -266,10 +249,7 @@ async function buildProject(
   const compiledAssets = new Map<string, CompiledAsset>();
   for (const id of Object.keys(assets).sort()) {
     const asset = assets[id]!;
-    const sourcePath = resolveMediaReference(
-      { type: 'relative', path: asset.path },
-      path,
-    );
+    const sourcePath = resolve(dirname(path), asset.path);
     inputs?.record(identifyVideoInput(sourcePath, 'media'));
     const compiled = await compileAsset(
       id,
@@ -296,21 +276,6 @@ async function buildProject(
 
   validateSourceBounds(validated.project, compiledAssets, clipLocations);
 
-  // Saved metadata governs the snapshot. Transition handles also have to
-  // fit the sources currently on disk.
-  if (project.transitions?.length) {
-    const issues: string[] = [];
-    validateTransitions(
-      {
-        ...validated.project,
-        assets: Array.from(compiledAssets.values(), ({ current }) => current),
-      },
-      (path, _code, message) => issues.push(`${path}: ${message}`),
-      new Set(),
-    );
-    if (issues.length) throw new VideoDefinitionError(issues.join('\n'));
-  }
-
   return { project: validated.project, assets: compiledAssets };
 }
 
@@ -322,8 +287,8 @@ function validateSourceBounds(
   const trackTypes = new Map(project.tracks.map(({ id, type }) => [id, type]));
   for (const [index, clip] of project.clips.entries()) {
     if (clip.assetId === undefined) continue;
-    const { source, current } = assets.get(clip.assetId)!;
-    if (current.metadata?.kind === 'image') continue;
+    const { source, asset } = assets.get(clip.assetId)!;
+    if (asset.metadata?.kind === 'image') continue;
     const audio = trackTypes.get(clip.trackId) === 'audio';
     if (audio && !source.audio)
       throw new VideoDefinitionError(
@@ -364,10 +329,7 @@ async function loadFonts(
       fonts.set(id, font.data);
     } else {
       try {
-        const file = resolveMediaReference(
-          { type: 'relative', path: font.path },
-          path,
-        );
+        const file = resolve(dirname(path), font.path);
         record?.(identifyVideoInput(file, 'font'));
         const data = await readEmbeddedFont(file);
         verifiedFonts.add(data);
@@ -401,15 +363,7 @@ async function compileAsset(
   probes: VideoSourceProbes,
   signal?: AbortSignal,
 ): Promise<CompiledAsset> {
-  const {
-    path,
-    kind,
-    name = id,
-    metadata,
-    mediaTypes,
-    freezeFrame,
-    ...properties
-  } = definition;
+  const { path, kind, name = id, freezeFrame, ...properties } = definition;
   const file = { type: 'relative' as const, path };
   const sourceIdentity = videoInputIdentity(sourcePath);
   const source = await probeVideoSource(id, sourcePath, probes, signal);
@@ -421,7 +375,7 @@ async function compileAsset(
     throw new VideoDefinitionError(
       `assets.${id}.path: Media '${sourcePath}' changed during compilation. Retry after the write completes.`,
     );
-  const described = describeVideoSource(source);
+  const described = describeMediaAsset(source);
   if (freezeFrame) {
     const end = videoSourceDuration(source);
     if (
@@ -434,7 +388,8 @@ async function compileAsset(
         `assets.${id}.freezeFrame: Choose a source time inside a timed video and set kind to image.`,
       );
   }
-  const current: MediaAsset = {
+  const asset: MediaAsset = {
+    ...properties,
     id,
     name,
     file,
@@ -455,26 +410,14 @@ async function compileAsset(
       : described.metadata,
   };
   if (
-    current.metadata?.kind !== kind ||
-    (metadata && metadata.kind !== kind) ||
-    current.mediaTypes.length === 0 ||
-    (kind === 'video' && !source.video?.frameRate) ||
-    mediaTypes?.some((type) => !current.mediaTypes.includes(type))
+    asset.metadata?.kind !== kind ||
+    asset.mediaTypes.length === 0 ||
+    (kind === 'video' && !source.video?.frameRate)
   )
     throw new VideoDefinitionError(
       `assets.${id}: '${path}' does not match the declared ${kind} source and streams.`,
     );
-  return {
-    source,
-    sourceIdentity,
-    current,
-    asset: {
-      ...current,
-      ...properties,
-      mediaTypes: mediaTypes ?? current.mediaTypes,
-      metadata: metadata === null ? undefined : (metadata ?? current.metadata),
-    },
-  };
+  return { source, sourceIdentity, asset };
 }
 
 function generatedTrackId(
@@ -554,7 +497,7 @@ async function compileClip(
   };
 }
 
-export async function probeVideoSource(
+async function probeVideoSource(
   id: string,
   sourcePath: string,
   probes: VideoSourceProbes,

@@ -51,7 +51,7 @@ without weakening commit validation.
 A desktop session can accumulate several completed transactions before Save.
 Persist them with `history: 'preserve'`, retaining each undo step and guarding
 against the revision and serialized content last read from disk. Saving does not
-add another history entry. See the [persistence contract](../PROJECT_FORMAT.md#transactions-and-history-api)
+add another history entry. See the persistence contract
 for the distinction from single-transaction `history: 'restore'`.
 
 ## Consequences and alternatives
@@ -69,5 +69,7 @@ for the distinction from single-transaction `history: 'restore'`.
 - Source media stays unchanged; undo/redo restores references and metadata only.
 
 The [CLI contract](../CLI.md#transactions-undo-and-redo) defines batch operations,
-results and exit codes. The [core API contract](../PROJECT_FORMAT.md#transactions-and-history-api)
+results and exit codes. The core API contract
 defines persistence options, history structure and errors.
+
+The saved project format was retired. See [video definitions](../VIDEO_DEFINITIONS.md) for current authoring.

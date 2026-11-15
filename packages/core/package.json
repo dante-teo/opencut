@@ -8,13 +8,9 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./jobs": {
-      "types": "./dist/local-jobs.d.ts",
-      "import": "./dist/local-jobs.js"
-    },
-    "./node": {
-      "types": "./dist/project-files.d.ts",
-      "import": "./dist/project-files.js"
+    "./video": {
+      "types": "./dist/video.d.ts",
+      "import": "./dist/video.js"
     }
   },
   "files": [

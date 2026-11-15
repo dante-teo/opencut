@@ -15,12 +15,7 @@ import type {
   ColorGrade,
   TransitionRamp,
 } from '@opencut/shared';
-import {
-  checkRenderSignal,
-  MediaError,
-  mediaExecutable,
-  renderSourceInputArgs,
-} from './process.js';
+import { checkRenderSignal, MediaError } from './process.js';
 
 type TransformSource =
   | { kind: 'text'; rasterize: () => Promise<Buffer>; x: number; y: number }
@@ -76,7 +71,6 @@ function rawSource(
     args: [
       '-threads',
       '1',
-      ...renderSourceInputArgs(),
       '-i',
       path,
       '-map',
@@ -99,7 +93,7 @@ function rawSource(
 
 function ffmpeg(args: string[], signal: AbortSignal, decode: boolean) {
   const child = spawn(
-    mediaExecutable('ffmpeg'),
+    'ffmpeg',
     ['-v', 'error', '-nostdin', '-xerror', ...args],
     {
       stdio: decode ? ['ignore', 'pipe', 'pipe'] : ['pipe', 'ignore', 'pipe'],

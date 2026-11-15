@@ -69,5 +69,7 @@ sampling and publication decisions still apply.
 
 The [rendering contract](../CLI.md#project-rendering) defines commands, limits,
 stream requirements and output verification. The
-[project format](../PROJECT_FORMAT.md#exact-time) describes stored timing
+project format describes stored timing
 and clip properties.
+
+The saved project format was retired. See [video definitions](../VIDEO_DEFINITIONS.md) for current authoring.

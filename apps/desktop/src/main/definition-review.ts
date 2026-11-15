@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { watchVideo } from '@opencut/core/node';
+import { watchVideo } from '@opencut/core/video';
 import type { DefinitionReview } from '../bridge.js';
 
 export class DefinitionReviewSession {
   private controller: AbortController | undefined;
   private work: Promise<void> = Promise.resolve();
+  private watcher: Awaited<ReturnType<typeof watchVideo>> | undefined;
   private media: { url: string; path: string } | undefined;
 
   constructor(
@@ -18,6 +19,7 @@ export class DefinitionReviewSession {
   open(path: string) {
     this.controller?.abort();
     this.media = undefined;
+    this.watcher = undefined;
     const controller = new AbortController();
     this.controller = controller;
     this.send({ path, generation: 0, status: 'compiling', current: null });
@@ -46,6 +48,7 @@ export class DefinitionReviewSession {
             this.send({ path, ...status, current: ready });
           },
         });
+        if (!controller.signal.aborted) this.watcher = watcher;
         if (!controller.signal.aborted)
           await new Promise<void>((done) =>
             controller.signal.addEventListener('abort', () => done(), {
@@ -66,10 +69,20 @@ export class DefinitionReviewSession {
     });
   }
 
+  exportRevision<T>(
+    generation: number,
+    run: (video: import('@opencut/core/video').CompiledVideo) => Promise<T>,
+  ): Promise<T> {
+    if (!this.watcher)
+      throw new Error('Open a definition with a valid preview.');
+    return this.watcher.withCurrent(generation, run);
+  }
+
   close() {
     this.controller?.abort();
     this.controller = undefined;
     this.media = undefined;
+    this.watcher = undefined;
     this.send(null);
     return this.work;
   }

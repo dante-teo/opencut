@@ -6,8 +6,6 @@ import {
   VideoDefinitionError,
 } from './video-compiler.js';
 import type { CompilationOptions, CompiledVideo } from './video-compiler.js';
-import { canonicalProjectFilePath } from './project-files.js';
-import { deserializeProject } from './project.js';
 import { identifyVideoInput } from './video-input.js';
 import { readDefinitionScript } from './video-script.js';
 
@@ -18,7 +16,7 @@ export function isVideoDefinitionPath(file: string) {
 async function readDefinitionJson(path: string) {
   try {
     const json = await readFile(path, 'utf8');
-    return { json, value: JSON.parse(json) as unknown };
+    return JSON.parse(json) as unknown;
   } catch (cause) {
     throw definitionLoadError(path, cause);
   }
@@ -54,26 +52,7 @@ export async function compileVideoInput(
   // The selected filename determines how to load a symlink alias. Both loading
   // and media resolution use the same physical definition path.
   const value = file.endsWith('.video.json')
-    ? (await readDefinitionJson(path)).value
+    ? await readDefinitionJson(path)
     : await (options.loadScript ?? readDefinitionScript)(path, record);
   return compileDefinition(path, value, options);
-}
-
-/** A .video.json filename can also belong to a saved project. Read it once. */
-export async function readVideoJsonForPreview(
-  file: string,
-  signal: AbortSignal,
-) {
-  const path = await canonicalProjectFilePath(resolve(file));
-  const { json, value } = await readDefinitionJson(path);
-  if (
-    value &&
-    typeof value === 'object' &&
-    Object.hasOwn(value, 'schemaVersion')
-  )
-    return { path, project: deserializeProject(json) };
-  return compileDefinition(await realpath(path), value, {
-    signal,
-    preview: true,
-  });
 }

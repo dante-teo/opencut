@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { frameTime } from '@opencut/core';
 import type { RationalTime } from '@opencut/core';
 import type { DefinitionReview } from '../bridge.js';
@@ -68,7 +68,6 @@ function DefinitionPlayback({
         onSelect={setSelection}
         position={frameTime(frame, rate)}
         onSeek={seekTimeline}
-        linkedClipId={null}
       />
     </>
   );
@@ -84,6 +83,29 @@ export function DefinitionWorkspace({
   onClose: () => void;
 }) {
   const { current, status } = state;
+  const [progress, setProgress] = useState<number | null>(null);
+  const [feedback, setFeedback] = useState<{
+    error?: string;
+    message?: string;
+  }>({});
+  useEffect(() => window.opencut.onDefinitionExportProgress(setProgress), []);
+
+  async function exportDefinition() {
+    if (!current || progress !== null) return;
+    setProgress(0);
+    setFeedback({});
+    try {
+      const result = await window.opencut.exportDefinition(current.generation);
+      if (result.status === 'saved')
+        setFeedback({ message: `Saved ${result.path}` });
+    } catch (error) {
+      setFeedback({
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setProgress(null);
+    }
+  }
   return (
     <div className="workspace" aria-label="Definition review">
       <div className="project-toolbar">
@@ -92,8 +114,25 @@ export function DefinitionWorkspace({
           <span title={state.path}>{state.path.split(/[/\\]/).at(-1)}</span>
         </div>
         <div className="project-actions">
-          <button onClick={onOpen}>Open definition</button>
-          <button onClick={onClose}>Close definition</button>
+          <button onClick={onOpen} disabled={progress !== null}>
+            Open definition
+          </button>
+          <button onClick={onClose} disabled={progress !== null}>
+            Close definition
+          </button>
+          <button
+            onClick={() => void exportDefinition()}
+            disabled={!current || progress !== null}
+          >
+            Export MP4
+          </button>
+          {progress !== null && (
+            <button
+              onClick={() => void window.opencut.cancelDefinitionExport()}
+            >
+              Cancel export
+            </button>
+          )}
         </div>
       </div>
       <div className="project-feedback">
@@ -109,6 +148,13 @@ export function DefinitionWorkspace({
             ` · ${status === 'ready' ? 'Revision' : 'Showing last valid revision'} ${current.generation} (${current.sourceRevision.slice(0, 12)})`}
         </span>
         {state.error && <pre role="alert">{state.error}</pre>}
+        {progress !== null && (
+          <progress max={100} value={progress} aria-label="Export progress" />
+        )}
+        {feedback.message && (
+          <output aria-label="Export result">{feedback.message}</output>
+        )}
+        {feedback.error && <pre role="alert">{feedback.error}</pre>}
       </div>
       {current && <DefinitionPlayback key={current.url} revision={current} />}
     </div>

@@ -1,12 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  PROJECT_SCHEMA_VERSION,
   ProjectFormatError,
   compareTimes,
   createProject,
-  deserializeProject,
   frameTime,
-  serializeProject,
   validateProject,
 } from './index.js';
 import type { Project } from './index.js';
@@ -86,11 +83,10 @@ function issues(project: unknown) {
   return result.error.issues;
 }
 
-describe('project creation and persistence', () => {
+describe('compiled snapshot validation', () => {
   it('creates independent valid empty projects with stable unique IDs and defaults', () => {
     const first = createProject({ name: 'First' });
     const second = createProject({ name: 'Second' });
-    expect(first.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
     expect(first.metadata.id).not.toBe(second.metadata.id);
     expect(first.metadata.createdAt).toBe(first.metadata.updatedAt);
     expect(first.settings).toEqual({
@@ -101,36 +97,8 @@ describe('project creation and persistence', () => {
     expect(first.assets).toEqual([]);
     expect(first.tracks).toEqual([]);
     expect(first.clips).toEqual([]);
-    expect(deserializeProject(serializeProject(first))).toEqual(first);
     first.settings.width = 100;
     expect(second.settings.width).toBe(1920);
-  });
-
-  it('round trips multiple assets, video/audio tracks and clips without data loss', () => {
-    const project = example();
-    const json = serializeProject(project);
-    const loaded = deserializeProject(json);
-    expect(loaded).toEqual(project);
-    expect(loaded.metadata.id).toBe('project-demo');
-    expect(json).toContain('\n  "schemaVersion": 1,\n');
-    expect(json.endsWith('\n')).toBe(true);
-    expect(serializeProject(loaded)).toBe(json);
-    loaded.assets[0]!.name = 'Renamed';
-    expect(project.assets[0]!.name).toBe('Camera');
-  });
-
-  it('has deterministic object order regardless of input key insertion order', () => {
-    const project = example();
-    const shuffled = JSON.parse(
-      JSON.stringify(project),
-      (_key, value: unknown) => {
-        if (value && typeof value === 'object' && !Array.isArray(value))
-          return Object.fromEntries(Object.entries(value).reverse());
-        return value;
-      },
-    ) as Project;
-    expect(serializeProject(shuffled)).toBe(serializeProject(project));
-    expect(shuffled.metadata.updatedAt).toBe(project.metadata.updatedAt);
   });
 
   it('preserves array order, unreduced times and input data', () => {
@@ -138,7 +106,10 @@ describe('project creation and persistence', () => {
     project.clips.reverse();
     project.clips[0]!.sourceIn = { numerator: 2, denominator: 4 };
     const before = structuredClone(project);
-    expect(deserializeProject(serializeProject(project))).toEqual(before);
+    expect(validateProject(project)).toMatchObject({
+      success: true,
+      project: before,
+    });
     expect(project).toEqual(before);
   });
 
@@ -163,10 +134,9 @@ describe('project creation and persistence', () => {
     const project = example();
     project.assets.reverse();
     project.tracks.reverse();
-    expect(validateProject(project).success).toBe(true);
-    expect(
-      deserializeProject(serializeProject(project)).clips[0]!.assetId,
-    ).toBe('asset-camera');
+    const result = validateProject(project);
+    if (!result.success) throw result.error;
+    expect(result.project.clips[0]!.assetId).toBe('asset-camera');
   });
 
   it('preserves offline assets without attempting filesystem or probe access', () => {
@@ -175,58 +145,8 @@ describe('project creation and persistence', () => {
       type: 'absolute',
       path: '/does/not/exist/camera.mp4',
     };
-    expect(deserializeProject(serializeProject(project))).toEqual(project);
+    expect(validateProject(project)).toMatchObject({ success: true, project });
   });
-
-  it.each(['', '{', '{"schemaVersion":1,}', '/* comment */ {}', '{} {}'])(
-    'reports malformed JSON: %j',
-    (json) => {
-      try {
-        deserializeProject(json);
-        throw new Error('Expected failure');
-      } catch (error) {
-        expect(error).toBeInstanceOf(ProjectFormatError);
-        expect(error).toMatchObject({
-          code: 'INVALID_JSON',
-          issues: [{ path: '', code: 'invalid_json' }],
-        });
-        expect((error as Error).cause).toBeInstanceOf(SyntaxError);
-      }
-    },
-  );
-
-  it.each([0, 2, 999, -1])(
-    'clearly rejects unsupported schema %s before parsing its payload',
-    (schemaVersion) => {
-      const result = validateProject({ schemaVersion });
-      expect(result).toMatchObject({
-        success: false,
-        error: {
-          code: 'UNSUPPORTED_VERSION',
-          issues: [
-            {
-              path: '/schemaVersion',
-              message: expect.stringContaining(`version ${schemaVersion}`),
-            },
-          ],
-        },
-      });
-      expect(() =>
-        deserializeProject(JSON.stringify({ schemaVersion })),
-      ).toThrow('supported version is 1');
-    },
-  );
-
-  it.each([undefined, '1', 1.5, null, Number.MAX_SAFE_INTEGER + 1])(
-    'rejects malformed schema versions %s',
-    (schemaVersion) => {
-      expect(issues({ ...example(), schemaVersion })).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ path: '/schemaVersion' }),
-        ]),
-      );
-    },
-  );
 
   it.each([null, [], true, 1, 'project', {}])(
     'rejects an invalid root %j',
@@ -235,11 +155,13 @@ describe('project creation and persistence', () => {
     },
   );
 
-  it('revalidates on serialization and creation', () => {
+  it('reports missing assets and rejects invalid snapshot metadata', () => {
     const project = example();
     project.clips[0]!.assetId = 'unknown';
-    expect(() => serializeProject(project)).toThrow(
-      "/clips/0/assetId: Asset 'unknown' does not exist",
+    expect(issues(project)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: '/clips/0/assetId' }),
+      ]),
     );
     expect(() => createProject({ name: ' ' })).toThrow('/metadata/name');
   });
@@ -451,8 +373,11 @@ describe('project structure and reference validation', () => {
   ] as const)('preserves portable or explicitly absolute paths %j', (file) => {
     const project = example();
     project.assets[0]!.file = file;
-    expect(
-      deserializeProject(serializeProject(project)).assets[0]!.file,
-    ).toEqual(file);
+    expect(validateProject(project)).toMatchObject({
+      success: true,
+      project: {
+        assets: expect.arrayContaining([expect.objectContaining({ file })]),
+      },
+    });
   });
 });

@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import type { ApplicationInfo } from '@opencut/core';
 import './style.css';
 import appIcon from '../../resources/opencut-icon.png';
-import { ProjectWorkspace } from './project-workspace.js';
+import { Preview } from './video-preview.js';
 import { DefinitionWorkspace } from './definition-workspace.js';
 import type { DefinitionReview } from '../bridge.js';
 
@@ -47,7 +47,13 @@ function App() {
           }}
         />
       ) : (
-        <ProjectWorkspace onOpenDefinition={openDefinition} />
+        <section className="workspace" aria-label="Review workspace">
+          <div className="project-toolbar">
+            <h1>Review</h1>
+            <button onClick={openDefinition}>Open definition</button>
+          </div>
+          <Preview />
+        </section>
       )}
       {definitionError && <p role="alert">{definitionError}</p>}
       <p

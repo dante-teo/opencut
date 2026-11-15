@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { clipTimelineEnd, clipSourceTime } from './clip-timing.js';
-import type { ProjectSnapshot, TimelineClip } from './project.js';
+import type { Project, TimelineClip } from './project.js';
 import { compareTimes, frameTime } from './time.js';
 import type { FrameRate, RationalTime } from './time.js';
 
@@ -30,13 +30,6 @@ export function transitionOwner(transition: Transition) {
   return transition.kind === 'cross-dissolve'
     ? transition.to
     : transition.clipId;
-}
-
-export function transitionUsesClip(transition: Transition, id: string) {
-  return (
-    transitionOwner(transition) === id ||
-    (transition.kind === 'cross-dissolve' && transition.from === id)
-  );
 }
 
 function boundaryFrame(time: RationalTime, rate: FrameRate) {
@@ -123,7 +116,7 @@ function exceedsVideoDuration(sourceOut: RationalTime, duration: RationalTime) {
 }
 
 export function validateTransitions(
-  project: ProjectSnapshot,
+  project: Project,
   report: (path: string, code: string, message: string) => void,
   ids: Set<string>,
 ) {

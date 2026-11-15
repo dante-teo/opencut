@@ -21,7 +21,10 @@ describe('standalone built CLI', () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(result.stdout).toContain('Usage: opencut');
-      expect(result.stdout).toContain('project render');
+      expect(result.stdout).toContain(
+        'render <definition.video.ts|definition.video.json>',
+      );
+      expect(result.stdout).not.toContain('project render');
     },
   );
 
@@ -51,17 +54,62 @@ describe('standalone built CLI', () => {
     );
   });
 
-  it.each(['create', 'info', 'validate', 'render'])(
-    'provides scoped help for project %s',
-    (command) => {
-      const result = run('project', command, '--help');
-      expect(result.status).toBe(0);
-      expect(result.stderr).toBe('');
-      expect(result.stdout).toContain(
-        `Usage: opencut project ${command} <project-file>`,
+  it('rejects the former conversion command', () => {
+    const result = run(
+      'migrate',
+      'old.opencut.json',
+      '--output',
+      'new.video.json',
+      '--json',
+    );
+    expect(result.status).toBe(2);
+    expect(result.stdout).toBe('');
+    expect(JSON.parse(result.stderr).error.message).toBe(
+      "Unknown command 'migrate'.",
+    );
+    expect(
+      JSON.parse(run('--help', '--json').stdout).commands,
+    ).not.toContainEqual(expect.objectContaining({ name: 'migrate' }));
+  });
+
+  it('lists the same supported commands in both help forms', () => {
+    const catalog = JSON.parse(run('--help', '--json').stdout);
+    expect(JSON.parse(run('help', '--json').stdout)).toEqual(catalog);
+    for (const { name } of catalog.commands) {
+      const scoped = run('help', ...name.split(' '), '--json');
+      expect(scoped.status, scoped.stderr).toBe(0);
+      expect(JSON.parse(scoped.stdout).commands).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name })]),
       );
-    },
-  );
+    }
+    expect(run('render', '--help').stdout).toContain('--no-subtitles');
+  });
+
+  it('resolves subcommand help with option values before and between command words', () => {
+    const result = run(
+      '--size',
+      '320',
+      'preview',
+      '--frame=12',
+      'frame',
+      '-h',
+      '--json',
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(
+      JSON.parse(result.stdout).commands.map(
+        ({ name }: { name: string }) => name,
+      ),
+    ).toEqual(['preview frame']);
+  });
+
+  it('reports an unknown subcommand when help is requested', () => {
+    const result = run('help', 'online', 'missing', '--json');
+    expect(result.status).toBe(2);
+    expect(JSON.parse(result.stderr).error.message).toBe(
+      "Unknown command 'online missing'.",
+    );
+  });
 
   it('preserves repeated boolean options', () => {
     const result = run('-v', '--version');
@@ -91,72 +139,6 @@ describe('standalone built CLI', () => {
     ['extract-frame', 'a.mp4', '--timestamp', '1', '--output', 'out.jpg'],
     ['--json'],
     ['--version', 'probe', 'a.mp4'],
-    ['compose', 'one.mp4', '--music', 'music.wav', '--output', 'out.mp4'],
-    ['compose', 'a.mp4', 'b.mp4', '--output', 'out.mp4'],
-    [
-      'compose',
-      'a.mp4',
-      'b.mp4',
-      '--music',
-      'music.wav',
-      '--output',
-      'out.png',
-    ],
-    [
-      'compose',
-      'a.mp4',
-      'b.mp4',
-      '--music',
-      'music.wav',
-      '--output',
-      'out.mp4',
-      '--width',
-      '321',
-    ],
-    [
-      'compose',
-      'a.mp4',
-      'b.mp4',
-      '--music',
-      'music.wav',
-      '--output',
-      'out.mp4',
-      '--fps',
-      '29.97',
-    ],
-    [
-      'compose',
-      'a.mp4',
-      'b.mp4',
-      '--music',
-      'music.wav',
-      '--output',
-      'out.mp4',
-      '--music-volume',
-      'NaN',
-    ],
-    [
-      'compose',
-      'a.mp4',
-      'b.mp4',
-      '--music',
-      'music.wav',
-      '--output',
-      'out.mp4',
-      '--clip-volume',
-      '2',
-    ],
-    [
-      'compose',
-      'a.mp4',
-      'b.mp4',
-      '--music',
-      'music.wav',
-      '--output',
-      'out.mp4',
-      '--timestamp',
-      '0',
-    ],
     ['probe', 'a.mp4', '--width', '640'],
     [
       'extract-frame',

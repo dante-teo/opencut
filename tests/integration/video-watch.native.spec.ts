@@ -19,15 +19,17 @@ import { promisify } from 'node:util';
 import {
   compileVideo,
   previewVideo,
+  renderCompiledVideo,
   watchVideo,
+  type VideoWatchRevision,
   type VideoWatchStatus,
 } from '@opencut/sdk';
 import {
   compareRgb,
   decodeFrames,
   verifyVideoTimestamps,
-} from '../desktop/t27-comparison.js';
-import { decodeAudio, sampleOnsets } from '../desktop/t27-audio.js';
+} from './media-comparison.js';
+import { decodeAudio, sampleOnsets } from './audio-comparison.js';
 
 const fixtures = resolve('tests/fixtures/generated');
 const cli = resolve('apps/cli/dist/index.js');
@@ -149,27 +151,59 @@ test('watch observes imports, missing files and in-place media changes without m
     replacement,
   ]);
   const beforeMedia = performance.now();
-  const ordinary = previewVideo(await compileVideo(file, { preview: true }));
-  await writeFile(still, await readFile(replacement));
-  const staleOutput = join(directory, 'stale.png');
-  await assert.rejects(
-    ordinary.frame(0, staleOutput),
-    /changed after it was read/,
+  const compiled = await compileVideo(file, { preview: true });
+  const ordinary = previewVideo(compiled);
+  let updated: VideoWatchRevision;
+  let releaseExport!: () => void;
+  const holdExport = new Promise<void>((release) => {
+    releaseExport = release;
+  });
+  const exportPath = join(directory, 'pinned.mp4');
+  const exporting = watcher.withCurrent(recovered.generation, async (video) => {
+    await holdExport;
+    return renderCompiledVideo(video, exportPath, { quality: 'draft' });
+  });
+  try {
+    await writeFile(still, await readFile(replacement));
+    const staleOutput = join(directory, 'stale.png');
+    await assert.rejects(
+      ordinary.frame(0, staleOutput),
+      /changed after it was read/,
+    );
+    await assert.rejects(access(staleOutput), { code: 'ENOENT' });
+    const staleExport = join(directory, 'stale.mp4');
+    await assert.rejects(
+      renderCompiledVideo(compiled, staleExport),
+      /changed after it was read/,
+    );
+    await assert.rejects(access(staleExport), { code: 'ENOENT' });
+    updated = (
+      await waitFor(
+        ({ status, generation }) =>
+          status === 'ready' && generation > recovered.generation,
+      )
+    ).current!;
+    assert.notEqual(updated.sourceRevision, recovered.sourceRevision);
+    assert.notEqual(
+      (await updated.video.resolveRender()).visualClips[0]!.path,
+      snapshotPath,
+    );
+    const pixel = decodeFrames(updated.playback.path, [0], 320, 180).get(0)!;
+    assert.ok(pixel[0]! > 240 && pixel[1]! < 15 && pixel[2]! < 15);
+    await access(snapshotPath);
+    await assert.rejects(
+      watcher.withCurrent(recovered.generation, async () => {}),
+      /preview changed/,
+    );
+  } finally {
+    releaseExport();
+    await exporting;
+  }
+  await assert.rejects(access(snapshotPath), { code: 'ENOENT' });
+  assert.deepEqual(
+    decodeFrames(exportPath, [0], 320, 180).get(0),
+    initialFrame,
   );
-  await assert.rejects(access(staleOutput), { code: 'ENOENT' });
-  const updated = (
-    await waitFor(
-      ({ status, generation }) =>
-        status === 'ready' && generation > recovered.generation,
-    )
-  ).current!;
-  assert.notEqual(updated.sourceRevision, recovered.sourceRevision);
-  assert.notEqual(
-    (await updated.video.resolveRender()).visualClips[0]!.path,
-    snapshotPath,
-  );
-  const pixel = decodeFrames(updated.playback.path, [0], 320, 180).get(0)!;
-  assert.ok(pixel[0]! > 240 && pixel[1]! < 15 && pixel[2]! < 15);
   t.diagnostic(
     `Missing-import failure to media recovery ${(performance.now() - started).toFixed(0)} ms; media rewrite to playable revision ${(performance.now() - beforeMedia).toFixed(0)} ms including decode.`,
   );

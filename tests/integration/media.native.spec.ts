@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
+import {
+  copyFile,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +21,77 @@ const entry = fileURLToPath(
 );
 const generated = fileURLToPath(
   new URL('../fixtures/generated/', import.meta.url),
+);
+
+test(
+  'SIGTERM stops frame decoding without publishing a PNG',
+  { skip: process.platform === 'win32' },
+  async (t) => {
+    requireTool('ffprobe');
+    const directory = await mkdtemp(join(generated, 'cancel-frame-'));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const decoder = `
+    setTimeout(() => {
+      const fs = require('node:fs');
+      fs.writeFileSync('decoder-finished', '');
+      process.stdout.write(fs.readFileSync(${JSON.stringify(join(generated, 'still.png'))}));
+    }, 1500);
+  `;
+    const preload = `
+    import { createRequire, syncBuiltinESMExports } from 'node:module';
+    const subprocess = createRequire(import.meta.url)('node:child_process');
+    const { execFile } = subprocess;
+    subprocess.execFile = (command, args, ...rest) => {
+      if (command !== 'ffmpeg') return execFile(command, args, ...rest);
+      const child = execFile(process.execPath, ['-e', ${JSON.stringify(decoder)}], ...rest);
+      process.stderr.write('decoder started\\n');
+      return child;
+    };
+    syncBuiltinESMExports();
+  `;
+    const mock = join(directory, 'mock-decoder.mjs');
+    await writeFile(mock, preload);
+    const child = spawn(
+      process.execPath,
+      [
+        '--import',
+        mock,
+        entry,
+        'extract-frame',
+        join(generated, 'video-short.mp4'),
+        '--timestamp',
+        '0',
+        '--output',
+        'frame.png',
+      ],
+      { cwd: directory, stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    let output = '';
+    let diagnostics = '';
+    let cancelled = false;
+    child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+      output += chunk;
+    });
+    child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
+      diagnostics += chunk;
+      if (!cancelled && diagnostics.includes('decoder started')) {
+        cancelled = true;
+        child.kill('SIGTERM');
+      }
+    });
+    try {
+      const [code] = await once(child, 'close', {
+        signal: AbortSignal.timeout(10_000),
+      });
+      assert.ok(cancelled, diagnostics);
+      assert.equal(code, 143, diagnostics);
+      assert.equal(output, '');
+      assert.deepEqual(await readdir(directory), ['mock-decoder.mjs']);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null)
+        child.kill('SIGKILL');
+    }
+  },
 );
 
 test('native T02 CLI against existing synthetic fixtures', async (t) => {

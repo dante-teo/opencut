@@ -1,9 +1,8 @@
 import { z } from 'zod';
 import { snapshotSchema, clipSchema, clipVisualSchema } from './project.js';
 import type { Project } from './project.js';
-import { projectRevision, projectSnapshot } from './editing.js';
 import { evaluateTimelineFrame } from './evaluation.js';
-import { listTimeline } from './timeline.js';
+import { listTimeline } from './timeline-view.js';
 import { frameRateSchema, timeSchema } from './time.js';
 
 const natural = z.int().nonnegative();
@@ -53,14 +52,12 @@ const resolvedClip = clipSchema.extend({
 export const projectInspectionSchema = snapshotSchema.extend({
   inspectionVersion: version,
   path: z.string(),
-  revision: natural,
   duration: timeSchema,
 });
 export const timelineInspectionSchema = z.strictObject({
   inspectionVersion: version,
   path: z.string(),
   projectId: z.string(),
-  revision: natural,
   frame: natural,
   frameRate: frameRateSchema,
   time: timeSchema,
@@ -79,7 +76,6 @@ const previewBase = z.strictObject({
   path: z.string(),
   projectPath: z.string(),
   projectId: z.string(),
-  revision: natural,
   frameRate: frameRateSchema,
   width: z.int().positive(),
   height: z.int().positive(),
@@ -118,22 +114,12 @@ export const previewSheetSchema = previewBase.extend({
     }),
   ),
 });
-export const inspectionJsonSchemas = {
-  'project inspect': z.toJSONSchema(projectInspectionSchema),
-  'timeline inspect': z.toJSONSchema(timelineInspectionSchema),
-  'preview frame': z.toJSONSchema(previewFrameSchema),
-  'preview contact-sheet': z.toJSONSchema(previewSheetSchema),
-  'preview clip': z.toJSONSchema(previewClipSchema),
-};
-
-/** A detached, revision-tagged content snapshot, without potentially huge undo stacks. */
+/** A detached view of the compiled snapshot. */
 export function inspectProject(project: Project, path: string) {
-  const snapshot = projectSnapshot(project);
   return projectInspectionSchema.parse({
-    ...snapshot,
+    ...project,
     inspectionVersion: 1,
     path,
-    revision: projectRevision(project),
     duration: listTimeline(project).duration,
   });
 }
@@ -144,7 +130,6 @@ export function inspectTimeline(project: Project, path: string, frame: number) {
     inspectionVersion: 1,
     path,
     projectId: project.metadata.id,
-    revision: projectRevision(project),
     frame,
     frameRate: project.settings.frameRate,
     ...evaluateTimelineFrame(project, frame),

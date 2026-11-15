@@ -14,16 +14,14 @@ import {
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { compileVideo, defineVideo, migrateProject } from '@opencut/sdk';
-import { createProject, serializeProject } from '@opencut/core';
-import { describeMediaAsset } from '../../packages/core/src/assets.js';
+import { compileVideo, defineVideo, previewVideo } from '@opencut/sdk';
 import {
   decodeStillFrame,
   probeMedia,
   renderTimelineFrame,
   renderVideoTimeline,
 } from '../../packages/media/src/index.js';
-import { compareRgb, decodeFrames } from '../desktop/t27-comparison.js';
+import { decodeFrames } from './media-comparison.js';
 import { requireTool, runTool } from '../../scripts/fixture-lib.js';
 import type { Probe } from '../../scripts/fixture-lib.js';
 
@@ -45,7 +43,7 @@ const hash = async (path: string) =>
     .update(await readFile(path))
     .digest('hex');
 
-test('T44 public CLI renders equivalent 20-second definitions and legacy projects', async () => {
+test('T44 public CLI renders equivalent 20-second TypeScript and JSON definitions', async () => {
   requireTool('ffmpeg');
   requireTool('ffprobe');
   const directory = await mkdtemp(join(generated, 't44-'));
@@ -172,44 +170,6 @@ test('T44 public CLI renders equivalent 20-second definitions and legacy project
     );
     assert.equal((await readdir(directory)).length, 11);
 
-    const project = structuredClone(
-      (await compileVideo(example('json'))).project,
-    );
-    delete project.settings.durationFrames;
-    for (const asset of project.assets)
-      asset.file.path = join(
-        '..',
-        asset.file.path.split('/').at(-1)!,
-      ).replaceAll('\\', '/');
-    const legacy = join(directory, 'legacy.video.json');
-    const original = serializeProject(project);
-    await writeFile(legacy, original);
-    const legacyPreview = cli(
-      'preview',
-      'frame',
-      legacy,
-      '--frame',
-      '96',
-      '--output',
-      'legacy.png',
-    );
-    assert.equal(legacyPreview.projectPath, legacy);
-    assert.equal(
-      await hash(join(directory, 'legacy.png')),
-      await hash(join(directory, 'json-96.png')),
-    );
-    const legacyRender = run(
-      'project',
-      'render',
-      legacy,
-      '--output',
-      'legacy.mp4',
-    );
-    assert.equal(legacyRender.status, 0, legacyRender.stderr);
-    const result = JSON.parse(legacyRender.stdout.trim().split('\n').at(-1)!);
-    assert.equal(result.event, 'completed');
-    assert.equal(result.frameCount, 456);
-    assert.equal(await readFile(legacy, 'utf8'), original);
     assert.deepEqual(await Promise.all(sources.map(hash)), before);
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -235,14 +195,13 @@ function decodeRgb(path: string, frame?: number) {
   return result.stdout;
 }
 
-test('T45 migration preserves mixed tracks, subtitles, grading, effects and exact timing', async () => {
+test('both definition formats render mixed tracks, subtitles, grading, effects and exact timing', async () => {
   requireTool('ffmpeg');
   requireTool('ffprobe');
   const directory = await mkdtemp(join(generated, 't45-'));
   const definitions = join(directory, 'definitions');
-  const ts = join(definitions, 'converted.video.ts');
-  const json = join(definitions, 'converted.video.json');
-  const legacy = join(directory, 'legacy.opencut.json');
+  const ts = join(definitions, 'mixed.video.ts');
+  const json = join(definitions, 'mixed.video.json');
   const titleFont = fileURLToPath(
     new URL('../../packages/media/fonts/NotoEmoji.ttf', import.meta.url),
   );
@@ -263,54 +222,7 @@ test('T45 migration preserves mixed tracks, subtitles, grading, effects and exac
   };
   try {
     await mkdir(definitions);
-    const [video, tone, image] = await Promise.all(
-      ['video-long.mp4', 'audio-tone.wav', 'still.png'].map((file) =>
-        probeMedia(join(generated, file)),
-      ),
-    );
     const embeddedFont = (await readFile(titleFont)).toString('base64');
-    const project = createProject({
-      id: 'original',
-      name: 'T45 round trip',
-      createdAt: '2024-03-02T01:02:03.456Z',
-      settings: {
-        frameRate: rate,
-        width: 320,
-        height: 180,
-        backgroundColor: '#193149A0',
-      },
-    });
-    project.assets = [
-      {
-        ...describeMediaAsset(video!),
-        id: 'camera',
-        name: 'Camera',
-        file: { type: 'relative', path: '../video-long.mp4' },
-      },
-      {
-        ...describeMediaAsset(tone!),
-        id: 'voice',
-        name: 'Voice',
-        file: { type: 'absolute', path: join(generated, 'audio-tone.wav') },
-      },
-      {
-        ...describeMediaAsset(image!),
-        id: 'held',
-        name: 'Previously frozen frame',
-        file: { type: 'relative', path: '../still.png' },
-      },
-    ];
-    project.tracks = [
-      {
-        id: 'picture',
-        name: 'Picture and freeze',
-        type: 'video',
-        volume: 0.7,
-        locked: true,
-      },
-      { id: 'titles', name: 'Titles', type: 'video' },
-      { id: 'audio', name: 'Audio', type: 'audio', volume: 0.6 },
-    ];
     const grade = {
       exposure: 0.3,
       contrast: 1.1,
@@ -322,238 +234,208 @@ test('T45 migration preserves mixed tracks, subtitles, grading, effects and exac
         { input: 0.8, output: 0.72 },
       ],
     };
-    project.clips = [
-      {
-        id: 'opening',
-        assetId: 'camera',
-        trackId: 'picture',
-        timelineStart: frame(0),
-        sourceIn: frame(12),
-        sourceOut: frame(36),
-        grade,
-        speed: exact(3, 2),
-        muted: true,
-        linkId: 'sync',
-        visual: {
-          fit: 'cover',
-          crop: { left: 0.05, right: 0.02, top: 0.1, bottom: 0.08 },
-        },
-        keyframes: {
-          scale: [
+    const definition = defineVideo({
+      name: 'Mixed definition',
+      canvas: {
+        frameRate: rate,
+        width: 320,
+        height: 180,
+        backgroundColor: '#193149A0',
+      },
+      assets: {
+        camera: { path: '../../video-long.mp4', kind: 'video' },
+        voice: { path: '../../audio-tone.wav', kind: 'audio' },
+        held: { path: '../../still.png', kind: 'image' },
+      },
+      fonts: { emoji: { data: embeddedFont } },
+      tracks: [
+        {
+          id: 'picture',
+          type: 'video',
+          volume: 0.7,
+          clips: [
             {
-              time: exact(0),
-              value: 0.8,
-              easing: 'ease-in-out',
-              curve: [0.1, 0.9],
+              id: 'opening',
+              asset: 'camera',
+              at: frame(0),
+              sourceIn: frame(12),
+              sourceOut: frame(36),
+              grade,
+              speed: exact(3, 2),
+              muted: true,
+              visual: {
+                fit: 'cover',
+                crop: { left: 0.05, right: 0.02, top: 0.1, bottom: 0.08 },
+              },
+              keyframes: {
+                scale: [
+                  {
+                    time: exact(0),
+                    value: 0.8,
+                    easing: 'ease-in-out',
+                    curve: [0.1, 0.9],
+                  },
+                  { time: frame(16), value: 1.05, easing: 'linear' },
+                ],
+              },
             },
-            { time: frame(16), value: 1.05, easing: 'linear' },
+            {
+              id: 'incoming',
+              asset: 'camera',
+              at: frame(16),
+              sourceIn: frame(48),
+              sourceOut: frame(64),
+              volume: 0.35,
+            },
+            {
+              id: 'freeze',
+              asset: 'held',
+              at: frame(32),
+              sourceIn: frame(1),
+              sourceOut: frame(9),
+              visual: { scale: 0.8, rotation: 5 },
+              grade,
+            },
           ],
         },
-      },
-      {
-        id: 'incoming',
-        assetId: 'camera',
-        trackId: 'picture',
-        timelineStart: frame(16),
-        sourceIn: frame(48),
-        sourceOut: frame(64),
-        volume: 0.35,
-      },
-      {
-        id: 'freeze',
-        assetId: 'held',
-        trackId: 'picture',
-        timelineStart: frame(32),
-        sourceIn: frame(1),
-        sourceOut: frame(9),
-        visual: { scale: 0.8, rotation: 5 },
-        grade,
-      },
-      {
-        id: 'heading',
-        trackId: 'titles',
-        timelineStart: frame(2),
-        sourceIn: frame(2),
-        sourceOut: frame(15),
-        text: {
-          content: '☺',
-          embeddedFont,
-          canvasFill: '#00000020',
-          fontSize: 24,
-          rotation: 8,
-          fontWeight: 700,
-          emphasis: ['☺'],
-        },
-        visual: { y: -40, opacity: 0.8 },
-      },
-      {
-        id: 'dialogue',
-        assetId: 'camera',
-        trackId: 'audio',
-        timelineStart: frame(0),
-        sourceIn: frame(12),
-        sourceOut: frame(36),
-        speed: exact(3, 2),
-        detachedAudio: true,
-        linkId: 'sync',
-        effects: [
-          { type: 'eq', frequency: 300, db: -3 },
-          { type: 'compressor', threshold: -18, ratio: 3 },
-          { type: 'limiter', ceiling: -2 },
-        ],
-        gainKeys: [
-          { time: exact(1, 1000), value: 0.2 },
-          { time: frame(15), value: 0.75 },
-        ],
-        fadeIn: { duration: exact(1, 100), from: 0.25 },
-        fadeOut: { duration: exact(1, 10), to: 0.3 },
-      },
-      {
-        id: 'music',
-        assetId: 'voice',
-        trackId: 'audio',
-        timelineStart: exact(25, 36),
-        sourceIn: exact(1, 111),
-        sourceOut: exact(2, 3),
-        volume: 0.4,
-      },
-    ];
-    project.transitions = [
-      { id: 'up', kind: 'fade-in', clipId: 'opening', frames: 3 },
-      {
-        id: 'dissolve',
-        kind: 'cross-dissolve',
-        from: 'opening',
-        to: 'incoming',
-        frames: 6,
-      },
-      { id: 'down', kind: 'fade-out', clipId: 'incoming', frames: 4 },
-    ];
-    project.markers = [{ id: 'cut', frame: 16, name: 'Cut' }];
-    project.subtitles = {
-      style: { color: '#FFFFFF', fontSize: 22, embeddedFont },
-      cues: [
         {
-          id: 'cue',
-          text: '☺ ☻',
-          start: exact(113, 1000),
-          end: exact(32, 25),
-          pop: true,
-          emphasis: ['☺'],
-          style: {
-            x: 10,
-            stroke: { width: 1, color: '#000000' },
-            embeddedFont: null,
-          },
-          words: [
-            { from: 0, to: 1, start: exact(0), end: exact(25, 73) },
-            { from: 2, to: 3, start: exact(25, 73), end: exact(109, 100) },
+          id: 'titles',
+          type: 'text',
+          clips: [
+            {
+              id: 'heading',
+              at: frame(2),
+              sourceIn: frame(2),
+              sourceOut: frame(15),
+              text: {
+                content: '☺',
+                font: 'emoji',
+                canvasFill: '#00000020',
+                fontSize: 24,
+                rotation: 8,
+                fontWeight: 700,
+                emphasis: ['☺'],
+              },
+              visual: { y: -40, opacity: 0.8 },
+            },
+          ],
+        },
+        {
+          id: 'audio',
+          type: 'audio',
+          volume: 0.6,
+          clips: [
+            {
+              id: 'dialogue',
+              asset: 'camera',
+              at: frame(0),
+              sourceIn: frame(12),
+              sourceOut: frame(36),
+              speed: exact(3, 2),
+              detachedAudio: true,
+              effects: [
+                { type: 'eq', frequency: 300, db: -3 },
+                { type: 'compressor', threshold: -18, ratio: 3 },
+                { type: 'limiter', ceiling: -2 },
+              ],
+              gainKeys: [
+                { time: exact(1, 1000), value: 0.2 },
+                { time: frame(15), value: 0.75 },
+              ],
+              fadeIn: { duration: exact(1, 100), from: 0.25 },
+              fadeOut: { duration: exact(1, 10), to: 0.3 },
+            },
+            {
+              id: 'music',
+              asset: 'voice',
+              at: exact(25, 36),
+              sourceIn: exact(1, 111),
+              sourceOut: exact(2, 3),
+              volume: 0.4,
+            },
           ],
         },
       ],
-    };
-    const saved = serializeProject(project);
-    await writeFile(legacy, saved);
-    const report = JSON.parse(run('migrate', legacy, '--output', json));
-    assert.deepEqual(report, {
-      sourcePath: legacy,
-      path: json,
-      historyOmitted: false,
+      transitions: [
+        { id: 'up', kind: 'fade-in', clipId: 'opening', frames: 3 },
+        {
+          id: 'dissolve',
+          kind: 'cross-dissolve',
+          from: 'opening',
+          to: 'incoming',
+          frames: 6,
+        },
+        { id: 'down', kind: 'fade-out', clipId: 'incoming', frames: 4 },
+      ],
+      markers: [{ id: 'cut', frame: 16, name: 'Cut' }],
+      subtitles: {
+        style: { color: '#FFFFFF', fontSize: 22, font: 'emoji' },
+        cues: [
+          {
+            id: 'cue',
+            text: '☺ ☻',
+            start: exact(113, 1000),
+            end: exact(32, 25),
+            pop: true,
+            emphasis: ['☺'],
+            style: {
+              x: 10,
+              stroke: { width: 1, color: '#000000' },
+              embeddedFont: null,
+            },
+            words: [
+              { from: 0, to: 1, start: exact(0), end: exact(25, 73) },
+              { from: 2, to: 3, start: exact(25, 73), end: exact(109, 100) },
+            ],
+          },
+        ],
+      },
     });
-    run('migrate', legacy, '--output', ts);
-    const converted = await compileVideo(json);
-    const { assets, ...content } = converted.project;
-    assert.equal(
-      serializeProject({ ...content, assets: [...project.assets] }),
-      saved,
-    );
-    const originalAssets = new Map(
-      project.assets.map(({ id, ...asset }) => [id, asset]),
-    );
-    for (const { id, file, ...asset } of assets) {
-      assert.deepEqual(
-        { ...asset, file: originalAssets.get(id)!.file },
-        originalAssets.get(id),
-      );
-      assert.equal(file.type, 'relative');
-      assert.ok(file.path.startsWith('../../'));
-    }
-    const jsonText = JSON.parse(await readFile(json, 'utf8'));
-    assert.equal(Object.keys(jsonText.fonts).length, 1);
-    assert.equal(
-      jsonText.tracks[1].clips[0].text.font,
-      jsonText.subtitles.style.font,
+    const authored = JSON.stringify(definition);
+    await writeFile(json, authored);
+    await writeFile(ts, `export default ${authored};\n`);
+
+    const compiled = await compileVideo(json);
+    assert.deepEqual((await compileVideo(ts)).project, compiled.project);
+    const { visualTransitions, audioClips } = await compiled.resolveRender();
+    assert.ok(visualTransitions?.some(({ layers }) => layers.length === 2));
+    assert.deepEqual(
+      audioClips
+        .find(({ clipId }) => clipId === 'dialogue')
+        ?.effects?.map(({ type }) => type),
+      ['eq', 'compressor', 'limiter'],
     );
     assert.equal(
-      serializeProject((await compileVideo(ts)).project),
-      serializeProject(converted.project),
+      compiled.project.clips.find(({ id }) => id === 'heading')?.text
+        ?.embeddedFont,
+      embeddedFont,
     );
-    assert.equal(
-      serializeProject((await compileVideo(json)).project),
-      serializeProject(converted.project),
-    );
-    run('project', 'render', legacy, '--output', 'legacy.mp4');
-    run('render', json, '--output', 'converted.mp4');
+    assert.equal(compiled.project.subtitles?.style.embeddedFont, embeddedFont);
+
+    run('render', json, '--output', 'json.mp4');
     run('render', ts, '--output', 'typescript.mp4');
     assert.equal(
-      await hash(join(directory, 'converted.mp4')),
-      await hash(join(directory, 'legacy.mp4')),
-    );
-    assert.equal(
+      await hash(join(directory, 'json.mp4')),
       await hash(join(directory, 'typescript.mp4')),
-      await hash(join(directory, 'legacy.mp4')),
     );
 
     const frames = [2, 5, 14, 17, 29, 35, 39];
-    const rendered = decodeFrames(
-      join(directory, 'legacy.mp4'),
-      frames,
-      320,
-      180,
-    );
-    const convertedFrames = decodeFrames(
-      join(directory, 'converted.mp4'),
-      frames,
-      320,
-      180,
-    );
     for (const index of frames) {
+      const sdkFrame = join(directory, `sdk-${index}.png`);
+      const cliFrame = join(directory, `cli-${index}.png`);
+      await previewVideo(compiled).frame(index, sdkFrame);
       run(
         'preview',
         'frame',
-        legacy,
+        ts,
         '--frame',
         String(index),
         '--output',
-        `legacy-${index}.png`,
+        cliFrame,
       );
-      run(
-        'preview',
-        'frame',
-        json,
-        '--frame',
-        String(index),
-        '--output',
-        `converted-${index}.png`,
-      );
-      assert.equal(
-        await hash(join(directory, `converted-${index}.png`)),
-        await hash(join(directory, `legacy-${index}.png`)),
-      );
-      // Compare the two decoded exports with the project's consistency metrics.
-      // PNG-to-H.264 chroma subsampling is independent of the migration.
-      const migratedRgb = convertedFrames.get(index)!;
-      const comparison = compareRgb(migratedRgb, rendered.get(index)!, {
-        mean: 8,
-        p95: 25,
-        largePixelFraction: 0.025,
-      });
-      assert.ok(
-        comparison.passed,
-        `Frame ${index} ${JSON.stringify(comparison.metrics)}`,
-      );
+      assert.equal(await hash(cliFrame), await hash(sdkFrame));
     }
-    assert.equal(await readFile(legacy, 'utf8'), saved);
+    assert.equal(await readFile(json, 'utf8'), authored);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -687,15 +569,6 @@ test('T45 source-backed freezes match the corresponding extracted image and supp
       await renderTimelineFrame({ ...extracted, output: reference, range });
       assert.equal(await hash(output), await hash(reference));
     }
-    const republished = join(directory, 'held.opencut.json');
-    await writeFile(republished, serializeProject(compiled.project));
-    const migrated = join(directory, 'migrated.video.json');
-    await migrateProject(republished, migrated);
-    assert.deepEqual(
-      await (await compileVideo(migrated)).resolveRender(),
-      attached,
-    );
-
     async function writeStillDefinition() {
       const path = join(directory, 'still.video.json');
       await writeFile(

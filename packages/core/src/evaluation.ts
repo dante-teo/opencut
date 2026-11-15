@@ -7,7 +7,7 @@ import type { Project, TimelineClip } from './project.js';
 import { audioFadeGain, baseAudioGain, keyframeGain } from './audio.js';
 import { clipSpeed, sampleClipSourceTime } from './clip-timing.js';
 import { resolveTransition } from './transitions.js';
-import { listTimeline } from './timeline.js';
+import { listTimeline } from './timeline-view.js';
 import { subtitleTextLayers } from './subtitles.js';
 import { compareTimes, frameTime, subtractTimes, timeSchema } from './time.js';
 import type { RationalTime } from './time.js';
@@ -175,22 +175,17 @@ type ClipSample = {
 };
 
 export type EvaluatedTimelineClip = ResolvedTimelineClip & ClipSample;
-export type PlaybackTimelineClip = (
-  Omit<ResolvedMediaClip, 'keyframes'> | Omit<ResolvedTextClip, 'keyframes'>
-) &
-  ClipSample & { animated: boolean };
-
-export interface TimelineEvaluation<Clip = EvaluatedTimelineClip> {
+export interface TimelineEvaluation {
   time: RationalTime;
   duration: RationalTime;
   boundary: 'inside' | 'end' | 'after';
   /** Nominal clip intervals. Video handles appear only in visualClips. */
-  activeClips: Clip[];
+  activeClips: EvaluatedTimelineClip[];
   /** Bottom to top. Includes transparent clips, whose visible flag is false. */
-  visualClips: Clip[];
+  visualClips: EvaluatedTimelineClip[];
   /** Includes muted sources; unknown stream presence remains a candidate. */
-  audioClips: Clip[];
-  mixingSources: Clip[];
+  audioClips: EvaluatedTimelineClip[];
+  mixingSources: EvaluatedTimelineClip[];
   gap: boolean;
   visualGap: boolean;
   backgroundColor: string;
@@ -208,27 +203,6 @@ export function evaluateTimeline(
 export function createTimelineEvaluator(
   project: Project,
   sampleVisuals = false,
-) {
-  return createTimelineQuery(project, sampleVisuals, (clip) =>
-    structuredClone(clip),
-  );
-}
-
-/** Frame-sampled playback needs the sampled transform, but not the stored keys. */
-export function createPlaybackTimelineEvaluator(project: Project) {
-  return createTimelineQuery(project, true, ({ keyframes, ...clip }) => ({
-    ...structuredClone(clip),
-    animated: !!keyframes,
-  }));
-}
-
-function createTimelineQuery<
-  Clip extends
-    Omit<ResolvedMediaClip, 'keyframes'> | Omit<ResolvedTextClip, 'keyframes'>,
->(
-  project: Project,
-  sampleVisuals: boolean,
-  copyClip: (clip: ResolvedTimelineClip) => Clip,
 ) {
   const timeline = resolveTimeline(project);
   const backgroundColor = project.settings.backgroundColor ?? '#000000';
@@ -250,10 +224,10 @@ function createTimelineQuery<
     entries.push(transition);
     transitions.set(transition.trackId, entries);
   }
-  return (time: RationalTime): TimelineEvaluation<Clip & ClipSample> => {
+  return (time: RationalTime): TimelineEvaluation => {
     timeSchema.parse(time);
-    const activeClips: (Clip & ClipSample)[] = [];
-    const visualClips: (Clip & ClipSample)[] = [];
+    const activeClips: EvaluatedTimelineClip[] = [];
+    const visualClips: EvaluatedTimelineClip[] = [];
     const frame = needsFrameSampling
       ? (BigInt(time.numerator) * BigInt(rate.numerator)) /
         (BigInt(time.denominator) * BigInt(rate.denominator))
@@ -297,7 +271,7 @@ function createTimelineQuery<
             audioFadeGain(clip, clip.duration, local) *
             (clip.gainKeys ? keyframeGain(clip.gainKeys, local) : 1)
           : gain;
-        const detached = copyClip(clip);
+        const detached = structuredClone(clip);
         const visual = evaluateVisual(
           detached.visual,
           clip.keyframes,
@@ -320,7 +294,7 @@ function createTimelineQuery<
       }
       if (transition) {
         for (const { clip: participant, direction } of transition.layers) {
-          const detached = copyClip(participant);
+          const detached = structuredClone(participant);
           const visual = evaluateVisual(
             detached.visual,
             participant.keyframes,
