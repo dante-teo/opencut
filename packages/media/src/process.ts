@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { access, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { resolve } from 'node:path';
+import { renderToolCommand, trackRenderProcess } from './render-budget.js';
 
 export class MediaError extends Error {
   override name = 'MediaError';
@@ -21,6 +22,7 @@ export function checkRenderSignal(signal?: AbortSignal): void {
 export interface MediaToolControl {
   signal?: AbortSignal | undefined;
   onStdout?: (chunk: Buffer) => void;
+  writesFile?: boolean;
 }
 
 export async function localFile(file: string): Promise<string> {
@@ -51,6 +53,7 @@ export async function runMediaTool(
   control?: MediaToolControl,
 ): Promise<Buffer> {
   checkRenderSignal(control?.signal);
+  const command = renderToolCommand(tool, args, control?.writesFile);
   return new Promise((resolve, reject) => {
     let closed = false;
     let callbackError: unknown;
@@ -63,9 +66,10 @@ export async function runMediaTool(
       child.kill('SIGTERM');
       killTimer = setTimeout(() => child.kill('SIGKILL'), 2000);
     };
+    let untrack = () => {};
     const child = execFile(
-      tool,
-      args,
+      command.tool,
+      command.args,
       {
         encoding: 'buffer',
         shell: false,
@@ -76,6 +80,7 @@ export async function runMediaTool(
       },
       (error, stdout, stderr) => {
         closed = true;
+        untrack();
         clearTimeout(killTimer);
         clearTimeout(timeout);
         control?.signal?.removeEventListener('abort', stop);
@@ -105,6 +110,17 @@ export async function runMediaTool(
           return;
         }
         const diagnostics = stderr.toString('utf8').trim();
+        if (
+          error &&
+          (error.signal === 'SIGXFSZ' || /File too large/i.test(diagnostics))
+        ) {
+          reject(
+            new MediaError('Render exceeded its temporary disk budget.', {
+              cause: error,
+            }),
+          );
+          return;
+        }
         if (error || diagnostics) {
           reject(
             new MediaError(
@@ -117,6 +133,12 @@ export async function runMediaTool(
         resolve(stdout);
       },
     );
+    if (!closed)
+      untrack = trackRenderProcess(child.pid, (error) => {
+        callbackError = error;
+        callbackFailed = true;
+        stop();
+      });
     child.stdin?.end();
     if (control && !closed) {
       child.stdout?.on('data', (chunk: Buffer) => {

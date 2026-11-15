@@ -1,0 +1,29 @@
+[
+  {
+    "id": "wide",
+    "params": {
+      "layout": "wide",
+      "title": "Studio dispatch",
+      "subtitle": "From the studio"
+    }
+  },
+  {
+    "id": "tall",
+    "params": {
+      "layout": "tall",
+      "title": "Studio vertical",
+      "subtitle": "A closer look"
+    }
+  },
+  {
+    "id": "square",
+    "output": "field-square.mp4",
+    "params": {
+      "layout": "square",
+      "title": "From the field",
+      "subtitle": "On location",
+      "footage": "field",
+      "music": "location"
+    }
+  }
+]

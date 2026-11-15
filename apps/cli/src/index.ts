@@ -28,6 +28,10 @@ async function run(args: string[]) {
       const { runVideoCommand } = await import('./video.js');
       return runVideoCommand(command, file, values);
     }
+    case 'batch': {
+      const { runBatch } = await import('./video-batch.js');
+      return runBatch(file, values);
+    }
     case 'preview':
     case 'timeline inspect':
     case 'preview frame':

@@ -1,6 +1,6 @@
 /** Node entrypoint for definition workflows. */
-export { defineVideo } from './video-definition.js';
-export type { VideoDefinition } from './video-definition.js';
+export { defineVideo, videoId, videoParams } from './video-definition.js';
+export type { VideoDefinition, VideoParameters } from './video-definition.js';
 export { inspectProject, inspectTimeline } from './inspection.js';
 export {
   parseSubtitles,
@@ -28,7 +28,11 @@ export type {
   VideoPreviewRange,
 } from './video-preview.js';
 export { renderVideo, renderCompiledVideo } from './video-render.js';
-export type { VideoRenderOptions } from './video-render.js';
+export type {
+  CompiledVideoRenderOptions,
+  VideoRenderBuild,
+  VideoRenderOptions,
+} from './video-render.js';
 export { watchVideo } from './video-watch.js';
 export type {
   VideoWatchOptions,
@@ -42,3 +46,12 @@ export type {
   VideoProcessingProgress,
 } from './video-processing.js';
 export type { VideoRecipeInspection } from './video-recipe.js';
+export type { VideoBuild, VideoCompileOptions } from './video-files.js';
+export { batchRenderVideo } from './video-batch.js';
+export type {
+  VideoBatchOptions,
+  VideoBatchProgress,
+  VideoBatchResult,
+  VideoVariant,
+  VideoVariantResult,
+} from './video-batch.js';

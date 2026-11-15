@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { extname, join } from 'node:path';
+import { accountRenderFile } from '@opencut/media';
 import type { VideoTimelineOptions, VisualTimelineClip } from '@opencut/media';
 import type { ProjectRenderPlan } from './render-plan.js';
 import type { CompiledVideo } from './video-compiler.js';
@@ -29,6 +30,7 @@ export async function withRenderSources<T>(
           throw new Error(`No compiled source identity for '${path}'.`);
         directory ??= await mkdtemp(join(tmpdir(), 'opencut-render-sources-'));
         const snapshot = join(directory, `${staged.size}${extname(path)}`);
+        await accountRenderFile(path);
         await copyVideoInput(path, identity, snapshot, signal);
         staged.set(path, snapshot);
         return snapshot;

@@ -29,6 +29,12 @@ or superseded builds cannot publish over the last valid preview. Export pins
 the selected revision's source copies for the duration of the render. The
 watcher removes superseded copies after the last export using them finishes.
 
+A batch compiles each TypeScript variant in a fresh worker, then passes its
+immutable composition to the shared renderer. Variants share source probes
+and recipe cache entries. Each slot owns its temporary render files and
+publishes its MP4 independently. The MP4 carries its own resolved parameters
+and build record. See the [batch CLI contract](CLI.md#batch-rendering).
+
 Asset resolution checks each recipe against its source and estimates the
 output of each step. The processing pipeline materializes referenced assets
 and probes each completed step before binding the timeline. A recipe is an

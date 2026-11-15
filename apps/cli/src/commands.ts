@@ -9,7 +9,15 @@ import { UsageError } from './usage.js';
 const optionTypes = {
   ...processingOptionTypes,
   ...renderOptionTypes,
-  output: { type: 'string' },
+  output: { type: 'string', short: 'o' },
+  params: { type: 'string' },
+  variants: { type: 'string' },
+  'output-dir': { type: 'string' },
+  only: { type: 'string' },
+  concurrency: { type: 'string' },
+  'fail-fast': { type: 'boolean' },
+  'temp-bytes': { type: 'string' },
+  'memory-bytes': { type: 'string' },
   timestamp: { type: 'string' },
   frame: { type: 'string' },
   from: { type: 'string' },
@@ -26,23 +34,47 @@ const optionTypes = {
 } as const;
 
 const definition = '<definition.video.ts|definition.video.json>';
+const params = '[--params <params.json>]';
 const position = '(--frame <n> | --timestamp <time>)';
 
 const commands = {
-  validate: { args: definition, options: Object.keys(processingOptionTypes) },
-  inspect: { args: definition, options: Object.keys(processingOptionTypes) },
-  'recipes inspect': { args: definition, options: [] },
-  'recipes validate': { args: definition, options: [] },
+  validate: {
+    args: `${definition} ${params}`,
+    options: ['params', ...Object.keys(processingOptionTypes)],
+  },
+  inspect: {
+    args: `${definition} ${params}`,
+    options: ['params', ...Object.keys(processingOptionTypes)],
+  },
+  'recipes inspect': { args: `${definition} ${params}`, options: ['params'] },
+  'recipes validate': { args: `${definition} ${params}`, options: ['params'] },
   'timeline inspect': {
-    args: `${definition} ${position}`,
-    options: ['frame', 'timestamp'],
+    args: `${definition} ${position} ${params}`,
+    options: ['frame', 'timestamp', 'params'],
   },
   render: {
-    args: `${definition} --output <new.mp4>`,
+    args: `${definition} --output <new.mp4> ${params}`,
     options: [
       'output',
+      'params',
       ...Object.keys(renderOptionTypes),
       ...Object.keys(processingOptionTypes),
+    ],
+  },
+  batch: {
+    args: `${definition} --variants <variants.json> --output-dir <directory> [--only <id,id>] [--concurrency <1..8>] [--fail-fast] [--temp-bytes <bytes>] [--memory-bytes <bytes>]`,
+    options: [
+      'variants',
+      'output-dir',
+      'only',
+      'concurrency',
+      'fail-fast',
+      'temp-bytes',
+      'memory-bytes',
+      ...Object.keys(renderOptionTypes).filter((key) => key !== 'overwrite'),
+      ...Object.keys(processingOptionTypes).filter(
+        (key) => key !== 'recipe-workers',
+      ),
     ],
   },
   preview: {
@@ -50,20 +82,20 @@ const commands = {
     options: ['watch', 'size'],
   },
   'preview frame': {
-    args: `${definition} ${position} --output <new.png> [--size <64..1920>]`,
-    options: ['frame', 'timestamp', 'output', 'size'],
+    args: `${definition} ${position} --output <new.png> [--size <64..1920>] ${params}`,
+    options: ['frame', 'timestamp', 'output', 'size', 'params'],
   },
   'preview clip': {
-    args: `${definition} --from <n> --to <n> --output <new.mp4> [--size <64..1920>] [--quality <draft|balanced|high>]`,
-    options: ['from', 'to', 'output', 'size', 'quality'],
+    args: `${definition} --from <n> --to <n> --output <new.mp4> [--size <64..1920>] [--quality <draft|balanced|high>] ${params}`,
+    options: ['from', 'to', 'output', 'size', 'quality', 'params'],
   },
   'preview contact-sheet': {
-    args: `${definition} --output <new.png> [--from <n>] [--to <n>] [--count <1..16>] [--columns <1..16>] [--size <64..640>]`,
-    options: ['from', 'to', 'output', 'size', 'count', 'columns'],
+    args: `${definition} --output <new.png> [--from <n>] [--to <n>] [--count <1..16>] [--columns <1..16>] [--size <64..640>] ${params}`,
+    options: ['from', 'to', 'output', 'size', 'count', 'columns', 'params'],
   },
   'subtitles export': {
-    args: `${definition} --output <new.srt|new.vtt>`,
-    options: ['output'],
+    args: `${definition} --output <new.srt|new.vtt> ${params}`,
+    options: ['output', 'params'],
   },
   probe: { args: '<media>', options: [] },
   'extract-frame': {
@@ -153,9 +185,19 @@ export function printHelp(positionals: string[], json: boolean | undefined) {
   const help = [
     'Usage: opencut <command> [options]',
     ...selected.map(({ usage }) => '  ' + usage),
-    ...(scope === 'render' ? [renderOptionHelp] : []),
-    ...(['render', 'validate', 'inspect'].includes(scope)
-      ? [processingOptionHelp]
+    ...(['render', 'batch'].includes(scope)
+      ? [
+          scope === 'batch'
+            ? renderOptionHelp.replace(' --overwrite', '')
+            : renderOptionHelp,
+        ]
+      : []),
+    ...(['render', 'batch', 'validate', 'inspect'].includes(scope)
+      ? [
+          scope === 'batch'
+            ? processingOptionHelp.replace(' --recipe-workers <count>', '')
+            : processingOptionHelp,
+        ]
       : []),
   ].join('\n');
   console.log(

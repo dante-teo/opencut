@@ -19,6 +19,15 @@ node apps/cli/dist/index.js validate examples/video/showcase.video.ts
 node apps/cli/dist/index.js render examples/video/showcase.video.json --output showcase.mp4
 ```
 
+Use the [parameterized short-video example](VIDEO_DEFINITIONS.md#reusable-functions-and-parameters)
+to render landscape, portrait, and square variants from the same TypeScript
+definition. The example uses the synthetic media from the previous step.
+
+```sh
+node apps/cli/dist/index.js batch examples/video/short-batch.video.ts \
+  --variants examples/video/short-batch.variants.json --output-dir ./outputs --json
+```
+
 Run `pnpm dev` for the optional Electron app. **Open definition** watches
 the chosen file and its inputs, shows the last playable revision, and lets
 you export it. **Open video** plays a local source file. Edit the definition

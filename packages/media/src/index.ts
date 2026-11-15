@@ -46,3 +46,4 @@ export {
   validateEnhancementOutput,
 } from './enhance.js';
 export type { InterpolationPlan } from './interpolate.js';
+export { accountRenderFile, withRenderBudget } from './render-budget.js';

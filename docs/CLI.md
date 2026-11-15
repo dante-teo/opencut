@@ -89,3 +89,70 @@ controls. Put `trim` first to limit inference to a source range. For UHD,
 start with one recipe worker. Use `system inspect --json` for the supported
 configurations and model readiness, then `validate` to run the actual job.
 See [enhancement presets and limits](VIDEO_DEFINITIONS.md#ai-enhancement).
+
+## Batch rendering
+
+```sh
+opencut render examples/video/short-batch.video.ts --params examples/video/short-batch.params.json -o final.mp4
+opencut batch examples/video/short-batch.video.ts --variants examples/video/short-batch.variants.json --output-dir ./outputs --concurrency 2 --json
+# After correcting a failed tall variant in the manifest
+opencut batch examples/video/short-batch.video.ts --variants examples/video/short-batch.variants.json --output-dir ./outputs --only tall
+```
+
+The variant file is a JSON array of entries with `id`, optional `params`,
+and optional `output`. Each output is a flat MP4 basename in the output
+directory and defaults to `<id>.mp4`. Use letters, digits, hyphens, and
+underscores for IDs and basenames, starting with a letter or digit. The
+batch creates its output directory, rejects duplicate names
+case-insensitively before compiling, and publishes each verified file
+atomically to a new path. Use `--only id,id` to retry selected IDs after
+fixing the manifest. Use a fresh directory to rebuild successful IDs.
+
+Each variant validates its own parameters. The default is to continue when a
+variant fails. `--fail-fast` cancels outstanding work after the first
+failure. SIGINT or SIGTERM stops active and queued jobs. Completed files
+remain available. With `--json`, stdout contains `{ ok, variants }` in
+manifest order. Each variant result has `id`, `output`, `elapsedSeconds`, and
+`status`. A `completed` result contains `render`. A `failed` result contains
+`phase` and `error` with a code and message. A `cancelled` result contains
+`reason`. A batch with failed or cancelled variants exits nonzero.
+
+Stderr includes one JSON object per progress event with
+`event: "batch-progress"`, the variant `id` and `output`, and a `status`
+of `compiling`, `recipe`, `rendering`, `render`, or `finished`. The
+`recipe` and `render` events carry `progress`, and `finished` carries the
+final variant `result`. Filter these events by their `event` field when
+reading stderr, which also carries diagnostics and authoring logs.
+
+Batch runs directly on macOS or Linux. `--concurrency` accepts 1–8 and defaults
+to 1. Each slot owns at most one recipe step at a time. An AI step can run one
+inference worker with a decoder and an encoder. A transformed render layer
+can run a decoder and an encoder together. Shared source probes and the
+recipe cache reuse work across slots. Cache keys depend on the relevant
+source, ordered step parameters, and backend. Changes to layout, title, or
+captions alone leave matching recipe steps reusable.
+
+`--temp-bytes` (default 8 GiB) and `--memory-bytes` (default 2 GiB) divide
+the batch budgets evenly across active slots. Recipe overrides may lower a
+slot's limits. The temporary budget covers staging for recipes and renders,
+including copied sources, layer intermediates, and the unfinished MP4.
+Published outputs and completed cache entries consume persistent disk space.
+OpenCut samples native child-process RSS with `/bin/ps` and caps FFmpeg
+allocation sizes. If the host blocks or cannot run `/bin/ps`, the active
+render or recipe stops and reports a sampling error. TypeScript authoring
+runs with a capped V8 old-generation heap. These limits
+have the granularity of process sampling, file limits, and heap accounting.
+Canvas allocations, shared process memory, and VideoToolbox driver
+allocations contribute to system memory outside the native RSS budget.
+
+Each batch MP4 and each parameterized single render stores an `opencut_build`
+format tag with resolved parameters, definition and composition SHA-256
+digests, effective processing and render settings, and recipe cache keys.
+The batch record also gives the variant ID and its resource limits. Read
+the record from `build` in a single render's JSON result or from
+`variants[].render.build` for completed batch variants. Keep secrets out of
+parameters since the tag travels with the output.
+
+```sh
+ffprobe -v error -show_entries format_tags=opencut_build -of json ./outputs/wide.mp4
+```

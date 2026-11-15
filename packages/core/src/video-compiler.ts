@@ -26,6 +26,7 @@ import type {
 } from './video-definition.js';
 import { identifyVideoInput } from './video-input.js';
 import type { RecordVideoInput } from './video-input.js';
+import type { VideoBuild } from './video-files.js';
 import type { VideoRecipeInspection } from './video-recipe.js';
 
 function stableId(kind: string, ...parts: unknown[]) {
@@ -65,6 +66,7 @@ const epoch = '1970-01-01T00:00:00.000Z';
 
 export interface CompiledVideo {
   readonly path: string;
+  readonly build?: VideoBuild;
   /** A deeply frozen project snapshot. */
   readonly project: Project;
   readonly frameCount: number;
@@ -80,12 +82,14 @@ export async function compileDefinition(
   path: string,
   value: unknown,
   options: CompilationOptions = {},
+  getBuild?: (definition: ParsedVideoDefinition) => VideoBuild,
 ): Promise<CompiledVideo> {
   const { signal, preview = false } = options;
   signal?.throwIfAborted();
+  const definition = parseVideoDefinition(value);
   const { project, assets, recipes } = await buildProject(
     path,
-    parseVideoDefinition(value),
+    definition,
     options,
   );
   let renderPlan: BoundRenderPlan;
@@ -113,6 +117,7 @@ export async function compileDefinition(
   }
   return Object.freeze({
     path,
+    ...(getBuild && { build: freeze(getBuild(definition)) }),
     project: freeze(project),
     frameCount: renderPlan.frameCount,
     recipes: freeze(recipes),

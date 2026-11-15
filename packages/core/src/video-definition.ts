@@ -131,9 +131,101 @@ export const videoDefinitionSchema = z.strictObject({
 
 export type VideoDefinition = z.input<typeof videoDefinitionSchema>;
 
-/** Type an authoring expression. Both file formats are validated when compiled. */
-export function defineVideo(definition: VideoDefinition): VideoDefinition {
-  return definition;
+export type VideoParameterValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly VideoParameterValue[]
+  | VideoParameters;
+export interface VideoParameters {
+  readonly [key: string]: VideoParameterValue;
+}
+const parametersSchema = z.record(z.string(), z.json());
+const parameterized = Symbol('videoParameters');
+
+interface ParameterizedVideo {
+  [parameterized](value?: VideoParameters): Promise<ResolvedVideoDefinition>;
+}
+
+export interface ResolvedVideoDefinition {
+  value: unknown;
+  params?: VideoParameters;
+}
+
+/** Zod builders for the strict parameter shape of a TypeScript definition. */
+export const videoParams = z;
+
+export function defineVideo(definition: VideoDefinition): VideoDefinition;
+export function defineVideo<Shape extends z.ZodRawShape>(
+  shape: Shape,
+  compose: (
+    params: z.output<z.ZodObject<Shape>>,
+  ) => VideoDefinition | Promise<VideoDefinition>,
+): ParameterizedVideo;
+export function defineVideo<Shape extends z.ZodRawShape>(
+  definition: VideoDefinition | Shape,
+  compose?: (
+    params: z.output<z.ZodObject<Shape>>,
+  ) => VideoDefinition | Promise<VideoDefinition>,
+): VideoDefinition | ParameterizedVideo {
+  if (!compose) return definition as VideoDefinition;
+  const schema = z.strictObject(definition as Shape);
+  return {
+    async [parameterized](value) {
+      const result = await schema.safeParseAsync(value ?? {});
+      if (!result.success) throw invalidParameters(result.error);
+      const params = structuredClone(validateVideoParameters(result.data));
+      return { value: await compose(result.data), params };
+    },
+  };
+}
+
+export function validateVideoParameters(value: unknown) {
+  try {
+    const result = parametersSchema.safeParse(value);
+    if (!result.success) throw invalidParameters(result.error);
+    // The author schema must see every input key, including keys ignored by JSON validation.
+    return value as VideoParameters;
+  } catch (error) {
+    if (error instanceof VideoDefinitionError) throw error;
+    throw new VideoDefinitionError('params: Expected a finite JSON object.', {
+      cause: error,
+    });
+  }
+}
+
+function invalidParameters(error: z.ZodError) {
+  return new VideoDefinitionError(
+    error.issues
+      .map(
+        ({ path, message }) => [`params`, ...path].join('.') + ': ' + message,
+      )
+      .join('\n'),
+  );
+}
+
+export async function resolveVideoDefinition(
+  value: unknown,
+  params?: VideoParameters,
+): Promise<ResolvedVideoDefinition> {
+  if (value && typeof value === 'object' && parameterized in value)
+    return (value as ParameterizedVideo)[parameterized](params);
+  if (params !== undefined)
+    throw new VideoDefinitionError(
+      'params: This definition does not declare external parameters.',
+    );
+  return { value };
+}
+
+/** Qualify a local ID with its placement scopes for clips, transitions, or cues. */
+export function videoId(scope: string, ...parts: string[]) {
+  return [scope, ...parts]
+    .map((part) => {
+      const id = entityIdSchema.parse(part);
+      return `${id.length}-${id}`;
+    })
+    .join('-');
 }
 
 export class VideoDefinitionError extends Error {

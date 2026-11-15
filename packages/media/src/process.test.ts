@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { runMediaTool } from './process.js';
+import { withRenderBudget } from './render-budget.js';
 
 vi.mock('node:child_process', () => ({ execFile: vi.fn() }));
 const end = vi.fn();
@@ -73,9 +74,14 @@ describe('render subprocess lifecycle', () => {
     const stdout = new PassThrough();
     const kill = vi.fn();
     let finish!: (error: Error | null, stdout: Buffer, stderr: Buffer) => void;
-    vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+    vi.mocked(execFile).mockImplementationOnce((...args: unknown[]) => {
       finish = args[3] as typeof finish;
-      return { stdin: { end }, stdout, kill } as unknown as ChildProcess;
+      return {
+        pid: 123,
+        stdin: { end },
+        stdout,
+        kill,
+      } as unknown as ChildProcess;
     });
     return {
       stdout,
@@ -139,6 +145,79 @@ describe('render subprocess lifecycle', () => {
       child.close(new Error('terminated'), 'decoder stalled');
       expect(await caught).toMatchObject({
         message: 'ffprobe timed out after 50 ms: decoder stalled',
+      });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  const limits = { maxTemporaryBytes: 4096, maxNativeBytes: 1024 };
+
+  it.each(['EPERM', 'ENOENT'])(
+    'stops and waits for the media subprocess when ps fails with %s',
+    async (code) => {
+      vi.useFakeTimers();
+      try {
+        const child = pending();
+        const cause = Object.assign(new Error(`spawn /bin/ps ${code}`), {
+          code,
+        });
+        vi.mocked(execFile).mockImplementationOnce((...args: unknown[]) => {
+          if (code === 'EPERM') throw cause;
+          const callback = args[3] as (
+            error: Error,
+            output: string,
+            diagnostic: string,
+          ) => void;
+          setImmediate(() => callback(cause, '', ''));
+          return {} as ChildProcess;
+        });
+        const render = withRenderBudget(limits, () =>
+          runMediaTool('ffmpeg', []),
+        );
+        const outcome = render.catch((error: unknown) => error);
+        await vi.advanceTimersByTimeAsync(60);
+        expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+        child.close(new Error('terminated'));
+        expect(await outcome).toMatchObject({
+          name: 'MediaError',
+          message: expect.stringContaining(
+            'Cannot sample native memory with /bin/ps',
+          ),
+          cause,
+        });
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('continues sampling when ps reports a PID that has already exited', async () => {
+    vi.useFakeTimers();
+    try {
+      const child = pending();
+      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+        const callback = args[3] as (
+          error: Error | null,
+          output: string,
+          diagnostic: string,
+        ) => void;
+        if (vi.mocked(execFile).mock.calls.length === 2)
+          callback(Object.assign(new Error('ps exited'), { code: 1 }), '', '');
+        else callback(null, '2', '');
+        return {} as ChildProcess;
+      });
+      const render = withRenderBudget(limits, () => runMediaTool('ffmpeg', []));
+      const outcome = render.catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(50);
+      expect(child.kill).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(50);
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+      child.close(new Error('terminated'));
+      expect(await outcome).toMatchObject({
+        message: 'Render exceeded its native memory budget.',
       });
       expect(vi.getTimerCount()).toBe(0);
     } finally {

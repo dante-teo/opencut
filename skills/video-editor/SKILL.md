@@ -29,7 +29,12 @@ discover commands and `opencut render --help` for export controls.
 5. Deliver a new MP4 with `opencut render DEFINITION --output final.mp4`.
    The CLI does not need Electron or a running worker. Export an SRT or VTT
    with `opencut subtitles export DEFINITION --output final.srt` if requested.
-6. Probe the result and report what was rendered and checked.
+6. For variants, use `defineVideo(shape, compose)` with `videoParams` and
+   reusable TypeScript helpers. Validate a sample with `--params params.json`.
+   Run `opencut batch DEFINITION --variants variants.json --output-dir outputs --json`.
+   Read each result and retry corrected entries with `--only id,id`.
+7. Probe the results and report dimensions, frame counts, failed variants,
+   and recipe cache reuse when relevant.
 
 See [definition fields](references/video-definitions.md), the
 [CLI reference](references/cli.md), and [SDK usage](references/sdk.md).

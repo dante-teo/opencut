@@ -458,3 +458,48 @@ to `previewVideo` for project inspection, exact frame inspection, PNGs,
 contact sheets and clips. `watchVideo(file, { onStatus, signal })` delivers
 playable revisions and build errors. The SDK reference documents the lifetime
 of these revisions. [SDK reference](SDK.md)
+
+## Reusable functions and parameters
+
+Use TypeScript functions and imports to compose the same definition fields.
+A helper can return one clip, a group of clips with transitions, subtitle
+cues, or an audio clip with effects. Give each placement a distinct,
+stable scope. When one piece references another, qualify their IDs with
+`videoId(scope, localId)`. Reuse the same qualified clip IDs in transitions.
+The compiler also supplies stable IDs for clips and tracks when explicit IDs
+are unnecessary.
+
+Use `defineVideo(shape, compose)` to declare external inputs and infer their
+types inside the composition function. `videoParams` exposes Zod builders.
+OpenCut treats an omitted parameter file as an empty object and reports
+missing required fields, unknown top-level keys, and invalid values with
+`params` paths. Use `z.strictObject` for nested records that should also
+reject unknown keys. Defaults and transforms resolve before composition.
+Keep resolved values JSON-compatible. The composition function can be
+asynchronous and runs once per compile. Batch compiles each variant in its
+own worker with fresh module state.
+
+The [three-second example](../examples/video/short-batch.video.ts) imports
+[sequence, title, subtitle, and soundtrack helpers](../examples/video/batch-sequences.ts).
+It places the same two-clip sequence with a dissolve in the intro and outro
+using separate scopes. Its [manifest](../examples/video/short-batch.variants.json)
+selects landscape, portrait, and square canvases with different titles and
+captions. The square variant selects alternate footage and audio.
+
+```sh
+opencut validate examples/video/short-batch.video.ts --params examples/video/short-batch.params.json
+opencut preview frame examples/video/short-batch.video.ts --params examples/video/short-batch.params.json --frame 12 -o review.png
+opencut batch examples/video/short-batch.video.ts --variants examples/video/short-batch.variants.json --output-dir ./outputs --concurrency 2
+```
+
+One-shot inspection, frame and clip previews, contact sheets, and subtitle
+export accept the same `--params` file as `render`. For a quick comparison,
+generate a contact sheet for each parameter file you want to review.
+
+```sh
+opencut preview contact-sheet examples/video/short-batch.video.ts \
+  --params examples/video/short-batch.params.json --count 4 -o contact.png
+```
+
+In the SDK, pass `params` to `compileVideo` and review the resulting
+composition with `previewVideo(compiled)`.

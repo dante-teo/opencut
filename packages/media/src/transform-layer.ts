@@ -16,6 +16,7 @@ import type {
   TransitionRamp,
 } from '@opencut/shared';
 import { checkRenderSignal, MediaError } from './process.js';
+import { renderToolCommand, trackRenderProcess } from './render-budget.js';
 
 type TransformSource =
   | { kind: 'text'; rasterize: () => Promise<Buffer>; x: number; y: number }
@@ -92,16 +93,17 @@ function rawSource(
 }
 
 function ffmpeg(args: string[], signal: AbortSignal, decode: boolean) {
-  const child = spawn(
+  const command = renderToolCommand(
     'ffmpeg',
     ['-v', 'error', '-nostdin', '-xerror', ...args],
-    {
-      stdio: decode ? ['ignore', 'pipe', 'pipe'] : ['pipe', 'ignore', 'pipe'],
-      signal,
-      killSignal: 'SIGKILL',
-      windowsHide: true,
-    },
+    !decode,
   );
+  const child = spawn(command.tool, command.args, {
+    stdio: decode ? ['ignore', 'pipe', 'pipe'] : ['pipe', 'ignore', 'pipe'],
+    signal,
+    killSignal: 'SIGKILL',
+    windowsHide: true,
+  });
   let diagnostics = '';
   child.stderr!.setEncoding('utf8').on('data', (chunk: string) => {
     diagnostics = (diagnostics + chunk).slice(-16384);
@@ -111,8 +113,15 @@ function ffmpeg(args: string[], signal: AbortSignal, decode: boolean) {
     child.on('error', (error) => {
       failure = error;
     });
-    child.once('close', (code) => {
-      if (code === 0 && !failure) resolve();
+    const untrack = trackRenderProcess(child.pid, (error) => {
+      failure = error;
+      child.kill('SIGKILL');
+    });
+    child.once('close', (code, signal) => {
+      untrack();
+      if (signal === 'SIGXFSZ' || /File too large/i.test(diagnostics))
+        reject(new MediaError('Render exceeded its temporary disk budget.'));
+      else if (code === 0 && !failure) resolve();
       else
         reject(
           new MediaError(
@@ -180,7 +189,6 @@ export async function stageTransformLayer(
     timeout,
     ...(options.signal ? [options.signal] : []),
   ]);
-  const decoder = media && ffmpeg(media.args, signal, true);
   const encoder = ffmpeg(
     [
       '-n',
@@ -208,6 +216,8 @@ export async function stageTransformLayer(
     signal,
     false,
   );
+
+  const decoder = media && ffmpeg(media.args, signal, true);
 
   async function* frames() {
     const decoded =

@@ -15,7 +15,6 @@ import {
 } from './video-input.js';
 import type { VideoInput } from './video-input.js';
 import type { VideoProcessingOptions } from './video-processing.js';
-import { readIsolatedDefinitionScript } from './video-script.js';
 
 export interface VideoWatchRevision {
   readonly generation: number;
@@ -157,8 +156,7 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
         signal,
         probes,
         processing: options.processing,
-        loadScript: (file, record) =>
-          readIsolatedDefinitionScript(file, signal, record),
+        scriptWorker: {},
         inputs: {
           record,
           async snapshotMedia(file) {

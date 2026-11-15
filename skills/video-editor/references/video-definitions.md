@@ -151,3 +151,13 @@ before enhancement. Recipe order determines whether enhancement runs
 before or after interpolation. Compare
 the processed sequence with a Lanczos resize when judging detail and
 temporal consistency. See the [enhancement reference](../../../docs/VIDEO_DEFINITIONS.md#ai-enhancement).
+
+## Parameterized composition
+
+Use `defineVideo({ title: videoParams.string() }, ({ title }) => definition)`
+to validate external JSON and infer the composition input type. Return the
+same definition shape used for static videos. Compose clip groups, titles,
+subtitles, effects, and transitions with normal TypeScript functions.
+Pass a stable placement scope to reusable helpers and use
+`videoId(scope, localId)` for clip IDs referenced by transitions. See the
+[three-variant example](../../../examples/video/short-batch.video.ts).

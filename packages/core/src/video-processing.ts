@@ -250,7 +250,7 @@ function pixels({ width, height }: RecipeMedia) {
   return (width ?? 0) * (height ?? 0);
 }
 
-function processingSettings(options: VideoProcessingOptions) {
+export function processingSettings(options: VideoProcessingOptions) {
   const concurrency = positive('concurrency', options.concurrency ?? 1, 16);
   const directory = resolve(
     options.cacheDirectory ??

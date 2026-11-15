@@ -17,3 +17,13 @@ and input streams. Use normal `validate` with the same recipe limits as
 `render` to check whether the referenced AI recipe can actually build.
 For enhancement, check `low-latency-super-resolution`,
 `video-super-resolution`, or `temporal-noise-filter` in the system report.
+
+Render a variant with `opencut render DEFINITION --params params.json -o final.mp4`.
+Use the same parameter file with one-shot validation, inspection, preview
+commands including `preview contact-sheet`, and subtitle export. Pass an array of `{ id, params, output? }` entries to
+`opencut batch DEFINITION --variants variants.json --output-dir outputs --json`.
+Read `variants` on stdout for the final status of each selected ID. Filter
+stderr for objects with `event: "batch-progress"`.
+The default filename is `<id>.mp4`. Use `--only id,id` for selective retries,
+`--concurrency` for active job slots, and `--fail-fast` to cancel outstanding
+work after a failure. See the [batch file contract and budgets](../../../docs/CLI.md#batch-rendering).

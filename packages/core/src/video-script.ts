@@ -4,7 +4,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import {
   definitionLoadError,
+  resolveVideoDefinition,
   VideoDefinitionError,
+} from './video-definition.js';
+import type {
+  ResolvedVideoDefinition,
+  VideoParameters,
 } from './video-definition.js';
 import { identifyVideoInput } from './video-input.js';
 import type { RecordVideoInput, VideoInput } from './video-input.js';
@@ -12,7 +17,8 @@ import type { RecordVideoInput, VideoInput } from './video-input.js';
 export async function readDefinitionScript(
   path: string,
   record?: RecordVideoInput,
-): Promise<unknown> {
+  params?: VideoParameters,
+): Promise<ResolvedVideoDefinition> {
   // Node keys ESM modules by URL. Pass the build ID along each local import
   // edge, including dynamic imports, while leaving package imports alone.
   const build = randomUUID();
@@ -50,9 +56,8 @@ export async function readDefinitionScript(
   });
   try {
     // An async default export can still import helpers after module evaluation.
-    return await ((
-      await import(url.href)
-    ).default as unknown);
+    const value: unknown = await (await import(url.href)).default;
+    return await resolveVideoDefinition(value, params);
   } catch (cause) {
     throw definitionLoadError(path, cause);
   } finally {
@@ -62,15 +67,20 @@ export async function readDefinitionScript(
 
 export async function readIsolatedDefinitionScript(
   path: string,
-  signal: AbortSignal,
+  signal: AbortSignal | undefined,
   record?: RecordVideoInput,
-): Promise<unknown> {
-  signal.throwIfAborted();
+  params?: VideoParameters,
+  authoringHeapMb?: number,
+): Promise<ResolvedVideoDefinition> {
+  signal?.throwIfAborted();
   const worker = new Worker(
     new URL('./video-script-worker.js', import.meta.url),
     {
-      workerData: path,
+      workerData: { path, params },
       execArgv: [],
+      ...(authoringHeapMb !== undefined && {
+        resourceLimits: { maxOldGenerationSizeMb: authoringHeapMb },
+      }),
       stdout: true,
       stderr: true,
     },
@@ -79,20 +89,23 @@ export async function readIsolatedDefinitionScript(
   worker.stderr.pipe(process.stderr, { end: false });
   let abort = () => {};
   try {
-    return await new Promise<unknown>((resolve, reject) => {
-      abort = () => reject(signal.reason);
-      signal.addEventListener('abort', abort, { once: true });
+    return await new Promise<ResolvedVideoDefinition>((resolve, reject) => {
+      abort = () => reject(signal?.reason);
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
       worker.on(
         'message',
         (
           message:
-            { input: VideoInput } | { value: unknown } | { error: string },
+            | { input: VideoInput }
+            | { result: ResolvedVideoDefinition }
+            | { error: string },
         ) => {
           if ('input' in message) {
             record?.(message.input);
           } else if ('error' in message)
             reject(new VideoDefinitionError(message.error));
-          else resolve(message.value);
+          else resolve(message.result);
         },
       );
       worker.on('error', reject);
@@ -105,7 +118,7 @@ export async function readIsolatedDefinitionScript(
       );
     });
   } finally {
-    signal.removeEventListener('abort', abort);
+    signal?.removeEventListener('abort', abort);
     await worker.terminate();
   }
 }

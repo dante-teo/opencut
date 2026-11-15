@@ -22,7 +22,14 @@ import type {
 import { processVideoRecipes } from './video-processing.js';
 import type { VideoProcessingOptions } from './video-processing.js';
 
-export type VideoSourceProbes = Map<string, MediaMetadata>;
+export type VideoSourceProbes = Map<
+  string,
+  {
+    identity: string;
+    standard?: Promise<MediaMetadata>;
+    recipe?: Promise<MediaMetadata>;
+  }
+>;
 
 export interface VideoAssetOptions {
   signal?: AbortSignal | undefined;
@@ -61,13 +68,11 @@ export async function compileVideoAssets(
     const path = resolve(directory, definition.path);
     inputs?.record(identifyVideoInput(path, 'media'));
     if (definition.recipe) {
-      const recipe = await readAssetRecipe(
-        id,
-        definition,
-        path,
+      const recipe = await readAssetRecipe(id, definition, path, {
         signal,
-        inputs?.record,
-      );
+        record: inputs?.record,
+        probes,
+      });
       prepared.push({ id, definition, path, recipe });
       if (referenced.has(id)) required.push(recipe);
     } else {
@@ -126,7 +131,7 @@ export async function inspectAssetRecipes(
       id,
       definition,
       resolve(directory, definition.path),
-      signal,
+      { signal },
     );
     recipes.push(inspection);
   }
@@ -138,14 +143,13 @@ async function readAssetRecipe(
   id: string,
   definition: VideoAssetDefinition,
   path: string,
-  signal?: AbortSignal,
-  record?: RecordVideoInput,
+  options: ProbeOptions,
 ): Promise<RecipeInput> {
   if (definition.freezeFrame)
     throw new VideoDefinitionError(
       `assets.${id}: Choose either recipe or freezeFrame.`,
     );
-  const input = await probeAsset(id, path, { signal, recipe: true, record });
+  const input = await probeAsset(id, path, { ...options, recipe: true });
   return {
     input,
     inspection: inspectRecipe(
@@ -157,20 +161,17 @@ async function readAssetRecipe(
   };
 }
 
+interface ProbeOptions {
+  signal?: AbortSignal | undefined;
+  probes?: VideoSourceProbes;
+  recipe?: boolean;
+  record?: RecordVideoInput | undefined;
+}
+
 async function probeAsset(
   id: string,
   path: string,
-  {
-    signal,
-    probes,
-    recipe = false,
-    record,
-  }: {
-    signal?: AbortSignal | undefined;
-    probes?: VideoSourceProbes;
-    recipe?: boolean;
-    record?: RecordVideoInput | undefined;
-  },
+  { signal, probes, recipe = false, record }: ProbeOptions,
 ): Promise<IdentifiedMedia> {
   signal?.throwIfAborted();
   const identity = videoInputIdentity(path);
@@ -178,9 +179,21 @@ async function probeAsset(
   try {
     const canonical = await realpath(path);
     record?.(identifyVideoInput(canonical, 'media'));
-    metadata =
-      probes?.get(canonical) ??
-      (await (recipe ? probeRecipeMedia : probeMedia)(canonical, signal));
+    const probe = recipe ? probeRecipeMedia : probeMedia;
+    let entry = probes?.get(canonical);
+    if (identity && entry?.identity !== identity) {
+      entry = { identity };
+      probes?.set(canonical, entry);
+    }
+    const mode = recipe ? 'recipe' : 'standard';
+    const pending = entry?.[mode] ?? probe(canonical, signal);
+    if (entry) entry[mode] = pending;
+    try {
+      metadata = await pending;
+    } catch (error) {
+      if (entry?.[mode] === pending) delete entry[mode];
+      throw error;
+    }
   } catch (cause) {
     signal?.throwIfAborted();
     throw new VideoDefinitionError(
@@ -198,7 +211,6 @@ async function probeAsset(
         ? `assets.${id}.path: Media changed during recipe inspection.`
         : `assets.${id}.path: Media '${path}' changed during compilation. Retry after the write completes.`,
     );
-  probes?.set(metadata.path, metadata);
   return { metadata, identity };
 }
 

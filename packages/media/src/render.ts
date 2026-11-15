@@ -35,6 +35,7 @@ import {
 } from './probe.js';
 import type { MediaMetadata } from './probe.js';
 import { checkRenderSignal, MediaError, runMediaTool } from './process.js';
+import { accountRenderBytes, accountRenderFile } from './render-budget.js';
 import { renderProgress } from './render-progress.js';
 import type { RenderProgress } from './render-progress.js';
 import { fitVisual } from './video-filter.js';
@@ -111,6 +112,8 @@ interface RenderAudioFade {
 }
 
 export interface VideoTimelineOptions extends RenderControls {
+  /** Serialize build provenance in a custom MP4 format tag. */
+  buildMetadata?: string;
   /** Metadata already probed for this render invocation, indexed by resolved source path. */
   sourceMetadata?: ReadonlyMap<string, MediaMetadata>;
   /** Stage inputs on first decode. For a ranged preview, omit visual layers outside that range. */
@@ -739,23 +742,27 @@ async function prepareTimeline(
       encoders.add('ffv1');
       const hold =
         !clip.animation && (source.kind === 'text' || !source.sampling);
-      const layerInput = registerInput(`${scratchName}.nut`, (destination) =>
-        stageTransformLayer(
-          {
-            width,
-            height,
-            rate: frameRate,
-            startFrame: first,
-            frameCount: hold ? 1 : last - first,
-            visual: clip,
-            ...(clip.grade && { grade: clip.grade }),
-            source,
-            ...(clip.animation && { animation: clip.animation }),
-            ...(ramp && { ramp }),
-            signal: options.signal,
-          },
-          destination,
-        ),
+      const layerInput = registerInput(
+        `${scratchName}.nut`,
+        async (destination) => {
+          await stageTransformLayer(
+            {
+              width,
+              height,
+              rate: frameRate,
+              startFrame: first,
+              frameCount: hold ? 1 : last - first,
+              visual: clip,
+              ...(clip.grade && { grade: clip.grade }),
+              source,
+              ...(clip.animation && { animation: clip.animation }),
+              ...(ramp && { ramp }),
+              signal: options.signal,
+            },
+            destination,
+          );
+          await accountRenderFile(destination);
+        },
       );
       filters.push(
         `[${layerInput}:v]format=rgba,settb=1/${numerator},setpts=(N+${first})*${denominator}[${label}]`,
@@ -789,12 +796,14 @@ async function prepareTimeline(
       };
       if (transformed)
         return transform({ kind: 'text', rasterize: readRaster, x, y });
-      const textInput = registerInput(`${label}.png`, async (destination) =>
-        writeFile(destination, await readRaster(), {
+      const textInput = registerInput(`${label}.png`, async (destination) => {
+        const png = await readRaster();
+        accountRenderBytes(png.length);
+        await writeFile(destination, png, {
           flag: 'wx',
           signal: options.signal,
-        }),
-      );
+        });
+      });
       // Hold the static image from time zero and gate it to the clip interval.
       filters.push(
         `[${textInput}:v]format=rgba,settb=1/${numerator},setpts=0[${label}]`,
@@ -847,8 +856,10 @@ async function prepareTimeline(
         const path = scratch
           ? join(await scratch.open(), `freeze-${heldFrames.size}.png`)
           : `freeze-${heldFrames.size}.png`;
-        if (scratch)
+        if (scratch) {
+          accountRenderBytes(bytes.length);
           await writeFile(path, bytes, { flag: 'wx', signal: options.signal });
+        }
         held = {
           path,
           width: bytes.readUInt32BE(16),
@@ -1284,6 +1295,24 @@ async function prepareTimeline(
       `alimiter=limit=0.95:level=0:latency=1,atrim=start_sample=${sample(startFrame)}:end_sample=${options.range ? sample(endFrame) : totalSamples},asettb=1/48000,asetpts=N[audio]`,
   );
   checkRenderSignal(options.signal);
+  const metadataInput = options.buildMetadata === undefined ? -1 : input;
+  if (options.buildMetadata !== undefined) {
+    const escaped = options.buildMetadata.replace(/[\\=;#]/g, '\\$&');
+    const bytes = Buffer.from(`;FFMETADATA1\nopencut_build=${escaped}\n`);
+    const filename = 'build.ffmetadata';
+    args.push('-f', 'ffmetadata', '-i', filename);
+    stagedInputs.push({
+      filename,
+      argumentIndex: args.length - 1,
+      async write(destination) {
+        accountRenderBytes(bytes.length);
+        await writeFile(destination, bytes, {
+          flag: 'wx',
+          signal: options.signal,
+        });
+      },
+    });
+  }
   args.push(
     '-filter_complex_threads',
     '1',
@@ -1294,7 +1323,7 @@ async function prepareTimeline(
     '-map',
     '[audio]',
     '-map_metadata',
-    '-1',
+    String(metadataInput),
     '-c:v',
     codec === 'h264' ? 'libx264' : 'libx265',
     '-preset',
@@ -1330,7 +1359,7 @@ async function prepareTimeline(
     '-ac',
     String(audioChannels),
     '-movflags',
-    '+faststart',
+    metadataInput < 0 ? '+faststart' : '+faststart+use_metadata_tags',
     '-f',
     'mp4',
   );
@@ -1434,7 +1463,9 @@ export async function renderVideoTimeline(
     await runMediaTool('ffmpeg', args, 4 * 1024 * 1024, 600_000, {
       signal: options.signal,
       onStdout: progress.chunk,
+      writesFile: true,
     });
+    await accountRenderFile(rendered);
     checkRenderSignal(options.signal);
     progress.verifying();
     const metadata = await probeMedia(rendered, options.signal);

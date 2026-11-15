@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { CommandOptions } from './commands.js';
 import { UsageError } from './usage.js';
+import { readParams } from './json-argument.js';
 import { withCommandCancellation } from './cancellation.js';
 
 function formatProbe(media: MediaMetadata): string {
@@ -39,7 +40,11 @@ export async function runDefinitionTool(
         throw new UsageError('Specify --output <new.srt|new.vtt>.');
       const { writeSubtitleFile } = await import('@opencut/core/video');
       const { loadVideo } = await import('./video.js');
-      const { project } = await loadVideo(file, { preview: true, signal });
+      const { project } = await loadVideo(file, {
+        preview: true,
+        signal,
+        params: await readParams(values.params, signal),
+      });
       result = await writeSubtitleFile(
         output,
         project.subtitles?.cues ?? [],

@@ -1,8 +1,9 @@
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { cpus, release, version } from 'node:os';
 import { MediaError, checkRenderSignal, runMediaTool } from './process.js';
+import { sampleProcessMemory } from './process-memory.js';
 
 export interface RecipeProcessLimits {
   maxTemporaryBytes: number;
@@ -148,21 +149,20 @@ export async function runRecipeProcess(
       limits.timeoutMs,
     );
     const monitor = setInterval(() => {
-      if (sampling || child.pid === undefined) return;
+      if (sampling || failure || child.pid === undefined) return;
       sampling = true;
-      execFile(
-        '/bin/ps',
+      sampleProcessMemory(
         pipeline
           ? ['-axo', 'pgid=,rss=']
           : ['-o', 'rss=', '-p', String(child.pid)],
-        { timeout: 1000, maxBuffer: pipeline ? 1024 * 1024 : 1024 },
+        pipeline ? 1024 * 1024 : 1024,
         (error, stdout) => {
           sampling = false;
-          if (
-            !closed &&
-            !error &&
+          if (closed) return;
+          if (error) stop(error);
+          else if (
             recipeMemory(stdout, pipeline ? child.pid : undefined) >
-              limits.maxNativeBytes
+            limits.maxNativeBytes
           )
             stop(
               new MediaError('Recipe step exceeded its native memory limit.'),

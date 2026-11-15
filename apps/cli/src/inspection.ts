@@ -10,6 +10,7 @@ import type { RenderQuality } from '@opencut/media';
 import { commandUsage, type CommandOptions } from './commands.js';
 import { UsageError } from './usage.js';
 import { withCommandCancellation } from './cancellation.js';
+import { readParams } from './json-argument.js';
 import { loadVideo } from './video.js';
 
 function printWatchStatus(
@@ -145,7 +146,11 @@ export async function runInspectionCommand(
       : undefined;
   const requestedTo = command === 'preview clip' ? integer('to') : undefined;
   await withCommandCancellation(async (signal) => {
-    const video = await loadVideo(file, { signal, preview: true });
+    const video = await loadVideo(file, {
+      signal,
+      preview: true,
+      params: await readParams(values.params, signal),
+    });
     const tools = previewVideo(video);
     if (command === 'timeline inspect') {
       console.log(JSON.stringify(tools.inspectFrame(selectedFrame!), null, 2));
