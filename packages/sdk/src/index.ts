@@ -669,7 +669,17 @@ export type { VideoDefinition } from '@opencut/core';
 export {
   compileVideo,
   migrateProject,
+  previewVideo,
+  watchVideo,
   VideoDefinitionError,
   VideoMigrationError,
 } from '@opencut/core/node';
-export type { CompiledVideo } from '@opencut/core/node';
+export type {
+  CompiledVideo,
+  PreviewPosition,
+  VideoPreviewOptions,
+  VideoPreviewRange,
+  VideoWatchOptions,
+  VideoWatchRevision,
+  VideoWatchStatus,
+} from '@opencut/core/node';

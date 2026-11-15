@@ -20,7 +20,11 @@ import { MediaLibrary } from './media-library.js';
 import { ProjectInspector } from './project-inspector.js';
 import { shortcutAction, shortcutOwnsKeys } from './shortcuts.js';
 
-export function ProjectWorkspace() {
+export function ProjectWorkspace({
+  onOpenDefinition,
+}: {
+  onOpenDefinition: () => void;
+}) {
   const [state, setState] = useState<DesktopProject | null>(null);
   const [busy, setBusy] = useState('Loading project…');
   const [error, setError] = useState('');
@@ -246,6 +250,9 @@ export function ProjectWorkspace() {
           <ExportPanel state={state} disabled={!!busy} />
           <button disabled={!!busy} onClick={openProject}>
             <FolderOpen aria-hidden="true" /> Open project
+          </button>
+          <button disabled={!!busy} onClick={onOpenDefinition}>
+            Open definition
           </button>
           <button
             disabled={!!busy || !project}

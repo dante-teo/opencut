@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   APP_INFO_CHANNEL,
+  DEFINITION_CHANNELS,
   EXPORT_CHANNELS,
   EXPORT_CHANGED_CHANNEL,
   PROJECT_CHANGED_CHANNEL,
@@ -23,6 +24,17 @@ import {
 } from '../bridge.js';
 
 const api: DesktopAPI = {
+  openDefinition: () => ipcRenderer.invoke(DEFINITION_CHANNELS.open),
+  closeDefinition: () => ipcRenderer.invoke(DEFINITION_CHANNELS.close),
+  onDefinitionChanged(callback) {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      state: Parameters<typeof callback>[0],
+    ) => callback(state);
+    ipcRenderer.on(DEFINITION_CHANNELS.changed, listener);
+    return () =>
+      ipcRenderer.removeListener(DEFINITION_CHANNELS.changed, listener);
+  },
   renderTimeline: (input) => ipcRenderer.invoke(TIMELINE_RENDER_CHANNEL, input),
   onDesktopControl: (callback) => {
     const listener = (

@@ -94,6 +94,9 @@ T44 compiles whole-video TypeScript and JSON definitions to in-memory projects.
 Use the [executable showcase](VIDEO_DEFINITIONS.md#run-the-example) to validate,
 inspect, preview and render directly from a definition. T45 adds full project
 composition semantics and [saved-project conversion](VIDEO_DEFINITIONS.md#convert-a-saved-project).
+T46 adds [watched definition previews](VIDEO_DEFINITIONS.md#inspect-preview-and-render)
+in the CLI, SDK and Electron, plus frame, contact sheet and short clip exports
+from definitions.
 
 ## Quick start (macOS)
 

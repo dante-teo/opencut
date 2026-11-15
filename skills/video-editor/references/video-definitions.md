@@ -3,7 +3,8 @@
 Use `.video.ts` or `.video.json` when starting from media and delivering a
 rendered video. In TypeScript, import `defineVideo` from `@opencut/sdk` and
 default-export the object through that function. TypeScript executes as trusted
-Node code once per command. Repeated SDK builds refresh local ESM imports,
+Node code once per compilation. A default export can also be a promise that
+resolves to the definition. Repeated builds refresh local ESM imports,
 while package imports follow Node's normal cache. JSON contains the same
 object as plain data.
 
@@ -81,14 +82,26 @@ slashes. Inspect the source with `opencut probe` to choose valid source points.
 ```sh
 opencut validate opening.video.json --json
 opencut inspect opening.video.json --json
+opencut preview opening.video.json --watch --json
 opencut preview frame opening.video.json --frame 24 --output opening.png
+opencut preview contact-sheet opening.video.json --from 0 --to 48 --count 4 --output sheet.png
+opencut preview clip opening.video.json --from 0 --to 48 --output review.mp4
 opencut render opening.video.json --output opening.mp4
 opencut probe opening.mp4 --json
 ```
 
+Run watch in a separate terminal or use **Open definition** in Electron.
+Read `current.generation` and `current.path` from `ready` events.
+On an `error` event, `current` holds the last playable revision if one exists.
+Watch tracks local ESM imports, including dynamic imports used to resolve the
+default export, along with referenced fonts and media. Stop watch with Ctrl-C
+when review ends. To keep a preview, write a named output with a one-shot
+command or copy the current MP4 before it is replaced. For timeline seconds, use
+`--timestamp` in place of `--frame`. Range ends are exclusive.
+
 Read `frameCount` from validation to check the output length, including
 inferred durations. Run the same commands with a `.video.ts` input. Use new output paths in an
-existing directory. If TypeScript evaluation stalls after cancellation,
+existing directory. If TypeScript evaluation stalls in a one-shot command after cancellation,
 send a second SIGINT (Ctrl-C) or SIGTERM to terminate the command. Review
 frames at meaningful boundaries and verify duration,
 frame rate, dimensions and audio after rendering. For complete 20-second

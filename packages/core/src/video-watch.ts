@@ -1,0 +1,287 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { extname, join, resolve } from 'node:path';
+import { renderVideoTimeline } from '@opencut/media';
+import type { VideoTimelineResult } from '@opencut/media';
+import { compileVideoInput, isVideoDefinitionPath } from './video-files.js';
+import { VideoDefinitionError } from './video-compiler.js';
+import type { CompiledVideo, VideoSourceProbes } from './video-compiler.js';
+import {
+  copyVideoInput,
+  identifyVideoInput,
+  videoInputIdentity,
+} from './video-input.js';
+import type { VideoInput } from './video-input.js';
+import { readIsolatedDefinitionScript } from './video-script.js';
+
+export interface VideoWatchRevision {
+  readonly generation: number;
+  readonly sourceRevision: string;
+  readonly video: CompiledVideo;
+  readonly playback: Readonly<VideoTimelineResult>;
+}
+
+export type VideoWatchStatus = {
+  generation: number;
+  current: VideoWatchRevision | null;
+} & (
+  | { status: 'compiling' | 'rendering' | 'ready' }
+  | { status: 'error'; error: string }
+);
+
+export interface VideoWatchOptions {
+  onStatus: (status: VideoWatchStatus) => void;
+  maxDimension?: number;
+  signal?: AbortSignal;
+}
+
+type Published = {
+  revision: VideoWatchRevision;
+  inputs: Map<string, VideoInput>;
+  media: Set<string>;
+  renderKey: string;
+};
+
+/** Watch only inputs of the selected definition, retaining one playable revision. */
+export async function watchVideo(file: string, options: VideoWatchOptions) {
+  const path = resolve(file);
+  if (!isVideoDefinitionPath(path))
+    throw new VideoDefinitionError('Expected a .video.ts or .video.json file.');
+  options.signal?.throwIfAborted();
+
+  const directory = await mkdtemp(join(tmpdir(), 'opencut-video-'));
+  const watched = new Map([[path, videoInputIdentity(path)]]);
+  const snapshots = new Map<string, string>();
+  const probes: VideoSourceProbes = new Map();
+  const settings = {
+    maxDimension: options.maxDimension ?? 640,
+    quality: 'draft' as const,
+  };
+  let published: Published | undefined;
+  let active: AbortController | undefined;
+  let generation = 0;
+  let work = Promise.resolve();
+  let debounce: ReturnType<typeof setTimeout> | undefined;
+  let closing: Promise<void> | undefined;
+
+  function emit(
+    status: VideoWatchStatus['status'],
+    generation: number,
+    error?: unknown,
+  ) {
+    const current = published?.revision ?? null;
+    const event: VideoWatchStatus =
+      status === 'error'
+        ? {
+            status,
+            generation,
+            current,
+            error: error instanceof Error ? error.message : String(error),
+          }
+        : { status, generation, current };
+    try {
+      options.onStatus(event);
+    } catch (error) {
+      process.emitWarning(
+        `OpenCut preview status listener failed: ${String(error)}`,
+      );
+    }
+  }
+
+  function schedule() {
+    if (closing) return;
+    active?.abort();
+    clearTimeout(debounce);
+    const next = ++generation;
+    // Let truncate/rewrite and rename-based saves settle before executing code.
+    debounce = setTimeout(() => {
+      work = work.then(async () => {
+        if (closing || next !== generation) return;
+        active = new AbortController();
+        try {
+          await rebuild(next, active.signal);
+        } catch (error) {
+          if (!closing && next === generation) emit('error', next, error);
+        } finally {
+          active = undefined;
+        }
+      });
+    }, 180);
+    emit('compiling', next);
+  }
+
+  function refreshInputs() {
+    let changed = false;
+    for (const [file, previous] of watched) {
+      const identity = videoInputIdentity(file);
+      if (identity === previous) continue;
+      watched.set(file, identity);
+      changed = true;
+    }
+    return changed;
+  }
+
+  function isCurrent(next: number, inputs: Map<string, VideoInput>) {
+    if (closing || next !== generation) return false;
+    // A write can land between polls, including after the encoder finishes.
+    const changed = refreshInputs();
+    if (
+      changed ||
+      [...inputs.values()].some(
+        ({ path, identity }) => watched.get(path) !== identity,
+      )
+    ) {
+      schedule();
+      return false;
+    }
+    return true;
+  }
+
+  async function rebuild(next: number, signal: AbortSignal) {
+    const inputs = new Map<string, VideoInput>();
+    const media = new Set<string>();
+    const output = join(directory, `revision-${next}.mp4`);
+    const record = (input: VideoInput) => {
+      if (!inputs.has(input.path)) inputs.set(input.path, input);
+      if (!watched.has(input.path)) watched.set(input.path, input.identity);
+    };
+    try {
+      const video = await compileVideoInput(path, {
+        preview: true,
+        signal,
+        probes,
+        loadScript: (file, record) =>
+          readIsolatedDefinitionScript(file, signal, record),
+        inputs: {
+          record,
+          async snapshotMedia(file) {
+            const canonical = await realpath(file).catch(() => file);
+            const input = identifyVideoInput(canonical, 'media');
+            record(input);
+            if (input.identity === null)
+              throw new VideoDefinitionError(
+                `Cannot snapshot media '${file}': expected a readable regular file.`,
+              );
+            const key = JSON.stringify([canonical, input.identity]);
+            let snapshot = snapshots.get(key);
+            if (!snapshot) {
+              snapshot = join(directory, randomUUID() + extname(canonical));
+              try {
+                await copyVideoInput(
+                  canonical,
+                  input.identity,
+                  snapshot,
+                  signal,
+                );
+              } catch (cause) {
+                await rm(snapshot, { force: true });
+                throw new VideoDefinitionError(
+                  `Cannot snapshot media '${file}': ${cause instanceof Error ? cause.message : String(cause)}`,
+                  { cause },
+                );
+              }
+              snapshots.set(key, snapshot);
+            }
+            media.add(key);
+            return snapshot;
+          },
+        },
+      });
+      if (!isCurrent(next, inputs)) return;
+
+      const hash = createHash('sha256').update(JSON.stringify(video.project));
+      const ordered = [...inputs.values()].sort((a, b) =>
+        a.path.localeCompare(b.path),
+      );
+      for (const input of ordered) {
+        hash.update(JSON.stringify(input));
+        if (input.kind === 'source')
+          hash.update(await readFile(input.path, { signal }));
+      }
+      const sourceRevision = hash.digest('hex');
+      const { sourceMetadata, ...plan } = await video.resolveRender();
+      if (!isCurrent(next, inputs)) return;
+
+      // The bound paths identify immutable media copies. Edits that leave
+      // the composition unchanged can publish a new revision with the same MP4.
+      const renderKey = createHash('sha256')
+        .update(JSON.stringify([plan, settings]))
+        .digest('hex');
+      let playback =
+        published?.renderKey === renderKey
+          ? published.revision.playback
+          : undefined;
+      if (!playback) {
+        emit('rendering', next);
+        playback = await renderVideoTimeline({
+          ...plan,
+          sourceMetadata,
+          ...settings,
+          output,
+          signal,
+        });
+      }
+
+      if (!isCurrent(next, inputs)) return;
+      const previous = published?.revision.playback.path;
+      const revision = Object.freeze({
+        generation: next,
+        sourceRevision,
+        video,
+        playback: Object.freeze(playback),
+      });
+      published = { revision, inputs, media, renderKey };
+      emit('ready', next);
+      if (previous && previous !== playback.path)
+        await rm(previous, { force: true });
+    } catch (error) {
+      if (isCurrent(next, inputs)) emit('error', next, error);
+    } finally {
+      if (next === generation) {
+        for (const file of watched.keys()) {
+          if (
+            file !== path &&
+            !published?.inputs.has(file) &&
+            !inputs.has(file)
+          )
+            watched.delete(file);
+        }
+      }
+      if (published?.revision.playback.path !== output)
+        await rm(output, { force: true });
+      for (const [key, snapshot] of snapshots) {
+        if (published?.media.has(key)) continue;
+        snapshots.delete(key);
+        probes.delete(snapshot);
+        await rm(snapshot, { force: true });
+      }
+    }
+  }
+
+  // Poll exact paths, including missing imports. No directory enumeration is needed.
+  const poll = setInterval(() => {
+    if (refreshInputs()) schedule();
+  }, 100);
+
+  function close(): Promise<void> {
+    if (closing) return closing;
+    options.signal?.removeEventListener('abort', abort);
+    clearTimeout(debounce);
+    clearInterval(poll);
+    active?.abort();
+    closing = work.finally(() =>
+      rm(directory, { recursive: true, force: true }),
+    );
+    return closing;
+  }
+
+  function abort() {
+    void close().catch(console.error);
+  }
+
+  options.signal?.addEventListener('abort', abort, { once: true });
+  if (options.signal?.aborted) await close();
+  else schedule();
+  return { path, close };
+}

@@ -59,7 +59,7 @@ export function ProjectTimeline({
   onSelect: (id: string) => void;
   position: RationalTime;
   onSeek: (time: RationalTime) => void;
-  onPreviewClip: (id: string) => void;
+  onPreviewClip?: (id: string) => void;
   linkedClipId: string | null;
 }) {
   const index = useMemo(() => indexTimeline(project), [project]);
@@ -200,14 +200,16 @@ export function ProjectTimeline({
           >
             {timelineTimecode(position, rate)} NDF
           </span>
-          <button
-            aria-label="Preview selected clip"
-            title="Preview selected clip"
-            disabled={!linkedVideo}
-            onClick={() => linkedVideo && onPreviewClip(linkedVideo.id)}
-          >
-            <Clapperboard aria-hidden="true" />
-          </button>
+          {onPreviewClip && (
+            <button
+              aria-label="Preview selected clip"
+              title="Preview selected clip"
+              disabled={!linkedVideo}
+              onClick={() => linkedVideo && onPreviewClip(linkedVideo.id)}
+            >
+              <Clapperboard aria-hidden="true" />
+            </button>
+          )}
           <button
             aria-label="Zoom out"
             disabled={zoom === ZOOM_LEVELS[0]}
@@ -492,17 +494,20 @@ export function ProjectTimeline({
                             height="52"
                             overflow="hidden"
                           >
-                            {project && artworkVisible && !clip.text && (
-                              <ClipArtwork
-                                project={project}
-                                clip={clip}
-                                asset={asset}
-                                audio={track.type === 'audio'}
-                                offset={Math.max(0, x + 1 - clipLeft)}
-                                width={artworkWidth}
-                                zoom={zoom}
-                              />
-                            )}
+                            {onPreviewClip &&
+                              project &&
+                              artworkVisible &&
+                              !clip.text && (
+                                <ClipArtwork
+                                  project={project}
+                                  clip={clip}
+                                  asset={asset}
+                                  audio={track.type === 'audio'}
+                                  offset={Math.max(0, x + 1 - clipLeft)}
+                                  width={artworkWidth}
+                                  zoom={zoom}
+                                />
+                              )}
                             <text className="clip-name" x="8" y="14">
                               {speedLabel}
                               {title}

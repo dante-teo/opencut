@@ -118,6 +118,8 @@ interface RenderAudioFade {
 export interface VideoTimelineOptions extends RenderControls {
   /** Metadata already probed for this render invocation, indexed by resolved source path. */
   sourceMetadata?: ReadonlyMap<string, MediaMetadata>;
+  /** Stage inputs on first decode. For a ranged preview, omit visual layers outside that range. */
+  snapshotSource?: (sourcePath: string) => Promise<string>;
   /** Allow a desktop host to do text shaping off its main thread. */
   rasterizeText?: typeof rasterizeTextLayer;
   width: number;
@@ -624,6 +626,7 @@ async function prepareTimeline(
   };
   const filters: string[] = [];
   const sources = new Map(options.sourceMetadata);
+  const inputPathFor = (path: string) => options.snapshotSource?.(path) ?? path;
   const inputs = new Map<string, number>();
   const readSource = async (clip: { path: string; clipId: string }) => {
     checkRenderSignal(options.signal);
@@ -716,11 +719,11 @@ async function prepareTimeline(
       windows.set(layer.clipId, ranges);
     }
   }
+  const overlapsRange = (clip: VisualTimelineClip) =>
+    clip.timelineStartFrame < endFrame &&
+    clip.timelineStartFrame + clip.frameCount > startFrame;
   const visibleClips = visualClips.filter(
-    (clip) =>
-      !clip.subtitle ||
-      (clip.timelineStartFrame < endFrame &&
-        clip.timelineStartFrame + clip.frameCount > startFrame),
+    (clip) => !clip.subtitle || overlapsRange(clip),
   );
   validateSubtitleBurnIn(visibleClips);
   const heldFrames = new Map<string, HeldFrame>();
@@ -828,18 +831,19 @@ async function prepareTimeline(
           `Clip '${clip.clipId}' requires a freeze time inside a timed video.`,
         );
       if (first >= last) return;
+      const frozenSource = await inputPathFor(source.path);
       const inputStart = source.startTimeSeconds ?? 0;
       const timestamp =
         seconds(freeze) + ((video.startTimeSeconds ?? inputStart) - inputStart);
       const key = JSON.stringify([
-        await realpath(source.path),
+        await realpath(frozenSource),
         video.index,
         timestamp,
       ]);
       held = heldFrames.get(key);
       if (!held) {
         const bytes = await decodeStillFrame(
-          source,
+          { ...source, path: frozenSource },
           timestamp,
           true,
           options.signal,
@@ -906,7 +910,7 @@ async function prepareTimeline(
         : 'setpts=PTS-STARTPTS,' +
           frameSampling +
           `trim=start_frame=${clip.sourceStartFrame}:end_frame=${sourceEnd}`;
-    const inputPath = held?.path ?? source.path;
+    const inputPath = held?.path ?? (await inputPathFor(source.path));
     if (transformed) {
       return transform({
         kind: 'media',
@@ -956,7 +960,11 @@ async function prepareTimeline(
   };
   for (const [index, clip] of visibleClips.entries()) {
     const label = `layer${index}`;
-    const placement = await prepareLayer(clip, label, `layer-${index}`);
+    // A transition can contribute even when its owner's base clip is off-range.
+    const placement =
+      !options.snapshotSource || overlapsRange(clip)
+        ? await prepareLayer(clip, label, `layer-${index}`)
+        : undefined;
     if (placement) {
       const gate = enabled(
         clip.timelineStartFrame,
@@ -1211,7 +1219,13 @@ async function prepareTimeline(
     let audioInput = inputs.get(first.clipId);
     if (audioInput === undefined) {
       audioInput = input++;
-      args.push('-threads', '1', ...renderSourceInputArgs(), '-i', source.path);
+      args.push(
+        '-threads',
+        '1',
+        ...renderSourceInputArgs(),
+        '-i',
+        await inputPathFor(source.path),
+      );
     }
     const speed = first.retiming ? seconds(first.retiming.speed) : 1;
     // Keep one tempo filter across contiguous pieces. Only the run tail needs

@@ -82,7 +82,8 @@ Commands:
   project inspect <project-file>      Read revision-tagged content (offline)
   timeline inspect <project-file> --frame <n>
                                        Evaluate layers, audio and exact source times
-  preview frame|contact-sheet|clip <project-file> --output <new.png|mp4>
+  preview <definition> --watch         Watch and render playable revisions
+  preview frame|contact-sheet|clip <project-or-definition> --output <new.png|mp4>
                                        Inspect the composited timeline (preview --help)
   project create <project-file> --name <name> [--width <px>] [--height <px>] [--fps <n|n/d>]
                                        Create a new project without overwriting

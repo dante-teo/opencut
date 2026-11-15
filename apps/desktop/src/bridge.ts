@@ -3,6 +3,25 @@ import type { CacheLimits, CacheStatus, RenderProgress } from '@opencut/media';
 import type { ApplicationInfo, Project, SubtitleFormat } from '@opencut/core';
 
 export const APP_INFO_CHANNEL = 'app:get-info';
+export const DEFINITION_CHANNELS = {
+  open: 'definition:open',
+  close: 'definition:close',
+  changed: 'definition:changed',
+} as const;
+
+export interface DefinitionReview {
+  path: string;
+  generation: number;
+  status: 'compiling' | 'rendering' | 'ready' | 'error';
+  error?: string;
+  current: {
+    generation: number;
+    sourceRevision: string;
+    project: Project;
+    frameCount: number;
+    url: string;
+  } | null;
+}
 export const OPEN_PREVIEW_CHANNEL = 'preview:open';
 export const PREVIEW_METRICS_CHANNEL = 'preview:metrics';
 export const ASSET_PREVIEW_CHANNEL = 'preview:asset';
@@ -145,6 +164,11 @@ export interface ExportState {
   error: string;
 }
 export interface DesktopAPI {
+  openDefinition(): Promise<void>;
+  closeDefinition(): Promise<void>;
+  onDefinitionChanged(
+    callback: (state: DefinitionReview | null) => void,
+  ): () => void;
   renderTimeline(input: ProjectViewInput & { size: number }): Promise<{
     url: string;
     hit: boolean;

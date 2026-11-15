@@ -19,6 +19,8 @@ import type { FrameRate, RationalTime } from './time.js';
 import { videoDefinitionSchema } from './video-definition.js';
 import type { VideoDefinition } from './video-definition.js';
 import { validateTransitions } from './transitions.js';
+import { identifyVideoInput, videoInputIdentity } from './video-input.js';
+import type { RecordVideoInput } from './video-input.js';
 
 export class VideoDefinitionError extends Error {
   override name = 'VideoDefinitionError';
@@ -64,15 +66,20 @@ type CompiledAsset = {
   asset: MediaAsset;
   current: MediaAsset;
   source: MediaMetadata;
+  sourceIdentity: string;
 };
 type FontStyle = {
   font?: string | undefined;
   embeddedFont?: string | null | undefined;
 };
-type CompilationOptions = {
+export type CompilationOptions = {
   signal?: AbortSignal | undefined;
   probes?: VideoSourceProbes;
   preview?: boolean;
+  inputs?: {
+    record: RecordVideoInput;
+    snapshotMedia(path: string): Promise<string>;
+  };
 };
 
 const epoch = '1970-01-01T00:00:00.000Z';
@@ -83,6 +90,8 @@ export interface CompiledVideo {
   /** A deeply frozen project snapshot. */
   readonly project: Project;
   readonly frameCount: number;
+  /** Media identity recorded before probing, keyed by the bound source path. */
+  sourceIdentity(path: string): string | undefined;
   resolveRender(): Promise<
     BoundRenderPlan & { sourceMetadata: ReadonlyMap<string, MediaMetadata> }
   >;
@@ -91,8 +100,9 @@ export interface CompiledVideo {
 export async function compileDefinition(
   path: string,
   value: unknown,
-  { signal, probes = new Map(), preview = false }: CompilationOptions = {},
+  options: CompilationOptions = {},
 ): Promise<CompiledVideo> {
+  const { signal, preview = false } = options;
   const parsed = videoDefinitionSchema.safeParse(value);
   signal?.throwIfAborted();
   if (!parsed.success)
@@ -105,12 +115,7 @@ export async function compileDefinition(
         .join('\n'),
     );
 
-  const { project, assets } = await buildProject(
-    path,
-    parsed.data,
-    signal,
-    probes,
-  );
+  const { project, assets } = await buildProject(path, parsed.data, options);
   let renderPlan: BoundRenderPlan;
   try {
     const plan = planProjectRender(project);
@@ -126,14 +131,24 @@ export async function compileDefinition(
     );
   }
   signal?.throwIfAborted();
+  const sourceMetadata = new Map(
+    Array.from(assets.values(), ({ source }) => [source.path, source] as const),
+  );
+  const sourceIdentities = new Map(
+    Array.from(
+      assets.values(),
+      ({ source, sourceIdentity }) => [source.path, sourceIdentity] as const,
+    ),
+  );
   return Object.freeze({
     path,
     project: freeze(project),
     frameCount: renderPlan.frameCount,
+    sourceIdentity: (path: string) => sourceIdentities.get(path),
     async resolveRender() {
       return {
         ...structuredClone(renderPlan),
-        sourceMetadata: new Map(probes),
+        sourceMetadata: new Map(sourceMetadata),
       };
     },
   });
@@ -156,8 +171,7 @@ function describeVideoSource(source: MediaMetadata) {
 async function buildProject(
   path: string,
   definition: VideoDefinition,
-  signal: AbortSignal | undefined,
-  probes: VideoSourceProbes,
+  { signal, probes = new Map(), inputs }: CompilationOptions,
 ) {
   const {
     canvas,
@@ -186,7 +200,12 @@ async function buildProject(
     markers,
   };
 
-  const resolveFont = await loadFonts(path, definition.fonts, signal);
+  const resolveFont = await loadFonts(
+    path,
+    definition.fonts,
+    signal,
+    inputs?.record,
+  );
   const { subtitles } = definition;
   if (subtitles) {
     const cues = [];
@@ -246,7 +265,19 @@ async function buildProject(
 
   const compiledAssets = new Map<string, CompiledAsset>();
   for (const id of Object.keys(assets).sort()) {
-    const compiled = await compileAsset(id, assets[id]!, path, probes, signal);
+    const asset = assets[id]!;
+    const sourcePath = resolveMediaReference(
+      { type: 'relative', path: asset.path },
+      path,
+    );
+    inputs?.record(identifyVideoInput(sourcePath, 'media'));
+    const compiled = await compileAsset(
+      id,
+      asset,
+      inputs ? await inputs.snapshotMedia(sourcePath) : sourcePath,
+      probes,
+      signal,
+    );
     compiledAssets.set(id, compiled);
     project.assets.push(compiled.asset);
   }
@@ -313,6 +344,7 @@ async function loadFonts(
   path: string,
   definitions: VideoDefinition['fonts'],
   signal?: AbortSignal,
+  record?: RecordVideoInput,
 ) {
   const fonts = new Map<string, string>();
   const verifiedFonts = new Set<string>();
@@ -336,6 +368,7 @@ async function loadFonts(
           { type: 'relative', path: font.path },
           path,
         );
+        record?.(identifyVideoInput(file, 'font'));
         const data = await readEmbeddedFont(file);
         verifiedFonts.add(data);
         fonts.set(id, data);
@@ -364,7 +397,7 @@ async function loadFonts(
 async function compileAsset(
   id: string,
   definition: AuthoredAsset,
-  definitionPath: string,
+  sourcePath: string,
   probes: VideoSourceProbes,
   signal?: AbortSignal,
 ): Promise<CompiledAsset> {
@@ -378,12 +411,16 @@ async function compileAsset(
     ...properties
   } = definition;
   const file = { type: 'relative' as const, path };
-  const source = await probeVideoSource(
-    id,
-    resolveMediaReference(file, definitionPath),
-    probes,
-    signal,
-  );
+  const sourceIdentity = videoInputIdentity(sourcePath);
+  const source = await probeVideoSource(id, sourcePath, probes, signal);
+  if (
+    sourceIdentity === null ||
+    sourceIdentity !== videoInputIdentity(sourcePath) ||
+    sourceIdentity !== videoInputIdentity(source.path)
+  )
+    throw new VideoDefinitionError(
+      `assets.${id}.path: Media '${sourcePath}' changed during compilation. Retry after the write completes.`,
+    );
   const described = describeVideoSource(source);
   if (freezeFrame) {
     const end = videoSourceDuration(source);
@@ -429,6 +466,7 @@ async function compileAsset(
     );
   return {
     source,
+    sourceIdentity,
     current,
     asset: {
       ...current,

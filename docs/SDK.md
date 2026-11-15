@@ -16,6 +16,42 @@ SDK imports. External agents can use the portable
 [Skill reference](../skills/video-editor/references/sdk.md) with a
 [staged runtime](README.md#external-agent-validation).
 
+## Video definition preview
+
+```ts
+import { compileVideo, previewVideo, watchVideo } from '@opencut/sdk';
+
+const video = await compileVideo('review.video.ts', { preview: true });
+const preview = previewVideo(video);
+console.log(preview.inspect());
+console.log(preview.inspectFrame({ numerator: 1, denominator: 2 }));
+await preview.frame(12, 'frame.png');
+await preview.contactSheet({ startFrame: 0, endFrame: 24 }, 'sheet.png');
+await preview.clip({ startFrame: 6, endFrame: 36 }, 'sample.mp4');
+
+const watcher = await watchVideo('review.video.ts', {
+  onStatus(event) {
+    if (event.status === 'ready') console.log(event.current?.playback.path);
+    if (event.status === 'error') console.error(event.error);
+  },
+});
+// Call await watcher.close() when review ends, or pass an AbortSignal.
+```
+
+Numbers passed to `frame` and `inspectFrame` are project-frame indices.
+Rational positions are timeline seconds. `compileVideo` exposes a frozen
+`project`, `frameCount`, and `resolveRender()` for the shared renderer. Use
+`preview: true` to apply the subtitle limit to the chosen render range.
+Outputs require new files in an existing directory.
+Preview output makes a private copy of each media file the renderer decodes.
+If a needed source changed after compilation, compile the definition again.
+
+Watch events include a monotonic `generation`, a build status, and `current`
+with the last playable revision. Pass `current.video` to `previewVideo` to
+inspect that revision or produce outputs from its media snapshots. The watcher
+owns the scratch files. Consume a revision before it is superseded or copy its
+playback MP4 to retain it. `close()` cancels work and removes scratch files.
+
 ## Open, edit and save
 
 ```ts

@@ -140,7 +140,10 @@ describe('agent CLI discovery and offline inspection', () => {
       frame.options.find(
         (option: { name: string }) => option.name === '--frame',
       ),
-    ).toMatchObject({ required: true, unit: 'project-frame', minimum: 0 });
+    ).toMatchObject({ required: false, unit: 'project-frame', minimum: 0 });
+    expect(frame.options).toContainEqual(
+      expect.objectContaining({ name: '--timestamp', required: false }),
+    );
     expect(catalog.schemas[frame.resultSchema].required).toContain('revision');
     expect(
       catalog.schemas['timeline inspect'].properties.visualClips.items
@@ -188,7 +191,7 @@ describe('agent CLI discovery and offline inspection', () => {
     );
     expect(
       JSON.parse(run('help', 'preview', '--json').stdout).commands,
-    ).toHaveLength(3);
+    ).toHaveLength(4);
   }, 30_000);
 
   it('returns complete revision-tagged project content without history or probing', async () => {
@@ -386,6 +389,41 @@ describe('agent CLI discovery and offline inspection', () => {
       expect(JSON.parse(result.stderr).error.message).toBeTruthy();
     }
   });
+
+  it('accepts preview options before the command', async () => {
+    const { path } = await example();
+    const args = [
+      'preview',
+      'frame',
+      path,
+      '--output',
+      'preview.png',
+      '--json',
+    ];
+    const leading = run('--frame', '30', ...args);
+    const trailing = run(...args, '--frame', '30');
+    expect(leading.status).toBe(2);
+    expect(leading.stderr).toBe(trailing.stderr);
+    expect(JSON.parse(leading.stderr).error.message).toContain('<= 30');
+  });
+
+  it.each(['bogus', '1/0', '999999999999999999999'])(
+    'classifies malformed timeline timestamp %s as an argument error',
+    (timestamp) => {
+      for (const args of [
+        ['timeline', 'inspect', 'missing.video.json'],
+        ['preview', 'frame', 'missing.video.json', '--output', 'preview.png'],
+      ]) {
+        const result = run(...args, '--timestamp', timestamp, '--json');
+        expect(result.status).toBe(2);
+        expect(result.stdout).toBe('');
+        expect(JSON.parse(result.stderr).error).toMatchObject({
+          code: 'INVALID_ARGUMENTS',
+          message: expect.stringContaining('--timestamp'),
+        });
+      }
+    },
+  );
 });
 
 it('bounds preview duration before decoding or creating temporary output', async () => {

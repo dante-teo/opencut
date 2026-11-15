@@ -19,10 +19,8 @@ export async function withCommandCancellation(
   process.on('SIGTERM', cancel);
   try {
     await run(controller.signal);
-  } catch (error) {
-    if (exitCode !== undefined) process.exitCode = exitCode;
-    throw error;
   } finally {
+    if (exitCode !== undefined) process.exitCode = exitCode;
     removeHandlers();
   }
 }

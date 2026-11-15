@@ -207,6 +207,10 @@ const options: Record<string, Option> = {
     minimum: 0,
     maximum: Number.MAX_SAFE_INTEGER,
   },
+  watch: {
+    type: 'boolean',
+    description: 'Watch the selected video definition and its local inputs.',
+  },
   from: {
     type: 'string',
     description: 'Inclusive timeline range start.',
@@ -647,10 +651,9 @@ const definitions: Definition[] = [
   {
     name: 'timeline inspect',
     description:
-      'Evaluate active layers (bottom to top), audio candidates/gains, gaps and exact source times.',
+      'Evaluate a saved project or definition at exactly one --frame or timeline --timestamp.',
     args: ['project-file'],
-    options: ['frame'],
-    required: ['frame'],
+    options: ['frame', 'timestamp'],
   },
   {
     name: 'track add',
@@ -793,11 +796,22 @@ const definitions: Definition[] = [
   {
     name: 'preview frame',
     description:
-      'Export a composited frame from a saved project or video definition as a lossless PNG. Canvas alpha flattens over black.',
+      'Export a composited PNG from a saved project or definition at exactly one --frame or timeline --timestamp.',
     args: ['project-file'],
-    options: ['frame', 'output', 'size'],
-    required: ['frame', 'output'],
+    options: ['frame', 'timestamp', 'output', 'size'],
+    required: ['output'],
     defaults: { size: 'project' },
+    tools: ['ffmpeg', 'ffprobe'],
+  },
+  {
+    name: 'preview',
+    description:
+      'Rebuild playable definition revisions on changes. With --json, emit status as JSON Lines.',
+    args: ['definition-file'],
+    options: ['watch', 'size'],
+    required: ['watch'],
+    defaults: { size: 640 },
+    jsonl: true,
     tools: ['ffmpeg', 'ffprobe'],
   },
   {
@@ -1012,6 +1026,13 @@ export function discovery(scope: string[] = [], help = '') {
             : {}),
           ...(command.name === 'preview contact-sheet' && name === 'size'
             ? { maximum: 640 }
+            : {}),
+          ...(name === 'timestamp' &&
+          ['preview frame', 'timeline inspect'].includes(command.name)
+            ? {
+                description:
+                  'Timeline seconds as a decimal, fraction or clock timestamp.',
+              }
             : {}),
           required: command.required?.includes(name) ?? false,
           ...(command.defaults && name in command.defaults

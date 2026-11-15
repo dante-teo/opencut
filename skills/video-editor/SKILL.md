@@ -12,7 +12,9 @@ scripts need the supplied `@opencut/sdk` package.
 
 For a new video, author one `.video.ts` or `.video.json` definition. Run
 `opencut validate DEFINITION`, then `opencut inspect DEFINITION --json`.
-Review `opencut preview frame DEFINITION --frame N --output review.png`
+Use `opencut preview DEFINITION --watch` or Electron's **Open definition**
+to review changes as you save. Review a specific frame with
+`opencut preview frame DEFINITION --frame N --output review.png`
 and deliver `opencut render DEFINITION --output final.mp4`. Probe the
 result. The [whole-video workflow](references/video-definitions.md) covers
 the fields, timing, paths and a complete example. Run trusted TypeScript

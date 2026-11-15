@@ -15,7 +15,7 @@ import { stat } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getApplicationInfo, projectRevision } from '@opencut/core';
-import { renderPreviewCache } from '@opencut/core/node';
+import { isVideoDefinitionPath, renderPreviewCache } from '@opencut/core/node';
 import { WAVEFORM_CHUNK_SECONDS } from '@opencut/shared';
 import {
   probeMedia,
@@ -25,8 +25,10 @@ import {
 } from '@opencut/media';
 import { ExportSession } from './export-session.js';
 import { MediaClient } from './media-client.js';
+import { DefinitionReviewSession } from './definition-review.js';
 import {
   APP_INFO_CHANNEL,
+  DEFINITION_CHANNELS,
   EXPORT_CHANNELS,
   EXPORT_CHANGED_CHANNEL,
   PROJECT_CHANGED_CHANNEL,
@@ -79,6 +81,11 @@ if (devURL && new URL(devURL).origin !== 'http://127.0.0.1:5173') {
 }
 const rendererURL = new URL(devURL ?? 'opencut://app/index.html').href;
 let mainWindow: BrowserWindow | null = null;
+const definitionReview = new DefinitionReviewSession((state) => {
+  if (mainWindow && !mainWindow.isDestroyed())
+    mainWindow.webContents.send(DEFINITION_CHANNELS.changed, state);
+});
+let selectingDefinition = false;
 let mediaClient: MediaClient | null = null;
 let previewFile: { url: string; path: string } | null = null;
 const timelineFiles = new Map<string, string>();
@@ -387,6 +394,7 @@ async function createWindow(): Promise<void> {
   window.on('closed', () => {
     if (mainWindow === window) {
       mainWindow = null;
+      void definitionReview.close();
       previewFile = null;
       revokeTimeline();
     }
@@ -421,7 +429,8 @@ app
           const path =
             request.url === previewFile?.url
               ? previewFile.path
-              : timelineFiles.get(request.url);
+              : (timelineFiles.get(request.url) ??
+                definitionReview.resolveMedia(request.url));
           if (request.method !== 'GET' || !path)
             return new Response(null, { status: 403 });
           return await servePreviewFile(path, request);
@@ -456,6 +465,42 @@ app
     ipcMain.handle(APP_INFO_CHANNEL, (event) => {
       assertSender(event);
       return getApplicationInfo();
+    });
+    ipcMain.handle(
+      DEFINITION_CHANNELS.open,
+      async (event, ...args: unknown[]) => {
+        assertSender(event);
+        if (args.length) throw new Error('Unexpected definition arguments.');
+        if (selectingDefinition || !mainWindow) return;
+        selectingDefinition = true;
+        try {
+          const { canceled, filePaths } = await dialog.showOpenDialog(
+            mainWindow,
+            {
+              title: 'Review a video definition',
+              message:
+                'Only open trusted local TypeScript. OpenCut executes the selected script and its imports on every rebuild.',
+              properties: ['openFile'],
+              filters: [
+                { name: 'Video definitions', extensions: ['ts', 'json'] },
+              ],
+            },
+          );
+          assertSender(event);
+          if (canceled) return;
+          const [path] = filePaths;
+          if (!path || !isVideoDefinitionPath(path))
+            throw new Error('Choose a .video.ts or .video.json file.');
+          definitionReview.open(path);
+        } finally {
+          selectingDefinition = false;
+        }
+      },
+    );
+    ipcMain.handle(DEFINITION_CHANNELS.close, (event, ...args: unknown[]) => {
+      assertSender(event);
+      if (args.length) throw new Error('Unexpected definition arguments.');
+      return definitionReview.close();
     });
     for (const [key, channel] of Object.entries(PROJECT_CHANNELS)) {
       const action = key as ProjectAction;
@@ -914,6 +959,7 @@ app.on('before-quit', (event) => {
     void Promise.allSettled([
       projectSession.dispose(),
       exportSession.dispose(),
+      definitionReview.close(),
       mediaClient.close(),
     ]).finally(() => app.quit());
   }

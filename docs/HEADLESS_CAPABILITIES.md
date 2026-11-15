@@ -3,10 +3,12 @@
 This matrix describes the current public interfaces. `edit apply` accepts the
 operation types and fields in `opencut help edit apply --json`; the SDK accepts
 the same operations through `project.apply`. Both use the core validation and
-history model. Inspect the project revision before editing. Whole-video definitions use `validate`, `inspect`, `preview frame` and
-`render` with `defineVideo()`/`compileVideo()` in the SDK. See
-[Video as code](VIDEO_DEFINITIONS.md). Electron reviews
-and exports saved projects and follows revisions committed by either interface.
+history model. Inspect the project revision before editing. Whole-video
+definitions support validation, inspection, frame previews, contact sheets,
+short clips, watch mode and final renders. The SDK exposes `defineVideo()`,
+`compileVideo()`, `previewVideo()` and `watchVideo()`. See
+[Video as code](VIDEO_DEFINITIONS.md). Electron follows source definitions
+and saved project revisions, and exports saved projects.
 
 | Capability                                                              | CLI                                                           | TypeScript SDK                                                                                          | Notes                                                                                                    |
 | ----------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |

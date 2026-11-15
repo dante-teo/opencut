@@ -695,5 +695,22 @@ export {
 } from './video-files.js';
 export { VideoDefinitionError } from './video-compiler.js';
 export type { CompiledVideo } from './video-compiler.js';
+export {
+  previewVideo,
+  previewProject,
+  previewFrameIndex,
+  VideoPreviewRangeError,
+} from './video-preview.js';
+export type {
+  PreviewPosition,
+  VideoPreviewOptions,
+  VideoPreviewRange,
+} from './video-preview.js';
+export { watchVideo } from './video-watch.js';
+export type {
+  VideoWatchOptions,
+  VideoWatchRevision,
+  VideoWatchStatus,
+} from './video-watch.js';
 
 export { migrateProject, VideoMigrationError } from './video-migration.js';

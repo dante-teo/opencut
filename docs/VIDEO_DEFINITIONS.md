@@ -36,11 +36,13 @@ must be new and their parent directories must exist.
 In TypeScript, import `defineVideo` from `@opencut/sdk` and default-export the
 result. Put the SDK on the definition's Node package resolution path. Node
 24.12+ within 24.x runs the file with native type stripping. Use ESM and
-erasable TypeScript syntax. The command evaluates the entry module once per
-compilation as trusted local code. Relative and absolute local ESM imports are
-evaluated afresh with the entry module. Bare package imports use Node's
-normal module cache. The CLI does runtime validation. The TypeScript compiler
-can check the authoring type separately.
+erasable TypeScript syntax. OpenCut evaluates the entry module once per
+compilation as trusted local code. The default export can also be a promise
+that resolves to a definition. Relative and absolute local ESM imports are
+evaluated afresh, including dynamic imports made while that promise resolves.
+Bare package imports use Node's normal module cache. The CLI validates the
+resolved value at runtime. The TypeScript compiler can check the authoring type
+separately.
 
 ```ts
 import { defineVideo } from '@opencut/sdk';
@@ -166,6 +168,50 @@ inputs on different builds.
 
 ## Inspect, preview and render
 
+Open [the review example](../examples/video/review.video.ts) to try a two-second
+composition with video, an image overlay, subtitles, a dissolve and an audio
+track. Edit its imported `review-title.ts` to update the title and project name.
+
+```sh
+opencut preview examples/video/review.video.ts --watch
+opencut timeline inspect examples/video/review.video.ts --timestamp 1
+opencut preview frame examples/video/review.video.ts --timestamp 1 --output frame.png
+opencut preview contact-sheet examples/video/review.video.ts --from 12 --to 36 --count 4 --output review.png
+opencut preview clip examples/video/review.video.ts --from 6 --to 42 --quality high --output review.mp4
+```
+
+Both definition formats support these commands. A timestamp can be decimal
+seconds, a fraction such as `1001/30000`, or a clock time such as `00:00:01.500`.
+It selects the project frame covering that time. `--frame` selects a frame
+directly. Range ends are exclusive and clips have a 30-second limit.
+
+In Electron, choose **Open definition** and select the source file. OpenCut
+compiles and renders a playable revision with mixed audio. Use the timeline
+ruler or frame buttons to seek the composition. A build error appears beside
+the last valid revision, which stays playable while you fix the file.
+
+CLI watch prints the build stages and the path of each playable MP4. Use
+`--size` to change the default 640-pixel cap on the longest side.
+With `--json`, stdout carries one event per line. Each event has a `status`
+(`compiling`, `rendering`, `ready`, or `error`), an attempted `generation`, and
+a `current` field. `current` is `null` until the first playable preview and
+then contains its `generation`, `sourceRevision`, `path`, and `frameCount`.
+An `error` event also includes an `error` message and watch keeps running.
+
+A `ready` event can reuse the current MP4 when an edit leaves the render plan
+unchanged. The MP4 is temporary. Copy it while it is current to keep it, or
+use a one-shot preview command to write a named output. Press Ctrl-C to stop
+watching and remove the temporary preview files.
+
+Watch mode debounces saves and tracks the entry, relative and absolute ESM
+imports, referenced font files, and local media. It reuses unchanged media
+snapshots and probe results. Changes to the render plan encode a full draft
+playback movie with the shared renderer. Larger compositions take longer to
+refresh. Media may need temporary disk space for copies when the filesystem
+cannot clone them.
+Only open trusted TypeScript. Bare package files, arbitrary files read by
+script code, and external state are outside the tracked inputs.
+
 `validate` checks the schema, timeline, media kinds, source bounds and
 full-render constraints. Its JSON output includes `{ ok, path, frameCount }`.
 The frame count is available for both declared and inferred durations.
@@ -185,17 +231,16 @@ source metadata. Edits to the definition after compilation apply on the next
 invocation. Validation and rendering do not save a project or add editing
 history. Render and preview commands publish a new output only after
 verification. Send SIGINT (Ctrl-C) or SIGTERM to request cancellation.
-If a TypeScript definition is stalled, send a second signal to terminate the
-CLI. Saved projects continue to use `project render` and the
+Watch can cancel the worker that evaluates TypeScript. If TypeScript evaluation
+stalls in a one-shot CLI command, send a second signal to terminate the CLI.
+Saved projects continue to use `project render` and the
 project editing commands.
 
-SDK callers can use `compileVideo(file, { signal })` to obtain the definition
-`path`, frozen `project` and computed `frameCount`. Pass the project to the
-shared evaluator for frame inspection, or spread the result of
-`await video.resolveRender()` into the headless media renderer. That method
-reuses the current build's source probe results. For a frame or range preview,
-use `compileVideo(file, { signal, preview: true })` and pass the selected
-range to the renderer. The renderer applies the subtitle limit to that range.
+SDK callers can pass `await compileVideo(file, { signal, preview: true })`
+to `previewVideo` for project inspection, exact frame inspection, PNGs,
+contact sheets and clips. `watchVideo(file, { onStatus, signal })` delivers
+playable revisions and build errors. The SDK reference documents the lifetime
+of these revisions. [SDK reference](SDK.md#video-definition-preview)
 
 ## Convert a saved project
 

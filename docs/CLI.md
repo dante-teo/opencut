@@ -24,11 +24,12 @@ with `pnpm fixtures:generate` if absent; see the
 [fixture contract](../tests/fixtures/README.md). The output parent directory must
 already exist, and the output file must not exist.
 
-## Whole-video definitions (T44–T45)
+## Whole-video definitions (T44–T46)
 
 ```sh
 opencut validate sample.video.ts
 opencut inspect sample.video.ts --json
+opencut preview sample.video.ts --watch
 opencut preview frame sample.video.ts --frame 48 --output frame.png
 opencut render sample.video.ts --output final.mp4
 opencut migrate edit.opencut.json --output edit.video.json --json
@@ -39,7 +40,7 @@ clips in a single file and render without creating a saved project.
 `validate --json` reports the computed `frameCount` even when duration is inferred.
 Full-render validation allows up to 256 visible subtitle cues. A frame preview
 applies the limit to the selected frame.
-`preview frame` also accepts saved projects, including ones named
+All three `preview` inspection commands accept saved projects, including ones named
 `*.video.json`. For that suffix, a top-level `schemaVersion` identifies a
 saved project. Video definitions use the optional `version` field.
 Use `migrate` to convert the saved snapshot to a new `.video.json` or `.video.ts`.
@@ -127,7 +128,7 @@ identity, every command's positional arguments and options, required flags,
 defaults, units, constraints, prerequisites, capability statuses and exit codes.
 `help GROUP [ACTION] --json` scopes the command list. The `help` field
 contains the corresponding readable command or group usage. `globalOptions` includes version/help aliases.
-`jsonOutput` distinguishes existing JSONL commands (`project render`, `cache proxy`)
+`jsonOutput` distinguishes JSONL commands (`project render`, `cache proxy`, `preview --watch`)
 from single-document results. A `resultSchema` key points into `schemas`, which
 contains JSON Schema 2020-12 definitions for the five T29 results, script
 results and errors.
@@ -142,14 +143,14 @@ command group, between the group and action, or after the action. For example:
 node apps/cli/dist/index.js project --json inspect /path/to/project.opencut.json
 node apps/cli/dist/index.js timeline --json inspect /path/to/project.opencut.json --frame 20
 node apps/cli/dist/index.js preview --json -h frame
+node apps/cli/dist/index.js --frame 20 preview frame /path/to/review.video.ts --output frame.png
 ```
 
 These forms return the same JSON results or scoped help as placing the flags at
 the end. `tests/integration/inspection-cli.test.ts` covers option ordering,
 scoped help and rejection of inspection-only options on unrelated commands.
-The six inspection options `--frame`, `--from`, `--to`, `--size`, `--count` and
-`--columns` apply only to their supported inspection/preview commands;
-`--version` remains a standalone command (optionally with `--json`).
+Inspection options apply to the commands listed in `help --json`. Use
+`--version` as a standalone command, optionally with `--json`.
 
 `project inspect` returns `inspectionVersion: 1`, canonical absolute `path`,
 project `schemaVersion`, metadata, settings, asset references/metadata, ordered
@@ -169,12 +170,14 @@ candidate. Inspection does not decode media or determine actual occlusion/alpha.
 Half-open clip boundaries match playback/export. `boundary` is `inside`, `end`
 or `after`; inspecting the end or later is supported and returns no active clips.
 
-All new time flags (`--frame`, `--from`, `--to`) accept nonnegative safe integer
-**project-frame indices**, never decimal seconds or source-file frame numbers.
+The `--frame`, `--from` and `--to` flags accept nonnegative safe integer
+project-frame indices. For `timeline inspect` and `preview frame`, `--timestamp`
+selects the frame covering a time in the compiled timeline. A malformed
+timestamp exits with status 2 and reports `INVALID_ARGUMENTS` in JSON mode.
 `--to` is exclusive. A preview frame must be strictly before the timeline end.
 Ranges must satisfy `0 <= from < to <= timeline frame count`.
 
-- `preview frame` requires `--frame` and a new `.png` output. Default size is the
+- `preview frame` requires `--frame` or `--timestamp` and a new `.png` output. Default size is the
   project canvas; optional `--size 64..1920` caps its longest side.
 - `preview contact-sheet` requires a new `.png` output. `--from` defaults to 0,
   `--to` to the timeline end, `--count` to min(8, range frames), `--columns` to
@@ -210,12 +213,16 @@ and exact label appearance depend on the host.
 
 Export limits still apply to the whole project: at least one video, image, text or subtitle cue,
 frame-aligned title boundaries, at most 64 non-subtitle clips and 600 seconds, rational 1–120 fps,
-even sides 2–3840 and at most 3840×2160 pixels. Referenced visual sources must be
-readable even outside the requested range; clips also validate referenced audio.
-Unused offline assets do not block rendering. Audio-only/empty projects remain
-inspectable but cannot generate visual previews. T27's SDR/color, VFR, HDR and
-long-run audio limitations still apply. Preview ranges trim the finished
-composition; decoding preceding frames can make late-frame requests slower.
+even sides 2–3840 and at most 3840×2160 pixels. Saved-project previews check
+referenced visual sources even outside the requested range. Definition previews
+probe declared assets during compilation and snapshot visual inputs when a
+selected frame needs them. Contact sheets use the sampled frames to determine
+which inputs they need. PNG previews skip audio. Video clips use the shared
+audio mix, including processing before the selected range. Unused offline
+assets in a saved project do not block rendering. A video definition can
+preview a blank or audio-only canvas with an explicit duration. T27's
+SDR/color, VFR, HDR and long-run audio limitations still apply. Decoding
+preceding frames can make late-frame requests slower.
 This is an inspection/export path, not a real-time playback benchmark.
 
 Only explicit new output paths in existing writable directories are accepted;
@@ -228,13 +235,14 @@ directory is removed on success or handled failure. Clip output is bounded by
 Handled cancellation removes temporary files before exit 130 (SIGINT) or 143
 (SIGTERM); SIGKILL/power loss cannot run cleanup.
 
-With `--json`, stdout contains one success document. Preview clip progress is
+For one-shot commands with `--json`, stdout contains one success document. Preview clip progress is
 JSONL on stderr; its last stderr line on failure is the existing structured error
 `{ "ok": false, "error": { "code": "...", "message": "..." } }`.
 Check exit status before using results: 0 success, 2 invalid command/option/range,
 1 invalid project/media/prerequisite/file/runtime failure. Invalid requests never
 publish partial destinations. JSON errors preserve existing CLI codes; argument
 errors include a usage hint.
+Watch mode streams status events on stdout. See the [watch event fields](VIDEO_DEFINITIONS.md#inspect-preview-and-render).
 
 ## Commands
 
@@ -287,7 +295,8 @@ errors include a usage hint.
 - `media --help` and `media import|list|info|remove --help`: show asset usage.
 - `timeline list <project-file> [--json]`: inspect tracks, clips and exact timing.
 - `timeline inspect <project-file> --frame <n> [--json]`: evaluate active layers, audio candidates and exact source-time mappings.
-- `preview frame|contact-sheet|clip <project-file> --output <new.png|new.mp4> [options]`: generate headless composited inspection media; see [selection, quality and resource limits](#agent-discovery-and-visual-inspection-t29).
+- `preview frame|contact-sheet|clip <project-or-definition> --output <new.png|new.mp4> [options]` generates composited inspection media. See [selection, quality and resource limits](#agent-discovery-and-visual-inspection-t29).
+- `preview <definition> --watch [--size <64..1920>] [--json]` rebuilds a temporary playback preview as inputs change. See [video definition preview](VIDEO_DEFINITIONS.md#inspect-preview-and-render).
 - `track add <project-file> --type <video|audio> --name <name> [--json]`: append a track.
 - `track audio <project-file> <track-id> [--volume <0..1>] [--muted <true|false>] [--json]` controls the sound on a video or audio track.
 - `track remove <project-file> <track-id> [--json]`: remove an empty track.

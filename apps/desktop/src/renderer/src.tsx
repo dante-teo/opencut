@@ -4,10 +4,21 @@ import type { ApplicationInfo } from '@opencut/core';
 import './style.css';
 import appIcon from '../../resources/opencut-icon.png';
 import { ProjectWorkspace } from './project-workspace.js';
+import { DefinitionWorkspace } from './definition-workspace.js';
+import type { DefinitionReview } from '../bridge.js';
 
 function App() {
   const [info, setInfo] = useState<ApplicationInfo | null>(null);
   const [error, setError] = useState(false);
+  const [definition, setDefinition] = useState<DefinitionReview | null>(null);
+  const [definitionError, setDefinitionError] = useState('');
+  useEffect(() => window.opencut.onDefinitionChanged(setDefinition), []);
+  function openDefinition() {
+    setDefinitionError('');
+    void window.opencut
+      .openDefinition()
+      .catch((error: Error) => setDefinitionError(error.message));
+  }
   useEffect(() => {
     window.opencut
       .getApplicationInfo()
@@ -24,7 +35,21 @@ function App() {
           OpenCut<span className="brand-dot">.</span>
         </span>
       </header>
-      <ProjectWorkspace />
+      {definition ? (
+        <DefinitionWorkspace
+          state={definition}
+          onOpen={openDefinition}
+          onClose={() => {
+            setDefinitionError('');
+            void window.opencut
+              .closeDefinition()
+              .catch((error: Error) => setDefinitionError(error.message));
+          }}
+        />
+      ) : (
+        <ProjectWorkspace onOpenDefinition={openDefinition} />
+      )}
+      {definitionError && <p role="alert">{definitionError}</p>}
       <p
         className={`status ${info && !error ? 'status-ready' : ''}`}
         role="status"
