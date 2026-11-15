@@ -1,22 +1,20 @@
 # ADR 0017: Gate local video effects by measured capability
 
-Status: Accepted for backend evaluation; production adoption deferred
+Status: Accepted. Low-latency interpolation is adopted for headless media recipes. Other effects remain under evaluation.
 
 ## Decision
 
-| Capability          | Primary candidate                                                                                                                                                     | Fallback                                                                                                                                                                                                                                               |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Frame interpolation | VideoToolbox low-latency interpolation (macOS 26+), as an offline job. Probe the source size and pixel format, then verify the session. Bypass the model across cuts. | Preserve the source cadence or repeat frames if a higher output cadence is required. Do not route to the macOS 15.4 offline converter by default: its tested Normal configuration scored below frame duplication. RIFE is a future fallback candidate. |
-| Enhancement         | Keep Lanczos as the default. VideoToolbox low-latency SR is the first opt-in AI candidate for supported 1.5× jobs.                                                    | Use Lanczos for unsupported sizes or when the model cannot start. Keep Apple 4× video SR followed by conventional resizing as an experimental UHD option only.                                                                                         |
-| Denoising           | FFmpeg `hqdn3d` at a conservative strength, with user control.                                                                                                        | Bypass the effect if the filter is missing or if it smears detail. Gate Apple temporal noise filtering on a supported device and real footage validation.                                                                                              |
+| Capability          | Primary candidate                                                                                                                                                     | Fallback                                                                                                                                                                                                                       |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Frame interpolation | VideoToolbox low-latency interpolation (macOS 26+), as an offline job. Probe the source size and pixel format, then verify the session. Bypass the model across cuts. | Return an actionable error for unsupported AI requests. The separate frameRate recipe offers conventional conversion. The tested offline Normal configuration scored below frame duplication. RIFE remains a future candidate. |
+| Enhancement         | Keep Lanczos as the default. VideoToolbox low-latency SR is the first opt-in AI candidate for supported 1.5× jobs.                                                    | Use Lanczos for unsupported sizes or when the model cannot start. Keep Apple 4× video SR followed by conventional resizing as an experimental UHD option only.                                                                 |
+| Denoising           | FFmpeg `hqdn3d` at a conservative strength, with user control.                                                                                                        | Bypass the effect if the filter is missing or if it smears detail. Gate Apple temporal noise filtering on a supported device and real footage validation.                                                                      |
 
 Probe each feature independently. `VTFrameProcessor` and offline frame-rate
 conversion first appeared on macOS 15.4; the tested low-latency effects, offline
 video SR, and temporal noise filter require macOS 26. Inspect the actual
 configuration, input and output formats, model readiness and session result.
-Do not bundle or automatically fetch third-party weights. Keep all effects out
-of OpenCut editing, preview, render and project persistence until they pass the
-target hardware and quality gates. Apple's
+Do not bundle or automatically fetch third-party weights. The headless AI interpolation recipes use the low-latency model when its OpenCut session starts successfully. Other effects remain outside product workflows pending their hardware and quality checks. Apple's
 [algorithm overview](https://developer.apple.com/videos/play/wwdc2025/300/) and
 [configuration guidance](https://developer.apple.com/forums/thread/821701)
 describe the runtime checks.
@@ -96,8 +94,7 @@ diagonal texture. Upscayl sharpened text but changed some digit strokes. The
 conventional denoise output removed visible grain while preserving edges in the
 inspected crop. This synthetic material cannot validate faces, fast occlusions,
 film grain, difficult compression, color fidelity, flicker across whole shots,
-or variable frame rates. A representative footage review and repeated sustained
-runs with Electron active on the fanless M4 Air are prerequisites for shipping.
+or variable frame rates. The headless interpolation recipes are documented in [Video definitions](../VIDEO_DEFINITIONS.md#ai-interpolation). Sustained performance with Electron active on the fanless M4 Air remains unmeasured.
 
 ## Distribution constraints
 

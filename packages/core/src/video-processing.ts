@@ -4,13 +4,16 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   MediaError,
+  interpolationBackendVersion,
   probeRecipeMedia,
   recipeBackendVersion,
+  runInterpolation,
   runRecipeProcess,
 } from '@opencut/media';
 import type { RecipeProcessLimits } from '@opencut/media';
 import { videoInputIdentity } from './video-input.js';
 import type { IdentifiedMedia } from './video-input.js';
+import { isInterpolationStep } from './video-recipe-schema.js';
 import { materializeRecipeEntry } from './video-recipe-cache.js';
 import {
   recipeArguments,
@@ -56,7 +59,14 @@ export async function processVideoRecipes(
     ? AbortSignal.any([signal, controller.signal])
     : controller.signal;
   const { concurrency, limits, directory } = processingSettings(options);
-  const version = await recipeBackendVersion(processingSignal);
+  const ffmpeg = await recipeBackendVersion(processingSignal);
+  let interpolationVersion:
+    ReturnType<typeof interpolationBackendVersion> | undefined;
+  const backends = {
+    ffmpeg,
+    interpolation: () =>
+      (interpolationVersion ??= interpolationBackendVersion(processingSignal)),
+  };
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const cacheDirectory = await realpath(directory);
   const jobs = recipes.values();
@@ -68,7 +78,7 @@ export async function processVideoRecipes(
           const result = await processRecipe(
             recipe,
             cacheDirectory,
-            version,
+            backends,
             limits,
             processingSignal,
             options.onProgress,
@@ -87,12 +97,18 @@ export async function processVideoRecipes(
 async function processRecipe(
   { input, inspection: { assetId, steps } }: RecipeInput,
   directory: string,
-  backendVersion: string,
+  backends: {
+    ffmpeg: string;
+    interpolation: () => ReturnType<typeof interpolationBackendVersion>;
+  },
   limits: RecipeProcessLimits,
   signal: AbortSignal,
   onProgress?: VideoProcessingOptions['onProgress'],
 ) {
   let current = input;
+  // A partial final packet affects ffprobe's average, but not the cadence of
+  // an interpolation result or subsequent steps that preserve its frame rate.
+  let declaredCadence: number | null = null;
   let dependency = JSON.stringify([
     input.metadata.path,
     input.identity,
@@ -102,16 +118,25 @@ async function processRecipe(
     try {
       signal.throwIfAborted();
       assertCurrent(current);
-      const inputMedia = recipeMedia(current.metadata);
+      // Old derived-media manifests predate the color and timing fields
+      // needed by VideoToolbox. Refresh those inputs before planning the step.
+      const source =
+        isInterpolationStep(parameters) &&
+        current.metadata.video?.colorRange === undefined
+          ? await probeRecipeMedia(current.metadata.path, signal)
+          : current.metadata;
+      const inputMedia = recipeMedia(source);
+      inputMedia.frameRate = declaredCadence ?? inputMedia.frameRate;
       const step = resolveRecipeStep(inputMedia, parameters);
       const key = createHash('sha256')
         .update(
           JSON.stringify([
             2,
-            backendVersion,
+            backends.ffmpeg,
             dependency,
             step.parameters,
             step.format,
+            ...(step.interpolation ? await backends.interpolation() : []),
           ]),
         )
         .digest('hex');
@@ -144,12 +169,23 @@ async function processRecipe(
               'Recipe step exceeds its decoded pixel limit.',
             );
           report('started');
-          await runRecipeProcess(
-            recipeArguments(current.metadata, step, output),
-            limits,
-            signal,
-            (seconds) => report('processing', seconds),
-          );
+          const progress = (seconds: number) => report('processing', seconds);
+          if (step.interpolation)
+            await runInterpolation(
+              source,
+              step.interpolation,
+              output,
+              limits,
+              signal,
+              progress,
+            );
+          else
+            await runRecipeProcess(
+              recipeArguments(source, step, output),
+              limits,
+              signal,
+              progress,
+            );
           const info = await lstat(output);
           if (
             !info.isFile() ||
@@ -160,7 +196,7 @@ async function processRecipe(
               'Recipe output is empty or exceeds its temporary file limit.',
             );
           const metadata = await probeRecipeMedia(output, signal);
-          validateRecipeOutput(metadata, step);
+          validateRecipeOutput(source, metadata, step);
           assertCurrent(current);
           return metadata;
         },
@@ -169,6 +205,8 @@ async function processRecipe(
       report(reused ? 'cache-hit' : 'completed');
       dependency = key;
       current = entry;
+      if (step.interpolation || declaredCadence !== null)
+        declaredCadence = step.media.frameRate;
     } catch (cause) {
       signal.throwIfAborted();
       throw recipeStepError(assetId, index, cause);

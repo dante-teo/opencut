@@ -10,3 +10,8 @@ automatically processes referenced recipes and reuses completed steps. The
 `render --json` result reports `completed` and `cache-hit` recipe steps. Use
 `--recipe-cache` to choose a cache and `--recipe-workers` and the other
 [recipe flags](../../../docs/CLI.md#media-recipes) to set processing limits.
+
+On macOS, `opencut system inspect --json` reports the VideoToolbox processor
+and tested formats and dimensions. Recipe inspection checks declarations
+and input streams. Use normal `validate` with the same recipe limits as
+`render` to check whether the referenced AI recipe can actually build.

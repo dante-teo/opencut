@@ -185,15 +185,17 @@ recipes. The [TypeScript](../examples/video/recipes.video.ts) and
 [JSON](../examples/video/recipes.video.json) examples share a trim between a
 cropped video and a normalized soundtrack.
 
-| `type`           | Parameters and behavior                                                                                                                                                                             |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `trim`           | `start`, `end` in seconds from the current input’s container start. End is exclusive. Cuts each retained stream at the same boundaries and rebases the range. Video cuts align to available frames. |
-| `crop`           | Integer `x`, `y`, `width`, `height` within the current oriented image. Cropping before resizing uses the original pixel grid.                                                                       |
-| `resize`         | Integer `width`, `height` in square pixels. Optional `method` is `bicubic` (default), `bilinear`, `lanczos`, or `nearest`.                                                                          |
-| `frameRate`      | `numerator` and optional `denominator` (default 1), 1–120 fps. Uses FFmpeg’s nearest timestamp drop/duplicate conversion. Fractional frame boundaries can round by a frame.                         |
-| `extractAudio`   | Selects the input’s default audio stream and outputs audio. Pads a delayed audio start with silence to retain its position.                                                                         |
-| `normalizeAudio` | One-pass loudness normalization. Optional `targetLufs` defaults to −16 and accepts −40 through −10. Requires audio.                                                                                 |
-| `convert`        | `format` is `mov` (FFV1 with PCM) or `mp4` (H.264 with AAC and even dimensions) for video, `png` for images, and `wav` (float PCM) or `flac` for audio.                                             |
+| `type`              | Parameters and behavior                                                                                                                                                                             |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `trim`              | `start`, `end` in seconds from the current input’s container start. End is exclusive. Cuts each retained stream at the same boundaries and rebases the range. Video cuts align to available frames. |
+| `crop`              | Integer `x`, `y`, `width`, `height` within the current oriented image. Cropping before resizing uses the original pixel grid.                                                                       |
+| `resize`            | Integer `width`, `height` in square pixels. Optional `method` is `bicubic` (default), `bilinear`, `lanczos`, or `nearest`.                                                                          |
+| `frameRate`         | `numerator` and optional `denominator` (default 1), 1–120 fps. Uses FFmpeg’s nearest timestamp drop/duplicate conversion. Fractional frame boundaries can round by a frame.                         |
+| `interpolateFrames` | Synthesizes frames at the requested cadence, preserving picture duration and the selected audio stream. See [AI interpolation](#ai-interpolation).                                                  |
+| `smoothSlowMotion`  | Synthesizes frames while extending picture duration by `1 / speed`. Drops the selected audio stream. See [AI interpolation](#ai-interpolation).                                                     |
+| `extractAudio`      | Selects the input’s default audio stream and outputs audio. Pads a delayed audio start with silence to retain its position.                                                                         |
+| `normalizeAudio`    | One-pass loudness normalization. Optional `targetLufs` defaults to −16 and accepts −40 through −10. Requires audio.                                                                                 |
+| `convert`           | `format` is `mov` (FFV1 with PCM) or `mp4` (H.264 with AAC and even dimensions) for video, `png` for images, and `wav` (float PCM) or `flac` for audio.                                             |
 
 Steps select the same primary video and audio streams as composition. By
 default, each step writes lossless MOV, PNG, or WAV for the resulting kind.
@@ -221,6 +223,92 @@ estimated metadata, or `opencut recipes validate DEFINITION` to check the
 recipe declarations and input streams. These commands probe sources without
 transcoding. `opencut validate`, `inspect`, `preview`, and `render` compile
 and materialize referenced recipes as needed. See [CLI flags and limits](CLI.md#media-recipes).
+
+### AI interpolation
+
+Use this asset recipe in a `.video.json` definition for 24 → 48 fps.
+
+```json
+{
+  "recipe": [
+    { "type": "interpolateFrames", "numerator": 48, "quality": "balanced" }
+  ]
+}
+```
+
+Use this TypeScript recipe for half-speed picture at 30 fps. Both operations
+accept the same properties in either definition format.
+
+```ts
+import type { VideoRecipe } from '@opencut/sdk';
+
+const recipe: VideoRecipe = [
+  { type: 'trim', start: 2, end: 6 },
+  {
+    type: 'smoothSlowMotion',
+    numerator: 30,
+    speed: 0.5,
+    quality: 'balanced',
+    sceneCuts: [1.2],
+  },
+];
+```
+
+- `numerator` and `denominator` set the target rate from 1 through 120 fps.
+  The denominator defaults to 1. `speed` for slow motion ranges from 0.125
+  inclusive to 1 exclusive. At output picture time `t`, slow motion samples
+  input picture time `t * speed`. It writes silent video starting at zero.
+  Duration-preserving interpolation starts the derived container at the
+  first retained stream and preserves the relative picture and audio offsets.
+  If an earlier track is discarded and the retained picture and audio started
+  at 0.125 s and 0.25 s, the derived picture starts at zero and audio at
+  0.125 s. The recipe encodes the selected audio as float PCM and trims decoder
+  padding beyond a declared audio endpoint.
+- `quality` selects `fast`, `balanced` (default), or `high`. VideoToolbox
+  provides up to one, three, or seven intermediate phases per pair,
+  respectively. Higher settings resolve finer source-time positions and can
+  cost more. The effective source sampling rate (`target fps / speed`) must
+  exceed the input cadence and stay within 2×, 4×, or 8× that cadence for the
+  selected quality. OpenCut uses the probed average for original media.
+- The sampler follows decoded presentation timestamps, including variable
+  cadence. Original frames on the output grid retain their pixels. Between
+  originals the sampler uses the nearest available interior model phase
+  and may reuse that phase on long VFR intervals. If the duration ends
+  between grid points, the final packet is shortened to keep the endpoint.
+  Subsequent recipe steps use the declared cadence even when the shorter
+  packet changes the average frame rate reported by a probe. For example,
+  a 48 fps interpolation result can feed a 50 fps step in the same recipe.
+- `sceneThreshold` is the FFmpeg scene change score from above 0 through 100
+  and defaults to 8. `sceneCuts` are strictly increasing seconds relative to
+  the first picture frame in this step's input. A cut between frames applies
+  to the first decoded frame at or after that time. The sampler holds the
+  previous image until a detected or explicit cut and holds the final source
+  image through its last interval. Automatic detection is heuristic. Specify
+  known edits in `sceneCuts`, especially where two shots have similar colors.
+- Put a `trim` before the AI step to limit processing to that input range.
+  Source positions on timeline clips use the final derived asset's clock.
+  A high-rate derived asset needs a matching canvas frame rate when the
+  delivered composition should show every synthesized frame.
+
+Fresh AI steps require an Apple Silicon Mac running macOS 26 or later,
+OpenCut built with the macOS 26+ SDK, and FFmpeg with `scdet` and `libx264`.
+OpenCut opens a VideoToolbox model session for the actual oriented dimensions
+and quality. Inputs must be even-sized, progressive, 8-bit, video-range SDR
+4:2:0 with right-angle rotation if a display matrix is present. Untagged range
+is interpreted as video range. When audio is present, the picture stream must
+declare its duration. The derived MOV uses lossless H.264, retains the source
+color tags where specified, and keeps portrait geometry. Full-range, HDR,
+higher-bit-depth, and unsupported configurations fail with an error. Use
+`opencut system inspect --json` for hardware diagnostics. AI steps have no
+automatic fallback. The separate `frameRate` recipe is available for regular
+timestamp-based conversion.
+
+Fine edges and partly occluded motion can soften or warp between frames.
+In the reviewed [Tears of Steel](https://mango.blender.org/about/) excerpts,
+fast foreground machinery sometimes blurred more on synthesized frames.
+Faster movement, flashes, and subtle cuts can also challenge scene detection.
+Review synthesized frames and cut boundaries in the final composition. See
+the [CLI processing limits and cache behavior](CLI.md#media-recipes).
 
 ## Inspect, preview and render
 

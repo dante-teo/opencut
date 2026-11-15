@@ -34,7 +34,8 @@ output of each step. The processing pipeline materializes referenced assets
 and probes each completed step before binding the timeline. A recipe is an
 ordered chain of single-output steps. A step key includes the canonical source
 path, file identity and probe metadata or its predecessor’s key, that step’s
-parameters and format, and the FFmpeg and ffprobe build versions. Equivalent
+parameters and format, and the FFmpeg and ffprobe build versions. AI keys also
+include the VideoToolbox worker binary, chip, and OS version. Equivalent
 prefixes share results across assets and processes. Timeline-only edits leave
 those keys intact.
 
@@ -45,5 +46,8 @@ the output, rechecks the input identity, and publishes the output and its
 identity together with a directory rename.
 Aborted work removes its stage. A guard stops the encoder process group if
 the build process exits unexpectedly. The next request for a key can clear
-its abandoned stage and gets a fresh attempt directory. Watched revisions
+its abandoned stage and gets a fresh attempt directory. The AI recipe worker
+receives decoded pixels and presentation timestamps through bounded pipes and
+keeps a window of two source surfaces and one output surface. Its FFmpeg
+decoder and encoder share the step's process group and lifecycle. Watched revisions
 pin copies of their final derived assets just as they pin unprocessed sources.

@@ -12,7 +12,9 @@ discover commands and `opencut render --help` for export controls.
    relative to the definition. Keep original media intact. Use ordered asset
    recipes for reusable preprocessing. Run
    `opencut recipes inspect DEFINITION --json` to check the steps without
-   transcoding.
+   transcoding. Use `interpolateFrames` to preserve duration at a higher
+   frame rate or `smoothSlowMotion` to extend picture duration and mute it.
+   Check [AI recipe support and scene boundaries](references/video-definitions.md#media-recipes).
 2. Set canvas size, frame rate, ordered tracks, and clip ranges. Use integer
    frame positions or exact rationals as documented. Add subtitles, effects,
    fades, and transitions to the definition itself.

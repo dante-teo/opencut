@@ -35,3 +35,9 @@ export { rasterizeTextLayer, validateEmbeddedFont } from './text.js';
 export type { TextRaster } from './text.js';
 export { runRecipeProcess, recipeBackendVersion } from './recipe-process.js';
 export type { RecipeProcessLimits } from './recipe-process.js';
+export {
+  interpolationBackendVersion,
+  interpolationTiming,
+  runInterpolation,
+} from './interpolate.js';
+export type { InterpolationPlan } from './interpolate.js';

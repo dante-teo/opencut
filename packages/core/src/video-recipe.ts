@@ -1,17 +1,21 @@
 import {
+  interpolationTiming,
   isStillImage,
   MediaError,
   recipeInputArguments,
   videoSourceDuration,
 } from '@opencut/media';
-import type { MediaMetadata } from '@opencut/media';
+import type { InterpolationPlan, MediaMetadata } from '@opencut/media';
 import type { IdentifiedMedia } from './video-input.js';
+import { interpolationPhaseDepth } from './video-recipe-schema.js';
 import type {
+  InterpolationStep,
   RecipeFormat,
   ResolvedVideoRecipe,
 } from './video-recipe-schema.js';
 
 type Step = ResolvedVideoRecipe[number];
+
 export type RecipeMedia = {
   kind: 'video' | 'image' | 'audio';
   width: number | null;
@@ -29,6 +33,8 @@ export type RecipeStep = {
   format: RecipeFormat;
   media: RecipeMedia;
 };
+
+type ResolvedRecipeStep = RecipeStep & { interpolation?: InterpolationPlan };
 
 export interface RecipeInput {
   input: IdentifiedMedia;
@@ -61,9 +67,9 @@ export function inspectRecipe(
   let input = recipeMedia(source);
   const steps = recipe.map((parameters, index) => {
     try {
-      const step = resolveRecipeStep(input, parameters);
-      input = step.media;
-      return step;
+      const { format, media } = resolveRecipeStep(input, parameters);
+      input = media;
+      return { parameters, format, media };
     } catch (cause) {
       throw recipeStepError(assetId, index, cause);
     }
@@ -116,7 +122,7 @@ export function recipeMedia(source: MediaMetadata): RecipeMedia {
 export function resolveRecipeStep(
   input: RecipeMedia,
   parameters: Step,
-): RecipeStep {
+): ResolvedRecipeStep {
   const media = { ...input };
   let output: RecipeFormat =
     input.kind === 'image' ? 'png' : input.kind === 'audio' ? 'wav' : 'mov';
@@ -153,6 +159,9 @@ export function resolveRecipeStep(
       media.frameRate = fps;
       break;
     }
+    case 'interpolateFrames':
+    case 'smoothSlowMotion':
+      return resolveInterpolation(input, parameters);
     case 'extractAudio':
       if (!input.hasAudio)
         throw new Error('Audio extraction requires an audio stream.');
@@ -192,6 +201,85 @@ export function resolveRecipeStep(
       break;
   }
   return { parameters, format: output, media };
+}
+
+function resolveInterpolation(
+  input: RecipeMedia,
+  parameters: InterpolationStep,
+): ResolvedRecipeStep {
+  const { numerator, denominator, quality, sceneCuts, sceneThreshold } =
+    parameters;
+  const fps = numerator / denominator;
+  const preserveAudio = parameters.type === 'interpolateFrames';
+  const speed = preserveAudio ? 1 : parameters.speed;
+  const sourceRate = fps / speed;
+  const { durationSeconds, frameRate, width, height } = input;
+  if (
+    input.kind !== 'video' ||
+    durationSeconds === null ||
+    frameRate === null ||
+    fps < 1 ||
+    fps > 120 ||
+    sourceRate <= frameRate + 0.000001
+  )
+    throw new Error(
+      'AI interpolation requires timed video, a target of 1–120 fps, and a higher sampling rate on the source clock (target fps / speed).',
+    );
+
+  const phaseDepth = interpolationPhaseDepth[quality];
+  if (sourceRate > frameRate * 2 ** phaseDepth + 0.000001)
+    throw new Error(
+      'The requested source-clock sampling rate exceeds this interpolation quality. Choose a higher quality, lower target fps, or faster speed.',
+    );
+  if (!width || !height || width % 2 || height % 2)
+    throw new Error(
+      'VideoToolbox interpolation requires even video dimensions.',
+    );
+  if (
+    sceneCuts.some(
+      (cut, index) =>
+        cut >= durationSeconds || (index > 0 && cut <= sceneCuts[index - 1]!),
+    )
+  )
+    throw new Error(
+      'Scene cuts must be strictly increasing and inside the current picture duration.',
+    );
+
+  const duration = durationSeconds / speed;
+  const hasAudio = preserveAudio && input.hasAudio;
+  const pictureStart = input.videoStartSeconds ?? 0;
+  const audioStart = hasAudio ? input.audioStartSeconds : null;
+  const originShiftSeconds = Math.min(pictureStart, audioStart ?? pictureStart);
+  const videoStart = pictureStart - originShiftSeconds;
+  return {
+    parameters,
+    format: 'mov',
+    media: {
+      ...input,
+      frameRate: fps,
+      durationSeconds: duration,
+      videoStartSeconds: videoStart,
+      hasAudio,
+      audioStartSeconds:
+        audioStart === null ? null : audioStart - originShiftSeconds,
+      audioDurationSeconds:
+        hasAudio && input.audioDurationSeconds !== null
+          ? input.audioDurationSeconds - originShiftSeconds
+          : null,
+    },
+    interpolation: {
+      numerator,
+      denominator,
+      timing: interpolationTiming(numerator, denominator, duration),
+      phaseDepth,
+      sceneThreshold,
+      sceneCuts,
+      speed,
+      videoStartSeconds: videoStart,
+      originShiftSeconds,
+      preserveAudio,
+    },
+  };
 }
 
 function trimRecipeMedia(
@@ -337,7 +425,11 @@ export function recipeArguments(
   ];
 }
 
-export function validateRecipeOutput(output: MediaMetadata, step: RecipeStep) {
+export function validateRecipeOutput(
+  input: MediaMetadata,
+  output: MediaMetadata,
+  step: ResolvedRecipeStep,
+) {
   const actual = recipeMedia(output);
   const expected = step.media;
   if (
@@ -351,6 +443,30 @@ export function validateRecipeOutput(output: MediaMetadata, step: RecipeStep) {
     throw new MediaError(
       'Recipe result did not contain the expected media streams, dimensions, or duration.',
     );
+  if (step.interpolation) {
+    const { timing, videoStartSeconds, preserveAudio } = step.interpolation;
+    const audio = preserveAudio ? input.audio : null;
+    if (
+      Math.abs(actual.durationSeconds! - expected.durationSeconds!) >
+        0.000003 ||
+      Math.abs((actual.videoStartSeconds ?? 0) - videoStartSeconds) >
+        0.000003 ||
+      output.video?.frameCount !== timing.frameCount ||
+      (audio &&
+        expected.audioStartSeconds !== null &&
+        Math.abs((actual.audioStartSeconds ?? 0) - expected.audioStartSeconds) >
+          0.001) ||
+      (audio?.durationSeconds != null &&
+        expected.audioDurationSeconds !== null &&
+        Math.abs(
+          (actual.audioDurationSeconds ?? 0) - expected.audioDurationSeconds,
+        ) > 0.001)
+    )
+      throw new MediaError(
+        'AI interpolation output did not preserve the expected picture or audio timing.',
+      );
+    return;
+  }
   const tolerance = Math.max(0.05, 1 / (actual.frameRate ?? 1000));
   if (
     step.parameters.type !== 'extractAudio' &&

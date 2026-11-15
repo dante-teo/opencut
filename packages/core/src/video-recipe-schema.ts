@@ -2,6 +2,22 @@ import { z } from 'zod';
 
 const pixels = z.int().min(1).max(16384);
 const format = z.enum(['mov', 'mp4', 'png', 'wav', 'flac']);
+const frameRate = {
+  numerator: z.int().positive().max(120000),
+  denominator: z.int().positive().max(120000).default(1),
+};
+export const interpolationPhaseDepth = {
+  fast: 1,
+  balanced: 2,
+  high: 3,
+} as const;
+const interpolation = {
+  ...frameRate,
+  quality: z.enum(['fast', 'balanced', 'high']).default('balanced'),
+  sceneThreshold: z.number().positive().max(100).default(8),
+  sceneCuts: z.array(z.number().positive()).max(4096).default([]),
+};
+
 export const videoRecipeSchema = z
   .array(
     z.discriminatedUnion('type', [
@@ -27,8 +43,16 @@ export const videoRecipeSchema = z
       }),
       z.strictObject({
         type: z.literal('frameRate'),
-        numerator: z.int().positive().max(120000),
-        denominator: z.int().positive().max(120000).default(1),
+        ...frameRate,
+      }),
+      z.strictObject({
+        type: z.literal('interpolateFrames'),
+        ...interpolation,
+      }),
+      z.strictObject({
+        type: z.literal('smoothSlowMotion'),
+        ...interpolation,
+        speed: z.number().min(0.125).lt(1),
       }),
       z.strictObject({ type: z.literal('extractAudio') }),
       z.strictObject({
@@ -44,3 +68,14 @@ export const videoRecipeSchema = z
 export type VideoRecipe = z.input<typeof videoRecipeSchema>;
 export type ResolvedVideoRecipe = z.output<typeof videoRecipeSchema>;
 export type RecipeFormat = z.output<typeof format>;
+
+export type InterpolationStep = Extract<
+  ResolvedVideoRecipe[number],
+  { type: 'interpolateFrames' | 'smoothSlowMotion' }
+>;
+
+export function isInterpolationStep(
+  step: ResolvedVideoRecipe[number],
+): step is InterpolationStep {
+  return step.type === 'interpolateFrames' || step.type === 'smoothSlowMotion';
+}

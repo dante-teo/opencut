@@ -49,15 +49,16 @@ recipes.
 | `--recipe-cache`           | `$XDG_CACHE_HOME/opencut/recipes-v1`, or `~/.cache/opencut/recipes-v1`. Use a private local directory that supports file locks and atomic rename.     |
 | `--recipe-workers`         | 1 active step per invocation, configurable from 1 through 16.                                                                                         |
 | `--recipe-temp-bytes`      | 4 GiB for staged media per invocation, split evenly among workers. The OS file limit rounds down and can be stricter on Linux depending on the shell. |
-| `--recipe-memory-bytes`    | 1 GiB per FFmpeg process. Bounds individual FFmpeg allocations and terminates workers observed above the RSS limit. RSS is sampled every 50 ms.       |
-| `--recipe-buffered-frames` | 32 frames per FFmpeg filter graph.                                                                                                                    |
+| `--recipe-memory-bytes`    | 1 GiB per active step. Caps individual FFmpeg allocations and checks process-group RSS for AI steps. RSS is sampled every 50 ms.                      |
+| `--recipe-buffered-frames` | 32 frames per FFmpeg filter graph. VideoToolbox keeps two input surfaces and one output surface and requires a limit of at least 3.                   |
 | `--recipe-max-pixels`      | 8,847,360 pixels per input or output frame.                                                                                                           |
-| `--recipe-timeout-ms`      | 1,800,000 milliseconds per FFmpeg step.                                                                                                               |
+| `--recipe-timeout-ms`      | 1,800,000 milliseconds per step.                                                                                                                      |
 
 Processing limits apply to fresh recipe work. Cached media and composition
-outputs have their own disk usage. Completed entries stay on disk until
-removed. Matching inputs, parameters, and backend versions reuse them.
-Stop active builds before clearing the cache directory.
+outputs have their own disk usage. Matching inputs, parameters, and backend
+versions reuse completed entries. A backend version change rebuilds affected
+steps and their dependents on the next run. Older entries stay on disk until
+removed. Stop active builds before clearing the cache directory.
 
 Foreground rendering reports step starts, media time, completions, and cache
 hits on stderr. A successful `render --json` includes `recipeProcessing` when
@@ -73,3 +74,12 @@ Fresh recipe execution requires macOS or Linux and FFmpeg with
 `-filter_buffered_frames` and FFV1 encoding in MOV. Verified on macOS with
 FFmpeg and ffprobe 9.0.2. Node versions that mark the built-in SQLite module
 experimental may print a warning on stderr when opening the recipe cache.
+
+`interpolateFrames` and `smoothSlowMotion` add local VideoToolbox inference to
+referenced video recipes. Source identity, prior steps such as `trim`, target
+rate, quality, scene settings, and the backend build and OS identify the
+cached result. The same worker limits apply. The memory budget samples the
+combined RSS of the decoder, model worker, and encoder. It does not measure
+Apple driver or system-wide unified memory. Native capability checks happen
+on a fresh execution of `validate`, `inspect`, or `render`. See the
+[AI recipe settings and supported inputs](VIDEO_DEFINITIONS.md#ai-interpolation).

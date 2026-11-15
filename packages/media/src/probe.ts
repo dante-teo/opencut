@@ -20,10 +20,16 @@ export interface MediaStream {
   height: number | null;
   frameRate: number | null;
   frameRateRatio: string | null;
+  frameCount?: number | null;
   pixelFormat: string | null;
   /** Display geometry; optional for callers supplying legacy metadata. */
   sampleAspectRatio?: number;
   colorSpace?: string | null;
+  colorRange?: string | null;
+  colorPrimaries?: string | null;
+  colorTransfer?: string | null;
+  chromaLocation?: string | null;
+  fieldOrder?: string | null;
   hasAlpha?: boolean;
   rotation?: number;
   sampleRate: number | null;
@@ -79,11 +85,24 @@ function parseStream(value: unknown): MediaStream {
   }
   const disposition = record(data.disposition);
   const frameRate = parseFrameRate(data.avg_frame_rate);
+  const durationTicks = finiteNumber(data.duration_ts);
+  const [timeNumerator, timeDenominator] =
+    text(data.time_base)?.split('/').map(Number) ?? [];
   return {
     index,
     type,
     codec: text(data.codec_name),
-    durationSeconds: finiteNumber(data.duration),
+    durationSeconds:
+      durationTicks !== null &&
+      Number.isSafeInteger(durationTicks) &&
+      timeNumerator !== undefined &&
+      timeNumerator > 0 &&
+      timeDenominator !== undefined &&
+      timeDenominator > 0 &&
+      Number.isSafeInteger(timeNumerator) &&
+      Number.isSafeInteger(timeDenominator)
+        ? (durationTicks * timeNumerator) / timeDenominator
+        : finiteNumber(data.duration),
     startTimeSeconds: finiteNumber(data.start_time, -Infinity),
     timeBase: text(data.time_base),
     bitRate: finiteNumber(data.bit_rate),
@@ -94,8 +113,14 @@ function parseStream(value: unknown): MediaStream {
     height: finiteNumber(data.height, 1),
     frameRate,
     frameRateRatio: frameRate === null ? null : text(data.avg_frame_rate),
+    frameCount: finiteNumber(data.nb_frames),
     pixelFormat: text(data.pix_fmt),
     colorSpace: text(data.color_space),
+    colorRange: text(data.color_range),
+    colorPrimaries: text(data.color_primaries),
+    colorTransfer: text(data.color_transfer),
+    chromaLocation: text(data.chroma_location),
+    fieldOrder: text(data.field_order),
     hasAlpha:
       /^(?:yuva|gbrap|rgba|argb|bgra|abgr|ya|pal8)/.test(
         text(data.pix_fmt) ?? '',

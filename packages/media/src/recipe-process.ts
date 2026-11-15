@@ -9,57 +9,106 @@ export interface RecipeProcessLimits {
   timeoutMs: number;
 }
 
+const progress = ['-progress', 'pipe:1', '-stats_period', '0.25'];
+
+type InterpolationPipeline = {
+  timingPipe: string;
+  decoder: string[];
+  worker: { executable: string; args: string[] };
+  encoder: string[];
+};
+
+function ffmpegLimits(limits: RecipeProcessLimits) {
+  return [
+    '-nostdin',
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-xerror',
+    '-max_alloc',
+    String(Math.min(limits.maxNativeBytes, 2_147_483_647)),
+    '-filter_threads',
+    '1',
+    '-filter_complex_threads',
+    '1',
+    '-filter_buffered_frames',
+    String(limits.maxBufferedFrames),
+    '-threads',
+    '1',
+    '-max_pixels',
+    String(limits.maxPixels),
+  ];
+}
+
 export async function runRecipeProcess(
-  args: string[],
+  invocation: string[] | InterpolationPipeline,
   limits: RecipeProcessLimits,
   signal: AbortSignal,
   onTime: (seconds: number) => void,
 ) {
   checkRenderSignal(signal);
-  if (process.platform !== 'darwin' && process.platform !== 'linux')
+  const pipeline = !Array.isArray(invocation);
+  if (
+    !pipeline &&
+    process.platform !== 'darwin' &&
+    process.platform !== 'linux'
+  )
     throw new MediaError('Bounded recipe processing requires macOS or Linux.');
-
-  // Use KiB for the shell limit. Some Linux shells use 512-byte units,
-  // so the kernel cap can be stricter there. FFmpeg writes one file.
-  const blocks = Math.floor(limits.maxTemporaryBytes / 1024);
-  // A dedicated stdin pipe stays open while the caller owns this process.
-  // EOF also reaches the guard after SIGKILL, when the caller cannot clean up.
+  const ffmpeg = ffmpegLimits(limits);
+  let command = 'exec ffmpeg "$@" </dev/null 3<&-';
+  let args: string[];
+  if (pipeline) {
+    const { timingPipe, decoder, worker, encoder } = invocation;
+    const decode = [...ffmpeg, ...decoder];
+    // Pair the raw stream with one timing record per frame. The shell opens
+    // the metadata pipe before exec so a decoder startup failure closes it.
+    command = `
+      set -o pipefail
+      fifo=$1
+      worker=$2
+      nativeCount=$3
+      decodeCount=$4
+      shift 4
+      native=("\${@:1:nativeCount}")
+      shift "$nativeCount"
+      decode=("\${@:1:decodeCount}")
+      shift "$decodeCount"
+      mkfifo "$fifo" || exit 1
+      trap 'rm -f "$fifo"' EXIT
+      ffmpeg "\${decode[@]}" </dev/null 3>"$fifo" |
+        OS_ACTIVITY_MODE=disable "$worker" "\${native[@]}" 3<"$fifo" |
+        ffmpeg "$@" 3<&-
+    `;
+    args = [
+      timingPipe,
+      worker.executable,
+      String(worker.args.length),
+      String(decode.length),
+      ...worker.args,
+      ...decode,
+      ...ffmpeg,
+      ...progress,
+      ...encoder,
+    ];
+  } else {
+    args = [...ffmpeg, ...progress, ...invocation];
+  }
+  // The caller holds stdin open. EOF kills the group even after a caller SIGKILL.
   const launch = `
     ulimit -f "$1" || exit 125
     shift
     exec 3<&0
     ( IFS= read -r _ <&3; kill -KILL "-$$" ) >/dev/null 2>&1 &
-    exec ffmpeg "$@" </dev/null 3<&-
+    ${command}
   `;
   await new Promise<void>((resolve, reject) => {
     const child = spawn(
-      '/bin/sh',
+      pipeline ? '/bin/bash' : '/bin/sh',
       [
         '-c',
         launch,
         'opencut-recipe',
-        String(blocks),
-        '-nostdin',
-        '-hide_banner',
-        '-loglevel',
-        'error',
-        '-xerror',
-        '-max_alloc',
-        String(Math.min(limits.maxNativeBytes, 2_147_483_647)),
-        '-filter_threads',
-        '1',
-        '-filter_complex_threads',
-        '1',
-        '-filter_buffered_frames',
-        String(limits.maxBufferedFrames),
-        '-progress',
-        'pipe:1',
-        '-stats_period',
-        '0.25',
-        '-threads',
-        '1',
-        '-max_pixels',
-        String(limits.maxPixels),
+        String(Math.floor(limits.maxTemporaryBytes / 1024)),
         ...args,
       ],
       { detached: true, stdio: ['pipe', 'pipe', 'pipe'] },
@@ -99,14 +148,17 @@ export async function runRecipeProcess(
       sampling = true;
       execFile(
         '/bin/ps',
-        ['-o', 'rss=', '-p', String(child.pid)],
-        { timeout: 1000, maxBuffer: 1024 },
+        pipeline
+          ? ['-axo', 'pgid=,rss=']
+          : ['-o', 'rss=', '-p', String(child.pid)],
+        { timeout: 1000, maxBuffer: pipeline ? 1024 * 1024 : 1024 },
         (error, stdout) => {
           sampling = false;
           if (
             !closed &&
             !error &&
-            Number(stdout.trim()) * 1024 > limits.maxNativeBytes
+            recipeMemory(stdout, pipeline ? child.pid : undefined) >
+              limits.maxNativeBytes
           )
             stop(
               new MediaError('Recipe step exceeded its native memory limit.'),
@@ -130,6 +182,9 @@ export async function runRecipeProcess(
     child.stderr.on('data', (chunk: Buffer) => {
       diagnostic = (diagnostic + chunk.toString('utf8')).slice(-8192);
     });
+    child.stdin.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code !== 'EPIPE') stop(error);
+    });
     child.once('exit', () => child.stdin.destroy());
     child.on('error', (error) => {
       failure ??= error;
@@ -142,14 +197,17 @@ export async function runRecipeProcess(
       clearTimeout(killTimer);
       signal.removeEventListener('abort', cancel);
       if (failure) reject(failure);
-      else if (sig === 'SIGXFSZ' || /File too large/i.test(diagnostic))
+      else if (
+        sig === 'SIGXFSZ' ||
+        /File too large|File size limit exceeded/i.test(diagnostic)
+      )
         reject(
           new MediaError('Recipe step exceeded its temporary file limit.'),
         );
-      else if (code !== 0 || diagnostic)
+      else if (code !== 0 || (!pipeline && diagnostic))
         reject(
           new MediaError(
-            `FFmpeg recipe step failed: ${diagnostic.trim() || sig || code}`,
+            `${pipeline ? 'AI interpolation' : 'FFmpeg recipe step'} failed: ${diagnostic.trim() || sig || code}`,
           ),
         );
       else resolve();
@@ -157,6 +215,16 @@ export async function runRecipeProcess(
     signal.addEventListener('abort', cancel, { once: true });
     if (signal.aborted) cancel();
   });
+}
+
+function recipeMemory(output: string, group: number | undefined) {
+  if (group === undefined) return Number(output.trim()) * 1024;
+  let kib = 0;
+  for (const line of output.trim().split('\n')) {
+    const [pgid, rss] = line.trim().split(/\s+/).map(Number);
+    if (pgid === group) kib += rss ?? 0;
+  }
+  return kib * 1024;
 }
 
 export async function recipeBackendVersion(signal: AbortSignal) {

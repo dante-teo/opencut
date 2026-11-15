@@ -110,10 +110,26 @@ definitions and fixture setup, see [Video as code](../../../docs/VIDEO_DEFINITIO
 ## Media recipes
 
 Set `recipe` on an asset to run steps in order. Available types are `trim`,
-`crop`, `resize`, `frameRate`, `extractAudio`, `normalizeAudio`, and `convert`.
+`crop`, `resize`, `frameRate`, `interpolateFrames`, `smoothSlowMotion`,
+`extractAudio`, `normalizeAudio`, and `convert`.
 Set `kind` to the final result and use processed time for clip source ranges.
 Recipe trims use seconds from the input container start and retain the
 selected audio stream when it overlaps the trim.
 Use `visual.crop` for a crop that belongs to an individual timeline clip.
 The [recipe reference](../../../docs/VIDEO_DEFINITIONS.md#media-preprocessing-recipes)
 includes step parameters and paired TypeScript and JSON examples.
+
+For local AI interpolation use `{ "type": "interpolateFrames", "numerator": 48 }`
+on 24 fps video. This preserves picture duration and the relative timing of
+the selected picture and audio. The first retained stream becomes time zero.
+For half-speed
+picture use `{ "type": "smoothSlowMotion", "numerator": 30, "speed": 0.5 }`;
+its duration doubles and the result is silent. Set optional `quality` to
+`fast`, `balanced` (default), or `high`. Specify known shot cuts in
+`sceneCuts` using seconds from the first picture frame entering that step.
+Use the declared cadence from the preceding interpolation step when choosing
+a target for a chained step. Match the canvas cadence to the final processed
+video to show every synthesized frame.
+These steps require a supported Apple Silicon Mac on macOS 26+. Inspect
+hardware with `opencut system inspect --json`. On unsupported inputs the
+step fails. See the [AI recipe reference](../../../docs/VIDEO_DEFINITIONS.md#ai-interpolation).
