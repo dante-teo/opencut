@@ -267,16 +267,14 @@ app
               message:
                 'Only open trusted local TypeScript. OpenCut executes the selected script and its imports on every rebuild.',
               properties: ['openFile'],
-              filters: [
-                { name: 'Video definitions', extensions: ['ts', 'json'] },
-              ],
+              filters: [{ name: 'Video definitions', extensions: ['ts'] }],
             },
           );
           assertSender(event);
           if (canceled) return;
           const [path] = filePaths;
           if (!path || !isVideoDefinitionPath(path))
-            throw new Error('Choose a .video.ts or .video.json file.');
+            throw new Error('Choose a .video.ts file.');
           previewFile = null;
           definitionReview.open(path);
         } finally {

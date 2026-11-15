@@ -15,7 +15,29 @@ import {
 } from './video-recipe-schema.js';
 
 export const packageManifestName = 'opencut-package.json';
-export const packageEntryName = 'opencut.bundle.video.json';
+export const packageEntryName = 'opencut.bundle.video.ts';
+
+const entryPrefix = 'export default ';
+const entrySuffix = ';\n';
+
+export function serializePackageEntry(definition: ParsedVideoDefinition) {
+  return entryPrefix + JSON.stringify(definition) + entrySuffix;
+}
+
+function parsePackageEntry(source: string) {
+  let value: unknown;
+  try {
+    // Read the generated TypeScript data literal without executing the module.
+    if (!source.startsWith(entryPrefix) || !source.endsWith(entrySuffix))
+      throw new Error('Expected a static default export.');
+    value = JSON.parse(source.slice(entryPrefix.length, -entrySuffix.length));
+  } catch (cause) {
+    throw new VideoDefinitionError('Invalid packaged TypeScript entry.', {
+      cause,
+    });
+  }
+  return parseVideoDefinition(value);
+}
 
 const safeComponent = (part: string) =>
   part !== '' &&
@@ -183,7 +205,7 @@ export async function verifyPackageContents(
     !paths.has(manifest.entry) ||
     !paths.has(sourceName) ||
     !sourceName.startsWith('project/') ||
-    !/\.video\.(?:ts|json)$/.test(sourceName) ||
+    !sourceName.endsWith('.video.ts') ||
     manifest.imports.some(
       ({ from, to, specifier }) =>
         !paths.has(from) || !paths.has(to) || !/^\.{1,2}\//.test(specifier),
@@ -224,7 +246,7 @@ export async function verifyPackageContents(
         );
     }
   }
-  const definition = parseVideoDefinition(JSON.parse(valueBytes!) as unknown);
+  const definition = parsePackageEntry(valueBytes!);
   for (const item of [
     ...Object.values(definition.assets ?? {}),
     ...Object.values(definition.fonts ?? {}),

@@ -1,7 +1,7 @@
 # OpenCut
 
 OpenCut is a local video rendering engine for video as code.
-Define a complete video in one TypeScript or JSON file and render it from
+Define a complete video in one TypeScript (.video.ts) file and render it from
 the CLI.
 
 ```sh

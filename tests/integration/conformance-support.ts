@@ -39,16 +39,11 @@ export async function conformanceWorkspace(t: TestContext, name: string) {
 
   return {
     path: (filename: string) => join(directory, filename),
-    async definition(
-      value: VideoDefinition,
-      format: 'ts' | 'json' = 'json',
-      stem = 'edit',
-    ) {
-      const path = join(directory, stem + '.video.' + format);
-      const body = JSON.stringify(value, null, 2);
+    async definition(value: VideoDefinition, stem = 'edit') {
+      const path = join(directory, stem + '.video.ts');
       await writeFile(
         path,
-        format === 'ts' ? `export default ${body};\n` : body,
+        `export default ${JSON.stringify(value, null, 2)};\n`,
       );
       return path;
     },

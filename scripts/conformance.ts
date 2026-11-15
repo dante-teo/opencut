@@ -76,11 +76,9 @@ try {
   await mkdir(examples);
   for (const name of [
     'showcase.video.ts',
-    'showcase.video.json',
     'review.video.ts',
     'review-title.ts',
     'recipes.video.ts',
-    'recipes.video.json',
   ]) {
     const original = await readFile(join('examples/video', name), 'utf8');
     await writeFile(

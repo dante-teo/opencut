@@ -13,8 +13,9 @@ import {
 } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { compileVideo, defineVideo, previewVideo } from '@opencut/sdk';
+import type { VideoDefinition } from '@opencut/sdk';
 import {
   decodeStillFrame,
   probeMedia,
@@ -24,26 +25,23 @@ import {
 import { decodeFrames } from './media-comparison.js';
 import { requireTool, runTool } from '../../scripts/fixture-lib.js';
 import type { Probe } from '../../scripts/fixture-lib.js';
-import { assertSimilarExports } from './conformance-support.js';
 import { fixtureDirectory, videoExample } from '../fixture-paths.js';
 
 const entry = fileURLToPath(
   new URL('../../apps/cli/dist/index.js', import.meta.url),
 );
-const example = (extension: string) =>
-  videoExample('showcase.video.' + extension);
+const example = videoExample('showcase.video.ts');
 const hash = async (path: string) =>
   createHash('sha256')
     .update(await readFile(path))
     .digest('hex');
 
-test('T44 public CLI renders equivalent 20-second TypeScript and JSON definitions', async () => {
+test('T44 public CLI renders and previews a 20-second TypeScript definition', async () => {
   requireTool('ffmpeg');
   requireTool('ffprobe');
   const directory = await mkdtemp(join(fixtureDirectory, 't44-'));
   const sources = [
-    example('ts'),
-    example('json'),
+    example,
     join(fixtureDirectory, 'video-long.mp4'),
     join(fixtureDirectory, 'audio-tone.wav'),
     join(fixtureDirectory, 'still.png'),
@@ -61,39 +59,24 @@ test('T44 public CLI renders equivalent 20-second TypeScript and JSON definition
     return JSON.parse(result.stdout);
   };
   try {
-    const { path: tsPath, ...ts } = cli('inspect', example('ts'));
-    const { path: jsonPath, ...json } = cli('inspect', example('json'));
-    assert.notEqual(tsPath, jsonPath);
-    assert.deepEqual(ts, json);
-    const alias = join(directory, 'alias.video.json');
-    await symlink(example('json'), alias, 'file');
-    assert.deepEqual(cli('inspect', alias), { path: jsonPath, ...json });
+    const inspected = cli('inspect', example);
+    const alias = join(directory, 'alias.video.ts');
+    await symlink(example, alias, 'file');
+    assert.deepEqual(cli('inspect', alias), inspected);
     await rm(alias);
-    for (const extension of ['ts', 'json']) {
-      cli('validate', example(extension));
-      cli('render', example(extension), '--output', `${extension}.mp4`);
-      for (const frame of [30, 96, 414, 479])
-        cli(
-          'preview',
-          'frame',
-          example(extension),
-          '--frame',
-          String(frame),
-          '--output',
-          `${extension}-${frame}.png`,
-        );
-    }
-    await assertSimilarExports(
-      join(directory, 'ts.mp4'),
-      join(directory, 'json.mp4'),
-      { width: 320, height: 180, frameCount: 480, fps: 24 },
-    );
-    const outputBeforeOverwrite = await hash(join(directory, 'ts.mp4'));
+    cli('validate', example);
+    cli('render', example, '--output', 'ts.mp4');
     for (const frame of [30, 96, 414, 479])
-      assert.equal(
-        await hash(join(directory, `ts-${frame}.png`)),
-        await hash(join(directory, `json-${frame}.png`)),
+      cli(
+        'preview',
+        'frame',
+        example,
+        '--frame',
+        String(frame),
+        '--output',
+        `ts-${frame}.png`,
       );
+    const outputBeforeOverwrite = await hash(join(directory, 'ts.mp4'));
     assert.notEqual(
       await hash(join(directory, 'ts-96.png')),
       await hash(join(directory, 'ts-479.png')),
@@ -138,18 +121,22 @@ test('T44 public CLI renders equivalent 20-second TypeScript and JSON definition
       assert.ok(error < 10, `Frame ${frame} mean RGB error: ${error}`);
     }
 
-    const tooLong = JSON.parse(await readFile(example('json'), 'utf8'));
-    tooLong.assets.camera.path = '../video-long.mp4';
-    tooLong.assets.music.path = '../audio-tone.wav';
-    tooLong.assets.still.path = '../still.png';
-    tooLong.tracks[0].clips[1].sourceOut = 132;
+    const { default: showcase } = await import(pathToFileURL(example).href);
+    const tooLong = structuredClone(showcase) as VideoDefinition;
+    for (const asset of Object.values(tooLong.assets!))
+      asset.path = join('..', asset.path.split('/').at(-1)!);
+    const footage = tooLong.tracks[0];
+    assert.equal(footage?.type, 'video');
+    const clip = footage.clips[1];
+    assert.ok(clip && 'sourceOut' in clip);
+    clip.sourceOut = 132;
     await writeFile(
-      join(directory, 'invalid.video.json'),
-      JSON.stringify(tooLong),
+      join(directory, 'invalid.video.ts'),
+      `export default ${JSON.stringify(tooLong)};\n`,
     );
     const invalid = run(
       'render',
-      'invalid.video.json',
+      'invalid.video.ts',
       '--output',
       'invalid.mp4',
     );
@@ -157,11 +144,11 @@ test('T44 public CLI renders equivalent 20-second TypeScript and JSON definition
     assert.match(invalid.stderr, /Out point exceeds the duration/);
     assert.ok(!(await readdir(directory)).includes('invalid.mp4'));
 
-    const replaced = run('render', example('json'), '--output', 'ts.mp4');
+    const replaced = run('render', example, '--output', 'ts.mp4');
     assert.equal(replaced.status, 1, replaced.stderr);
     assert.match(replaced.stderr, /Refusing to overwrite/);
     assert.equal(await hash(join(directory, 'ts.mp4')), outputBeforeOverwrite);
-    assert.equal((await readdir(directory)).length, 11);
+    assert.equal((await readdir(directory)).length, 6);
 
     assert.deepEqual(await Promise.all(sources.map(hash)), before);
   } finally {
@@ -188,13 +175,12 @@ function decodeRgb(path: string, frame?: number) {
   return result.stdout;
 }
 
-test('both definition formats render mixed tracks, subtitles, grading, effects and exact timing', async () => {
+test('TypeScript definitions render mixed tracks, subtitles, grading, effects and exact timing', async () => {
   requireTool('ffmpeg');
   requireTool('ffprobe');
   const directory = await mkdtemp(join(fixtureDirectory, 't45-'));
   const definitions = join(directory, 'definitions');
   const ts = join(definitions, 'mixed.video.ts');
-  const json = join(definitions, 'mixed.video.json');
   const titleFont = fileURLToPath(
     new URL('../../packages/media/fonts/NotoEmoji.ttf', import.meta.url),
   );
@@ -385,11 +371,9 @@ test('both definition formats render mixed tracks, subtitles, grading, effects a
       },
     });
     const authored = JSON.stringify(definition);
-    await writeFile(json, authored);
     await writeFile(ts, `export default ${authored};\n`);
 
-    const compiled = await compileVideo(json);
-    assert.deepEqual((await compileVideo(ts)).project, compiled.project);
+    const compiled = await compileVideo(ts);
     const { visualTransitions, audioClips } = await compiled.resolveRender();
     assert.ok(visualTransitions?.some(({ layers }) => layers.length === 2));
     assert.deepEqual(
@@ -405,13 +389,7 @@ test('both definition formats render mixed tracks, subtitles, grading, effects a
     );
     assert.equal(compiled.project.subtitles?.style.embeddedFont, embeddedFont);
 
-    run('render', json, '--output', 'json.mp4');
     run('render', ts, '--output', 'typescript.mp4');
-    await assertSimilarExports(
-      join(directory, 'json.mp4'),
-      join(directory, 'typescript.mp4'),
-      { width: 320, height: 180, frameCount: compiled.frameCount, fps: 24 },
-    );
 
     const frames = [2, 5, 14, 17, 29, 35, 39];
     for (const index of frames) {
@@ -429,7 +407,7 @@ test('both definition formats render mixed tracks, subtitles, grading, effects a
       );
       assert.equal(await hash(cliFrame), await hash(sdkFrame));
     }
-    assert.equal(await readFile(json, 'utf8'), authored);
+    assert.equal(await readFile(ts, 'utf8'), `export default ${authored};\n`);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -472,7 +450,7 @@ test('T45 source-backed freezes match the corresponding extracted image and supp
       new URL('../../packages/media/fonts/NotoEmoji.ttf', import.meta.url),
     );
     await copyFile(fontPath, join(directory, 'font.ttf'));
-    const path = join(directory, 'held.video.json');
+    const path = join(directory, 'held.video.ts');
     const definition = defineVideo({
       canvas: { width: 320, height: 180, frameRate: 24, durationFrames: 12 },
       assets: {
@@ -536,7 +514,7 @@ test('T45 source-backed freezes match the corresponding extracted image and supp
         },
       ],
     });
-    await writeFile(path, JSON.stringify(definition));
+    await writeFile(path, `export default ${JSON.stringify(definition)};\n`);
     const compiled = await compileVideo(path);
     assert.equal(
       compiled.project.clips.at(-1)?.text?.embeddedFont,
@@ -564,13 +542,13 @@ test('T45 source-backed freezes match the corresponding extracted image and supp
       assert.equal(await hash(output), await hash(reference));
     }
     async function writeStillDefinition() {
-      const path = join(directory, 'still.video.json');
+      const path = join(directory, 'still.video.ts');
       await writeFile(
         path,
-        JSON.stringify({
+        `export default ${JSON.stringify({
           ...definition,
           assets: { frame: { kind: 'image', path: 'held.png' } },
-        }),
+        })};\n`,
       );
       return path;
     }
@@ -597,35 +575,28 @@ test('T45 single-frame previews support definitions above the full-render subtit
         })),
       },
     });
-    const json = JSON.stringify(definition);
-    for (const format of ['json', 'ts']) {
-      const input = `captions.video.${format}`;
-      await writeFile(
-        join(directory, input),
-        format === 'ts' ? `export default ${json};\n` : json,
-      );
-      const result = spawnSync(
-        process.execPath,
-        [
-          entry,
-          'preview',
-          'frame',
-          input,
-          '--frame',
-          '256',
-          '--output',
-          `${format}.png`,
-          '--json',
-        ],
-        { cwd: directory, encoding: 'utf8', timeout: 30_000 },
-      );
-      assert.equal(result.status, 0, result.stderr);
-      assert.equal(JSON.parse(result.stdout).frame, 256);
-    }
-    assert.equal(
-      await hash(join(directory, 'json.png')),
-      await hash(join(directory, 'ts.png')),
+    const input = 'captions.video.ts';
+    await writeFile(
+      join(directory, input),
+      `export default ${JSON.stringify(definition)};\n`,
     );
+    const result = spawnSync(
+      process.execPath,
+      [
+        entry,
+        'preview',
+        'frame',
+        input,
+        '--frame',
+        '256',
+        '--output',
+        'captions.png',
+        '--json',
+      ],
+      { cwd: directory, encoding: 'utf8', timeout: 30_000 },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).frame, 256);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

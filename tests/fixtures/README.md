@@ -47,7 +47,7 @@ up its temporary files without touching generated fixtures. Ordinary `pnpm test`
 does not run this test or require native media tools.
 
 Run `pnpm test:media` with the five generated fixtures and FFmpeg/ffprobe. It
-covers probing and extraction, TypeScript and JSON rendering, compositing,
+covers probing and extraction, TypeScript rendering, compositing,
 audio and subtitle timing, preview recovery, and cancellation. Tests that
 create derived media use and clean up their own subdirectories under
 `generated/`.

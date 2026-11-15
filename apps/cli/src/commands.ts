@@ -35,7 +35,7 @@ const optionTypes = {
   version: { type: 'boolean', short: 'v' },
 } as const;
 
-const definition = '<definition.video.ts|definition.video.json>';
+const definition = '<definition.video.ts>';
 const params = '[--params <params.json>]';
 const position = '(--frame <n> | --timestamp <time>)';
 

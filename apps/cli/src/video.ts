@@ -42,7 +42,7 @@ export async function runVideoCommand(
   values: CommandOptions,
 ) {
   if (!isVideoDefinitionPath(file))
-    throw new UsageError('Choose a .video.ts or .video.json definition.');
+    throw new UsageError('Choose a .video.ts definition.');
   const { output } = values;
   if (command === 'render' && !output?.toLowerCase().endsWith('.mp4'))
     throw new UsageError(`Usage: ${commandUsage(command)}`);

@@ -39,5 +39,7 @@ Use `--root DIR` if the inputs share a wider root, `--resource PATH` per
 extra authoring file relative to that root, and `--params FILE` to select
 a variant. Only share
 files you have permission to redistribute. Run `opencut package verify BUNDLE`
-after moving it, then render `BUNDLE/opencut.bundle.video.json`. A compatible
-OpenCut, FFmpeg and required native models must be present on the new host.
+after moving it, then render `BUNDLE/opencut.bundle.video.ts`. Keep that
+filename at the bundle root. Verification rejects symlinks at the entry and
+in packaged dependency paths. The new host needs a compatible OpenCut,
+FFmpeg, and any required native models.

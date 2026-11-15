@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import {
   copyFile,
@@ -125,7 +126,7 @@ test('T53 reuses verified stages, rejects corruption, and rerenders an interrupt
   const root = await scratch(t);
   const cache = join(root, 'cache');
   const processing = { cacheDirectory: cache };
-  const file = join(root, 'edit.video.json');
+  const file = join(root, 'edit.video.ts');
   const output = join(root, 'out.mp4');
   const tools = join(root, 'tools');
   await mkdir(tools);
@@ -135,7 +136,7 @@ test('T53 reuses verified stages, rejects corruption, and rerenders an interrupt
   );
   await writeFile(
     file,
-    JSON.stringify({
+    `export default ${JSON.stringify({
       canvas: { width: 128, height: 72, frameRate: 24, durationFrames: 12 },
       assets: {
         picture: {
@@ -153,7 +154,7 @@ test('T53 reuses verified stages, rejects corruption, and rerenders an interrupt
           clips: [{ asset: 'picture', at: 0, sourceOut: 12, muted: true }],
         },
       ],
-    } satisfies VideoDefinition),
+    } satisfies VideoDefinition)};\n`,
   );
   await writeFile(
     join(tools, 'ffmpeg'),
@@ -267,15 +268,15 @@ PATH="$T53_PATH" exec ffmpeg "$@"
 
 test('T53 keeps the last published render receipt through failed retries', async (t) => {
   const root = await scratch(t);
-  const file = join(root, 'edit.video.json');
+  const file = join(root, 'edit.video.ts');
   const output = join(root, 'out.mp4');
   const processing = { cacheDirectory: join(root, 'cache') };
   await writeFile(
     file,
-    JSON.stringify({
+    `export default ${JSON.stringify({
       canvas: { width: 64, height: 64, frameRate: 24, durationFrames: 4 },
       tracks: [],
-    } satisfies VideoDefinition),
+    } satisfies VideoDefinition)};\n`,
   );
 
   const inspect = async () =>
@@ -493,6 +494,8 @@ test('T53 packages TypeScript imports, media, fonts and resources, and renders f
     '--json',
   ]);
   const verified = await verifyVideoPackage(bundle);
+  assert.equal(basename(verified.entry), 'opencut.bundle.video.ts');
+  assert.match(await readFile(verified.entry, 'utf8'), /^export default \{/);
   assert.deepEqual(verified.manifest.params, chosen);
   assert.deepEqual(verified.manifest.requirements.authoringPackages, [
     '@opencut/sdk',
@@ -591,7 +594,7 @@ test('T53 rejects escaped or unresolved dependencies, collisions, and malicious 
   assert.deepEqual(await readdir(bundle), []);
   await rm(bundle, { recursive: true });
 
-  const { manifest } = await packageVideo(definition, bundle, {
+  const { entry, manifest } = await packageVideo(definition, bundle, {
     root: project,
     resources: ['src/subtitle.txt'],
   });
@@ -612,6 +615,31 @@ test('T53 rejects escaped or unresolved dependencies, collisions, and malicious 
     }),
   );
   await assert.rejects(verifyVideoPackage(bundle), /collision/);
+
+  const entrySource = await readFile(entry, 'utf8');
+  const script = entrySource + "throw new Error('Unexpected execution');\n";
+  const bytes = Buffer.byteLength(script);
+  const sha256 = createHash('sha256').update(script).digest('hex');
+  await writeFile(entry, script);
+  await writeFile(
+    manifestFile,
+    JSON.stringify({
+      ...manifest,
+      bytes: manifest.bytes + bytes - Buffer.byteLength(entrySource),
+      files: manifest.files.map((file) =>
+        file.path === manifest.entry ? { ...file, bytes, sha256 } : file,
+      ),
+    }),
+  );
+  await assert.rejects(
+    verifyVideoPackage(bundle),
+    /Invalid packaged TypeScript entry/,
+  );
+  await assert.rejects(
+    inspectVideoBuild(entry),
+    /Invalid packaged TypeScript entry/,
+  );
+  await writeFile(entry, entrySource);
   await writeFile(manifestFile, JSON.stringify(manifest));
   await rm(join(bundle, item.path));
   await symlink(
@@ -619,6 +647,31 @@ test('T53 rejects escaped or unresolved dependencies, collisions, and malicious 
     join(bundle, item.path),
   );
   await assert.rejects(verifyVideoPackage(bundle), /symlink/);
+});
+
+test('T53 rejects a symlink at the reserved package entry', async (t) => {
+  const root = await scratch(t);
+  const definition = join(root, 'edit.video.ts');
+  await writeFile(
+    definition,
+    'export default { canvas: { width: 64, height: 64, frameRate: 24, durationFrames: 4 }, tracks: [] };\n',
+  );
+  const bundle = join(root, 'bundle');
+  const { entry } = await packageVideo(definition, bundle);
+  const alias = join(root, 'alias.video.ts');
+  await symlink(entry, alias);
+  await inspectVideoBuild(alias);
+  const directoryAlias = join(root, 'bundle-link');
+  await symlink(bundle, directoryAlias, 'dir');
+  await inspectVideoBuild(join(directoryAlias, basename(entry)));
+
+  const renamed = join(bundle, 'renamed.video.ts');
+  await rename(entry, renamed);
+  await symlink(basename(renamed), entry);
+  await assert.rejects(
+    inspectVideoBuild(entry),
+    /Package path .* contains a symlink/,
+  );
 });
 
 test('T53 records AI requirements and rejects a backend version mismatch before processing', async (t) => {

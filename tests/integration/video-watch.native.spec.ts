@@ -35,16 +35,16 @@ import { fixtureDirectory, videoExample } from '../fixture-paths.js';
 const cli = resolve('apps/cli/dist/index.js');
 const example = videoExample('review.video.ts');
 
-test('JSON watch preserves playback through truncation and follows atomic saves', async (t) => {
-  const directory = await mkdtemp(join(fixtureDirectory, 't46-json-'));
+test('TypeScript watch preserves playback through truncation and follows atomic saves', async (t) => {
+  const directory = await mkdtemp(join(fixtureDirectory, 't46-atomic-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const file = join(directory, 'blank.video.json');
+  const file = join(directory, 'blank.video.ts');
   const body = {
-    name: 'JSON first',
+    name: 'First revision',
     canvas: { width: 64, height: 64, frameRate: 24, durationFrames: 4 },
     tracks: [],
   };
-  await writeFile(file, JSON.stringify(body));
+  await writeFile(file, `export default ${JSON.stringify(body)};\n`);
   let latest: VideoWatchStatus | undefined;
   const watcher = await watchVideo(file, {
     onStatus: (event) => {
@@ -66,11 +66,11 @@ test('JSON watch preserves playback through truncation and follows atomic saves'
   const temporary = join(directory, 'editor-save');
   await writeFile(
     temporary,
-    JSON.stringify({ ...body, name: 'JSON recovered' }),
+    `export default ${JSON.stringify({ ...body, name: 'Recovered revision' })};\n`,
   );
   await rename(temporary, file);
   const after = (await waitFor('ready')).current!;
-  assert.equal(after.video.project.metadata.name, 'JSON recovered');
+  assert.equal(after.video.project.metadata.name, 'Recovered revision');
   assert.ok(after.generation > failed.generation);
   assert.equal(after.playback.path, before.playback.path);
 });
@@ -343,14 +343,14 @@ test('watch tracks imports made while an async default export resolves', async (
 test('definition previews stage media only when decoding it', async (t) => {
   const directory = await mkdtemp(join(fixtureDirectory, 't46-staging-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const file = join(directory, 'staging.video.json');
+  const file = join(directory, 'staging.video.ts');
   const image = join(directory, 'insert.png');
   const audio = join(directory, 'tone.wav');
   await copyFile(join(fixtureDirectory, 'still.png'), image);
   await copyFile(join(fixtureDirectory, 'audio-tone.wav'), audio);
   await writeFile(
     file,
-    JSON.stringify({
+    `export default ${JSON.stringify({
       canvas: { width: 64, height: 64, frameRate: 24, durationFrames: 12 },
       assets: {
         insert: { kind: 'image', path: 'insert.png' },
@@ -360,7 +360,7 @@ test('definition previews stage media only when decoding it', async (t) => {
         { type: 'image', clips: [{ asset: 'insert', at: 5, duration: 2 }] },
         { type: 'audio', clips: [{ asset: 'tone', at: 0, sourceOut: 12 }] },
       ],
-    }),
+    })};\n`,
   );
   const preview = previewVideo(await compileVideo(file, { preview: true }));
   await rm(image);
@@ -496,12 +496,12 @@ test('definition previews agree with final composited frames and audio timing', 
   const skew = Math.abs(fullOnsets[0]! - 6 / 24 - clipOnsets[0]!);
   assert.ok(skew <= 0.01, `Audio onset error ${skew}s`);
 
-  const json = videoExample('showcase.video.json');
-  const jsonBefore = await readFile(json);
-  const jsonSheet = await run(
+  const showcase = videoExample('showcase.video.ts');
+  const showcaseBefore = await readFile(showcase);
+  const showcaseSheet = await run(
     'preview',
     'contact-sheet',
-    json,
+    showcase,
     '--from',
     '24',
     '--to',
@@ -509,25 +509,25 @@ test('definition previews agree with final composited frames and audio timing', 
     '--count',
     '2',
     '--output',
-    join(directory, 'json-sheet.png'),
+    join(directory, 'showcase-sheet.png'),
   );
   assert.deepEqual(
-    jsonSheet.samples.map(({ frame }: { frame: number }) => frame),
+    showcaseSheet.samples.map(({ frame }: { frame: number }) => frame),
     [24, 30],
   );
-  const jsonClip = await run(
+  const showcaseClip = await run(
     'preview',
     'clip',
-    json,
+    showcase,
     '--from',
     '24',
     '--to',
     '36',
     '--output',
-    join(directory, 'json-clip.mp4'),
+    join(directory, 'showcase-clip.mp4'),
   );
-  assert.equal(jsonClip.frameCount, 12);
-  assert.deepEqual(await readFile(json), jsonBefore);
+  assert.equal(showcaseClip.frameCount, 12);
+  assert.deepEqual(await readFile(showcase), showcaseBefore);
   t.diagnostic(
     `Maximum mean RGB error ${Math.max(...means).toFixed(2)}/255 across five frames; shifted audio onset error ${(skew * 1000).toFixed(1)} ms.`,
   );

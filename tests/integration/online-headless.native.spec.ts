@@ -151,10 +151,10 @@ test('public SDK and CLI download licensed online media without Electron', async
   assert.equal(artifact.provenance.license, 'CC BY 4.0');
   assert.deepEqual(await readFile(artifact.path), bytes);
 
-  const definition = join(root, 'online.video.json');
+  const definition = join(root, 'online.video.ts');
   await writeFile(
     definition,
-    JSON.stringify({
+    `export default ${JSON.stringify({
       canvas: { width: 64, height: 64, frameRate: 24 },
       assets: {
         licensed: {
@@ -166,7 +166,7 @@ test('public SDK and CLI download licensed online media without Electron', async
       tracks: [
         { type: 'image', clips: [{ asset: 'licensed', at: 0, duration: 1 }] },
       ],
-    }),
+    })};\n`,
   );
   const inspected = run('inspect', definition);
   assert.equal(inspected.status, 0, inspected.stderr);

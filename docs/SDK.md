@@ -2,7 +2,7 @@
 
 Use Node 24.12+ (within 24.x) and import the definition API from
 `@opencut/sdk`. A trusted .video.ts file should default-export
-`defineVideo({...})`. The matching .video.json form needs no JavaScript.
+`defineVideo({...})`.
 
 ```ts
 import { compileVideo, previewVideo, renderCompiledVideo } from '@opencut/sdk';

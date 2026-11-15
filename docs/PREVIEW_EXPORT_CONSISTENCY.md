@@ -13,8 +13,7 @@ preview. A failed or superseded rebuild leaves the last complete playback
 available. Desktop export renders the selected revision using its staged
 inputs and retains those inputs while the render is active.
 
-Run `pnpm test:consistency` for TypeScript and JSON parity, frame
-and audio alignment, preview recovery, and decoded comparison
+Run `pnpm test:consistency` for frame and audio alignment, preview recovery, and decoded comparison
 of an Electron export with a foreground SDK render.
 
 ## Video-as-Code conformance
@@ -55,7 +54,7 @@ fade envelopes, and compare both orders of an equalizer and a limiter.
   limited to 5/255, the 95th percentile to 25/255, and at most 2.5% of
   pixels may differ by more than 48 in any channel. Lossy compression
   and 4:2:0 chroma sampling can shift edges. Same-quality repeated builds
-  and format parity use tighter bounds of 0.5/255, 2/255, and 0.1%,
+  use tighter bounds of 0.5/255, 2/255, and 0.1%,
   with 0.003 RMS tolerance for stereo PCM. The shared export parity check
   compares every decoded frame in bounded batches.
 - The AI chain checks that interpolated frames differ from both endpoints

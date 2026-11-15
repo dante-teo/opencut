@@ -1,5 +1,5 @@
-import { readFile, realpath } from 'node:fs/promises';
-import { basename, dirname, relative, resolve } from 'node:path';
+import { realpath } from 'node:fs/promises';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import {
   checkpointCompilation,
   inspectBuildCheckpoint,
@@ -13,9 +13,7 @@ import {
 import { inspectAssetRecipes } from './video-assets.js';
 import { compileDefinition } from './video-compiler.js';
 import {
-  definitionLoadError,
   parseVideoDefinition,
-  resolveVideoDefinition,
   validateVideoParameters,
   VideoDefinitionError,
 } from './video-definition.js';
@@ -32,16 +30,7 @@ import {
 } from './video-script.js';
 
 export function isVideoDefinitionPath(file: string) {
-  return file.endsWith('.video.ts') || file.endsWith('.video.json');
-}
-
-async function readDefinitionJson(path: string) {
-  try {
-    const json = await readFile(path, 'utf8');
-    return JSON.parse(json) as unknown;
-  } catch (cause) {
-    throw definitionLoadError(path, cause);
-  }
+  return file.endsWith('.video.ts');
 }
 
 export type VideoCompileOptions = Pick<
@@ -228,19 +217,22 @@ export async function readVideoInput(
   trace?: Parameters<typeof readDefinitionScript>[3],
 ) {
   if (!isVideoDefinitionPath(file))
-    throw new VideoDefinitionError('Expected a .video.ts or .video.json file.');
+    throw new VideoDefinitionError('Expected a .video.ts file.');
   options.signal?.throwIfAborted();
   const resolved = resolve(file);
   record?.(identifyVideoInput(resolved, 'source'));
-  const path = await realpath(resolved).catch((cause: unknown) => {
+  // Let package verification check the reserved entry itself for symlinks.
+  const isPackageEntry = basename(resolved) === packageEntryName;
+  const physical = await realpath(
+    isPackageEntry ? dirname(resolved) : resolved,
+  ).catch((cause: unknown) => {
     throw new VideoDefinitionError(
       `Cannot open video definition '${resolved}'.`,
       { cause },
     );
   });
+  const path = isPackageEntry ? join(physical, packageEntryName) : physical;
   if (path !== resolved) record?.(identifyVideoInput(path, 'source'));
-  // The selected filename determines how to load a symlink alias. Both loading
-  // and media resolution use the same physical definition path.
   const params =
     options.params === undefined
       ? undefined
@@ -262,12 +254,6 @@ export async function readVideoInput(
       verified: packaged.fingerprints,
     };
   }
-  if (file.endsWith('.video.json'))
-    return {
-      path,
-      verified: undefined,
-      ...(await resolveVideoDefinition(await readDefinitionJson(path), params)),
-    };
   const result =
     trace || options.scriptWorker || params !== undefined
       ? await readIsolatedDefinitionScript(

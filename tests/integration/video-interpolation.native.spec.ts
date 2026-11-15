@@ -106,14 +106,9 @@ function definition(
   };
 }
 
-async function writeDefinition(
-  dir: string,
-  name: string,
-  value: VideoDefinition,
-) {
-  const path = join(dir, `edit.video.${name}`);
-  const json = JSON.stringify(value);
-  await writeFile(path, name === 'ts' ? `export default ${json};\n` : json);
+async function writeDefinition(dir: string, value: VideoDefinition) {
+  const path = join(dir, 'edit.video.ts');
+  await writeFile(path, `export default ${JSON.stringify(value)};\n`);
   return path;
 }
 
@@ -216,13 +211,11 @@ test('T49 rejects invalid effective rates and unordered scene boundaries during 
   );
   const file = await writeDefinition(
     dir,
-    'json',
     definition('src.mov', [{ type: 'interpolateFrames', numerator: 24 }]),
   );
   await assert.rejects(inspectVideoRecipes(file), /higher sampling rate/);
   await writeDefinition(
     dir,
-    'json',
     definition('src.mov', [
       {
         type: 'smoothSlowMotion',
@@ -238,7 +231,7 @@ test('T49 rejects invalid effective rates and unordered scene boundaries during 
   );
 });
 
-test('T49 24→48 synthesizes frames, protects cuts and preserves pixels, tags and delayed PCM across TS and JSON', async (t) => {
+test('T49 24→48 synthesizes frames, protects cuts and preserves pixels, tags and delayed PCM across repeated builds', async (t) => {
   const dir = await fixture(t);
   if (!dir) return;
   const source = join(dir, 'two-shots.mov');
@@ -271,12 +264,11 @@ test('T49 24→48 synthesizes frames, protects cuts and preserves pixels, tags a
   const value = definition('two-shots.mov', [
     { type: 'interpolateFrames', numerator: 48, quality: 'fast' },
   ]);
-  const json = await writeDefinition(dir, 'json', value);
-  const ts = await writeDefinition(dir, 'ts', value);
+  const file = await writeDefinition(dir, value);
   const cache = join(dir, 'cache');
-  for (const [file, output, status] of [
-    [ts, 'ts.mp4', /step 1: completed/],
-    [json, 'json.mp4', /step 1: cache-hit/],
+  for (const [output, status] of [
+    ['first.mp4', /step 1: completed/],
+    ['second.mp4', /step 1: cache-hit/],
   ] as const) {
     const { stderr } = await exec(
       process.execPath,
@@ -293,7 +285,7 @@ test('T49 24→48 synthesizes frames, protects cuts and preserves pixels, tags a
     );
     assert.match(stderr, status);
   }
-  const derived = await compiledPath(json, cache);
+  const derived = await compiledPath(file, cache);
   assert.equal((await cacheFiles(cache)).length, 1);
   const original = await frameHashes(source);
   const result = await frameHashes(derived);
@@ -339,8 +331,8 @@ test('T49 24→48 synthesizes frames, protects cuts and preserves pixels, tags a
     { type: 'trim', start: 0.125, end: 0.625 },
     { type: 'interpolateFrames', numerator: 48, sceneCuts: [0.375] },
   ];
-  await writeDefinition(dir, 'json', value);
-  const trimmed = await frameHashes(await compiledPath(json, cache));
+  await writeDefinition(dir, value);
+  const trimmed = await frameHashes(await compiledPath(file, cache));
   assert.equal(trimmed.length, 24);
   assert.deepEqual(
     trimmed.filter((_, i) => i % 2 === 0),
@@ -365,7 +357,6 @@ test('T49 30→60 works with portrait VFR timestamps and explicit cuts, and trim
   );
   const cfrFile = await writeDefinition(
     dir,
-    'ts',
     definition(
       'portrait-cfr.mov',
       [{ type: 'interpolateFrames', numerator: 60 }],
@@ -419,7 +410,7 @@ test('T49 30→60 works with portrait VFR timestamps and explicit cuts, and trim
     360,
     640,
   );
-  const file = await writeDefinition(dir, 'json', value);
+  const file = await writeDefinition(dir, value);
   const derived = await compiledPath(file, cache);
   const input = await probeMedia(source);
   const output = await probeMedia(derived);
@@ -438,7 +429,7 @@ test('T49 30→60 works with portrait VFR timestamps and explicit cuts, and trim
   value.assets!.picture!.recipe = [
     { type: 'smoothSlowMotion', speed: 0.47, numerator: 30, quality: 'high' },
   ];
-  await writeDefinition(dir, 'json', value);
+  await writeDefinition(dir, value);
   const slow = await compiledPath(file, cache);
   const slowMedia = await probeMedia(slow);
   const duration = input.video!.durationSeconds! / 0.47;
@@ -483,7 +474,6 @@ test('T49 preserves a picture offset between target ticks and keeps early audio 
   );
   const file = await writeDefinition(
     dir,
-    'json',
     definition('late-picture.mov', [
       { type: 'interpolateFrames', numerator: 48 },
     ]),
@@ -547,7 +537,6 @@ test('T49 rebases retained picture and audio when an earlier track is discarded'
   assert.equal(input.audio?.startTimeSeconds, 0.25);
   const file = await writeDefinition(
     dir,
-    'json',
     definition('multitrack.mov', [
       { type: 'interpolateFrames', numerator: 48 },
     ]),
@@ -595,7 +584,6 @@ test('T49 chains interpolation at the declared cadence after a partial final fra
   );
   const file = await writeDefinition(
     dir,
-    'json',
     definition(
       'short.mov',
       [
@@ -670,7 +658,6 @@ test('T49 preserves short audio when the input declares only picture duration', 
 
   const file = await writeDefinition(
     dir,
-    'json',
     definition('short-audio.avi', [
       { type: 'interpolateFrames', numerator: 48 },
     ]),
@@ -698,7 +685,6 @@ test('T49 limits and cancellation leave no published output and allow a clean re
   );
   const file = await writeDefinition(
     dir,
-    'json',
     definition('src.mov', [{ type: 'interpolateFrames', numerator: 48 }]),
   );
   const cacheDirectory = join(dir, 'cache');
@@ -748,7 +734,6 @@ test('T49 limits and cancellation leave no published output and allow a clean re
   );
   await writeDefinition(
     dir,
-    'json',
     definition('full.mov', [{ type: 'interpolateFrames', numerator: 48 }]),
   );
   await assert.rejects(

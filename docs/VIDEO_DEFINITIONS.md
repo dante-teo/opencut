@@ -1,14 +1,13 @@
 # Video as code
 
-Author a complete video in one `.video.ts` or `.video.json` file. OpenCut
+Author a complete video in one `.video.ts` file. OpenCut
 compiles the definition to an in-memory project and uses the shared timeline
 evaluator, compositor, and audio mixer.
 
 ## Run the example
 
-The [TypeScript example](../examples/video/showcase.video.ts) and
-[JSON example](../examples/video/showcase.video.json) each produce the same
-20-second video. They use the repository's synthetic media fixtures. Run the
+The [showcase](../examples/video/showcase.video.ts) renders a 20-second
+video using the repository's synthetic media fixtures. Run the
 commands from the checkout root with Node 24.12+ within 24.x, pnpm 11.20.0, and
 FFmpeg and ffprobe on PATH. Run `pnpm fixtures:generate` once if the fixture
 directory is absent.
@@ -20,20 +19,19 @@ out="$(mktemp -d tests/fixtures/generated/showcase-XXXXXX)"
 node apps/cli/dist/index.js validate examples/video/showcase.video.ts
 node apps/cli/dist/index.js inspect examples/video/showcase.video.ts --json
 node apps/cli/dist/index.js preview frame examples/video/showcase.video.ts --frame 96 --output "$out/preview.png"
-node apps/cli/dist/index.js render examples/video/showcase.video.ts --output "$out/typescript.mp4"
-node apps/cli/dist/index.js render examples/video/showcase.video.json --output "$out/json.mp4"
-ffprobe -v error -show_streams -show_format "$out/typescript.mp4"
+node apps/cli/dist/index.js render examples/video/showcase.video.ts --output "$out/showcase.mp4"
+ffprobe -v error -show_streams -show_format "$out/showcase.mp4"
 ```
 
 Use `opencut` in place of `node apps/cli/dist/index.js` if the executable is
 on PATH. The definition argument and output path resolve from the invoking
-directory. Source paths resolve from the definition file's directory, using
-the target directory if the file is reached through a symlink. Output files
-must be new and their parent directories must exist.
+directory. Source paths in authored definitions resolve from the definition
+file's directory, using the target directory if the file is reached through a
+symlink. Output files must be new and their parent directories must exist.
 
 ## Author a definition
 
-In TypeScript, import `defineVideo` from `@opencut/sdk` and default-export the
+Import `defineVideo` from `@opencut/sdk` and default-export the
 result. Put the SDK on the definition's Node package resolution path. Node
 24.12+ within 24.x runs the file with native type stripping. Use ESM and
 erasable TypeScript syntax. OpenCut evaluates the entry module once per
@@ -71,8 +69,7 @@ export default defineVideo({
 });
 ```
 
-JSON contains the same object as plain data. Both formats accept `version: 1`
-and use version 1 when omitted. The optional top-level `name` defaults to
+The optional `version` field defaults to `1`. The optional top-level `name` defaults to
 `Untitled video`.
 
 - `canvas` requires width, height and an integer or rational frame rate. Set
@@ -181,8 +178,7 @@ inputs on different builds.
 
 An asset can declare a `recipe` of 1–32 ordered steps. Set `kind` to the
 final media kind. Multiple declarations can use the same source with different
-recipes. The [TypeScript](../examples/video/recipes.video.ts) and
-[JSON](../examples/video/recipes.video.json) examples share a trim between a
+recipes. The [example](../examples/video/recipes.video.ts) shares a trim between a
 cropped video and a normalized soundtrack.
 
 | `type`              | Parameters and behavior                                                                                                                                                                             |
@@ -228,18 +224,17 @@ and materialize referenced recipes as needed. See [CLI flags and limits](CLI.md#
 
 ### AI interpolation
 
-Use this asset recipe in a `.video.json` definition for 24 → 48 fps.
+Use this asset recipe for 24 → 48 fps.
 
-```json
-{
-  "recipe": [
-    { "type": "interpolateFrames", "numerator": 48, "quality": "balanced" }
-  ]
-}
+```ts
+import type { VideoRecipe } from '@opencut/sdk';
+
+const recipe: VideoRecipe = [
+  { type: 'interpolateFrames', numerator: 48, quality: 'balanced' },
+];
 ```
 
-Use this TypeScript recipe for half-speed picture at 30 fps. Both operations
-accept the same properties in either definition format.
+Use this recipe for half-speed picture at 30 fps.
 
 ```ts
 import type { VideoRecipe } from '@opencut/sdk';
@@ -314,23 +309,22 @@ the [CLI processing limits and cache behavior](CLI.md#media-recipes).
 
 ### AI enhancement
 
-The following `.video.json` asset recipe processes only seconds 2 through 6
-of a 720p or 1080p 16:9 source. The same steps and properties work in
-`.video.ts` and are typed by `VideoRecipe` in the SDK.
+This asset recipe processes seconds 2 through 6 of a 720p or 1080p 16:9
+source. The SDK types these steps with `VideoRecipe`.
 
-```json
-{
-  "recipe": [
-    { "type": "trim", "start": 2, "end": 6 },
-    {
-      "type": "superResolution",
-      "backend": "videotoolbox",
-      "quality": "high",
-      "width": 3840,
-      "height": 2160
-    }
-  ]
-}
+```ts
+import type { VideoRecipe } from '@opencut/sdk';
+
+const recipe: VideoRecipe = [
+  { type: 'trim', start: 2, end: 6 },
+  {
+    type: 'superResolution',
+    backend: 'videotoolbox',
+    quality: 'high',
+    width: 3840,
+    height: 2160,
+  },
+];
 ```
 
 Set 2160 × 3840 for a 9:16 portrait input. Both dimensions must be even and
@@ -399,7 +393,7 @@ opencut preview contact-sheet examples/video/review.video.ts --from 12 --to 36 -
 opencut preview clip examples/video/review.video.ts --from 6 --to 42 --quality high --output review.mp4
 ```
 
-Both definition formats support these commands. A timestamp can be decimal
+A timestamp can be decimal
 seconds, a fraction such as `1001/30000`, or a clock time such as `00:00:01.500`.
 It selects the project frame covering that time. `--frame` selects a frame
 directly. Range ends are exclusive and clips have a 30-second limit.
@@ -509,6 +503,7 @@ composition with `previewVideo(compiled)`.
 Package one resolved parameter selection with
 [`opencut package`](CLI.md#portable-projects). Keep the package together
 when moving it. The editable files retain their original relative layout
-under `project/`; render the verified JSON entry at the package root.
+under `project/`. Render the generated `opencut.bundle.video.ts` at the
+package root.
 A named font file travels with the bundle. The receiving machine supplies
 OpenCut, FFmpeg and any system AI backends required by the recipes.

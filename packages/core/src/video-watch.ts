@@ -49,7 +49,7 @@ type Published = {
 export async function watchVideo(file: string, options: VideoWatchOptions) {
   const path = resolve(file);
   if (!isVideoDefinitionPath(path))
-    throw new VideoDefinitionError('Expected a .video.ts or .video.json file.');
+    throw new VideoDefinitionError('Expected a .video.ts file.');
   options.signal?.throwIfAborted();
 
   const directory = await mkdtemp(join(tmpdir(), 'opencut-video-'));

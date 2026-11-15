@@ -1,51 +1,51 @@
 # Author a whole video
 
-Use `.video.ts` or `.video.json` when starting from media and delivering a
-rendered video. In TypeScript, import `defineVideo` from `@opencut/sdk` and
+In a `.video.ts` file, import `defineVideo` from `@opencut/sdk` and
 default-export the object through that function. TypeScript executes as trusted
 Node code once per compilation. A default export can also be a promise that
 resolves to the definition. Repeated builds refresh local ESM imports,
-while package imports follow Node's normal cache. JSON contains the same
-object as plain data.
+while package imports follow Node's normal cache.
 
-```json
-{
-  "version": 1,
-  "name": "Opening",
-  "canvas": {
-    "width": 640,
-    "height": 360,
-    "frameRate": 24,
-    "durationFrames": 480
+```ts
+import { defineVideo } from '@opencut/sdk';
+
+export default defineVideo({
+  version: 1,
+  name: 'Opening',
+  canvas: {
+    width: 640,
+    height: 360,
+    frameRate: 24,
+    durationFrames: 480,
   },
-  "assets": {
-    "intro": { "path": "media/intro.mp4", "kind": "video" }
+  assets: {
+    intro: { path: 'media/intro.mp4', kind: 'video' },
   },
-  "tracks": [
+  tracks: [
     {
-      "type": "video",
-      "clips": [
+      type: 'video',
+      clips: [
         {
-          "asset": "intro",
-          "at": 0,
-          "sourceIn": 12,
-          "sourceOut": 108,
-          "volume": 0.6
-        }
-      ]
+          asset: 'intro',
+          at: 0,
+          sourceIn: 12,
+          sourceOut: 108,
+          volume: 0.6,
+        },
+      ],
     },
     {
-      "type": "text",
-      "clips": [
+      type: 'text',
+      clips: [
         {
-          "at": 12,
-          "duration": 72,
-          "text": { "content": "Opening", "fontSize": 48 }
-        }
-      ]
-    }
-  ]
-}
+          at: 12,
+          duration: 72,
+          text: { content: 'Opening', fontSize: 48 },
+        },
+      ],
+    },
+  ],
+});
 ```
 
 This example requires a video source at least 4.5 seconds long. Put `media/`
@@ -80,13 +80,13 @@ slashes. Inspect the source with `opencut probe` to choose valid source points.
   stream.
 
 ```sh
-opencut validate opening.video.json --json
-opencut inspect opening.video.json --json
-opencut preview opening.video.json --watch --json
-opencut preview frame opening.video.json --frame 24 --output opening.png
-opencut preview contact-sheet opening.video.json --from 0 --to 48 --count 4 --output sheet.png
-opencut preview clip opening.video.json --from 0 --to 48 --output review.mp4
-opencut render opening.video.json --output opening.mp4
+opencut validate opening.video.ts --json
+opencut inspect opening.video.ts --json
+opencut preview opening.video.ts --watch --json
+opencut preview frame opening.video.ts --frame 24 --output opening.png
+opencut preview contact-sheet opening.video.ts --from 0 --to 48 --count 4 --output sheet.png
+opencut preview clip opening.video.ts --from 0 --to 48 --output review.mp4
+opencut render opening.video.ts --output opening.mp4
 opencut probe opening.mp4 --json
 ```
 
@@ -118,7 +118,7 @@ Recipe trims use seconds from the input container start and retain the
 selected audio stream when it overlaps the trim.
 Use `visual.crop` for a crop that belongs to an individual timeline clip.
 The [recipe reference](../../../docs/VIDEO_DEFINITIONS.md#media-preprocessing-recipes)
-includes step parameters and paired TypeScript and JSON examples.
+includes step parameters and TypeScript examples.
 
 For local AI interpolation use `{ "type": "interpolateFrames", "numerator": 48 }`
 on 24 fps video. This preserves picture duration and the relative timing of

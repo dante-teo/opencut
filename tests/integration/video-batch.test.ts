@@ -117,9 +117,9 @@ describe('T52 parameterized video definitions', () => {
     await expect(compileVideo(file, { params: null })).rejects.toThrow(
       /params.*object|params.*record/i,
     );
-    const json = join(directory, 'static.video.json');
-    await writeFile(json, '{}');
-    await expect(compileVideo(json, { params: {} })).rejects.toThrow(
+    const plain = join(directory, 'static.video.ts');
+    await writeFile(plain, 'export default {};');
+    await expect(compileVideo(plain, { params: {} })).rejects.toThrow(
       /does not declare external parameters/,
     );
   });

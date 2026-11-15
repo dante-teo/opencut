@@ -1,6 +1,6 @@
 # OpenCut quick start
 
-OpenCut compiles a TypeScript or JSON definition into a video. Install
+OpenCut compiles a TypeScript definition into a video. Install
 Node.js 24.12+ within the 24.x series, pnpm 11.20, FFmpeg, and ffprobe. From
 a checkout, run:
 
@@ -16,7 +16,7 @@ Generate the synthetic media with `pnpm fixtures:generate` to run the
 
 ```sh
 node apps/cli/dist/index.js validate examples/video/showcase.video.ts
-node apps/cli/dist/index.js render examples/video/showcase.video.json --output showcase.mp4
+node apps/cli/dist/index.js render examples/video/showcase.video.ts --output showcase.mp4
 ```
 
 Use the [parameterized short-video example](VIDEO_DEFINITIONS.md#reusable-functions-and-parameters)

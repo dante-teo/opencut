@@ -117,7 +117,7 @@ test('reviews consecutive definition builds and keeps the last playable revision
 
 test('previews and exports a recipe-backed definition', async () => {
   const directory = await mkdtemp(join(fixtureDirectory, 't48-desktop-'));
-  const path = videoExample('recipes.video.json');
+  const path = videoExample('recipes.video.ts');
   const output = join(directory, 'desktop.mp4');
   const { application, page } = await launchDesktop({
     XDG_CACHE_HOME: directory,

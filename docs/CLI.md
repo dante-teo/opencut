@@ -127,14 +127,18 @@ was already published, use it, or choose a new output explicitly.
 ```sh
 opencut package src/edit.video.ts --root . --resource src/captions.txt --output ./bundle
 opencut package verify ./bundle --json
-opencut render ./bundle/opencut.bundle.video.json --output ./final.mp4
+opencut render ./bundle/opencut.bundle.video.ts --output ./final.mp4
 ```
 
-Move the entire bundle. The generated JSON entry rebuilds the selected
+Move the entire bundle. The generated TypeScript entry rebuilds the selected
 composition using the bundled inputs, even without the original TypeScript
 packages installed. Use `--params` at packaging time to choose a variant.
-The entry verifies file hashes automatically before building. Copy the
-editable sources from `project/` to make changes, then package them again.
+Keep the generated entry named `opencut.bundle.video.ts` at the bundle root.
+When rendering that entry, OpenCut verifies the package inventory and hashes,
+then reads the generated default export as data. Verification rejects symlinks
+at the manifest or entry and anywhere along a listed dependency path.
+Copy the editable sources from `project/` to make changes, then package them
+again.
 
 Choose a new output directory under an existing parent. The default root is
 the authored definition's directory. Use `--root` to include shared files

@@ -28,11 +28,11 @@ import type {
   VideoProcessingProgress,
   VideoWatchRevision,
 } from '@opencut/sdk';
+import recipes from '../../examples/video/recipes.video.ts';
 import { assertSimilarExports } from './conformance-support.js';
 import { fixtureDirectory, videoExample } from '../fixture-paths.js';
 
-const example = (extension: string) =>
-  videoExample('recipes.video.' + extension);
+const example = videoExample('recipes.video.ts');
 const entry = fileURLToPath(
   new URL('../../apps/cli/dist/index.js', import.meta.url),
 );
@@ -58,8 +58,8 @@ async function scratch() {
   return mkdtemp(join(fixtureDirectory, 't48-'));
 }
 
-async function sample() {
-  return JSON.parse(await readFile(example('json'), 'utf8')) as VideoDefinition;
+function writeDefinition(path: string, definition: VideoDefinition) {
+  return writeFile(path, `export default ${JSON.stringify(definition)};\n`);
 }
 
 function setPaths(
@@ -71,15 +71,10 @@ function setPaths(
     asset.path = relative(directory, source);
 }
 
-async function runExample(
-  directory: string,
-  cache: string,
-  extension: string,
-  output: string,
-) {
+async function runExample(directory: string, cache: string, output: string) {
   return cli(
     'render',
-    example(extension),
+    example,
     '--output',
     join(directory, output),
     '--recipe-cache',
@@ -89,33 +84,25 @@ async function runExample(
   );
 }
 
-test('T48 concurrent foreground TS and JSON renders share seven cache entries and preserve timing', async () => {
+test('T48 concurrent foreground renders share seven cache entries and preserve timing', async () => {
   const directory = await scratch();
   const cache = join(directory, 'cache');
   try {
-    const { stdout } = await cli(
-      'recipes',
-      'inspect',
-      example('json'),
-      '--json',
-    );
-    assert.deepEqual(
-      JSON.parse(stdout),
-      await inspectVideoRecipes(example('json')),
-    );
-    const [ts, json] = await Promise.all([
-      runExample(directory, cache, 'ts', 'ts.mp4'),
-      runExample(directory, cache, 'json', 'json.mp4'),
+    const { stdout } = await cli('recipes', 'inspect', example, '--json');
+    assert.deepEqual(JSON.parse(stdout), await inspectVideoRecipes(example));
+    const [first, second] = await Promise.all([
+      runExample(directory, cache, 'first.mp4'),
+      runExample(directory, cache, 'second.mp4'),
     ]);
-    assert.equal(starts(ts.stderr + '\n' + json.stderr).length, 7);
-    assert.equal(hits(ts.stderr) + hits(json.stderr), 9);
+    assert.equal(starts(first.stderr + '\n' + second.stderr).length, 7);
+    assert.equal(hits(first.stderr) + hits(second.stderr), 9);
     assert.equal((await entries(cache)).length, 7);
     await noStaging(cache);
-    const again = await runExample(directory, cache, 'ts', 'again.mp4');
+    const again = await runExample(directory, cache, 'again.mp4');
     assert.equal(hits(again.stderr), 8);
     assert.deepEqual(starts(again.stderr), []);
-    const path = join(directory, 'ts.mp4');
-    for (const other of ['json.mp4', 'again.mp4'])
+    const path = join(directory, 'first.mp4');
+    for (const other of ['second.mp4', 'again.mp4'])
       await assertSimilarExports(path, join(directory, other), {
         width: 160,
         height: 90,
@@ -161,11 +148,11 @@ test('T48 concurrent foreground TS and JSON renders share seven cache entries an
 test('T48 invalidation follows dependencies, skips unused work and repairs damaged entries', async () => {
   const directory = await scratch();
   const cacheDirectory = join(directory, 'cache');
-  const file = join(directory, 'edit.video.json');
+  const file = join(directory, 'edit.video.ts');
   const source = join(directory, 'source.mp4');
   try {
     await copyFile(join(fixtureDirectory, 'video-medium.mp4'), source);
-    const definition = await sample();
+    const definition = structuredClone(recipes);
     setPaths(definition, directory, source);
     definition.assets!.unused = {
       kind: 'video',
@@ -175,7 +162,7 @@ test('T48 invalidation follows dependencies, skips unused work and repairs damag
     const events: VideoProcessingProgress[] = [];
     async function build() {
       events.length = 0;
-      await writeFile(file, JSON.stringify(definition));
+      await writeDefinition(file, definition);
       return compileVideo(file, {
         processing: {
           cacheDirectory,
@@ -236,7 +223,7 @@ test('T48 invalidation follows dependencies, skips unused work and repairs damag
     await noStaging(cacheDirectory);
     const rotated = definition.assets!.picture!.recipe!;
     [rotated[1], rotated[2]] = [rotated[2]!, rotated[1]!];
-    await writeFile(file, JSON.stringify(definition));
+    await writeDefinition(file, definition);
     await assert.rejects(
       inspectVideoRecipes(file),
       /recipe\.2: Crop rectangle/,
@@ -250,21 +237,20 @@ test('T48 invalidation follows dependencies, skips unused work and repairs damag
 test('T48 CLI cancellation and worker budget failures clean staging and preserve valid cache entries', async () => {
   const directory = await scratch();
   const cacheDirectory = join(directory, 'cache');
-  const file = join(directory, 'edit.video.json');
+  const file = join(directory, 'edit.video.ts');
   try {
-    const definition = await sample();
+    const definition = structuredClone(recipes);
     setPaths(definition, directory, join(fixtureDirectory, 'video-medium.mp4'));
     const picture = definition.assets!.picture!;
     picture.recipe = picture.recipe!.slice(0, 1);
     definition.tracks = definition.tracks.slice(0, 1);
     delete definition.assets!.soundtrack;
-    const write = () => writeFile(file, JSON.stringify(definition));
-    await write();
+    await writeDefinition(file, definition);
     await compileVideo(file, { processing: { cacheDirectory } });
     const existing = await entries(cacheDirectory);
     assert.equal(existing.length, 1);
     picture.recipe.push({ type: 'resize', width: 1920, height: 1080 });
-    await write();
+    await writeDefinition(file, definition);
     const output = join(directory, 'cancelled.mp4');
     const child = spawn(
       process.execPath,
@@ -339,7 +325,7 @@ test('T48 watched definitions use pinned processed files for playback and export
   const statuses: Array<
     Parameters<Parameters<typeof watchVideo>[1]['onStatus']>[0]
   > = [];
-  const watcher = await watchVideo(example('json'), {
+  const watcher = await watchVideo(example, {
     signal,
     processing: { cacheDirectory },
     onStatus(event) {
@@ -373,7 +359,7 @@ test('T48 extraction preserves delayed audio relative to the trimmed picture', a
   const directory = await scratch();
   const cacheDirectory = join(directory, 'cache');
   const source = join(directory, 'delay.mov');
-  const definition = join(directory, 'delay.video.json');
+  const definition = join(directory, 'delay.video.ts');
   try {
     await exec('ffmpeg', [
       '-v',
@@ -418,7 +404,7 @@ test('T48 extraction preserves delayed audio relative to the trimmed picture', a
         { type: 'audio', clips: [{ asset: 'sound', at: 0, sourceOut: 20 }] },
       ],
     };
-    await writeFile(definition, JSON.stringify(authored));
+    await writeDefinition(definition, authored);
     const compiled = await compileVideo(definition, {
       processing: { cacheDirectory },
     });
@@ -448,7 +434,7 @@ test('T48 extraction preserves delayed audio relative to the trimmed picture', a
 
 test('T48 trims delayed picture and shorter audio on the container clock', async () => {
   const directory = await scratch();
-  const file = join(directory, 'edit.video.json');
+  const file = join(directory, 'edit.video.ts');
   const source = join(directory, 'delayed.mov');
   try {
     await exec('ffmpeg', [
@@ -502,7 +488,7 @@ test('T48 trims delayed picture and shorter audio on the container clock', async
         },
       ],
     };
-    await writeFile(file, JSON.stringify(definition));
+    await writeDefinition(file, definition);
     const { recipes } = await inspectVideoRecipes(file);
     assert.equal(recipes[0]?.steps[0]?.media.videoStartSeconds, 0.2);
     assert.equal(recipes[1]?.steps[0]?.media.hasAudio, false);
@@ -536,19 +522,19 @@ function killRecipeWorker(pid: number) {
 test('T48 a retry gets a fresh staging path after a CLI is killed mid-step', async () => {
   const directory = await scratch();
   const cacheDirectory = join(directory, 'cache');
-  const file = join(directory, 'edit.video.json');
+  const file = join(directory, 'edit.video.ts');
   const signal = AbortSignal.timeout(15_000);
   const originalPath = process.env.PATH ?? '';
   let child: ReturnType<typeof spawn> | undefined;
   let workerPid: number | undefined;
   try {
-    const definition = await sample();
+    const definition = structuredClone(recipes);
     setPaths(definition, directory, join(fixtureDirectory, 'video-medium.mp4'));
     const picture = definition.assets!.picture!;
     picture.recipe = picture.recipe!.slice(0, 1);
     definition.assets = { picture };
     definition.tracks = definition.tracks.slice(0, 1);
-    await writeFile(file, JSON.stringify(definition));
+    await writeDefinition(file, definition);
     await writeFile(
       join(directory, 'ffmpeg'),
       `#!/bin/sh
@@ -637,7 +623,7 @@ test('T48 recipe inspection and rendering accept BMP and TIFF inputs', async () 
   try {
     for (const format of ['bmp', 'tiff']) {
       const source = join(directory, `image.${format}`);
-      const file = join(directory, `${format}.video.json`);
+      const file = join(directory, `${format}.video.ts`);
       const output = join(directory, `${format}.mp4`);
       await exec('ffmpeg', [
         '-v',
@@ -663,7 +649,7 @@ test('T48 recipe inspection and rendering accept BMP and TIFF inputs', async () 
           { type: 'image', clips: [{ asset: 'image', at: 0, duration: 24 }] },
         ],
       };
-      await writeFile(file, JSON.stringify(definition));
+      await writeDefinition(file, definition);
       const { recipes } = await inspectVideoRecipes(file);
       assert.equal(recipes[0]?.steps[0]?.format, 'png');
       await cli(

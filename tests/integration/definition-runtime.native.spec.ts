@@ -13,10 +13,9 @@ import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { readSubtitleFile } from '@opencut/sdk';
 import { requireTool } from '../../scripts/fixture-lib.js';
-import { assertSimilarExports } from './conformance-support.js';
 import { fixtureDirectory, videoExample } from '../fixture-paths.js';
 
-test('both definition formats render without loading Electron, sessions or the durable queue', async () => {
+test('a TypeScript definition renders without loading Electron, sessions or the durable queue', async () => {
   requireTool('ffmpeg');
   requireTool('ffprobe');
   const directory = await mkdtemp(
@@ -38,34 +37,24 @@ test('both definition formats render without loading Electron, sessions or the d
     });
   `;
   try {
-    const outputs = [];
-    for (const format of ['ts', 'json']) {
-      const source = videoExample('showcase.video.' + format);
-      const output = join(directory, format + '.mp4');
-      const result = spawnSync(
-        process.execPath,
-        [
-          '--import',
-          'data:text/javascript,' + encodeURIComponent(guard),
-          entry,
-          'render',
-          source,
-          '--output',
-          output,
-          '--json',
-        ],
-        { encoding: 'utf8', cwd: directory, timeout: 30_000 },
-      );
-      assert.equal(result.status, 0, result.stderr);
-      assert.equal(JSON.parse(result.stdout).frameCount, 480);
-      outputs.push(output);
-    }
-    await assertSimilarExports(outputs[0]!, outputs[1]!, {
-      width: 320,
-      height: 180,
-      frameCount: 480,
-      fps: 24,
-    });
+    const source = videoExample('showcase.video.ts');
+    const output = join(directory, 'showcase.mp4');
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--import',
+        'data:text/javascript,' + encodeURIComponent(guard),
+        entry,
+        'render',
+        source,
+        '--output',
+        output,
+        '--json',
+      ],
+      { encoding: 'utf8', cwd: directory, timeout: 30_000 },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).frameCount, 480);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -81,7 +70,7 @@ test(
       join(fixtureDirectory, 'definition-output-'),
     );
     const entry = resolve('apps/cli/dist/index.js');
-    const source = videoExample('showcase.video.json');
+    const source = videoExample('showcase.video.ts');
     const output = join(directory, 'export.mp4');
     const run = (...args: string[]) =>
       spawnSync(process.execPath, [entry, ...args, '--json'], {
@@ -90,10 +79,10 @@ test(
       });
     try {
       const sidecar = join(directory, 'captions.vtt');
-      const captionSource = join(directory, 'captioned.video.json');
+      const captionSource = join(directory, 'captioned.video.ts');
       await writeFile(
         captionSource,
-        JSON.stringify({
+        `export default ${JSON.stringify({
           canvas: { width: 160, height: 90, frameRate: 24, durationFrames: 24 },
           tracks: [],
           subtitles: {
@@ -107,7 +96,7 @@ test(
               },
             ],
           },
-        }),
+        })};\n`,
       );
       const captions = run(
         'subtitles',
@@ -156,7 +145,7 @@ test(
       }
       assert.deepEqual(await readFile(output), sentinel);
       assert.deepEqual((await readdir(directory)).sort(), [
-        'captioned.video.json',
+        'captioned.video.ts',
         'captions.vtt',
         'export.mp4',
       ]);
@@ -200,17 +189,17 @@ test('explicit overwrite refuses a declared but unused media input', async () =>
   requireTool('ffprobe');
   const directory = await mkdtemp(join(fixtureDirectory, 'definition-input-'));
   const asset = join(directory, 'unused.mp4');
-  const source = join(directory, 'guard.video.json');
+  const source = join(directory, 'guard.video.ts');
   try {
     await copyFile(join(fixtureDirectory, 'video-short.mp4'), asset);
     const before = await readFile(asset);
     await writeFile(
       source,
-      JSON.stringify({
+      `export default ${JSON.stringify({
         canvas: { width: 160, height: 90, frameRate: 24, durationFrames: 24 },
         tracks: [],
         assets: { unused: { path: 'unused.mp4', kind: 'video' } },
-      }),
+      })};\n`,
     );
     const result = spawnSync(
       process.execPath,

@@ -148,10 +148,10 @@ async function makeSource(
 
 async function writeDefinition(
   directory: string,
-  extension: 'json' | 'ts',
   width: number,
   height: number,
   recipe: VideoRecipe,
+  stem = 'edit',
 ) {
   const definition: VideoDefinition = {
     canvas: { width, height, frameRate: 24, durationFrames: 4 },
@@ -160,12 +160,8 @@ async function writeDefinition(
       { type: 'video', clips: [{ asset: 'picture', at: 0, sourceOut: 4 }] },
     ],
   };
-  const path = join(directory, `edit.video.${extension}`);
-  const body = JSON.stringify(definition);
-  await writeFile(
-    path,
-    extension === 'ts' ? `export default ${body};\n` : body,
-  );
+  const path = join(directory, stem + '.video.ts');
+  await writeFile(path, `export default ${JSON.stringify(definition)};\n`);
   return path;
 }
 
@@ -240,7 +236,7 @@ async function frameHashes(path: string, filter: string) {
 test('T50 checks recipe declarations without running an enhancement backend', async (t) => {
   const dir = await scratch(t);
   await makeSource(dir, 640, 360, 12);
-  const valid = await writeDefinition(dir, 'json', 960, 540, [preset]);
+  const valid = await writeDefinition(dir, 960, 540, [preset]);
   const {
     recipes: [inspection],
   } = await inspectVideoRecipes(valid);
@@ -249,11 +245,11 @@ test('T50 checks recipe declarations without running an enhancement backend', as
     quality: 'high',
   });
   assert.equal(inspection?.steps[0]?.media.width, 960);
-  const mismatch = await writeDefinition(dir, 'json', 960, 544, [
+  const mismatch = await writeDefinition(dir, 960, 544, [
     { ...preset, height: 544 },
   ]);
   await assert.rejects(inspectVideoRecipes(mismatch), /original aspect ratio/);
-  const overScale = await writeDefinition(dir, 'json', 1920, 1080, [
+  const overScale = await writeDefinition(dir, 1920, 1080, [
     {
       ...preset,
       width: 1920,
@@ -313,14 +309,14 @@ test('T50 inspection rebases retained streams before planning a trim', async (t)
   const trim = { type: 'trim', start: 0, end: 0.25 } as const;
   const denoise = { type: 'denoise' } as const;
   const upscale = { ...preset, quality: 'fast' } as const;
-  const denoiseFile = await writeDefinition(dir, 'json', 640, 360, [
-    denoise,
-    trim,
-  ]);
-  const upscaleFile = await writeDefinition(dir, 'ts', 960, 540, [
-    upscale,
-    trim,
-  ]);
+  const denoiseFile = await writeDefinition(dir, 640, 360, [denoise, trim]);
+  const upscaleFile = await writeDefinition(
+    dir,
+    960,
+    540,
+    [upscale, trim],
+    'upscale',
+  );
   for (const file of [denoiseFile, upscaleFile]) {
     const {
       recipes: [recipe],
@@ -390,7 +386,7 @@ for (const {
     const source = await makeSource(dir, sourceWidth, sourceHeight, 4, 'null');
     assert.equal((await probeMedia(source)).video?.colorSpace, null);
     const [width, height] = targetSize;
-    const file = await writeDefinition(dir, 'json', width, height, [
+    const file = await writeDefinition(dir, width, height, [
       { ...preset, width, height, quality },
     ]);
     const derived = await compiledMedia(file, join(dir, 'cache'));
@@ -399,7 +395,7 @@ for (const {
 }
 
 test(
-  'T50 uses real fast inference, retains sync and tags, and shares TS/JSON cache with preview and render',
+  'T50 uses real fast inference, retains sync and tags, and shares the recipe cache with preview and render',
   { timeout: 30_000 },
   async (t) => {
     if (!(await supportsFastPreset()))
@@ -410,10 +406,9 @@ test(
     const cache = join(dir, 'cache');
     const trim = { type: 'trim', start: 0.041666, end: 0.375 } as const;
     const fastStep = { ...preset, quality: 'fast' } as const;
-    const json = await writeDefinition(dir, 'json', 960, 540, [trim, fastStep]);
-    const ts = await writeDefinition(dir, 'ts', 960, 540, [trim, fastStep]);
+    const file = await writeDefinition(dir, 960, 540, [trim, fastStep]);
     const events: VideoProcessingProgress[] = [];
-    const derived = await compiledMedia(json, cache, events);
+    const derived = await compiledMedia(file, cache, events);
     const trimEvent = events.find(
       (event) => event.step === 0 && event.status === 'completed',
     );
@@ -446,13 +441,13 @@ test(
     assert.ok(actual.every((hash, index) => hash !== lanczos[index]));
     assert.ok(new Set(actual).size > 1);
     const reused: VideoProcessingProgress[] = [];
-    assert.equal(await compiledMedia(ts, cache, reused), derived);
+    assert.equal(await compiledMedia(file, cache, reused), derived);
     assert.deepEqual(
       reused.map((event) => event.status),
       ['cache-hit', 'cache-hit'],
     );
     const rendered = join(dir, 'rendered.mp4');
-    await renderVideo(json, rendered, {
+    await renderVideo(file, rendered, {
       processing: { cacheDirectory: cache },
     });
     assert.equal((await videoPackets(rendered)).length, 4);
@@ -468,7 +463,7 @@ test(
     );
 
     const watcher = await new Promise<VideoWatchRevision>((resolve, reject) => {
-      void watchVideo(ts, {
+      void watchVideo(file, {
         processing: { cacheDirectory: cache },
         maxDimension: 960,
         onStatus(event) {
@@ -488,8 +483,8 @@ test(
       (config) => config.scale === 4 && config.modelStatus === 'ready',
     );
     if (highReady) {
-      await writeDefinition(dir, 'json', 960, 540, [trim, preset]);
-      assert.notEqual(await compiledMedia(json, cache, qualityChange), derived);
+      await writeDefinition(dir, 960, 540, [trim, preset]);
+      assert.notEqual(await compiledMedia(file, cache, qualityChange), derived);
       assert.deepEqual(
         qualityChange
           .filter(
@@ -501,11 +496,8 @@ test(
     }
 
     const change: VideoProcessingProgress[] = [];
-    await writeDefinition(dir, 'json', 960, 540, [
-      { ...trim, start: 0 },
-      fastStep,
-    ]);
-    assert.notEqual(await compiledMedia(json, cache, change), derived);
+    await writeDefinition(dir, 960, 540, [{ ...trim, start: 0 }, fastStep]);
+    assert.notEqual(await compiledMedia(file, cache, change), derived);
     assert.equal(
       change.filter(({ status }) => status === 'completed').length,
       2,
@@ -528,7 +520,7 @@ test('T50 high quality produces portrait UHD and composes with T49', async (t) =
   const dir = await scratch(t);
   const source = await makeSource(dir, 720, 1280, 6);
   const cache = join(dir, 'cache');
-  const file = await writeDefinition(dir, 'ts', 2160, 3840, [
+  const file = await writeDefinition(dir, 2160, 3840, [
     { ...preset, width: 2160, height: 3840 },
   ]);
   const output = await compiledMedia(file, cache);
@@ -542,7 +534,7 @@ test('T50 high quality produces portrait UHD and composes with T49', async (t) =
 
   if (support['low-latency-interpolation']?.status !== 'reported-supported')
     return;
-  const chain = await writeDefinition(dir, 'ts', 1080, 1920, [
+  const chain = await writeDefinition(dir, 1080, 1920, [
     { type: 'interpolateFrames', numerator: 30 },
     { ...preset, width: 1080, height: 1920 },
   ]);
@@ -560,7 +552,7 @@ test('T50 cancellation and bounded failures publish no media and allow retry', a
   const dir = await scratch(t);
   await makeSource(dir, 640, 360, 8, 'null');
   const cache = join(dir, 'cache');
-  const file = await writeDefinition(dir, 'json', 960, 540, [
+  const file = await writeDefinition(dir, 960, 540, [
     { ...preset, quality: 'fast' },
   ]);
   if (!(await supportsFastPreset())) return;
@@ -593,7 +585,7 @@ test('T50 cancellation and bounded failures publish no media and allow retry', a
   const bad = join(dir, 'bad');
   await mkdir(bad);
   await makeSource(bad, 640, 360, 8, `${tagged},setparams=color_trc=smpte2084`);
-  const hdr = await writeDefinition(bad, 'json', 960, 540, [
+  const hdr = await writeDefinition(bad, 960, 540, [
     { ...preset, quality: 'fast' },
   ]);
   await assert.rejects(
@@ -605,7 +597,7 @@ test('T50 cancellation and bounded failures publish no media and allow retry', a
   const variable = join(dir, 'variable');
   await mkdir(variable);
   await makeSource(variable, 640, 360, 8, `${tagged},setpts=PTS+gte(N\\,4)`);
-  const vfr = await writeDefinition(variable, 'json', 960, 540, [
+  const vfr = await writeDefinition(variable, 960, 540, [
     { ...preset, quality: 'fast' },
   ]);
   await assert.rejects(
@@ -629,7 +621,7 @@ test('T50 denoise uses a temporal model where supported and fails explicitly oth
     `${tagged},noise=alls=15:allf=t+u`,
   );
   const cache = join(dir, 'cache');
-  const file = await writeDefinition(dir, 'json', 640, 360, [
+  const file = await writeDefinition(dir, 640, 360, [
     { type: 'denoise', quality: 'strong' },
   ]);
   const processor = (await capabilities)['temporal-noise-filter'];

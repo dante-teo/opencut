@@ -175,8 +175,7 @@ test(
         },
       ],
     };
-    const json = await run.definition(value);
-    const ts = await run.definition(value, 'ts');
+    const definition = await run.definition(value);
     async function build(file: string) {
       const events: VideoProcessingProgress[] = [];
       const compiled = await compileVideo(file, {
@@ -190,7 +189,7 @@ test(
       );
       return { compiled, completed, events };
     }
-    const { compiled, completed, events } = await build(json);
+    const { compiled, completed, events } = await build(definition);
     assert.deepEqual(
       completed.map(({ status }) => status),
       ['completed', 'completed', 'completed'],
@@ -333,7 +332,7 @@ test(
       );
     }
 
-    const second = await build(ts);
+    const second = await build(definition);
     assert.deepEqual(
       second.completed.map(({ status }) => status),
       ['cache-hit', 'cache-hit', 'cache-hit'],
@@ -394,7 +393,7 @@ test(
     });
 
     await writeFile(derived, 'interrupted AI output');
-    const repaired = await build(json);
+    const repaired = await build(definition);
     assert.deepEqual(
       repaired.completed.map(({ status }) => status),
       ['cache-hit', 'cache-hit', 'completed'],
@@ -432,7 +431,7 @@ test(
         'data:text/javascript,' + encodeURIComponent(hook),
         cli,
         'render',
-        ts,
+        definition,
         '--recipe-cache',
         cacheDirectory,
         '--output',

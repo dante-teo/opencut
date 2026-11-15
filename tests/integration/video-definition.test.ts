@@ -65,9 +65,9 @@ const definition = () =>
     ],
   });
 
-async function writeDefinition(value: unknown, file = 'title.video.json') {
+async function writeDefinition(value: unknown, file = 'title.video.ts') {
   const path = join(directory, file);
-  await writeFile(path, JSON.stringify(value));
+  await writeFile(path, `export default ${JSON.stringify(value)};\n`);
   return path;
 }
 
@@ -109,7 +109,7 @@ describe('whole-video definitions', () => {
     expect(reordered.project.clips.map(({ id }) => id)).toEqual(
       first.project.clips.map(({ id }) => id).reverse(),
     );
-    expect(await readdir(directory)).toEqual(['title.video.json']);
+    expect(await readdir(directory)).toEqual(['title.video.ts']);
   });
 
   it('loads trusted TypeScript once per compilation and retains an immutable snapshot across edits', async () => {
@@ -192,7 +192,7 @@ describe('whole-video definitions', () => {
     await mkdir(folder);
     const path = await writeDefinition(
       definition(),
-      'definitions/title.video.json',
+      'definitions/title.video.ts',
     );
     const validate = run('validate', path);
     expect(validate.status, validate.stderr).toBe(0);
@@ -206,7 +206,7 @@ describe('whole-video definitions', () => {
       settings: { durationFrames: 600 },
       duration: { numerator: 1001, denominator: 50 },
     });
-    expect(await readdir(folder)).toEqual(['title.video.json']);
+    expect(await readdir(folder)).toEqual(['title.video.ts']);
   });
 
   it.each([
@@ -227,7 +227,7 @@ describe('whole-video definitions', () => {
       expect(
         JSON.parse(result.stderr.trimEnd().split('\n').at(-1)!).error.message,
       ).toMatch(diagnostic);
-      expect(await readdir(directory)).toEqual(['title.video.json']);
+      expect(await readdir(directory)).toEqual(['title.video.ts']);
     },
   );
 
@@ -364,7 +364,7 @@ describe('whole-video definitions', () => {
 });
 
 describe('definition validation', () => {
-  it('shares validation for TypeScript and JSON for duplicate IDs and subtitle timing', async () => {
+  it('validates duplicate IDs and subtitle timing in TypeScript definitions', async () => {
     const input = definition();
     for (const [value, message] of [
       [
@@ -418,11 +418,9 @@ describe('definition validation', () => {
         /Unknown font 'missing'/,
       ],
     ] as const) {
-      const json = await writeDefinition(value);
-      const ts = join(directory, 'title.video.ts');
-      await writeFile(ts, `export default ${JSON.stringify(value)};\n`);
-      for (const path of [ts, json])
-        await expect(compileVideo(path)).rejects.toThrow(message);
+      await expect(compileVideo(await writeDefinition(value))).rejects.toThrow(
+        message,
+      );
     }
   });
 
@@ -506,10 +504,22 @@ describe('definition validation', () => {
     expect(invalid.stderr).toMatch(/up to 256 visible subtitle cues/);
   });
 
+  it('rejects a valid definition saved as plain JSON', async () => {
+    const path = join(directory, 'title.video.json');
+    await writeFile(path, JSON.stringify(definition()));
+    await expect(compileVideo(path)).rejects.toThrow('.video.ts');
+    const result = run('validate', path);
+    expect(result.status).toBe(2);
+    expect(JSON.parse(result.stderr).error.message).toContain('.video.ts');
+  });
+
   it('rejects a saved snapshot even when named like a definition', async () => {
     const compiled = await compileVideo(await writeDefinition(definition()));
-    const path = join(directory, 'snapshot.video.json');
-    await writeFile(path, JSON.stringify(compiled.project));
+    const path = join(directory, 'snapshot.video.ts');
+    await writeFile(
+      path,
+      `export default ${JSON.stringify(compiled.project)};\n`,
+    );
     const result = run('validate', path);
     expect(result.status).toBe(1);
     expect(JSON.parse(result.stderr).error.code).toBe(

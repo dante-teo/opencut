@@ -207,9 +207,8 @@ test(
         ],
       },
     };
-    const json = await run.definition(value);
-    const ts = await run.definition(value, 'ts');
-    const compiled = await compileVideo(json);
+    const definition = await run.definition(value);
+    const compiled = await compileVideo(definition);
     const preview = previewVideo(compiled);
     const inspect = preview.inspectFrame(12);
     assert.deepEqual(
@@ -224,7 +223,8 @@ test(
 
     const final = (await renderCompiledVideo(compiled, run.path('final.mp4')))
       .path;
-    const parity = (await renderVideo(ts, run.path('typescript.mp4'))).path;
+    const repeated = (await renderVideo(definition, run.path('repeated.mp4')))
+      .path;
     const clip = (
       await preview.clip(
         { startFrame: 2, endFrame: 46 },
@@ -236,7 +236,7 @@ test(
       2, 3, 5, 6, 7, 8, 12, 16, 19, 20, 21, 24, 26, 27, 28, 29, 30, 31, 34, 35,
       41, 42, 43, 44, 45,
     ];
-    for (const path of [final, parity]) verifyVideoTimestamps(path, rate, 48);
+    for (const path of [final, repeated]) verifyVideoTimestamps(path, rate, 48);
     verifyVideoTimestamps(clip, rate, 44);
     const missing = run.path('dropped-frame.mp4');
     ffmpeg([
@@ -277,8 +277,12 @@ test(
     );
     const frames = decodeFrames(final, positions, width, height);
     const rgb = (frame: number) => frames.get(frame)!;
-    const tsFrames = decodeFrames(parity, positions, width, height);
-    const parityMetrics = assertFramesMatch(tsFrames, frames, repeatTolerance);
+    const repeatedFrames = decodeFrames(repeated, positions, width, height);
+    const repeatMetrics = assertFramesMatch(
+      repeatedFrames,
+      frames,
+      repeatTolerance,
+    );
     const clipFrames = decodeFrames(
       clip,
       positions.map((frame) => frame - 2),
@@ -402,7 +406,7 @@ test(
       retimedPixels,
       vfrSampling,
       gradedColor,
-      formatParity: parityMetrics,
+      repeatBuild: repeatMetrics,
       clipPreview: clipMetrics,
       pngPreview: frameMetrics.metrics,
       artifacts: await run.artifacts(
@@ -612,7 +616,6 @@ test('audio effect ordering has the expected noncommutative gain', async (t) => 
           },
         ],
       },
-      'json',
       name,
     );
     const path = (await renderVideo(file, run.path(name + '.mp4'))).path;
@@ -670,7 +673,7 @@ test('a definition edited during recipe processing publishes a single revision',
         if (status !== 'started') return;
         value.canvas.backgroundColor = '#00FF00';
         value.tracks[0]!.clips[0]!.at = 6;
-        writeFileSync(file, JSON.stringify(value));
+        writeFileSync(file, `export default ${JSON.stringify(value)};\n`);
         edited = true;
       },
     },

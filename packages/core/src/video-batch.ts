@@ -144,7 +144,7 @@ export async function batchRenderVideo(
   options: VideoBatchOptions,
 ): Promise<VideoBatchResult> {
   if (!isVideoDefinitionPath(file))
-    throw new VideoDefinitionError('Expected a .video.ts or .video.json file.');
+    throw new VideoDefinitionError('Expected a .video.ts file.');
   if (process.platform !== 'darwin' && process.platform !== 'linux')
     throw new MediaError('Bounded batch rendering requires macOS or Linux.');
   const plan = planVariants(variants, options.only);

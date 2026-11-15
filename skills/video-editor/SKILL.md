@@ -1,11 +1,10 @@
 ---
 name: video-editor
-description: Create, review and render video with OpenCut TypeScript or JSON definitions.
+description: Create, review and render video with OpenCut TypeScript definitions.
 ---
 
-Make a `.video.ts` or `.video.json` file the source of truth. In TypeScript,
-default-export a value constructed with `defineVideo` from `@opencut/sdk`.
-Use JSON when executable code is unnecessary. Run `opencut --help` to
+Default-export a value from `defineVideo` in a `.video.ts` file. Import
+`defineVideo` from `@opencut/sdk`. Run `opencut --help` to
 discover commands and `opencut render --help` for export controls.
 
 1. Probe inputs with `opencut probe FILE --json`. Reference media paths
@@ -24,8 +23,8 @@ discover commands and `opencut render --help` for export controls.
    `opencut timeline inspect DEFINITION --frame N --json`.
 4. Review the composition with `opencut preview DEFINITION --watch`, the
    desktop **Open definition** action, or a deterministic frame, clip, or
-   contact sheet from `opencut preview --help`. TypeScript executes as trusted
-   local code. A failed rebuild leaves the last valid preview available.
+   contact sheet from `opencut preview --help`. Authored TypeScript executes as
+   trusted local code. A failed rebuild leaves the last valid preview available.
 5. Deliver a new MP4 with `opencut render DEFINITION --output final.mp4`.
    The CLI does not need Electron or a running worker. Export an SRT or VTT
    with `opencut subtitles export DEFINITION --output final.srt` if requested.
@@ -36,7 +35,7 @@ discover commands and `opencut render --help` for export controls.
 7. If interrupted, run `opencut build inspect DEFINITION --json` with the
    same cache and parameters. Retry to reuse verified recipes and restart
    unfinished encoding. For transfer, run `opencut package DEFINITION --output bundle`
-   and `opencut package verify bundle`. Render `bundle/opencut.bundle.video.json`
+   and `opencut package verify bundle`. Render `bundle/opencut.bundle.video.ts`
    with the required backends.
 8. Probe the results and report dimensions, frame counts, failed variants,
    and recipe cache reuse when relevant.

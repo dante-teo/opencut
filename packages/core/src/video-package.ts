@@ -6,6 +6,7 @@ import {
   rename,
   rm,
   statfs,
+  writeFile,
 } from 'node:fs/promises';
 import { isBuiltin } from 'node:module';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
@@ -30,6 +31,7 @@ import {
   packageManifestName,
   packageRecipes,
   portableRelativePath,
+  serializePackageEntry,
   verifyPackageContents,
 } from './video-package-format.js';
 import type { VideoPackageManifest } from './video-package-format.js';
@@ -64,9 +66,7 @@ export async function packageVideo(
 ) {
   const source = resolve(file);
   if (!isVideoDefinitionPath(source) || basename(source) === packageEntryName)
-    throw new VideoDefinitionError(
-      'Choose an authored .video.ts or .video.json definition.',
-    );
+    throw new VideoDefinitionError('Choose an authored .video.ts definition.');
   const project = resolve(root ?? dirname(source));
   if (
     !(await lstat(project)).isDirectory() ||
@@ -182,8 +182,9 @@ export async function packageVideo(
       item.path = await add(resolve(dirname(source), item.path));
   }
 
+  const entrySource = serializePackageEntry(definition);
   const total =
-    Buffer.byteLength(JSON.stringify(definition) + '\n') +
+    Buffer.byteLength(entrySource) +
     [...dependencies.values()].reduce((sum, item) => sum + item.bytes, 0);
   assertUniquePackagePaths([
     packageManifestName,
@@ -221,7 +222,12 @@ export async function packageVideo(
           `Package dependency '${path}' changed during copying.`,
         );
     const entry = join(stage, packageEntryName);
-    await writeCheckpoint(entry, definition);
+    await writeFile(entry, entrySource, {
+      flag: 'wx',
+      mode: 0o600,
+      signal,
+      flush: true,
+    });
     const { bytes, sha256 } = await fingerprintFile(entry, signal);
     files.push({ path: packageEntryName, bytes, sha256 });
     const { recipes, native } = packageRecipes(definition);
