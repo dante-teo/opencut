@@ -5,14 +5,16 @@ import { extname, join, resolve } from 'node:path';
 import { renderVideoTimeline } from '@opencut/media';
 import type { VideoTimelineResult } from '@opencut/media';
 import { compileVideoInput, isVideoDefinitionPath } from './video-files.js';
-import { VideoDefinitionError } from './video-compiler.js';
-import type { CompiledVideo, VideoSourceProbes } from './video-compiler.js';
+import { VideoDefinitionError } from './video-definition.js';
+import type { CompiledVideo } from './video-compiler.js';
+import type { VideoSourceProbes } from './video-assets.js';
 import {
   copyVideoInput,
   identifyVideoInput,
   videoInputIdentity,
 } from './video-input.js';
 import type { VideoInput } from './video-input.js';
+import type { VideoProcessingOptions } from './video-processing.js';
 import { readIsolatedDefinitionScript } from './video-script.js';
 
 export interface VideoWatchRevision {
@@ -33,6 +35,7 @@ export type VideoWatchStatus = {
 export interface VideoWatchOptions {
   onStatus: (status: VideoWatchStatus) => void;
   maxDimension?: number;
+  processing?: VideoProcessingOptions;
   signal?: AbortSignal;
 }
 
@@ -153,6 +156,7 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
         preview: true,
         signal,
         probes,
+        processing: options.processing,
         loadScript: (file, record) =>
           readIsolatedDefinitionScript(file, signal, record),
         inputs: {

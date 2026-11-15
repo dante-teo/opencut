@@ -9,7 +9,10 @@ Use JSON when executable code is unnecessary. Run `opencut --help` to
 discover commands and `opencut render --help` for export controls.
 
 1. Probe inputs with `opencut probe FILE --json`. Reference media paths
-   relative to the definition. Keep original media intact.
+   relative to the definition. Keep original media intact. Use ordered asset
+   recipes for reusable preprocessing. Run
+   `opencut recipes inspect DEFINITION --json` to check the steps without
+   transcoding.
 2. Set canvas size, frame rate, ordered tracks, and clip ranges. Use integer
    frame positions or exact rationals as documented. Add subtitles, effects,
    fades, and transitions to the definition itself.

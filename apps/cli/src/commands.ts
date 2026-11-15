@@ -1,8 +1,13 @@
 import { parseArgs } from 'node:util';
+import {
+  processingOptionHelp,
+  processingOptionTypes,
+} from './recipe-options.js';
 import { renderOptionHelp, renderOptionTypes } from './render-options.js';
 import { UsageError } from './usage.js';
 
 const optionTypes = {
+  ...processingOptionTypes,
   ...renderOptionTypes,
   output: { type: 'string' },
   timestamp: { type: 'string' },
@@ -24,15 +29,21 @@ const definition = '<definition.video.ts|definition.video.json>';
 const position = '(--frame <n> | --timestamp <time>)';
 
 const commands = {
-  validate: { args: definition, options: [] },
-  inspect: { args: definition, options: [] },
+  validate: { args: definition, options: Object.keys(processingOptionTypes) },
+  inspect: { args: definition, options: Object.keys(processingOptionTypes) },
+  'recipes inspect': { args: definition, options: [] },
+  'recipes validate': { args: definition, options: [] },
   'timeline inspect': {
     args: `${definition} ${position}`,
     options: ['frame', 'timestamp'],
   },
   render: {
     args: `${definition} --output <new.mp4>`,
-    options: ['output', ...Object.keys(renderOptionTypes)],
+    options: [
+      'output',
+      ...Object.keys(renderOptionTypes),
+      ...Object.keys(processingOptionTypes),
+    ],
   },
   preview: {
     args: `${definition} --watch [--size <64..1920>]`,
@@ -143,6 +154,9 @@ export function printHelp(positionals: string[], json: boolean | undefined) {
     'Usage: opencut <command> [options]',
     ...selected.map(({ usage }) => '  ' + usage),
     ...(scope === 'render' ? [renderOptionHelp] : []),
+    ...(['render', 'validate', 'inspect'].includes(scope)
+      ? [processingOptionHelp]
+      : []),
   ].join('\n');
   console.log(
     json ? JSON.stringify({ commands: selected, help }, null, 2) : help,

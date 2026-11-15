@@ -28,3 +28,22 @@ definition. It observes source, imported modules and referenced media. Failed
 or superseded builds cannot publish over the last valid preview. Export pins
 the selected revision's source copies for the duration of the render. The
 watcher removes superseded copies after the last export using them finishes.
+
+Asset resolution checks each recipe against its source and estimates the
+output of each step. The processing pipeline materializes referenced assets
+and probes each completed step before binding the timeline. A recipe is an
+ordered chain of single-output steps. A step key includes the canonical source
+path, file identity and probe metadata or its predecessor’s key, that step’s
+parameters and format, and the FFmpeg and ffprobe build versions. Equivalent
+prefixes share results across assets and processes. Timeline-only edits leave
+those keys intact.
+
+A SQLite writer lock per cache shard coordinates foreground processes. Only
+one writer can encode or repair a particular entry. FFmpeg writes to a private
+attempt directory within the staging directory for its key. OpenCut probes
+the output, rechecks the input identity, and publishes the output and its
+identity together with a directory rename.
+Aborted work removes its stage. A guard stops the encoder process group if
+the build process exits unexpectedly. The next request for a key can clear
+its abandoned stage and gets a fresh attempt directory. Watched revisions
+pin copies of their final derived assets just as they pin unprocessed sources.

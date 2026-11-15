@@ -16,6 +16,7 @@ import {
   subtitleStyleSchema,
   subtitleTrackSchema,
 } from './subtitles.js';
+import { videoRecipeSchema } from './video-recipe-schema.js';
 import { transitionSchema } from './transitions.js';
 
 const frame = z.int().nonnegative();
@@ -86,6 +87,7 @@ const asset = assetSchema
   .extend({
     path: relativeMediaPathSchema,
     kind: z.enum(['video', 'image', 'audio']),
+    recipe: videoRecipeSchema.optional(),
   });
 const font = z.union([
   z.strictObject({ path: relativeMediaPathSchema }),
@@ -133,3 +135,35 @@ export type VideoDefinition = z.input<typeof videoDefinitionSchema>;
 export function defineVideo(definition: VideoDefinition): VideoDefinition {
   return definition;
 }
+
+export class VideoDefinitionError extends Error {
+  override name = 'VideoDefinitionError';
+  readonly code = 'INVALID_VIDEO_DEFINITION';
+}
+
+export function definitionLoadError(path: string, cause: unknown) {
+  return new VideoDefinitionError(
+    `Cannot load '${path}': ${cause instanceof Error ? cause.message : String(cause)}`,
+    { cause },
+  );
+}
+
+export function parseVideoDefinition(value: unknown) {
+  const parsed = videoDefinitionSchema.safeParse(value);
+  if (!parsed.success)
+    throw new VideoDefinitionError(
+      parsed.error.issues
+        .map(
+          ({ path, message }) =>
+            `${path.length ? path.join('.') : 'Definition'}: ${message}`,
+        )
+        .join('\n'),
+    );
+
+  return parsed.data;
+}
+
+export type ParsedVideoDefinition = ReturnType<typeof parseVideoDefinition>;
+export type VideoAssetDefinition = NonNullable<
+  ParsedVideoDefinition['assets']
+>[string];

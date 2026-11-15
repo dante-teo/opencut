@@ -4,6 +4,7 @@ import { MediaError, renderVideoTimeline } from '@opencut/media';
 import type { RenderControls } from '@opencut/media';
 import { withRenderSources } from './render-sources.js';
 import type { CompiledVideo } from './video-compiler.js';
+import type { VideoProcessingOptions } from './video-processing.js';
 import { compileVideo } from './video-files.js';
 
 export type VideoRenderOptions = Omit<
@@ -11,6 +12,7 @@ export type VideoRenderOptions = Omit<
   'range' | 'maxDimension'
 > & {
   burnSubtitles?: boolean;
+  processing?: VideoProcessingOptions | undefined;
 };
 
 async function statIfPresent(path: string) {
@@ -27,11 +29,13 @@ async function statIfPresent(path: string) {
 async function protectInputs(
   video: CompiledVideo,
   output: string,
+  boundSources: Iterable<string>,
   signal?: AbortSignal,
 ) {
   const destination = await statIfPresent(resolve(output));
   if (!destination) return;
   for (const path of new Set([
+    ...boundSources,
     video.path,
     ...video.project.assets.map(({ file }) =>
       resolve(dirname(video.path), file.path),
@@ -48,11 +52,20 @@ async function protectInputs(
 export async function renderCompiledVideo(
   video: CompiledVideo,
   output: string,
-  { burnSubtitles = true, ...options }: VideoRenderOptions = {},
+  {
+    burnSubtitles = true,
+    ...options
+  }: Omit<VideoRenderOptions, 'processing'> = {},
 ) {
   options.signal?.throwIfAborted();
-  if (options.overwrite) await protectInputs(video, output, options.signal);
-  return withRenderSources(video, options.signal, (plan) => {
+  return withRenderSources(video, options.signal, async (plan) => {
+    if (options.overwrite)
+      await protectInputs(
+        video,
+        output,
+        plan.sourceMetadata.keys(),
+        options.signal,
+      );
     if (!burnSubtitles)
       plan.visualClips = plan.visualClips.filter((clip) => !clip.subtitle);
     return renderVideoTimeline({ ...plan, ...options, output });
@@ -63,11 +76,12 @@ export async function renderCompiledVideo(
 export async function renderVideo(
   file: string,
   output: string,
-  options: VideoRenderOptions = {},
+  { processing, ...options }: VideoRenderOptions = {},
 ) {
   const video = await compileVideo(file, {
     signal: options.signal,
     preview: options.burnSubtitles === false,
+    processing,
   });
   return renderCompiledVideo(video, output, options);
 }

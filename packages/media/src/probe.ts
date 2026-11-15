@@ -156,10 +156,38 @@ export function audioSourceDuration(source: MediaMetadata): number | null {
     : source.audio.durationSeconds + offset;
 }
 
-export async function probeMedia(
+const dialogueFormats =
+  'image2,jpeg_pipe,png_pipe,apng,gif,gif_pipe,webp_pipe,mp3,ogg,wav,flac,mov,matroska,webm';
+const recipeFormats = `${dialogueFormats},bmp_pipe,tiff_pipe,avi,aac,aiff`;
+
+function localInputArguments(formats: string) {
+  return ['-protocol_whitelist', 'file', '-format_whitelist', formats];
+}
+
+export function recipeInputArguments() {
+  return localInputArguments(recipeFormats);
+}
+
+export function probeMedia(
   file: string,
   signal?: AbortSignal,
   options?: { localMediaOnly: boolean },
+): Promise<MediaMetadata> {
+  return probe(
+    file,
+    signal,
+    options?.localMediaOnly ? localInputArguments(dialogueFormats) : [],
+  );
+}
+
+export function probeRecipeMedia(file: string, signal?: AbortSignal) {
+  return probe(file, signal, recipeInputArguments());
+}
+
+async function probe(
+  file: string,
+  signal: AbortSignal | undefined,
+  inputArguments: string[],
 ): Promise<MediaMetadata> {
   checkRenderSignal(signal);
   const path = await localFile(file);
@@ -168,14 +196,7 @@ export async function probeMedia(
     [
       '-v',
       'error',
-      ...(options?.localMediaOnly
-        ? [
-            '-protocol_whitelist',
-            'file',
-            '-format_whitelist',
-            'image2,jpeg_pipe,png_pipe,apng,gif,gif_pipe,webp_pipe,mp3,ogg,wav,flac,mov,matroska,webm',
-          ]
-        : []),
+      ...inputArguments,
       '-show_format',
       '-show_streams',
       '-of',

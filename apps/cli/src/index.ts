@@ -20,6 +20,8 @@ async function run(args: string[]) {
 
   const { command, file } = resolveCommand(positionals, values);
   switch (command) {
+    case 'recipes inspect':
+    case 'recipes validate':
     case 'validate':
     case 'inspect':
     case 'render': {

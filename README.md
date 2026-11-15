@@ -30,6 +30,7 @@ details.
 ## Documentation
 
 - [Video-as-Code reference and runnable examples](docs/VIDEO_DEFINITIONS.md)
+- [Media preprocessing recipes](docs/VIDEO_DEFINITIONS.md#media-preprocessing-recipes)
 - [Architecture and compatibility](docs/ARCHITECTURE.md)
 - [CLI reference](docs/CLI.md)
 - [TypeScript SDK](docs/SDK.md)

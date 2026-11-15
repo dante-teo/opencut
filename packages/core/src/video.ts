@@ -14,8 +14,12 @@ export type {
   OnlineMediaSearch,
 } from './online-media.js';
 export { readSubtitleFile, writeSubtitleFile } from './subtitle-files.js';
-export { compileVideo, isVideoDefinitionPath } from './video-files.js';
-export { VideoDefinitionError } from './video-compiler.js';
+export {
+  compileVideo,
+  inspectVideoRecipes,
+  isVideoDefinitionPath,
+} from './video-files.js';
+export { VideoDefinitionError } from './video-definition.js';
 export type { CompiledVideo } from './video-compiler.js';
 export { previewVideo, VideoPreviewRangeError } from './video-preview.js';
 export type {
@@ -31,3 +35,10 @@ export type {
   VideoWatchRevision,
   VideoWatchStatus,
 } from './video-watch.js';
+
+export type { VideoRecipe } from './video-recipe-schema.js';
+export type {
+  VideoProcessingOptions,
+  VideoProcessingProgress,
+} from './video-processing.js';
+export type { VideoRecipeInspection } from './video-recipe.js';

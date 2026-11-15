@@ -106,3 +106,14 @@ send a second SIGINT (Ctrl-C) or SIGTERM to terminate the command. Review
 frames at meaningful boundaries and verify duration,
 frame rate, dimensions and audio after rendering. For complete 20-second
 definitions and fixture setup, see [Video as code](../../../docs/VIDEO_DEFINITIONS.md).
+
+## Media recipes
+
+Set `recipe` on an asset to run steps in order. Available types are `trim`,
+`crop`, `resize`, `frameRate`, `extractAudio`, `normalizeAudio`, and `convert`.
+Set `kind` to the final result and use processed time for clip source ranges.
+Recipe trims use seconds from the input container start and retain the
+selected audio stream when it overlaps the trim.
+Use `visual.crop` for a crop that belongs to an individual timeline clip.
+The [recipe reference](../../../docs/VIDEO_DEFINITIONS.md#media-preprocessing-recipes)
+includes step parameters and paired TypeScript and JSON examples.

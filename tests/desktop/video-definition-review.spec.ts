@@ -108,3 +108,49 @@ test('reviews consecutive definition builds and keeps the last playable revision
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('previews and exports a recipe-backed definition', async () => {
+  const directory = await mkdtemp(
+    resolve('tests/fixtures/generated/t48-desktop-'),
+  );
+  const path = resolve('examples/video/recipes.video.json');
+  const output = join(directory, 'desktop.mp4');
+  const { application, page } = await launchDesktop({
+    XDG_CACHE_HOME: directory,
+  });
+  try {
+    await application.evaluate(
+      ({ dialog }, { path, output }) => {
+        dialog.showOpenDialog = async () => ({
+          canceled: false,
+          filePaths: [path],
+        });
+        dialog.showSaveDialog = async () => ({
+          canceled: false,
+          filePath: output,
+        });
+      },
+      { path, output },
+    );
+    await page.getByRole('button', { name: 'Open definition' }).click();
+    const workspace = page.getByLabel('Definition review');
+    await expect(
+      workspace.getByRole('status', { name: 'Compilation status' }),
+    ).toContainText('Preview ready', { timeout: 20_000 });
+    await expect(workspace.getByLabel('Current frame')).toHaveText(
+      'Frame 0 / 23',
+    );
+    await workspace.getByRole('button', { name: 'Export MP4' }).click();
+    await expect(workspace.getByLabel('Export result')).toContainText(
+      'desktop.mp4',
+    );
+    const direct = join(directory, 'foreground.mp4');
+    await renderVideo(path, direct, {
+      processing: { cacheDirectory: join(directory, 'opencut', 'recipes-v1') },
+    });
+    expect(await readFile(output)).toEqual(await readFile(direct));
+  } finally {
+    await application.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

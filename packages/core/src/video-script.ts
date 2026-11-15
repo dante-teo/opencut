@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { registerHooks } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
-import { definitionLoadError, VideoDefinitionError } from './video-compiler.js';
+import {
+  definitionLoadError,
+  VideoDefinitionError,
+} from './video-definition.js';
 import { identifyVideoInput } from './video-input.js';
 import type { RecordVideoInput, VideoInput } from './video-input.js';
 

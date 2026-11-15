@@ -177,6 +177,51 @@ Unix epoch. Identical definitions and sources on the same toolchain build
 the same composition. A trusted TypeScript script can supply different
 inputs on different builds.
 
+## Media preprocessing recipes
+
+An asset can declare a `recipe` of 1–32 ordered steps. Set `kind` to the
+final media kind. Multiple declarations can use the same source with different
+recipes. The [TypeScript](../examples/video/recipes.video.ts) and
+[JSON](../examples/video/recipes.video.json) examples share a trim between a
+cropped video and a normalized soundtrack.
+
+| `type`           | Parameters and behavior                                                                                                                                                                             |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `trim`           | `start`, `end` in seconds from the current input’s container start. End is exclusive. Cuts each retained stream at the same boundaries and rebases the range. Video cuts align to available frames. |
+| `crop`           | Integer `x`, `y`, `width`, `height` within the current oriented image. Cropping before resizing uses the original pixel grid.                                                                       |
+| `resize`         | Integer `width`, `height` in square pixels. Optional `method` is `bicubic` (default), `bilinear`, `lanczos`, or `nearest`.                                                                          |
+| `frameRate`      | `numerator` and optional `denominator` (default 1), 1–120 fps. Uses FFmpeg’s nearest timestamp drop/duplicate conversion. Fractional frame boundaries can round by a frame.                         |
+| `extractAudio`   | Selects the input’s default audio stream and outputs audio. Pads a delayed audio start with silence to retain its position.                                                                         |
+| `normalizeAudio` | One-pass loudness normalization. Optional `targetLufs` defaults to −16 and accepts −40 through −10. Requires audio.                                                                                 |
+| `convert`        | `format` is `mov` (FFV1 with PCM) or `mp4` (H.264 with AAC and even dimensions) for video, `png` for images, and `wav` (float PCM) or `flac` for audio.                                             |
+
+Steps select the same primary video and audio streams as composition. By
+default, each step writes lossless MOV, PNG, or WAV for the resulting kind.
+A conversion applies to that step. Put it last when you want that format
+as the asset consumed by the renderer. Use either `recipe` or `freezeFrame`
+on an asset.
+
+Recipe inputs are single local media files. Supported formats include MOV/MP4,
+MKV/WebM, AVI, AAC, AIFF, FLAC, MP3, Ogg, WAV, BMP, TIFF, JPEG, PNG, WebP,
+GIF, and APNG. A video trim must intersect the picture stream. The result
+includes audio when the selected audio stream overlaps the range. For a
+source whose picture starts at 0.2 s and audio starts at 0 s, a trim from
+0.8 s to 1 s selects the picture at those container timestamps. If the audio
+ends before 0.8 s, the result contains picture only.
+
+Clip source positions refer to the final processed media. For example, a
+trim from 8 to 10 seconds makes the selected picture available from source
+position zero on the derived asset. Composition uses the probed duration and
+stream offsets of the derived media.
+Use an asset recipe to share a baked crop across clips. Use a clip’s
+`visual.crop` for a crop specific to that placement.
+
+Use `opencut recipes inspect DEFINITION --json` for the ordered steps and
+estimated metadata, or `opencut recipes validate DEFINITION` to check the
+recipe declarations and input streams. These commands probe sources without
+transcoding. `opencut validate`, `inspect`, `preview`, and `render` compile
+and materialize referenced recipes as needed. See [CLI flags and limits](CLI.md#media-recipes).
+
 ## Inspect, preview and render
 
 Open [the review example](../examples/video/review.video.ts) to try a two-second

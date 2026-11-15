@@ -1,37 +1,32 @@
 import { createHash } from 'node:crypto';
-import { realpath } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import {
   audioSourceDuration,
-  probeMedia,
   videoSourceDuration,
   validateEmbeddedFont,
   validateSubtitleBurnIn,
 } from '@opencut/media';
 import type { MediaMetadata } from '@opencut/media';
-import { describeMediaAsset, readEmbeddedFont } from './video-assets.js';
+import { compileVideoAssets, readEmbeddedFont } from './video-assets.js';
+import type { CompiledVideoAsset, VideoAssetOptions } from './video-assets.js';
 import { validateProject } from './project.js';
-import type { MediaAsset, Project, TimelineClip } from './project.js';
+import type { Project, TimelineClip } from './project.js';
 import { bindRenderSources } from './render-sources.js';
 import { planProjectRender } from './render-plan.js';
 import { frameTime, rationalTime } from './time.js';
 import type { FrameRate, RationalTime } from './time.js';
-import { videoDefinitionSchema } from './video-definition.js';
-import type { VideoDefinition } from './video-definition.js';
-import { identifyVideoInput, videoInputIdentity } from './video-input.js';
+import {
+  definitionLoadError,
+  parseVideoDefinition,
+  VideoDefinitionError,
+} from './video-definition.js';
+import type {
+  ParsedVideoDefinition,
+  VideoDefinition,
+} from './video-definition.js';
+import { identifyVideoInput } from './video-input.js';
 import type { RecordVideoInput } from './video-input.js';
-
-export class VideoDefinitionError extends Error {
-  override name = 'VideoDefinitionError';
-  readonly code = 'INVALID_VIDEO_DEFINITION';
-}
-
-export function definitionLoadError(path: string, cause: unknown) {
-  return new VideoDefinitionError(
-    `Cannot load '${path}': ${cause instanceof Error ? cause.message : String(cause)}`,
-    { cause },
-  );
-}
+import type { VideoRecipeInspection } from './video-recipe.js';
 
 function stableId(kind: string, ...parts: unknown[]) {
   return (
@@ -60,34 +55,20 @@ type BoundRenderPlan = ReturnType<typeof bindRenderSources>;
 type AuthoredTrack = VideoDefinition['tracks'][number];
 type AuthoredClip = AuthoredTrack['clips'][number];
 type AuthoredTime = AuthoredClip['at'];
-type AuthoredAsset = NonNullable<VideoDefinition['assets']>[string];
-type CompiledAsset = {
-  asset: MediaAsset;
-  source: MediaMetadata;
-  sourceIdentity: string;
-};
 type FontStyle = {
   font?: string | undefined;
   embeddedFont?: string | null | undefined;
 };
-export type CompilationOptions = {
-  signal?: AbortSignal | undefined;
-  probes?: VideoSourceProbes;
-  preview?: boolean;
-  inputs?: {
-    record: RecordVideoInput;
-    snapshotMedia(path: string): Promise<string>;
-  };
-};
+export type CompilationOptions = VideoAssetOptions & { preview?: boolean };
 
 const epoch = '1970-01-01T00:00:00.000Z';
-export type VideoSourceProbes = Map<string, MediaMetadata>;
 
 export interface CompiledVideo {
   readonly path: string;
   /** A deeply frozen project snapshot. */
   readonly project: Project;
   readonly frameCount: number;
+  readonly recipes: readonly VideoRecipeInspection[];
   /** Media identity recorded before probing, keyed by the bound source path. */
   sourceIdentity(path: string): string | undefined;
   resolveRender(): Promise<
@@ -101,26 +82,19 @@ export async function compileDefinition(
   options: CompilationOptions = {},
 ): Promise<CompiledVideo> {
   const { signal, preview = false } = options;
-  const parsed = videoDefinitionSchema.safeParse(value);
   signal?.throwIfAborted();
-  if (!parsed.success)
-    throw new VideoDefinitionError(
-      parsed.error.issues
-        .map(
-          ({ path, message }) =>
-            `${path.length ? path.join('.') : 'Definition'}: ${message}`,
-        )
-        .join('\n'),
-    );
-
-  const { project, assets } = await buildProject(path, parsed.data, options);
+  const { project, assets, recipes } = await buildProject(
+    path,
+    parseVideoDefinition(value),
+    options,
+  );
   let renderPlan: BoundRenderPlan;
   try {
     const plan = planProjectRender(project);
     if (!preview) validateSubtitleBurnIn(plan.visualClips);
     renderPlan = bindRenderSources(
       plan,
-      (assetId) => assets.get(assetId)!.source.path,
+      (assetId) => assets.get(assetId)!.media!.metadata.path,
     );
   } catch (cause) {
     throw new VideoDefinitionError(
@@ -129,19 +103,19 @@ export async function compileDefinition(
     );
   }
   signal?.throwIfAborted();
-  const sourceMetadata = new Map(
-    Array.from(assets.values(), ({ source }) => [source.path, source] as const),
-  );
-  const sourceIdentities = new Map(
-    Array.from(
-      assets.values(),
-      ({ source, sourceIdentity }) => [source.path, sourceIdentity] as const,
-    ),
-  );
+  const sourceMetadata = new Map<string, MediaMetadata>();
+  const sourceIdentities = new Map<string, string>();
+  for (const { media } of assets.values()) {
+    if (!media) continue;
+    const { metadata, identity } = media;
+    sourceMetadata.set(metadata.path, freeze(metadata));
+    sourceIdentities.set(metadata.path, identity);
+  }
   return Object.freeze({
     path,
     project: freeze(project),
     frameCount: renderPlan.frameCount,
+    recipes: freeze(recipes),
     sourceIdentity: (path: string) => sourceIdentities.get(path),
     async resolveRender() {
       return {
@@ -154,9 +128,10 @@ export async function compileDefinition(
 
 async function buildProject(
   path: string,
-  definition: VideoDefinition,
-  { signal, probes = new Map(), inputs }: CompilationOptions,
+  definition: ParsedVideoDefinition,
+  options: CompilationOptions,
 ) {
+  const { signal, inputs } = options;
   const {
     canvas,
     assets = {},
@@ -246,21 +221,16 @@ async function buildProject(
     }
   }
 
-  const compiledAssets = new Map<string, CompiledAsset>();
-  for (const id of Object.keys(assets).sort()) {
-    const asset = assets[id]!;
-    const sourcePath = resolve(dirname(path), asset.path);
-    inputs?.record(identifyVideoInput(sourcePath, 'media'));
-    const compiled = await compileAsset(
-      id,
-      asset,
-      inputs ? await inputs.snapshotMedia(sourcePath) : sourcePath,
-      probes,
-      signal,
-    );
-    compiledAssets.set(id, compiled);
-    project.assets.push(compiled.asset);
-  }
+  const clipAssets = new Set(
+    project.clips.flatMap(({ assetId }) => (assetId ? [assetId] : [])),
+  );
+  const compiled = await compileVideoAssets(
+    dirname(path),
+    assets,
+    clipAssets,
+    options,
+  );
+  project.assets = [...compiled.assets.values()].map(({ asset }) => asset);
 
   const validated = validateProject(project);
   if (!validated.success)
@@ -274,20 +244,20 @@ async function buildProject(
       { cause: validated.error },
     );
 
-  validateSourceBounds(validated.project, compiledAssets, clipLocations);
-
-  return { project: validated.project, assets: compiledAssets };
+  validateSourceBounds(validated.project, compiled.assets, clipLocations);
+  return { project: validated.project, ...compiled };
 }
 
 function validateSourceBounds(
   project: Project,
-  assets: ReadonlyMap<string, CompiledAsset>,
+  assets: ReadonlyMap<string, CompiledVideoAsset>,
   clipLocations: readonly string[],
 ) {
   const trackTypes = new Map(project.tracks.map(({ id, type }) => [id, type]));
   for (const [index, clip] of project.clips.entries()) {
     if (clip.assetId === undefined) continue;
-    const { source, asset } = assets.get(clip.assetId)!;
+    const { media, asset } = assets.get(clip.assetId)!;
+    const source = media!.metadata;
     if (asset.metadata?.kind === 'image') continue;
     const audio = trackTypes.get(clip.trackId) === 'audio';
     if (audio && !source.audio)
@@ -354,70 +324,6 @@ async function loadFonts(
       );
     return { ...properties, embeddedFont };
   };
-}
-
-async function compileAsset(
-  id: string,
-  definition: AuthoredAsset,
-  sourcePath: string,
-  probes: VideoSourceProbes,
-  signal?: AbortSignal,
-): Promise<CompiledAsset> {
-  const { path, kind, name = id, freezeFrame, ...properties } = definition;
-  const file = { type: 'relative' as const, path };
-  const sourceIdentity = videoInputIdentity(sourcePath);
-  const source = await probeVideoSource(id, sourcePath, probes, signal);
-  if (
-    sourceIdentity === null ||
-    sourceIdentity !== videoInputIdentity(sourcePath) ||
-    sourceIdentity !== videoInputIdentity(source.path)
-  )
-    throw new VideoDefinitionError(
-      `assets.${id}.path: Media '${sourcePath}' changed during compilation. Retry after the write completes.`,
-    );
-  const described = describeMediaAsset(source);
-  if (freezeFrame) {
-    const end = videoSourceDuration(source);
-    if (
-      kind !== 'image' ||
-      described.metadata.kind !== 'video' ||
-      !source.video?.frameRate ||
-      (end !== null && freezeFrame.numerator / freezeFrame.denominator >= end)
-    )
-      throw new VideoDefinitionError(
-        `assets.${id}.freezeFrame: Choose a source time inside a timed video and set kind to image.`,
-      );
-  }
-  const asset: MediaAsset = {
-    ...properties,
-    id,
-    name,
-    file,
-    ...(freezeFrame && { freezeFrame }),
-    mediaTypes: freezeFrame ? ['video'] : described.mediaTypes,
-    metadata: freezeFrame
-      ? {
-          ...described.metadata,
-          kind: 'image',
-          durationSeconds: null,
-          videoDuration: undefined,
-          frameRate: null,
-          frameRateRatio: null,
-          hasAudio: false,
-          audioCodec: null,
-          videoCodec: 'png',
-        }
-      : described.metadata,
-  };
-  if (
-    asset.metadata?.kind !== kind ||
-    asset.mediaTypes.length === 0 ||
-    (kind === 'video' && !source.video?.frameRate)
-  )
-    throw new VideoDefinitionError(
-      `assets.${id}: '${path}' does not match the declared ${kind} source and streams.`,
-    );
-  return { source, sourceIdentity, asset };
 }
 
 function generatedTrackId(
@@ -495,28 +401,6 @@ async function compileClip(
     ...timing,
     text: await resolveFont(text, `${location}.text`),
   };
-}
-
-async function probeVideoSource(
-  id: string,
-  sourcePath: string,
-  probes: VideoSourceProbes,
-  signal?: AbortSignal,
-) {
-  signal?.throwIfAborted();
-  try {
-    const canonical = await realpath(sourcePath);
-    const source =
-      probes.get(canonical) ?? freeze(await probeMedia(canonical, signal));
-    probes.set(canonical, source);
-    return source;
-  } catch (cause) {
-    signal?.throwIfAborted();
-    throw new VideoDefinitionError(
-      `assets.${id}.path: Cannot probe '${sourcePath}': ${cause instanceof Error ? cause.message : String(cause)}`,
-      { cause },
-    );
-  }
 }
 
 function withinSource(sourceOut: RationalTime, seconds: number | null) {

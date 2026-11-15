@@ -1,10 +1,12 @@
 import { readFile, realpath } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { inspectAssetRecipes } from './video-assets.js';
+import { compileDefinition } from './video-compiler.js';
 import {
-  compileDefinition,
   definitionLoadError,
+  parseVideoDefinition,
   VideoDefinitionError,
-} from './video-compiler.js';
+} from './video-definition.js';
 import type { CompilationOptions, CompiledVideo } from './video-compiler.js';
 import { identifyVideoInput } from './video-input.js';
 import { readDefinitionScript } from './video-script.js';
@@ -22,10 +24,10 @@ async function readDefinitionJson(path: string) {
   }
 }
 
-/** Compile a fresh definition using shared project rules and metadata-only probes. */
+/** Compile a fresh definition using shared project rules and materialize referenced recipes. */
 export function compileVideo(
   file: string,
-  options: Pick<CompilationOptions, 'signal' | 'preview'> = {},
+  options: Pick<CompilationOptions, 'signal' | 'preview' | 'processing'> = {},
 ): Promise<CompiledVideo> {
   return compileVideoInput(file, options);
 }
@@ -36,6 +38,25 @@ export async function compileVideoInput(
     loadScript?: typeof readDefinitionScript;
   },
 ): Promise<CompiledVideo> {
+  const { path, value } = await readVideoInput(file, options);
+  return compileDefinition(path, value, options);
+}
+
+/** Validate recipe order and input streams without transcoding or writing a cache. */
+export async function inspectVideoRecipes(
+  file: string,
+  { signal }: { signal?: AbortSignal } = {},
+) {
+  const { path, value } = await readVideoInput(file, { signal });
+  const { assets = {} } = parseVideoDefinition(value);
+  const recipes = await inspectAssetRecipes(dirname(path), assets, signal);
+  return { path, recipes };
+}
+
+async function readVideoInput(
+  file: string,
+  options: CompilationOptions & { loadScript?: typeof readDefinitionScript },
+) {
   if (!isVideoDefinitionPath(file))
     throw new VideoDefinitionError('Expected a .video.ts or .video.json file.');
   options.signal?.throwIfAborted();
@@ -54,5 +75,5 @@ export async function compileVideoInput(
   const value = file.endsWith('.video.json')
     ? await readDefinitionJson(path)
     : await (options.loadScript ?? readDefinitionScript)(path, record);
-  return compileDefinition(path, value, options);
+  return { path, value };
 }

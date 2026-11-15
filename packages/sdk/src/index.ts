@@ -1,6 +1,7 @@
 export {
   compileVideo,
   defineVideo,
+  inspectVideoRecipes,
   OnlineMediaError,
   OnlineMediaLibrary,
   parseSubtitles,
@@ -21,6 +22,10 @@ export type {
   OnlineMediaSearch,
   PreviewPosition,
   VideoDefinition,
+  VideoRecipe,
+  VideoRecipeInspection,
+  VideoProcessingOptions,
+  VideoProcessingProgress,
   VideoPreviewOptions,
   VideoPreviewRange,
   VideoRenderOptions,

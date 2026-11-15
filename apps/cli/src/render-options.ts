@@ -1,5 +1,5 @@
 import type { VideoRenderOptions } from '@opencut/core/video';
-import { UsageError } from './usage.js';
+import { positiveIntegerOption, UsageError } from './usage.js';
 
 export const renderOptionTypes = {
   quality: { type: 'string' },
@@ -28,22 +28,6 @@ export function parseRenderControls(values: {
     ? string | undefined
     : boolean | undefined;
 }): VideoRenderOptions {
-  const integer = (
-    key:
-      | 'width'
-      | 'height'
-      | 'video-bitrate'
-      | 'audio-bitrate'
-      | 'audio-rate'
-      | 'audio-channels',
-  ) => {
-    const value = values[key];
-    if (value === undefined) return undefined;
-    const n = Number(value);
-    if (!/^\d+$/.test(value) || !Number.isSafeInteger(n) || n <= 0)
-      throw new UsageError(`--${key} must be a positive integer.`);
-    return n;
-  };
   function choice<T extends string | number>(
     key: string,
     value: T | undefined,
@@ -54,8 +38,8 @@ export function parseRenderControls(values: {
       throw new UsageError(`--${key} must be one of: ${allowed.join(', ')}.`);
     return value;
   }
-  const width = integer('width');
-  const height = integer('height');
+  const width = positiveIntegerOption('width', values.width);
+  const height = positiveIntegerOption('height', values.height);
   if ((width === undefined) !== (height === undefined))
     throw new UsageError('Specify both --width and --height.');
   const fps = values.fps;
@@ -92,16 +76,22 @@ export function parseRenderControls(values: {
         : undefined,
     outputFrameRate:
       numerator === undefined ? undefined : { numerator, denominator },
-    videoBitrateKbps: integer('video-bitrate'),
-    audioBitrateKbps: integer('audio-bitrate'),
+    videoBitrateKbps: positiveIntegerOption(
+      'video-bitrate',
+      values['video-bitrate'],
+    ),
+    audioBitrateKbps: positiveIntegerOption(
+      'audio-bitrate',
+      values['audio-bitrate'],
+    ),
     audioSampleRate: choice(
       'audio-rate',
-      integer('audio-rate'),
+      positiveIntegerOption('audio-rate', values['audio-rate']),
       [44100, 48000],
     ) as VideoRenderOptions['audioSampleRate'],
     audioChannels: choice(
       'audio-channels',
-      integer('audio-channels'),
+      positiveIntegerOption('audio-channels', values['audio-channels']),
       [1, 2],
     ) as VideoRenderOptions['audioChannels'],
     overwrite: values.overwrite,

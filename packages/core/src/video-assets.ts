@@ -1,11 +1,252 @@
-import { open } from 'node:fs/promises';
+import { open, realpath } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import {
   isStillImage,
+  probeMedia,
+  probeRecipeMedia,
   validateEmbeddedFont,
   videoSourceDuration,
 } from '@opencut/media';
 import type { MediaMetadata } from '@opencut/media';
 import type { MediaAsset } from './project.js';
+import { VideoDefinitionError } from './video-definition.js';
+import type { VideoAssetDefinition } from './video-definition.js';
+import { identifyVideoInput, videoInputIdentity } from './video-input.js';
+import type { IdentifiedMedia, RecordVideoInput } from './video-input.js';
+import { inspectRecipe } from './video-recipe.js';
+import type {
+  RecipeMedia,
+  RecipeInput,
+  VideoRecipeInspection,
+} from './video-recipe.js';
+import { processVideoRecipes } from './video-processing.js';
+import type { VideoProcessingOptions } from './video-processing.js';
+
+export type VideoSourceProbes = Map<string, MediaMetadata>;
+
+export interface VideoAssetOptions {
+  signal?: AbortSignal | undefined;
+  probes?: VideoSourceProbes;
+  processing?: VideoProcessingOptions | undefined;
+  inputs?: {
+    record: RecordVideoInput;
+    snapshotMedia(path: string): Promise<string>;
+  };
+}
+
+export interface CompiledVideoAsset {
+  asset: MediaAsset;
+  media?: IdentifiedMedia;
+}
+
+type PreparedAsset =
+  | { id: string; compiled: CompiledVideoAsset }
+  | {
+      id: string;
+      definition: VideoAssetDefinition;
+      path: string;
+      recipe: RecipeInput;
+    };
+
+export async function compileVideoAssets(
+  directory: string,
+  definitions: Readonly<Record<string, VideoAssetDefinition>>,
+  referenced: ReadonlySet<string>,
+  { signal, probes = new Map(), inputs, processing }: VideoAssetOptions,
+) {
+  const prepared: PreparedAsset[] = [];
+  const required: RecipeInput[] = [];
+  for (const id of Object.keys(definitions).sort()) {
+    const definition = definitions[id]!;
+    const path = resolve(directory, definition.path);
+    inputs?.record(identifyVideoInput(path, 'media'));
+    if (definition.recipe) {
+      const recipe = await readAssetRecipe(
+        id,
+        definition,
+        path,
+        signal,
+        inputs?.record,
+      );
+      prepared.push({ id, definition, path, recipe });
+      if (referenced.has(id)) required.push(recipe);
+    } else {
+      const source = inputs ? await inputs.snapshotMedia(path) : path;
+      const media = await probeAsset(id, source, { signal, probes });
+      prepared.push({
+        id,
+        compiled: compileProbedAsset(id, definition, media),
+      });
+    }
+  }
+
+  const processed = await processVideoRecipes(required, processing, signal);
+  const assets = new Map<string, CompiledVideoAsset>();
+  const recipes: VideoRecipeInspection[] = [];
+  for (const asset of prepared) {
+    if ('compiled' in asset) {
+      assets.set(asset.id, asset.compiled);
+      continue;
+    }
+    const { id, definition, path, recipe } = asset;
+    recipes.push(recipe.inspection);
+    if (videoInputIdentity(path) !== recipe.input.identity)
+      throw new VideoDefinitionError(
+        `assets.${id}.path: Media changed during compilation.`,
+      );
+    const media = processed.get(id);
+    if (media) {
+      const pinned = inputs
+        ? await pinDerivedAsset(id, media, inputs.snapshotMedia)
+        : media;
+      assets.set(id, compileProbedAsset(id, definition, pinned));
+    } else {
+      assets.set(id, {
+        asset: describeUnusedRecipe(
+          id,
+          definition,
+          recipe.inspection.steps.at(-1)!.media,
+        ),
+      });
+    }
+  }
+  return { assets, recipes };
+}
+
+export async function inspectAssetRecipes(
+  directory: string,
+  definitions: Readonly<Record<string, VideoAssetDefinition>>,
+  signal?: AbortSignal,
+) {
+  const recipes: VideoRecipeInspection[] = [];
+  for (const id of Object.keys(definitions).sort()) {
+    const definition = definitions[id]!;
+    if (!definition.recipe) continue;
+    const { inspection } = await readAssetRecipe(
+      id,
+      definition,
+      resolve(directory, definition.path),
+      signal,
+    );
+    recipes.push(inspection);
+  }
+  signal?.throwIfAborted();
+  return recipes;
+}
+
+async function readAssetRecipe(
+  id: string,
+  definition: VideoAssetDefinition,
+  path: string,
+  signal?: AbortSignal,
+  record?: RecordVideoInput,
+): Promise<RecipeInput> {
+  if (definition.freezeFrame)
+    throw new VideoDefinitionError(
+      `assets.${id}: Choose either recipe or freezeFrame.`,
+    );
+  const input = await probeAsset(id, path, { signal, recipe: true, record });
+  return {
+    input,
+    inspection: inspectRecipe(
+      id,
+      input.metadata,
+      definition.recipe!,
+      definition.kind,
+    ),
+  };
+}
+
+async function probeAsset(
+  id: string,
+  path: string,
+  {
+    signal,
+    probes,
+    recipe = false,
+    record,
+  }: {
+    signal?: AbortSignal | undefined;
+    probes?: VideoSourceProbes;
+    recipe?: boolean;
+    record?: RecordVideoInput | undefined;
+  },
+): Promise<IdentifiedMedia> {
+  signal?.throwIfAborted();
+  const identity = videoInputIdentity(path);
+  let metadata: MediaMetadata;
+  try {
+    const canonical = await realpath(path);
+    record?.(identifyVideoInput(canonical, 'media'));
+    metadata =
+      probes?.get(canonical) ??
+      (await (recipe ? probeRecipeMedia : probeMedia)(canonical, signal));
+  } catch (cause) {
+    signal?.throwIfAborted();
+    throw new VideoDefinitionError(
+      `assets.${id}.path: Cannot probe '${path}': ${cause instanceof Error ? cause.message : String(cause)}`,
+      { cause },
+    );
+  }
+  if (
+    !identity ||
+    videoInputIdentity(path) !== identity ||
+    videoInputIdentity(metadata.path) !== identity
+  )
+    throw new VideoDefinitionError(
+      recipe
+        ? `assets.${id}.path: Media changed during recipe inspection.`
+        : `assets.${id}.path: Media '${path}' changed during compilation. Retry after the write completes.`,
+    );
+  probes?.set(metadata.path, metadata);
+  return { metadata, identity };
+}
+
+async function pinDerivedAsset(
+  id: string,
+  { metadata, identity }: IdentifiedMedia,
+  snapshotMedia: (path: string) => Promise<string>,
+): Promise<IdentifiedMedia> {
+  const path = await snapshotMedia(metadata.path);
+  const snapshotIdentity = videoInputIdentity(path);
+  if (!snapshotIdentity || videoInputIdentity(metadata.path) !== identity)
+    throw new VideoDefinitionError(
+      `assets.${id}: Recipe result changed during compilation.`,
+    );
+  return { metadata: { ...metadata, path }, identity: snapshotIdentity };
+}
+
+function describeUnusedRecipe(
+  id: string,
+  definition: VideoAssetDefinition,
+  media: RecipeMedia,
+): MediaAsset {
+  const { kind, width, height, durationSeconds, frameRate, hasAudio } = media;
+  return {
+    ...assetReference(id, definition),
+    mediaTypes:
+      kind === 'audio' ? ['audio'] : hasAudio ? ['video', 'audio'] : ['video'],
+    metadata: {
+      kind,
+      width,
+      height,
+      durationSeconds,
+      frameRate,
+      hasAudio,
+      formatName: null,
+      videoCodec: null,
+      audioCodec: null,
+      frameRateRatio: null,
+    },
+  };
+}
+
+function assetReference(
+  id: string,
+  { path, name = id, provenance }: VideoAssetDefinition,
+) {
+  return { id, name, provenance, file: { type: 'relative' as const, path } };
+}
 
 /** Translate probe metadata into the compiled asset fields. */
 export function describeMediaAsset(probed: MediaMetadata) {
@@ -67,4 +308,53 @@ export async function readEmbeddedFont(path: string) {
   }
   await validateEmbeddedFont(bytes);
   return bytes.toString('base64');
+}
+
+function compileProbedAsset(
+  id: string,
+  definition: VideoAssetDefinition,
+  media: IdentifiedMedia,
+): CompiledVideoAsset {
+  const source = media.metadata;
+  const { path, kind, freezeFrame } = definition;
+  const described = describeMediaAsset(source);
+  if (freezeFrame) {
+    const end = videoSourceDuration(source);
+    if (
+      kind !== 'image' ||
+      described.metadata.kind !== 'video' ||
+      !source.video?.frameRate ||
+      (end !== null && freezeFrame.numerator / freezeFrame.denominator >= end)
+    )
+      throw new VideoDefinitionError(
+        `assets.${id}.freezeFrame: Choose a source time inside a timed video and set kind to image.`,
+      );
+  }
+  const asset: MediaAsset = {
+    ...assetReference(id, definition),
+    ...(freezeFrame && { freezeFrame }),
+    mediaTypes: freezeFrame ? ['video'] : described.mediaTypes,
+    metadata: freezeFrame
+      ? {
+          ...described.metadata,
+          kind: 'image',
+          durationSeconds: null,
+          videoDuration: undefined,
+          frameRate: null,
+          frameRateRatio: null,
+          hasAudio: false,
+          audioCodec: null,
+          videoCodec: 'png',
+        }
+      : described.metadata,
+  };
+  if (
+    asset.metadata?.kind !== kind ||
+    asset.mediaTypes.length === 0 ||
+    (kind === 'video' && !source.video?.frameRate)
+  )
+    throw new VideoDefinitionError(
+      `assets.${id}: '${path}' does not match the declared ${kind} source and streams.`,
+    );
+  return { media, asset };
 }

@@ -2,26 +2,34 @@ import { Console } from 'node:console';
 import {
   compileVideo,
   inspectProject,
+  inspectVideoRecipes,
   isVideoDefinitionPath,
   renderCompiledVideo,
 } from '@opencut/core/video';
+import type { VideoProcessingProgress } from '@opencut/core/video';
 import type { RenderProgress } from '@opencut/media';
 import { withCommandCancellation } from './cancellation.js';
 import { commandUsage, type CommandOptions } from './commands.js';
+import { parseProcessingControls } from './recipe-options.js';
 import { UsageError } from './usage.js';
 import { parseRenderControls } from './render-options.js';
 
-type VideoCommand = 'validate' | 'inspect' | 'render';
+type VideoCommand =
+  'validate' | 'inspect' | 'render' | 'recipes inspect' | 'recipes validate';
 
 /** Route console output from trusted TypeScript to stderr during CLI compilation. */
-export async function loadVideo(
+export function loadVideo(
   file: string,
   options: Parameters<typeof compileVideo>[1],
 ) {
+  return withDefinitionConsole(() => compileVideo(file, options));
+}
+
+async function withDefinitionConsole<T>(run: () => Promise<T>) {
   const console = globalThis.console;
   globalThis.console = new Console(process.stderr);
   try {
-    return await compileVideo(file, options);
+    return await run();
   } finally {
     globalThis.console = console;
   }
@@ -40,9 +48,38 @@ export async function runVideoCommand(
 
   const controls = command === 'render' ? parseRenderControls(values) : {};
   await withCommandCancellation(async (signal) => {
+    if (command === 'recipes inspect' || command === 'recipes validate') {
+      const result = await withDefinitionConsole(() =>
+        inspectVideoRecipes(file, { signal }),
+      );
+      if (command === 'recipes inspect')
+        console.log(JSON.stringify(result, null, 2));
+      else if (values.json)
+        console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+      else
+        console.log(
+          `Valid media recipes (${result.recipes.length} assets): ${result.path}`,
+        );
+      return;
+    }
+    const processing = parseProcessingControls(values);
+    const recipeProcessing: VideoProcessingProgress[] = [];
+    processing.onProgress = (event) => {
+      if (values.json) {
+        if (event.status === 'completed' || event.status === 'cache-hit')
+          recipeProcessing.push(event);
+      } else {
+        const time =
+          event.seconds === undefined ? '' : ` (${event.seconds.toFixed(2)}s)`;
+        process.stderr.write(
+          `recipe ${event.assetId} step ${event.step + 1}: ${event.status}${time}\n`,
+        );
+      }
+    };
     const video = await loadVideo(file, {
       signal,
       preview: controls.burnSubtitles === false,
+      processing,
     });
     if (command === 'validate') {
       const result = {
@@ -57,7 +94,14 @@ export async function runVideoCommand(
       );
     } else if (command === 'inspect') {
       console.log(
-        JSON.stringify(inspectProject(video.project, video.path), null, 2),
+        JSON.stringify(
+          {
+            ...inspectProject(video.project, video.path),
+            ...(video.recipes.length > 0 && { recipes: video.recipes }),
+          },
+          null,
+          2,
+        ),
       );
     } else {
       const result = await renderCompiledVideo(video, output!, {
@@ -73,7 +117,15 @@ export async function runVideoCommand(
       });
       if (values.json)
         console.log(
-          JSON.stringify({ definitionPath: video.path, ...result }, null, 2),
+          JSON.stringify(
+            {
+              definitionPath: video.path,
+              ...result,
+              ...(recipeProcessing.length > 0 && { recipeProcessing }),
+            },
+            null,
+            2,
+          ),
         );
       else {
         for (const warning of result.warnings ?? [])

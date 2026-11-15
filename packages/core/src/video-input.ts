@@ -1,11 +1,17 @@
 import { constants, statSync } from 'node:fs';
 import { copyFile } from 'node:fs/promises';
+import type { MediaMetadata } from '@opencut/media';
 
 export type VideoInputKind = 'source' | 'media' | 'font';
 export interface VideoInput {
   path: string;
   kind: VideoInputKind;
   identity: string | null;
+}
+
+export interface IdentifiedMedia {
+  metadata: MediaMetadata;
+  identity: string;
 }
 
 export type RecordVideoInput = (input: VideoInput) => void;
