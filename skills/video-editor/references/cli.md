@@ -27,3 +27,17 @@ stderr for objects with `event: "batch-progress"`.
 The default filename is `<id>.mp4`. Use `--only id,id` for selective retries,
 `--concurrency` for active job slots, and `--fail-fast` to cancel outstanding
 work after a failure. See the [batch file contract and budgets](../../../docs/CLI.md#batch-rendering).
+
+Use `opencut build inspect DEFINITION --json` with the original
+`--recipe-cache`, `--params` and `--no-subtitles` selection to see recorded
+processing and render states. Retry with the same cache to reuse stages
+marked `reusable`. An interrupted MP4 encode starts over. When a verified
+MP4 exists, `lastAttempt` reports a newer retry separately from the output.
+
+`opencut package DEFINITION --output BUNDLE` creates a portable directory.
+Use `--root DIR` if the inputs share a wider root, `--resource PATH` per
+extra authoring file relative to that root, and `--params FILE` to select
+a variant. Only share
+files you have permission to redistribute. Run `opencut package verify BUNDLE`
+after moving it, then render `BUNDLE/opencut.bundle.video.json`. A compatible
+OpenCut, FFmpeg and required native models must be present on the new host.

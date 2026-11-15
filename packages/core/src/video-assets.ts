@@ -20,7 +20,10 @@ import type {
   VideoRecipeInspection,
 } from './video-recipe.js';
 import { processVideoRecipes } from './video-processing.js';
-import type { VideoProcessingOptions } from './video-processing.js';
+import type {
+  RecipeRecovery,
+  VideoProcessingOptions,
+} from './video-processing.js';
 
 export type VideoSourceProbes = Map<
   string,
@@ -35,6 +38,7 @@ export interface VideoAssetOptions {
   signal?: AbortSignal | undefined;
   probes?: VideoSourceProbes;
   processing?: VideoProcessingOptions | undefined;
+  recovery?: RecipeRecovery;
   inputs?: {
     record: RecordVideoInput;
     snapshotMedia(path: string): Promise<string>;
@@ -59,7 +63,13 @@ export async function compileVideoAssets(
   directory: string,
   definitions: Readonly<Record<string, VideoAssetDefinition>>,
   referenced: ReadonlySet<string>,
-  { signal, probes = new Map(), inputs, processing }: VideoAssetOptions,
+  {
+    signal,
+    probes = new Map(),
+    inputs,
+    processing,
+    recovery,
+  }: VideoAssetOptions,
 ) {
   const prepared: PreparedAsset[] = [];
   const required: RecipeInput[] = [];
@@ -85,7 +95,12 @@ export async function compileVideoAssets(
     }
   }
 
-  const processed = await processVideoRecipes(required, processing, signal);
+  const processed = await processVideoRecipes(
+    required,
+    processing,
+    signal,
+    recovery,
+  );
   const assets = new Map<string, CompiledVideoAsset>();
   const recipes: VideoRecipeInspection[] = [];
   for (const asset of prepared) {

@@ -10,6 +10,8 @@ const optionTypes = {
   ...processingOptionTypes,
   ...renderOptionTypes,
   output: { type: 'string', short: 'o' },
+  root: { type: 'string' },
+  resource: { type: 'string', multiple: true },
   params: { type: 'string' },
   variants: { type: 'string' },
   'output-dir': { type: 'string' },
@@ -38,6 +40,15 @@ const params = '[--params <params.json>]';
 const position = '(--frame <n> | --timestamp <time>)';
 
 const commands = {
+  package: {
+    args: `${definition} --output <new-directory> [--root <directory>] [--resource <path> ...] ${params}`,
+    options: ['output', 'root', 'resource', 'params'],
+  },
+  'package verify': { args: '<directory>', options: [] },
+  'build inspect': {
+    args: `${definition} [--recipe-cache <directory>] [--no-subtitles] ${params}`,
+    options: ['recipe-cache', 'no-subtitles', 'params'],
+  },
   validate: {
     args: `${definition} ${params}`,
     options: ['params', ...Object.keys(processingOptionTypes)],

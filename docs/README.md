@@ -35,6 +35,7 @@ in your usual text editor.
 
 - [Definition format and examples](VIDEO_DEFINITIONS.md)
 - [CLI commands](CLI.md)
+- [Build recovery and portable projects](CLI.md#build-recovery)
 - [TypeScript SDK](SDK.md)
 - [Export and rendering limits](EXPORT.md)
 - [Architecture](ARCHITECTURE.md)

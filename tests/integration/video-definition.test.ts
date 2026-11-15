@@ -224,7 +224,9 @@ describe('whole-video definitions', () => {
       const result = run('render', path, '--output', 'failed.mp4');
       expect(result.status).toBe(1);
       expect(result.stdout).toBe('');
-      expect(JSON.parse(result.stderr).error.message).toMatch(diagnostic);
+      expect(
+        JSON.parse(result.stderr.trimEnd().split('\n').at(-1)!).error.message,
+      ).toMatch(diagnostic);
       expect(await readdir(directory)).toEqual(['title.video.json']);
     },
   );
@@ -356,7 +358,7 @@ describe('whole-video definitions', () => {
     );
     const result = run('inspect', path);
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stderr.trim()).toBe('definition executed');
+    expect(result.stderr.split('\n')[0]).toBe('definition executed');
     expect(JSON.parse(result.stdout).settings.durationFrames).toBe(600);
   });
 });

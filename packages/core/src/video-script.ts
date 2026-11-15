@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { registerHooks } from 'node:module';
+import { isBuiltin, registerHooks } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import {
@@ -14,10 +14,18 @@ import type {
 import { identifyVideoInput } from './video-input.js';
 import type { RecordVideoInput, VideoInput } from './video-input.js';
 
+export type ScriptImport = {
+  parent: string;
+  specifier: string;
+  path?: string;
+  unresolved?: boolean;
+};
+
 export async function readDefinitionScript(
   path: string,
   record?: RecordVideoInput,
   params?: VideoParameters,
+  trace?: (edge: ScriptImport) => void,
 ): Promise<ResolvedVideoDefinition> {
   // Node keys ESM modules by URL. Pass the build ID along each local import
   // edge, including dynamic imports, while leaving package imports alone.
@@ -28,15 +36,36 @@ export async function readDefinitionScript(
   const hooks = registerHooks({
     resolve(specifier, context, nextResolve) {
       const { parentURL } = context;
-      const local =
-        parentURL?.startsWith('file:') &&
-        new URL(parentURL).searchParams.get(parameter) === build &&
-        /^(?:\.{1,2}\/|\/|file:)/.test(specifier);
+      if (
+        !parentURL?.startsWith('file:') ||
+        new URL(parentURL).searchParams.get(parameter) !== build
+      )
+        return nextResolve(specifier, context);
+      const local = /^(?:\.{1,2}\/|\/|file:)/.test(specifier);
       if (local && record) {
         const path = fileURLToPath(new URL(specifier, parentURL));
         record(identifyVideoInput(path, 'source'));
       }
-      const resolved = nextResolve(specifier, context);
+      let resolved: ReturnType<typeof nextResolve>;
+      try {
+        resolved = nextResolve(specifier, context);
+      } catch (error) {
+        trace?.({
+          parent: fileURLToPath(parentURL),
+          specifier,
+          unresolved: true,
+        });
+        throw error;
+      }
+      if (trace && !isBuiltin(specifier))
+        trace({
+          parent: fileURLToPath(parentURL),
+          specifier,
+          ...(local &&
+            resolved.url.startsWith('file:') && {
+              path: fileURLToPath(resolved.url),
+            }),
+        });
       if (!local || !resolved.url.startsWith('file:')) return resolved;
       const dependency = new URL(resolved.url);
       dependency.searchParams.set(parameter, build);
@@ -71,12 +100,13 @@ export async function readIsolatedDefinitionScript(
   record?: RecordVideoInput,
   params?: VideoParameters,
   authoringHeapMb?: number,
+  trace?: (edge: ScriptImport) => void,
 ): Promise<ResolvedVideoDefinition> {
   signal?.throwIfAborted();
   const worker = new Worker(
     new URL('./video-script-worker.js', import.meta.url),
     {
-      workerData: { path, params },
+      workerData: { path, params, traceImports: trace !== undefined },
       execArgv: [],
       ...(authoringHeapMb !== undefined && {
         resourceLimits: { maxOldGenerationSizeMb: authoringHeapMb },
@@ -98,12 +128,14 @@ export async function readIsolatedDefinitionScript(
         (
           message:
             | { input: VideoInput }
+            | { edge: ScriptImport }
             | { result: ResolvedVideoDefinition }
             | { error: string },
         ) => {
           if ('input' in message) {
             record?.(message.input);
-          } else if ('error' in message)
+          } else if ('edge' in message) trace?.(message.edge);
+          else if ('error' in message)
             reject(new VideoDefinitionError(message.error));
           else resolve(message.result);
         },

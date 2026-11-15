@@ -15,6 +15,7 @@ export async function withRenderSources<T>(
   video: CompiledVideo,
   signal: AbortSignal | undefined,
   render: (plan: CompiledRenderPlan) => Promise<T>,
+  scratch = tmpdir(),
 ) {
   const plan = await video.resolveRender();
   const staged = new Map<string, string>();
@@ -28,7 +29,7 @@ export async function withRenderSources<T>(
         const identity = video.sourceIdentity(path);
         if (!identity)
           throw new Error(`No compiled source identity for '${path}'.`);
-        directory ??= await mkdtemp(join(tmpdir(), 'opencut-render-sources-'));
+        directory ??= await mkdtemp(join(scratch, 'opencut-render-sources-'));
         const snapshot = join(directory, `${staged.size}${extname(path)}`);
         await accountRenderFile(path);
         await copyVideoInput(path, identity, snapshot, signal);

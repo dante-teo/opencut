@@ -8,6 +8,8 @@
 | Rebuild on source changes               | `preview DEFINITION --watch`                             | `watchVideo`                                              |
 | Compile and render with parameters      | `validate --params`, `render --params`                   | `compileVideo`, `renderVideo` with `params`               |
 | Render a batch of variants              | `batch`                                                  | `batchRenderVideo`                                        |
+| Inspect build recovery                  | `build inspect`                                          | `inspectVideoBuild`                                       |
+| Package and verify local dependencies   | `package`, `package verify`                              | `packageVideo`, `verifyVideoPackage`                      |
 | Export MP4                              | `render`                                                 | `renderVideo`, `renderCompiledVideo`                      |
 | Work with subtitles                     | `subtitles export`                                       | `parseSubtitles`, `readSubtitleFile`, `writeSubtitleFile` |
 | Inspect and extract source media        | `probe`, `extract-frame`                                 | `probeMedia`, `extractFrame`                              |

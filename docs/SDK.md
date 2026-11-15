@@ -67,13 +67,49 @@ the measured processed media. In inspection, `videoStartSeconds` and
 before the audio stream starts.
 
 The `onProgress` callback receives the asset ID, zero-based step index,
-cache key, and a `status` of `started`, `processing`, `completed`, or
+cache key, output `format`, and a `status` of `started`, `processing`, `completed`, or
 `cache-hit`. `seconds` is the output media time reported during processing.
 Pass a signal to `compileVideo` or `renderVideo` to cancel preprocessing.
 
 `VideoProcessingOptions` accepts `maxTemporaryBytes`, `maxNativeBytes`,
 `maxBufferedFrames`, `maxPixels`, and `timeoutMs`. See the
 [processing limits](CLI.md#media-recipes) for defaults and scope.
+
+## Recovery and portable projects
+
+```ts
+import {
+  inspectVideoBuild,
+  packageVideo,
+  renderVideo,
+  verifyVideoPackage,
+} from '@opencut/sdk';
+
+const processing = { cacheDirectory: './recipe-cache' };
+const status = await inspectVideoBuild('src/edit.video.ts', { processing });
+console.log(status.state, status.steps, status.renders);
+
+await packageVideo('src/edit.video.ts', './bundle', {
+  root: '.',
+  resources: ['src/captions.txt'],
+});
+const verified = await verifyVideoPackage('./bundle');
+await renderVideo(verified.entry, 'delivery.mp4', { processing });
+```
+
+Use the same compile options when inspecting or retrying a build.
+`inspectVideoBuild` hashes inputs and reports checkpoints for the current
+revision. When inspecting a build made by calling `renderVideo` with
+`burnSubtitles: false`, pass `preview: true` to select the same build.
+A recipe step can be reusable while still staged. A render with a valid
+published file can also carry a
+`lastAttempt` from a newer retry. See [build recovery](CLI.md#build-recovery).
+
+Pass `params` to select the composition and `signal` to cancel
+`packageVideo`, including during TypeScript evaluation. The returned
+`entry` points to the resolved definition. The manifest names the original
+editable source and its relative imports. See the
+[portable project rules and backend requirements](CLI.md#portable-projects).
 
 ## Parameterized builds
 

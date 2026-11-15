@@ -114,6 +114,10 @@ interface RenderAudioFade {
 export interface VideoTimelineOptions extends RenderControls {
   /** Serialize build provenance in a custom MP4 format tag. */
   buildMetadata?: string;
+  /** Parent for private scratch on the destination filesystem. */
+  scratchDirectory?: string;
+  /** Record a verified file before publication so a caller can reconcile a crash. */
+  onVerifiedOutput?: (staged: string) => Promise<void>;
   /** Metadata already probed for this render invocation, indexed by resolved source path. */
   sourceMetadata?: ReadonlyMap<string, MediaMetadata>;
   /** Stage inputs on first decode. For a ranged preview, omit visual layers outside that range. */
@@ -1395,8 +1399,11 @@ export async function validateVideoTimeline(options: VideoTimelineOptions) {
 }
 
 /** Stage generated overlays beside the temporary output, on the same filesystem. */
-function renderScratch(output: string, prefix: string) {
-  const directory = dirname(resolve(output));
+function renderScratch(
+  output: string,
+  prefix: string,
+  directory = dirname(resolve(output)),
+) {
   let temporary: string | undefined;
   const open = async () => {
     try {
@@ -1437,7 +1444,11 @@ function renderScratch(output: string, prefix: string) {
 export async function renderVideoTimeline(
   options: VideoTimelineOptions,
 ): Promise<VideoTimelineResult> {
-  const scratch = renderScratch(options.output, '.opencut-render-');
+  const scratch = renderScratch(
+    options.output,
+    '.opencut-render-',
+    options.scratchDirectory,
+  );
   try {
     const prepared = await prepareTimeline(options, false, scratch);
     await scratch.stage(prepared, options.signal);
@@ -1514,6 +1525,8 @@ export async function renderVideoTimeline(
       throw new MediaError(
         'Render verification failed: unexpected codec, dimensions, frame rate, duration or decoded frame count. Check source decodability and trim ranges.',
       );
+    checkRenderSignal(options.signal);
+    await options.onVerifiedOutput?.(rendered);
     checkRenderSignal(options.signal);
     try {
       if (options.overwrite) {

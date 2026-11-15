@@ -1,4 +1,5 @@
 import { constants, statSync } from 'node:fs';
+import type { BigIntStats } from 'node:fs';
 import { copyFile } from 'node:fs/promises';
 import type { MediaMetadata } from '@opencut/media';
 
@@ -26,12 +27,16 @@ export function identifyVideoInput(
 /** Include inode and high-resolution change time for replacements and in-place edits. */
 export function videoInputIdentity(path: string): string | null {
   try {
-    const info = statSync(path, { bigint: true });
-    if (!info.isFile()) return null;
-    return `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
+    return fileIdentity(statSync(path, { bigint: true }));
   } catch {
     return null;
   }
+}
+
+export function fileIdentity(info: BigIntStats) {
+  return info.isFile()
+    ? `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`
+    : null;
 }
 
 /** A private copy keeps the renderer's source stable across in-place edits. */

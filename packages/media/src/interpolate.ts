@@ -5,6 +5,8 @@ import type { MediaMetadata, MediaStream } from './probe.js';
 import { nativeRecipeFingerprint, runRecipeProcess } from './recipe-process.js';
 import type { RecipeProcessLimits } from './recipe-process.js';
 
+export const interpolationBackendId = 'videotoolbox-low-latency-v2';
+
 const worker = fileURLToPath(new URL('./video-interpolate', import.meta.url));
 
 export async function interpolationBackendVersion(signal: AbortSignal) {
@@ -14,7 +16,7 @@ export async function interpolationBackendVersion(signal: AbortSignal) {
     );
   return nativeRecipeFingerprint(
     worker,
-    'videotoolbox-low-latency-v2',
+    interpolationBackendId,
     'interpolation',
     signal,
   );

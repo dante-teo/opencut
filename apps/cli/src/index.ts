@@ -20,6 +20,12 @@ async function run(args: string[]) {
 
   const { command, file } = resolveCommand(positionals, values);
   switch (command) {
+    case 'package':
+    case 'package verify':
+    case 'build inspect': {
+      const { runBuildCommand } = await import('./video-build.js');
+      return runBuildCommand(command, file, values);
+    }
     case 'recipes inspect':
     case 'recipes validate':
     case 'validate':

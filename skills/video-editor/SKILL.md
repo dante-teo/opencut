@@ -33,7 +33,12 @@ discover commands and `opencut render --help` for export controls.
    reusable TypeScript helpers. Validate a sample with `--params params.json`.
    Run `opencut batch DEFINITION --variants variants.json --output-dir outputs --json`.
    Read each result and retry corrected entries with `--only id,id`.
-7. Probe the results and report dimensions, frame counts, failed variants,
+7. If interrupted, run `opencut build inspect DEFINITION --json` with the
+   same cache and parameters. Retry to reuse verified recipes and restart
+   unfinished encoding. For transfer, run `opencut package DEFINITION --output bundle`
+   and `opencut package verify bundle`. Render `bundle/opencut.bundle.video.json`
+   with the required backends.
+8. Probe the results and report dimensions, frame counts, failed variants,
    and recipe cache reuse when relevant.
 
 See [definition fields](references/video-definitions.md), the

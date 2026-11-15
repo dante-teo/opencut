@@ -215,8 +215,7 @@ test('T48 invalidation follows dependencies, skips unused work and repairs damag
     await build();
     assert.deepEqual(materialized(), ['soundtrack:2']);
     assert.equal((await entries(cacheDirectory)).length, 9);
-    // Changing only timestamps must invalidate the cache even when file size,
-    // inode and every probed media property are identical.
+    // Timestamp-only changes leave the content-addressed recipe keys intact.
     const original = await stat(source);
     const earlier = new Date('2000-01-01T00:00:00Z');
     await utimes(source, original.atime, earlier);
@@ -227,13 +226,13 @@ test('T48 invalidation follows dependencies, skips unused work and repairs damag
     );
     assert.notEqual(updated.mtimeMs, original.mtimeMs);
     await build();
-    assert.equal(materialized().length, 7);
-    assert.equal((await entries(cacheDirectory)).length, 16);
+    assert.deepEqual(materialized(), []);
+    assert.equal((await entries(cacheDirectory)).length, 9);
     // Replace the media at the same path. All descendants must be rebuilt.
     await copyFile(join(fixtureDirectory, 'video-long.mp4'), source);
     await build();
     assert.equal(materialized().length, 7);
-    assert.equal((await entries(cacheDirectory)).length, 23);
+    assert.equal((await entries(cacheDirectory)).length, 16);
     await noStaging(cacheDirectory);
     const rotated = definition.assets!.picture!.recipe!;
     [rotated[1], rotated[2]] = [rotated[2]!, rotated[1]!];
@@ -242,7 +241,7 @@ test('T48 invalidation follows dependencies, skips unused work and repairs damag
       inspectVideoRecipes(file),
       /recipe\.2: Crop rectangle/,
     );
-    assert.equal((await entries(cacheDirectory)).length, 23);
+    assert.equal((await entries(cacheDirectory)).length, 16);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -3,17 +3,43 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   rename,
   rm,
-  writeFile,
 } from 'node:fs/promises';
 import { join } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
-import { MediaError } from '@opencut/media';
+import { z } from 'zod';
 import type { MediaMetadata } from '@opencut/media';
-import { videoInputIdentity } from './video-input.js';
+import {
+  fileLease,
+  fingerprintFile,
+  hashJson,
+  missing,
+  syncPath,
+  writeCheckpoint,
+} from './video-integrity.js';
 import type { IdentifiedMedia } from './video-input.js';
 import type { RecipeFormat } from './video-recipe-schema.js';
+
+type RecipeEntry = IdentifiedMedia & { sha256: string };
+const stageDirectory = (directory: string, key: string) =>
+  join(directory, `.${key}.stage`);
+
+const receipt = z.strictObject({
+  version: z.literal(1),
+  key: z.string(),
+  bytes: z.int().positive(),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  metadataSha256: z.string(),
+  metadata: z.custom<Omit<MediaMetadata, 'path'>>(
+    (value) =>
+      value !== null &&
+      typeof value === 'object' &&
+      'streams' in value &&
+      Array.isArray(value.streams) &&
+      !('path' in value),
+  ),
+});
 
 export async function materializeRecipeEntry(
   directory: string,
@@ -22,96 +48,147 @@ export async function materializeRecipeEntry(
   signal: AbortSignal,
   encode: (output: string) => Promise<MediaMetadata>,
 ) {
-  const release = await lockEntry(directory, key, signal);
-  const staging = join(directory, `.${key}.stage`);
+  const release = await fileLease(
+    join(directory, `.lock-${key.slice(0, 2)}.sqlite`),
+    signal,
+  );
+  const staging = stageDirectory(directory, key);
   try {
     signal.throwIfAborted();
     const target = join(directory, key);
     const filename = `media.${format}`;
-    await rm(staging, { recursive: true, force: true });
-    const cached = await readEntry(target, filename);
-    if (cached) return { entry: cached, reused: true };
+    const publish = async (
+      attempt: string,
+      entry: RecipeEntry,
+      reused: boolean,
+    ) => {
+      signal.throwIfAborted();
+      await rename(attempt, target);
+      await syncPath(directory);
+      return {
+        entry: {
+          ...entry,
+          metadata: { ...entry.metadata, path: join(target, filename) },
+        },
+        reused,
+      };
+    };
+    const cached = await findRecipeEntry(directory, key, format, signal);
+    if (cached?.directory === target)
+      return { entry: cached.entry, reused: true };
     await rm(target, { recursive: true, force: true });
+    if (cached) return await publish(cached.directory, cached.entry, true);
+    await rm(staging, { recursive: true, force: true });
     await mkdir(staging, { mode: 0o700 });
     const attempt = await mkdtemp(join(staging, 'attempt-'));
     const output = join(attempt, filename);
-    const metadata = await encode(output);
-    const identity = videoInputIdentity(output);
-    if (!identity) throw new MediaError('Cannot identify recipe output.');
-    const entry: IdentifiedMedia = {
-      metadata: { ...metadata, path: join(target, filename) },
-      identity,
+    const metadata: Omit<MediaMetadata, 'path'> & { path?: string } = {
+      ...(await encode(output)),
     };
-    await writeFile(join(attempt, 'result.json'), JSON.stringify(entry), {
-      mode: 0o600,
+    delete metadata.path;
+    const { bytes, sha256, identity } = await fingerprintFile(output, signal);
+    await syncPath(output);
+    await writeCheckpoint(join(attempt, 'result.json'), {
+      version: 1,
+      key,
+      bytes,
+      sha256,
+      metadataSha256: hashJson(metadata),
+      metadata,
     });
-    signal.throwIfAborted();
-    await rename(attempt, target);
-    return { entry, reused: false };
+    return await publish(
+      attempt,
+      { metadata: { ...metadata, path: output }, identity, sha256 },
+      false,
+    );
   } finally {
     try {
       await rm(staging, { recursive: true, force: true });
     } finally {
-      release();
+      release?.();
     }
   }
 }
 
-async function readEntry(
+/** Find validated media without publishing or removing anything. */
+export async function findRecipeEntry(
   directory: string,
-  filename: string,
-): Promise<IdentifiedMedia | undefined> {
-  const path = join(directory, filename);
-  const manifest = join(directory, 'result.json');
-  try {
-    const media = await lstat(path);
-    if (!media.isFile() || !media.size || !(await lstat(manifest)).isFile())
-      return;
-    const identity = videoInputIdentity(path);
-    if (!identity) return;
-    const entry = JSON.parse(
-      await readFile(manifest, 'utf8'),
-    ) as Partial<IdentifiedMedia> | null;
-    if (entry?.metadata?.path === path && entry.identity === identity)
-      return { metadata: entry.metadata, identity };
-  } catch (error) {
-    if (!(
-      error instanceof SyntaxError ||
-      (error instanceof Error &&
-        'code' in error &&
-        ['ENOENT', 'ENOTDIR', 'EISDIR'].includes(String(error.code)))
-    ))
-      throw error;
+  key: string,
+  format: RecipeFormat,
+  signal?: AbortSignal,
+): Promise<{ directory: string; entry: RecipeEntry } | undefined> {
+  const target = join(directory, key);
+  const published = async () => {
+    const entry = await readRecipeEntry(target, key, format, signal);
+    return entry && { directory: target, entry };
+  };
+  const cached = await published();
+  if (cached) return cached;
+
+  const staging = stageDirectory(directory, key);
+  if (!(await statIfPresent(staging))?.isDirectory()) return published();
+  // A process may have stopped after writing a valid receipt but before publishing.
+  const attempts = await readdir(staging).catch((error: unknown) => {
+    if (!missing(error)) throw error;
+    return [];
+  });
+  for (const name of attempts) {
+    if (!/^attempt-[a-zA-Z0-9]{6}$/.test(name)) continue;
+    const attempt = join(staging, name);
+    const entry = await readRecipeEntry(attempt, key, format, signal).catch(
+      async (error: unknown) => {
+        // An inspector can race a writer moving the attempt to its final location.
+        if (signal?.aborted || (await statIfPresent(attempt))) throw error;
+      },
+    );
+    if (entry) return { directory: attempt, entry };
   }
+  return published();
 }
 
-// A writer lock is released by the OS if its process exits. Sharding keeps
-// unrelated steps independent without allocating a lock file for every key.
-async function lockEntry(directory: string, key: string, signal: AbortSignal) {
-  const { DatabaseSync } = await import('node:sqlite');
-  const database = new DatabaseSync(
-    join(directory, `.lock-${key.slice(0, 2)}.sqlite`),
-  );
+async function statIfPresent(path: string) {
+  return lstat(path).catch((error: unknown) => {
+    if (!missing(error)) throw error;
+  });
+}
+
+async function readRecipeEntry(
+  target: string,
+  key: string,
+  format: RecipeFormat,
+  signal?: AbortSignal,
+): Promise<RecipeEntry | undefined> {
+  const path = join(target, `media.${format}`);
+  const manifest = join(target, 'result.json');
   try {
-    for (;;) {
-      signal.throwIfAborted();
-      try {
-        database.exec('BEGIN IMMEDIATE');
-        return () => database.close();
-      } catch (error) {
-        // Extended SQLite codes keep SQLITE_BUSY (5) in their low byte.
-        if (!(
-          error instanceof Error &&
-          'errcode' in error &&
-          typeof error.errcode === 'number' &&
-          (error.errcode & 0xff) === 5
-        ))
-          throw error;
-        await delay(50, undefined, { signal });
-      }
-    }
+    if (
+      !(await lstat(target)).isDirectory() ||
+      !(await lstat(manifest)).isFile() ||
+      !(await lstat(path)).isFile()
+    )
+      return;
+    const parsed = receipt.safeParse(
+      JSON.parse(await readFile(manifest, 'utf8')),
+    );
+    if (
+      !parsed.success ||
+      parsed.data.key !== key ||
+      hashJson(parsed.data.metadata) !== parsed.data.metadataSha256
+    )
+      return;
+    const { bytes, sha256, identity } = await fingerprintFile(path, signal);
+    if (parsed.data.bytes === bytes && parsed.data.sha256 === sha256)
+      return { metadata: { ...parsed.data.metadata, path }, identity, sha256 };
   } catch (error) {
-    database.close();
-    throw error;
+    if (
+      !missing(error) &&
+      !(error instanceof SyntaxError) &&
+      !(
+        error instanceof Error &&
+        'code' in error &&
+        ['ENOTDIR', 'EISDIR'].includes(String(error.code))
+      )
+    )
+      throw error;
   }
 }

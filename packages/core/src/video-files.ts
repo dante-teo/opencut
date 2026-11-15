@@ -1,6 +1,15 @@
-import { createHash } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
-import { dirname, relative, resolve } from 'node:path';
+import { basename, dirname, relative, resolve } from 'node:path';
+import {
+  checkpointCompilation,
+  inspectBuildCheckpoint,
+  prepareVideoBuild,
+} from './video-build.js';
+import {
+  checkPackagedBackends,
+  packageEntryName,
+  verifyPackageContents,
+} from './video-package-format.js';
 import { inspectAssetRecipes } from './video-assets.js';
 import { compileDefinition } from './video-compiler.js';
 import {
@@ -14,6 +23,7 @@ import type { VideoParameters } from './video-definition.js';
 import type { CompilationOptions, CompiledVideo } from './video-compiler.js';
 import { identifyVideoInput, videoInputIdentity } from './video-input.js';
 import type { VideoInput } from './video-input.js';
+import { fingerprintFile, hashJson } from './video-integrity.js';
 import { processingSettings } from './video-processing.js';
 import type { VideoProcessingProgress } from './video-processing.js';
 import {
@@ -44,6 +54,7 @@ export type VideoCompileOptions = Pick<
 
 type InputOptions = CompilationOptions &
   VideoCompileOptions & {
+    checkpoint?: boolean;
     scriptWorker?: { maxOldGenerationSizeMb?: number };
     batch?: NonNullable<VideoBuild['batch']>;
   };
@@ -70,35 +81,50 @@ export interface VideoBuild {
   };
 }
 
-const hash = (value: string | Buffer) =>
-  createHash('sha256').update(value).digest('hex');
-
 /** Compile a fresh definition using shared project rules and materialize referenced recipes. */
 export function compileVideo(
   file: string,
   options: VideoCompileOptions = {},
 ): Promise<CompiledVideo> {
-  return compileVideoInput(file, options);
+  return compileVideoInput(file, { ...options, checkpoint: true });
 }
 
 export async function compileVideoInput(
   file: string,
   options: InputOptions,
 ): Promise<CompiledVideo> {
-  const sources = new Map<string, VideoInput>();
-  const { path, value, params } = await readVideoInput(
-    file,
-    options,
-    (input) => {
-      if (!sources.has(input.path)) sources.set(input.path, input);
-      options.inputs?.record(input);
-    },
+  const input = await readBuildInput(file, options);
+  const compile = (controls: InputOptions) =>
+    compileResolvedVideo(input, controls);
+  if (!options.checkpoint && !options.batch) return compile(options);
+  const build = await prepareVideoBuild(input, options);
+  return checkpointCompilation(build, options.signal, (record) =>
+    compile({ ...options, recovery: { record, sources: build.files } }),
   );
+}
+
+async function readBuildInput(file: string, options: InputOptions) {
+  const sources = new Map<string, VideoInput>();
+  const input = await readVideoInput(file, options, (source) => {
+    if (!sources.has(source.path)) sources.set(source.path, source);
+    options.inputs?.record(source);
+  });
+  return { ...input, sources };
+}
+
+async function compileResolvedVideo(
+  { path, value, params, sources }: Awaited<ReturnType<typeof readBuildInput>>,
+  options: InputOptions,
+) {
   if (!options.batch && params === undefined)
     return compileDefinition(path, value, options);
-
   const steps: VideoBuild['processing']['steps'][number][] = [];
-  const sha256 = await hashDefinition(path, sources, options.signal);
+  const sha256 = await hashDefinition(
+    path,
+    sources,
+    options.signal,
+    options.recovery?.sources,
+  );
   const { directory, concurrency, limits } = processingSettings(
     options.processing ?? {},
   );
@@ -122,7 +148,7 @@ export async function compileVideoInput(
       definition: {
         path,
         sha256,
-        compositionSha256: hash(JSON.stringify(composition)),
+        compositionSha256: hashJson(composition),
       },
       ...(params !== undefined && { params }),
       ...(options.batch && { batch: options.batch }),
@@ -138,28 +164,50 @@ export async function compileVideoInput(
   );
 }
 
+export type VideoBuildInspection = Awaited<
+  ReturnType<typeof inspectVideoBuild>
+>;
+
+/** Read the durable receipts for the exact currently resolved build without processing. */
+export async function inspectVideoBuild(
+  file: string,
+  options: VideoCompileOptions = {},
+) {
+  const input = await readBuildInput(file, options);
+  const build = await prepareVideoBuild(input, options);
+  return inspectBuildCheckpoint(build, options.signal);
+}
+
 async function hashDefinition(
   path: string,
   sources: ReadonlyMap<string, VideoInput>,
   signal?: AbortSignal,
+  saved?: ReadonlyMap<string, Awaited<ReturnType<typeof fingerprintFile>>>,
 ) {
   const dependencies = new Map<string, string>();
   for (const input of sources.values()) {
     if (!input.identity) continue;
     const physical = await realpath(input.path);
-    const bytes = await readFile(physical, { signal });
-    if (videoInputIdentity(input.path) !== input.identity)
+    const cached = saved?.get(physical);
+    const digest =
+      cached?.identity === input.identity
+        ? cached
+        : await fingerprintFile(physical, signal);
+    if (
+      digest.identity !== input.identity ||
+      videoInputIdentity(input.path) !== input.identity
+    )
       throw new VideoDefinitionError(
         `Definition source '${input.path}' changed during compilation.`,
       );
-    dependencies.set(physical, hash(bytes));
+    dependencies.set(physical, digest.sha256);
   }
   const root = dependencies.get(path);
   dependencies.delete(path);
   const imports = [...dependencies]
     .map(([file, digest]) => [relative(dirname(path), file), digest] as const)
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return hash(JSON.stringify([root, imports]));
+  return hashJson([root, imports]);
 }
 
 /** Validate recipe order and input streams without transcoding or writing a cache. */
@@ -173,10 +221,11 @@ export async function inspectVideoRecipes(
   return { path, recipes };
 }
 
-async function readVideoInput(
+export async function readVideoInput(
   file: string,
   options: InputOptions,
   record = options.inputs?.record,
+  trace?: Parameters<typeof readDefinitionScript>[3],
 ) {
   if (!isVideoDefinitionPath(file))
     throw new VideoDefinitionError('Expected a .video.ts or .video.json file.');
@@ -196,20 +245,39 @@ async function readVideoInput(
     options.params === undefined
       ? undefined
       : validateVideoParameters(options.params);
+  if (basename(path) === packageEntryName) {
+    if (params !== undefined)
+      throw new VideoDefinitionError(
+        'A packaged build uses its recorded parameters. Package the authored definition again for a different variant.',
+      );
+    const packaged = await verifyPackageContents(dirname(path), options.signal);
+    checkPackagedBackends(packaged.manifest);
+    record?.(identifyVideoInput(packaged.manifestPath, 'source'));
+    for (const [path, { identity }] of packaged.fingerprints)
+      record?.({ path, kind: 'source', identity });
+    return {
+      path,
+      value: packaged.definition,
+      params: undefined,
+      verified: packaged.fingerprints,
+    };
+  }
   if (file.endsWith('.video.json'))
     return {
       path,
+      verified: undefined,
       ...(await resolveVideoDefinition(await readDefinitionJson(path), params)),
     };
   const result =
-    options.scriptWorker || params !== undefined
+    trace || options.scriptWorker || params !== undefined
       ? await readIsolatedDefinitionScript(
           path,
           options.signal,
           record,
           params,
           options.scriptWorker?.maxOldGenerationSizeMb,
+          trace,
         )
-      : await readDefinitionScript(path, record);
-  return { path, ...result };
+      : await readDefinitionScript(path, record, params);
+  return { path, ...result, verified: undefined };
 }

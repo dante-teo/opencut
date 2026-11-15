@@ -26,7 +26,7 @@ export function loadVideo(
   return withDefinitionConsole(() => compileVideo(file, options));
 }
 
-async function withDefinitionConsole<T>(run: () => Promise<T>) {
+export async function withDefinitionConsole<T>(run: () => Promise<T>) {
   const console = globalThis.console;
   globalThis.console = new Console(process.stderr);
   try {

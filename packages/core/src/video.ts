@@ -16,6 +16,7 @@ export type {
 export { readSubtitleFile, writeSubtitleFile } from './subtitle-files.js';
 export {
   compileVideo,
+  inspectVideoBuild,
   inspectVideoRecipes,
   isVideoDefinitionPath,
 } from './video-files.js';
@@ -46,7 +47,11 @@ export type {
   VideoProcessingProgress,
 } from './video-processing.js';
 export type { VideoRecipeInspection } from './video-recipe.js';
-export type { VideoBuild, VideoCompileOptions } from './video-files.js';
+export type {
+  VideoBuild,
+  VideoBuildInspection,
+  VideoCompileOptions,
+} from './video-files.js';
 export { batchRenderVideo } from './video-batch.js';
 export type {
   VideoBatchOptions,
@@ -55,3 +60,7 @@ export type {
   VideoVariant,
   VideoVariantResult,
 } from './video-batch.js';
+
+export { packageVideo, verifyVideoPackage } from './video-package.js';
+export type { VideoPackageOptions } from './video-package.js';
+export type { VideoPackageManifest } from './video-package-format.js';

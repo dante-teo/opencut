@@ -46,7 +46,7 @@ recipes.
 
 | Option                     | Default and scope                                                                                                                                                                                                         |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--recipe-cache`           | `$XDG_CACHE_HOME/opencut/recipes-v1`, or `~/.cache/opencut/recipes-v1`. Use a private local directory that supports file locks and atomic rename.                                                                         |
+| `--recipe-cache`           | `$XDG_CACHE_HOME/opencut/recipes-v3`, or `~/.cache/opencut/recipes-v3`. Use a private local directory that supports file locks and atomic rename.                                                                         |
 | `--recipe-workers`         | 1 active step per invocation, configurable from 1 through 16.                                                                                                                                                             |
 | `--recipe-temp-bytes`      | 4 GiB for staged media per invocation, split evenly among workers. The OS file limit rounds down and can be stricter on Linux depending on the shell.                                                                     |
 | `--recipe-memory-bytes`    | 1 GiB per active step, or 2 GiB for high super-resolution. Caps individual FFmpeg allocations and checks process-group RSS for AI steps every 50 ms.                                                                      |
@@ -65,15 +65,13 @@ hits on stderr. A successful `render --json` includes `recipeProcessing` when
 recipes were used. Each entry has `assetId`, a zero-based `step`, a cache
 `key`, and a `status` of `completed` or `cache-hit`.
 
-SIGINT and SIGTERM cancel active steps and remove staged media. Each
-successfully published step can be reused independently. After an abrupt
-exit, rerun the same render command. The retry clears abandoned staging for
-the requested step. Unfinished steps encode in fresh attempt directories.
+SIGINT and SIGTERM cancel active steps. See [build recovery](#build-recovery)
+for abrupt exits and retries.
 
 Fresh recipe execution requires macOS or Linux and FFmpeg with
 `-filter_buffered_frames` and FFV1 encoding in MOV. Verified on macOS with
 FFmpeg and ffprobe 9.0.2. Node versions that mark the built-in SQLite module
-experimental may print a warning on stderr when opening the recipe cache.
+experimental may print a warning on stderr when opening the build cache.
 
 `interpolateFrames` and `smoothSlowMotion` add local VideoToolbox inference to
 referenced video recipes. Source identity, prior steps such as `trim`, target
@@ -89,6 +87,81 @@ controls. Put `trim` first to limit inference to a source range. For UHD,
 start with one recipe worker. Use `system inspect --json` for the supported
 configurations and model readiness, then `validate` to run the actual job.
 See [enhancement presets and limits](VIDEO_DEFINITIONS.md#ai-enhancement).
+
+## Build recovery
+
+```sh
+opencut build inspect edit.video.ts --recipe-cache ./cache --json
+opencut render edit.video.ts --recipe-cache ./cache --output final.mp4
+```
+
+Foreground compilation and rendering write local receipts in the recipe
+cache. `build inspect` resolves the current definition and inputs and reports
+their build ID, last compilation state, recorded recipe stages, and render
+states. Use the same cache, parameters and `--no-subtitles` selection as
+the original build. Inspection evaluates trusted TypeScript and hashes
+inputs. If the definition or inputs changed, inspection addresses the new
+build.
+
+- `steps[].reusable` means the recorded SHA-256 receipt matches a published
+  or staged recipe result. Inspection leaves verified staging in place for
+  the next retry, which checks the current recipe inputs and backend.
+- `renders[].state` describes the output. A `rendered` entry includes its
+  verified checksum. The optional `renders[].lastAttempt` describes a newer
+  attempt separately, so a failed overwrite can coexist with a valid MP4.
+  `missing-or-corrupt` means the published file is missing or its bytes no
+  longer match the receipt.
+
+After a crash, rerun the command with the same cache. Completed processing
+is checked against its SHA-256 receipt before reuse. The key includes the
+source bytes, relevant probed inputs and step settings, upstream output,
+and the backend fingerprint. A layout-only edit can reuse the same media
+stages. An interrupted encoder starts over in new scratch space. A retry
+removes the old scratch for the same build and output. A verified MP4 is
+published atomically; a failed or interrupted overwrite leaves any previous
+output intact until a replacement is verified. If inspection finds the MP4
+was already published, use it, or choose a new output explicitly.
+
+## Portable projects
+
+```sh
+opencut package src/edit.video.ts --root . --resource src/captions.txt --output ./bundle
+opencut package verify ./bundle --json
+opencut render ./bundle/opencut.bundle.video.json --output ./final.mp4
+```
+
+Move the entire bundle. The generated JSON entry rebuilds the selected
+composition using the bundled inputs, even without the original TypeScript
+packages installed. Use `--params` at packaging time to choose a variant.
+The entry verifies file hashes automatically before building. Copy the
+editable sources from `project/` to make changes, then package them again.
+
+Choose a new output directory under an existing parent. The default root is
+the authored definition's directory. Use `--root` to include shared files
+in a common ancestor. The package collects declared media and fonts, static
+relative imports (including type imports), and computed imports run for
+the selected composition. Supply `--resource` once per additional local
+authoring file, such as a subtitle file read directly with Node. Resource
+paths are relative to the project root. Files required only by other
+parameter selections or arbitrary filesystem reads are not inferred. Unresolved
+relative imports, escaping paths, symlinks, and destination collisions fail.
+
+The `opencut-package.json` manifest records input hashes, payload bytes,
+recipes, toolchain and native backend requirements. `package verify` checks
+the inventory and hashes. Rendering checks the backend requirements on the
+receiving machine. Package only assets and fonts you can redistribute.
+Caches, native models, system frameworks and third-party Node packages
+are not copied. Choose a compatible OpenCut build and FFmpeg
+installation. VideoToolbox recipes still require supported Apple Silicon
+hardware and macOS; Apple does not expose a separate model version, so
+results can vary with the OS. OpenCut requires the recorded backend
+version and does not substitute another algorithm.
+
+Packaging needs space for the listed payload once, plus small manifest
+and filesystem overhead. Sources shared by clips are copied once per path;
+the filesystem can use copy-on-write clones. Recipe cache and render
+scratch usage are separate. Verification checks integrity, not authorship;
+only run the archived TypeScript if you trust it.
 
 ## Batch rendering
 

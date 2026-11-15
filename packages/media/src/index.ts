@@ -47,3 +47,6 @@ export {
 } from './enhance.js';
 export type { InterpolationPlan } from './interpolate.js';
 export { accountRenderFile, withRenderBudget } from './render-budget.js';
+
+export { interpolationBackendId } from './interpolate.js';
+export { enhancementBackendId } from './enhance.js';

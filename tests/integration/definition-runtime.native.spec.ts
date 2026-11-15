@@ -28,7 +28,8 @@ test('both definition formats render without loading Electron, sessions or the d
     registerHooks({
       resolve(specifier, context, next) {
         const resolved = next(specifier, context);
-        if (specifier === 'electron' || specifier === 'node:sqlite' ||
+        // SQLite backs foreground leases; the retired queue itself must stay unloaded.
+        if (specifier === 'electron' ||
           /\\/(?:legacy|project-files|project-writer|session-transport|editing|local-jobs|job-store|job-worker)\\.js$/.test(resolved.url)) {
           throw new Error('Foreground render loaded compatibility code: ' + resolved.url);
         }

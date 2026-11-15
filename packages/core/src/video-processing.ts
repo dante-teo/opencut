@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { lstat, mkdir, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -13,12 +12,14 @@ import {
   runRecipeProcess,
 } from '@opencut/media';
 import type { RecipeProcessLimits } from '@opencut/media';
+import { fingerprintFile, hashJson } from './video-integrity.js';
 import { videoInputIdentity } from './video-input.js';
 import type { IdentifiedMedia } from './video-input.js';
 import {
   isEnhancementStep,
   isInterpolationStep,
 } from './video-recipe-schema.js';
+import type { RecipeFormat } from './video-recipe-schema.js';
 import { materializeRecipeEntry } from './video-recipe-cache.js';
 import {
   recipeArguments,
@@ -44,8 +45,16 @@ export interface VideoProcessingProgress {
   assetId: string;
   step: number;
   key: string;
+  format: RecipeFormat;
   status: 'started' | 'processing' | 'completed' | 'cache-hit';
   seconds?: number;
+}
+
+export interface RecipeRecovery {
+  sources: ReadonlyMap<string, Awaited<ReturnType<typeof fingerprintFile>>>;
+  record(
+    stage: Pick<VideoProcessingProgress, 'assetId' | 'step' | 'key' | 'format'>,
+  ): Promise<void>;
 }
 
 const MiB = 1024 * 1024;
@@ -57,6 +66,7 @@ export async function processVideoRecipes(
   recipes: readonly RecipeInput[],
   options: VideoProcessingOptions = {},
   signal?: AbortSignal,
+  recovery?: RecipeRecovery,
 ) {
   const results = new Map<string, IdentifiedMedia>();
   signal?.throwIfAborted();
@@ -94,6 +104,7 @@ export async function processVideoRecipes(
             limits,
             processingSignal,
             options.onProgress,
+            recovery,
           );
           results.set(recipe.inspection.assetId, result);
         }
@@ -117,16 +128,19 @@ async function processRecipe(
   limits: ProcessingLimits,
   signal: AbortSignal,
   onProgress?: VideoProcessingOptions['onProgress'],
+  recovery?: RecipeRecovery,
 ) {
   let current = input;
   // A partial final packet affects ffprobe's average, but not the cadence of
   // an interpolation result or subsequent steps that preserve its frame rate.
   let declaredCadence: number | null = null;
-  let dependency = JSON.stringify([
-    input.metadata.path,
-    input.identity,
-    recipeMedia(input.metadata),
-  ]);
+  const saved = recovery?.sources.get(input.metadata.path);
+  let dependency = (
+    saved?.identity === input.identity
+      ? saved
+      : await fingerprintFile(input.metadata.path, signal)
+  ).sha256;
+  assertCurrent(input);
   for (const [index, { parameters }] of steps.entries()) {
     try {
       signal.throwIfAborted();
@@ -143,19 +157,16 @@ async function processRecipe(
       const inputMedia = recipeMedia(source);
       inputMedia.frameRate = declaredCadence ?? inputMedia.frameRate;
       const step = resolveRecipeStep(inputMedia, parameters);
-      const key = createHash('sha256')
-        .update(
-          JSON.stringify([
-            2,
-            backends.ffmpeg,
-            dependency,
-            step.parameters,
-            step.format,
-            ...(step.interpolation ? await backends.interpolation() : []),
-            ...(enhancement ? await backends.enhancement() : []),
-          ]),
-        )
-        .digest('hex');
+      const key = hashJson([
+        3,
+        backends.ffmpeg,
+        dependency,
+        inputMedia,
+        step.parameters,
+        step.format,
+        ...(step.interpolation ? await backends.interpolation() : []),
+        ...(enhancement ? await backends.enhancement() : []),
+      ]);
       const report = (
         status: VideoProcessingProgress['status'],
         seconds?: number,
@@ -164,10 +175,17 @@ async function processRecipe(
           assetId,
           step: index,
           key,
+          format: step.format,
           status,
           ...(seconds !== undefined && { seconds }),
         });
       };
+      await recovery?.record({
+        assetId,
+        step: index,
+        key,
+        format: step.format,
+      });
       const { entry, reused } = await materializeRecipeEntry(
         directory,
         key,
@@ -233,7 +251,7 @@ async function processRecipe(
       );
       assertCurrent(current);
       report(reused ? 'cache-hit' : 'completed');
-      dependency = key;
+      dependency = `${key}:${entry.sha256}`;
       current = entry;
       if (step.interpolation || declaredCadence !== null)
         declaredCadence = step.media.frameRate;
@@ -257,7 +275,7 @@ export function processingSettings(options: VideoProcessingOptions) {
       join(
         process.env.XDG_CACHE_HOME || join(homedir(), '.cache'),
         'opencut',
-        'recipes-v1',
+        'recipes-v3',
       ),
   );
   const temporaryBytes = positive(

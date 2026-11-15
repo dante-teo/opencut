@@ -2,6 +2,7 @@ import { stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { MediaError, renderVideoTimeline } from '@opencut/media';
 import type { RenderControls } from '@opencut/media';
+import { authoredInputs, checkpointRender } from './video-build.js';
 import { withRenderSources } from './render-sources.js';
 import type { CompiledVideo } from './video-compiler.js';
 import type { VideoProcessingOptions } from './video-processing.js';
@@ -52,6 +53,7 @@ async function protectInputs(
   if (!destination) return;
   for (const path of new Set([
     ...boundSources,
+    ...authoredInputs(video),
     video.path,
     ...video.project.assets.map(({ file }) =>
       resolve(dirname(video.path), file.path),
@@ -99,22 +101,43 @@ export async function renderCompiledVideo(
   };
   const buildMetadata = build && JSON.stringify(build);
   signal?.throwIfAborted();
-  return withRenderSources(video, signal, async (plan) => {
-    if (overwrite)
-      await protectInputs(video, output, plan.sourceMetadata.keys(), signal);
-    if (!burnSubtitles)
-      plan.visualClips = plan.visualClips.filter((clip) => !clip.subtitle);
-    const result = await renderVideoTimeline({
-      ...plan,
-      ...settings,
-      signal,
-      overwrite,
-      ...(onProgress && { onProgress }),
-      ...(buildMetadata && { buildMetadata }),
-      output,
-    });
-    return { ...result, ...(build && { build }) };
-  });
+  return checkpointRender(
+    video,
+    output,
+    { ...settings, burnSubtitles },
+    signal,
+    (scratchDirectory, onVerifiedOutput) =>
+      withRenderSources(
+        video,
+        signal,
+        async (plan) => {
+          if (overwrite)
+            await protectInputs(
+              video,
+              output,
+              plan.sourceMetadata.keys(),
+              signal,
+            );
+          if (!burnSubtitles)
+            plan.visualClips = plan.visualClips.filter(
+              (clip) => !clip.subtitle,
+            );
+          const result = await renderVideoTimeline({
+            ...plan,
+            ...settings,
+            signal,
+            overwrite,
+            ...(onProgress && { onProgress }),
+            ...(buildMetadata && { buildMetadata }),
+            ...(scratchDirectory && { scratchDirectory }),
+            ...(onVerifiedOutput && { onVerifiedOutput }),
+            output,
+          });
+          return { ...result, ...(build && { build }) };
+        },
+        scratchDirectory,
+      ),
+  );
 }
 
 /** Compile and render in the calling process. Subprocesses are scoped to this call. */

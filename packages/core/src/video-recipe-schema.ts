@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 const pixels = z.int().min(1).max(16384);
-const format = z.enum(['mov', 'mp4', 'png', 'wav', 'flac']);
+export const recipeFormatSchema = z.enum(['mov', 'mp4', 'png', 'wav', 'flac']);
 const frameRate = {
   numerator: z.int().positive().max(120000),
   denominator: z.int().positive().max(120000).default(1),
@@ -72,7 +72,10 @@ export const videoRecipeSchema = z
         type: z.literal('normalizeAudio'),
         targetLufs: z.number().min(-40).max(-10).default(-16),
       }),
-      z.strictObject({ type: z.literal('convert'), format }),
+      z.strictObject({
+        type: z.literal('convert'),
+        format: recipeFormatSchema,
+      }),
     ]),
   )
   .min(1)
@@ -80,7 +83,7 @@ export const videoRecipeSchema = z
 
 export type VideoRecipe = z.input<typeof videoRecipeSchema>;
 export type ResolvedVideoRecipe = z.output<typeof videoRecipeSchema>;
-export type RecipeFormat = z.output<typeof format>;
+export type RecipeFormat = z.output<typeof recipeFormatSchema>;
 
 export type EnhancementStep = Extract<
   ResolvedVideoRecipe[number],

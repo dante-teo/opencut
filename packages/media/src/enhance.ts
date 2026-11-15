@@ -8,6 +8,8 @@ import { MediaError } from './process.js';
 import { nativeRecipeFingerprint, runRecipeProcess } from './recipe-process.js';
 import type { RecipeProcessLimits } from './recipe-process.js';
 
+export const enhancementBackendId = 'videotoolbox-enhancement-v4';
+
 const worker = fileURLToPath(new URL('./video-enhance', import.meta.url));
 
 type Enhancement =
@@ -30,7 +32,7 @@ export async function enhancementBackendVersion(signal: AbortSignal) {
     );
   return nativeRecipeFingerprint(
     worker,
-    'videotoolbox-enhancement-v4',
+    enhancementBackendId,
     'enhancement',
     signal,
   );

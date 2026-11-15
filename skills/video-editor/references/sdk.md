@@ -17,3 +17,12 @@ and `videoId(scope, localId)` to qualify repeated components. Pass
 to share recipe work and get one result per variant. Retry selected IDs with
 `only`. Read `build` for resolved inputs, definition identity, processing
 settings, and recipe cache keys.
+
+Call `inspectVideoBuild(definition, { params, processing })` before retrying
+an interrupted build. Pass `preview: true` when inspecting a build compiled
+with subtitles disabled. Keep the same cache to reuse stages marked
+`reusable`. For a published MP4, read `lastAttempt` for a newer retry.
+Use `packageVideo(definition, destination, { root, resources, params, signal })` and
+`verifyVideoPackage(destination)` to share a project. Pass the verified
+result's `entry` to `renderVideo` after relocation; it is already resolved
+for the recorded parameters.

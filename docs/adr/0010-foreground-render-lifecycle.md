@@ -98,3 +98,13 @@ and attempt leases. This is a separate entry point from the foreground CLI and
 desktop exports described above.
 
 T47 retired the queue. See the [current architecture](../ARCHITECTURE.md).
+
+## T53 foreground recovery
+
+Foreground definition builds use local SHA-256 receipts and OS-released
+SQLite leases. A recipe attempt is published by renaming its verified
+staging directory. A retry may adopt a staged attempt with a durable
+matching receipt. The foreground renderer records a digest before its
+existing atomic MP4 publication. It starts an interrupted encode over,
+while retaining verified recipe results. There is no persistent worker.
+See [build recovery](../CLI.md#build-recovery).

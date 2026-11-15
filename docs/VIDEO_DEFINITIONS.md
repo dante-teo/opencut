@@ -503,3 +503,12 @@ opencut preview contact-sheet examples/video/short-batch.video.ts \
 
 In the SDK, pass `params` to `compileVideo` and review the resulting
 composition with `previewVideo(compiled)`.
+
+## Moving a definition to another machine
+
+Package one resolved parameter selection with
+[`opencut package`](CLI.md#portable-projects). Keep the package together
+when moving it. The editable files retain their original relative layout
+under `project/`; render the verified JSON entry at the package root.
+A named font file travels with the bundle. The receiving machine supplies
+OpenCut, FFmpeg and any system AI backends required by the recipes.

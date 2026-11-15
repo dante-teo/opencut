@@ -200,7 +200,7 @@ async function recipeBuild(file: string, cacheDirectory: string) {
 
 async function cacheFiles(directory: string) {
   return (await readdir(directory)).filter(
-    (entry) => !entry.endsWith('.sqlite'),
+    (entry) => !entry.endsWith('.sqlite') && entry !== '.builds-v1',
   );
 }
 

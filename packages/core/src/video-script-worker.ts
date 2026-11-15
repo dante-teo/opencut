@@ -3,8 +3,9 @@ import type { VideoParameters } from './video-definition.js';
 import { readDefinitionScript } from './video-script.js';
 
 const port = parentPort!;
-const { path, params } = workerData as {
+const { path, params, traceImports } = workerData as {
   path: string;
+  traceImports: boolean;
   params?: VideoParameters;
 };
 try {
@@ -12,6 +13,7 @@ try {
     path,
     (input) => port.postMessage({ input }),
     params,
+    traceImports ? (edge) => port.postMessage({ edge }) : undefined,
   );
   port.postMessage({ result });
 } catch (error) {

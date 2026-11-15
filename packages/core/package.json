@@ -22,7 +22,8 @@
   },
   "dependencies": {
     "@opencut/media": "workspace:*",
-    "zod": "4.6.7",
-    "@opencut/shared": "workspace:*"
+    "@opencut/shared": "workspace:*",
+    "typescript": "6.0.3",
+    "zod": "4.6.7"
   }
 }
