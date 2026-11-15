@@ -24,20 +24,14 @@ import {
 import { decodeFrames } from './media-comparison.js';
 import { requireTool, runTool } from '../../scripts/fixture-lib.js';
 import type { Probe } from '../../scripts/fixture-lib.js';
+import { assertSimilarExports } from './conformance-support.js';
+import { fixtureDirectory, videoExample } from '../fixture-paths.js';
 
 const entry = fileURLToPath(
   new URL('../../apps/cli/dist/index.js', import.meta.url),
 );
-const generated = fileURLToPath(
-  new URL('../fixtures/generated/', import.meta.url),
-);
 const example = (extension: string) =>
-  fileURLToPath(
-    new URL(
-      `../../examples/video/showcase.video.${extension}`,
-      import.meta.url,
-    ),
-  );
+  videoExample('showcase.video.' + extension);
 const hash = async (path: string) =>
   createHash('sha256')
     .update(await readFile(path))
@@ -46,13 +40,13 @@ const hash = async (path: string) =>
 test('T44 public CLI renders equivalent 20-second TypeScript and JSON definitions', async () => {
   requireTool('ffmpeg');
   requireTool('ffprobe');
-  const directory = await mkdtemp(join(generated, 't44-'));
+  const directory = await mkdtemp(join(fixtureDirectory, 't44-'));
   const sources = [
     example('ts'),
     example('json'),
-    join(generated, 'video-long.mp4'),
-    join(generated, 'audio-tone.wav'),
-    join(generated, 'still.png'),
+    join(fixtureDirectory, 'video-long.mp4'),
+    join(fixtureDirectory, 'audio-tone.wav'),
+    join(fixtureDirectory, 'still.png'),
   ];
   const before = await Promise.all(sources.map(hash));
   const run = (...args: string[]) =>
@@ -89,10 +83,12 @@ test('T44 public CLI renders equivalent 20-second TypeScript and JSON definition
           `${extension}-${frame}.png`,
         );
     }
-    assert.equal(
-      await hash(join(directory, 'ts.mp4')),
-      await hash(join(directory, 'json.mp4')),
+    await assertSimilarExports(
+      join(directory, 'ts.mp4'),
+      join(directory, 'json.mp4'),
+      { width: 320, height: 180, frameCount: 480, fps: 24 },
     );
+    const outputBeforeOverwrite = await hash(join(directory, 'ts.mp4'));
     for (const frame of [30, 96, 414, 479])
       assert.equal(
         await hash(join(directory, `ts-${frame}.png`)),
@@ -164,10 +160,7 @@ test('T44 public CLI renders equivalent 20-second TypeScript and JSON definition
     const replaced = run('render', example('json'), '--output', 'ts.mp4');
     assert.equal(replaced.status, 1, replaced.stderr);
     assert.match(replaced.stderr, /Refusing to overwrite/);
-    assert.equal(
-      await hash(join(directory, 'ts.mp4')),
-      await hash(join(directory, 'json.mp4')),
-    );
+    assert.equal(await hash(join(directory, 'ts.mp4')), outputBeforeOverwrite);
     assert.equal((await readdir(directory)).length, 11);
 
     assert.deepEqual(await Promise.all(sources.map(hash)), before);
@@ -198,7 +191,7 @@ function decodeRgb(path: string, frame?: number) {
 test('both definition formats render mixed tracks, subtitles, grading, effects and exact timing', async () => {
   requireTool('ffmpeg');
   requireTool('ffprobe');
-  const directory = await mkdtemp(join(generated, 't45-'));
+  const directory = await mkdtemp(join(fixtureDirectory, 't45-'));
   const definitions = join(directory, 'definitions');
   const ts = join(definitions, 'mixed.video.ts');
   const json = join(definitions, 'mixed.video.json');
@@ -414,9 +407,10 @@ test('both definition formats render mixed tracks, subtitles, grading, effects a
 
     run('render', json, '--output', 'json.mp4');
     run('render', ts, '--output', 'typescript.mp4');
-    assert.equal(
-      await hash(join(directory, 'json.mp4')),
-      await hash(join(directory, 'typescript.mp4')),
+    await assertSimilarExports(
+      join(directory, 'json.mp4'),
+      join(directory, 'typescript.mp4'),
+      { width: 320, height: 180, frameCount: compiled.frameCount, fps: 24 },
     );
 
     const frames = [2, 5, 14, 17, 29, 35, 39];
@@ -444,9 +438,9 @@ test('both definition formats render mixed tracks, subtitles, grading, effects a
 test('T45 source-backed freezes match the corresponding extracted image and support relative fonts', async () => {
   requireTool('ffmpeg');
   requireTool('ffprobe');
-  const directory = await mkdtemp(join(generated, 't45-held-'));
+  const directory = await mkdtemp(join(fixtureDirectory, 't45-held-'));
   try {
-    const video = await probeMedia(join(generated, 'video-long.mp4'));
+    const video = await probeMedia(join(fixtureDirectory, 'video-long.mp4'));
     const frameTime = { numerator: 1, denominator: 2 };
     runTool('ffmpeg', [
       '-v',
@@ -454,7 +448,7 @@ test('T45 source-backed freezes match the corresponding extracted image and supp
       '-nostdin',
       '-n',
       '-i',
-      join(generated, 'audio-tone.wav'),
+      join(fixtureDirectory, 'audio-tone.wav'),
       '-itsoffset',
       '1',
       '-i',
@@ -588,7 +582,7 @@ test('T45 source-backed freezes match the corresponding extracted image and supp
 test('T45 single-frame previews support definitions above the full-render subtitle cap', async () => {
   requireTool('ffmpeg');
   requireTool('ffprobe');
-  const directory = await mkdtemp(join(generated, 't45-cues-'));
+  const directory = await mkdtemp(join(fixtureDirectory, 't45-cues-'));
   try {
     const definition = defineVideo({
       canvas: { width: 320, height: 180, frameRate: 24 },

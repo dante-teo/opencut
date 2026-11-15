@@ -5,3 +5,4 @@ tests/fixtures/generated/
 test-results/
 playwright-report/
 coverage/
+conformance-results/

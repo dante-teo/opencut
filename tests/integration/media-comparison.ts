@@ -88,13 +88,19 @@ export function decodeFrames(
   height: number,
 ) {
   const frames = [...new Set(indices)].sort((a, b) => a - b);
+  const first = frames[0]!;
+  const last = frames.at(-1)!;
+  const selection =
+    last - first + 1 === frames.length
+      ? `trim=start_frame=${first}:end_frame=${last + 1}`
+      : `select='${frames.map((frame) => `eq(n,${frame})`).join('+')}'`;
   const rgb = ffmpeg([
     '-i',
     path,
     '-map',
     '0:v:0',
     '-vf',
-    `select='${frames.map((frame) => `eq(n,${frame})`).join('+')}'`,
+    selection,
     '-fps_mode',
     'passthrough',
     '-frames:v',

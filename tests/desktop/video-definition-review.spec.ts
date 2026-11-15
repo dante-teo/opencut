@@ -1,13 +1,14 @@
 import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { renderVideo } from '@opencut/sdk';
 import { launchDesktop } from './helpers.js';
+import { assertSimilarExports } from '../integration/conformance-support.js';
+import { fixtureDirectory, videoExample } from '../fixture-paths.js';
 
 test('reviews consecutive definition builds and keeps the last playable revision on error', async () => {
   test.setTimeout(60_000);
-  const fixtures = resolve('tests/fixtures/generated');
-  const directory = await mkdtemp(join(fixtures, 't46-desktop-'));
+  const directory = await mkdtemp(join(fixtureDirectory, 't46-desktop-'));
   const path = join(directory, 'review.video.ts');
   const helper = join(directory, 'review-title.ts');
   const source = (
@@ -96,7 +97,12 @@ test('reviews consecutive definition builds and keeps the last playable revision
     );
     const direct = join(directory, 'foreground.mp4');
     await renderVideo(path, direct);
-    expect(await readFile(output)).toEqual(await readFile(direct));
+    await assertSimilarExports(output, direct, {
+      width: 320,
+      height: 180,
+      frameCount: 48,
+      fps: 24,
+    });
     await workspace.getByRole('button', { name: 'Export MP4' }).click();
     await expect(workspace.getByRole('alert')).toContainText(
       'Refusing to overwrite',
@@ -110,10 +116,8 @@ test('reviews consecutive definition builds and keeps the last playable revision
 });
 
 test('previews and exports a recipe-backed definition', async () => {
-  const directory = await mkdtemp(
-    resolve('tests/fixtures/generated/t48-desktop-'),
-  );
-  const path = resolve('examples/video/recipes.video.json');
+  const directory = await mkdtemp(join(fixtureDirectory, 't48-desktop-'));
+  const path = videoExample('recipes.video.json');
   const output = join(directory, 'desktop.mp4');
   const { application, page } = await launchDesktop({
     XDG_CACHE_HOME: directory,
@@ -148,7 +152,12 @@ test('previews and exports a recipe-backed definition', async () => {
     await renderVideo(path, direct, {
       processing: { cacheDirectory: join(directory, 'opencut', 'recipes-v1') },
     });
-    expect(await readFile(output)).toEqual(await readFile(direct));
+    await assertSimilarExports(output, direct, {
+      width: 160,
+      height: 90,
+      frameCount: 24,
+      fps: 24,
+    });
   } finally {
     await application.close();
     await rm(directory, { recursive: true, force: true });

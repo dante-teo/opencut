@@ -21,6 +21,7 @@
     "format:check": "prettier --check .",
     "test": "pnpm build:packages && pnpm --filter @opencut/cli build && vitest run",
     "test:desktop": "pnpm build && playwright test",
+    "test:conformance": "pnpm build && node --import tsx scripts/conformance.ts",
     "test:consistency": "pnpm build && playwright test video-definition-review.spec.ts && node --import tsx --test tests/integration/video-definition.native.spec.ts tests/integration/video-watch.native.spec.ts",
     "test:preview": "pnpm build && playwright test --config playwright.preview.config.ts",
     "fixtures:generate": "tsx scripts/fixtures.ts generate",

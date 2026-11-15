@@ -1,6 +1,6 @@
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fixtureDirectory as output } from '../tests/fixture-paths.js';
 import {
   fixtures,
   requireTool,
@@ -8,10 +8,6 @@ import {
   validateFixture,
 } from './fixture-lib.js';
 import type { Fixture } from './fixture-lib.js';
-
-const output = fileURLToPath(
-  new URL('../tests/fixtures/generated/', import.meta.url),
-);
 
 function generateArgs(fixture: Fixture): string[] {
   const args = [
@@ -104,7 +100,7 @@ async function generate(): Promise<void> {
   } catch (error) {
     if (error instanceof Error && 'code' in error && error.code === 'EEXIST') {
       throw new Error(
-        'Refusing to overwrite tests/fixtures/generated. To regenerate, explicitly remove only that generated directory after reviewing its contents.',
+        'Refusing to overwrite the generated fixture directory. To regenerate, explicitly remove only that directory after reviewing its contents.',
       );
     }
     throw error;

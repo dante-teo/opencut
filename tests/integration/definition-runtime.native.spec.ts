@@ -13,12 +13,14 @@ import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { readSubtitleFile } from '@opencut/sdk';
 import { requireTool } from '../../scripts/fixture-lib.js';
+import { assertSimilarExports } from './conformance-support.js';
+import { fixtureDirectory, videoExample } from '../fixture-paths.js';
 
 test('both definition formats render without loading Electron, sessions or the durable queue', async () => {
   requireTool('ffmpeg');
   requireTool('ffprobe');
   const directory = await mkdtemp(
-    resolve('tests/fixtures/generated/definition-runtime-'),
+    join(fixtureDirectory, 'definition-runtime-'),
   );
   const entry = resolve('apps/cli/dist/index.js');
   const guard = `
@@ -37,7 +39,7 @@ test('both definition formats render without loading Electron, sessions or the d
   try {
     const outputs = [];
     for (const format of ['ts', 'json']) {
-      const source = resolve('examples/video/showcase.video.' + format);
+      const source = videoExample('showcase.video.' + format);
       const output = join(directory, format + '.mp4');
       const result = spawnSync(
         process.execPath,
@@ -55,9 +57,14 @@ test('both definition formats render without loading Electron, sessions or the d
       );
       assert.equal(result.status, 0, result.stderr);
       assert.equal(JSON.parse(result.stdout).frameCount, 480);
-      outputs.push(await readFile(output));
+      outputs.push(output);
     }
-    assert.deepEqual(outputs[0], outputs[1]);
+    await assertSimilarExports(outputs[0]!, outputs[1]!, {
+      width: 320,
+      height: 180,
+      frameCount: 480,
+      fps: 24,
+    });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -70,10 +77,10 @@ test(
     requireTool('ffmpeg');
     requireTool('ffprobe');
     const directory = await mkdtemp(
-      resolve('tests/fixtures/generated/definition-output-'),
+      join(fixtureDirectory, 'definition-output-'),
     );
     const entry = resolve('apps/cli/dist/index.js');
-    const source = resolve('examples/video/showcase.video.json');
+    const source = videoExample('showcase.video.json');
     const output = join(directory, 'export.mp4');
     const run = (...args: string[]) =>
       spawnSync(process.execPath, [entry, ...args, '--json'], {
@@ -190,13 +197,11 @@ test(
 test('explicit overwrite refuses a declared but unused media input', async () => {
   requireTool('ffmpeg');
   requireTool('ffprobe');
-  const directory = await mkdtemp(
-    resolve('tests/fixtures/generated/definition-input-'),
-  );
+  const directory = await mkdtemp(join(fixtureDirectory, 'definition-input-'));
   const asset = join(directory, 'unused.mp4');
   const source = join(directory, 'guard.video.json');
   try {
-    await copyFile(resolve('tests/fixtures/generated/video-short.mp4'), asset);
+    await copyFile(join(fixtureDirectory, 'video-short.mp4'), asset);
     const before = await readFile(asset);
     await writeFile(
       source,

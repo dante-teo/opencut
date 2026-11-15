@@ -20,11 +20,9 @@ import type {
   VideoProcessingProgress,
   VideoRecipe,
 } from '@opencut/sdk';
+import { fixtureDirectory } from '../fixture-paths.js';
 
 const exec = promisify(execFile);
-const generated = fileURLToPath(
-  new URL('../fixtures/generated/', import.meta.url),
-);
 const cli = fileURLToPath(
   new URL('../../apps/cli/dist/index.js', import.meta.url),
 );
@@ -66,8 +64,8 @@ async function fixture(t: TestContext) {
 }
 
 async function scratch(t: TestContext) {
-  await mkdir(generated, { recursive: true });
-  const dir = await mkdtemp(join(generated, 't49-test-'));
+  await mkdir(fixtureDirectory, { recursive: true });
+  const dir = await mkdtemp(join(fixtureDirectory, 't49-test-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   return dir;
 }

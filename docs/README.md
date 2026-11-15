@@ -29,3 +29,4 @@ in your usual text editor.
 - [TypeScript SDK](SDK.md)
 - [Export and rendering limits](EXPORT.md)
 - [Architecture](ARCHITECTURE.md)
+- [Preview and export conformance](PREVIEW_EXPORT_CONSISTENCY.md#video-as-code-conformance)

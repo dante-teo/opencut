@@ -30,13 +30,13 @@ import {
   verifyVideoTimestamps,
 } from './media-comparison.js';
 import { decodeAudio, sampleOnsets } from './audio-comparison.js';
+import { fixtureDirectory, videoExample } from '../fixture-paths.js';
 
-const fixtures = resolve('tests/fixtures/generated');
 const cli = resolve('apps/cli/dist/index.js');
-const example = resolve('examples/video/review.video.ts');
+const example = videoExample('review.video.ts');
 
 test('JSON watch preserves playback through truncation and follows atomic saves', async (t) => {
-  const directory = await mkdtemp(join(fixtures, 't46-json-'));
+  const directory = await mkdtemp(join(fixtureDirectory, 't46-json-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const file = join(directory, 'blank.video.json');
   const body = {
@@ -76,12 +76,12 @@ test('JSON watch preserves playback through truncation and follows atomic saves'
 });
 
 test('watch observes imports, missing files and in-place media changes without mixing revisions', async (t) => {
-  const directory = await mkdtemp(join(fixtures, 't46-watch-'));
+  const directory = await mkdtemp(join(fixtureDirectory, 't46-watch-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const file = join(directory, 'live.video.ts');
   const helper = join(directory, 'helper.ts');
   const still = join(directory, 'still.png');
-  await copyFile(join(fixtures, 'still.png'), still);
+  await copyFile(join(fixtureDirectory, 'still.png'), still);
   const mediaAlias = join(directory, 'media.png');
   await symlink(still, mediaAlias);
   const definition = {
@@ -209,7 +209,7 @@ test('watch observes imports, missing files and in-place media changes without m
   );
   // Retarget the authored path without changing either of the target files.
   const nextAlias = join(directory, 'editor-media.png');
-  await symlink(join(fixtures, 'still.png'), nextAlias);
+  await symlink(join(fixtureDirectory, 'still.png'), nextAlias);
   await rename(nextAlias, mediaAlias);
   const retargeted = (
     await waitFor(
@@ -228,7 +228,7 @@ test('watch observes imports, missing files and in-place media changes without m
 });
 
 test('CLI watch streams JSON revisions, cancels a superseded build and cleans up on SIGINT', async (t) => {
-  const directory = await mkdtemp(join(fixtures, 't46-cli-'));
+  const directory = await mkdtemp(join(fixtureDirectory, 't46-cli-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const file = join(directory, 'blank.video.ts');
   const body = (name: string) =>
@@ -297,7 +297,7 @@ test('CLI watch streams JSON revisions, cancels a superseded build and cleans up
 });
 
 test('watch tracks imports made while an async default export resolves', async (t) => {
-  const directory = await mkdtemp(join(fixtures, 't46-async-'));
+  const directory = await mkdtemp(join(fixtureDirectory, 't46-async-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const file = join(directory, 'async.video.ts');
   const helper = join(directory, 'helper.ts');
@@ -341,13 +341,13 @@ test('watch tracks imports made while an async default export resolves', async (
 });
 
 test('definition previews stage media only when decoding it', async (t) => {
-  const directory = await mkdtemp(join(fixtures, 't46-staging-'));
+  const directory = await mkdtemp(join(fixtureDirectory, 't46-staging-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const file = join(directory, 'staging.video.json');
   const image = join(directory, 'insert.png');
   const audio = join(directory, 'tone.wav');
-  await copyFile(join(fixtures, 'still.png'), image);
-  await copyFile(join(fixtures, 'audio-tone.wav'), audio);
+  await copyFile(join(fixtureDirectory, 'still.png'), image);
+  await copyFile(join(fixtureDirectory, 'audio-tone.wav'), audio);
   await writeFile(
     file,
     JSON.stringify({
@@ -395,7 +395,7 @@ test('definition previews stage media only when decoding it', async (t) => {
 });
 
 test('definition previews agree with final composited frames and audio timing', async (t) => {
-  const directory = await mkdtemp(join(fixtures, 't46-accuracy-'));
+  const directory = await mkdtemp(join(fixtureDirectory, 't46-accuracy-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   async function run(...args: string[]) {
     return JSON.parse(
@@ -496,7 +496,7 @@ test('definition previews agree with final composited frames and audio timing', 
   const skew = Math.abs(fullOnsets[0]! - 6 / 24 - clipOnsets[0]!);
   assert.ok(skew <= 0.01, `Audio onset error ${skew}s`);
 
-  const json = resolve('examples/video/showcase.video.json');
+  const json = videoExample('showcase.video.json');
   const jsonBefore = await readFile(json);
   const jsonSheet = await run(
     'preview',

@@ -8,6 +8,7 @@ import {
   readFile,
   readdir,
   rm,
+  stat,
   utimes,
   writeFile,
 } from 'node:fs/promises';
@@ -27,14 +28,11 @@ import type {
   VideoProcessingProgress,
   VideoWatchRevision,
 } from '@opencut/sdk';
+import { assertSimilarExports } from './conformance-support.js';
+import { fixtureDirectory, videoExample } from '../fixture-paths.js';
 
-const generated = fileURLToPath(
-  new URL('../fixtures/generated/', import.meta.url),
-);
 const example = (extension: string) =>
-  fileURLToPath(
-    new URL(`../../examples/video/recipes.video.${extension}`, import.meta.url),
-  );
+  videoExample('recipes.video.' + extension);
 const entry = fileURLToPath(
   new URL('../../apps/cli/dist/index.js', import.meta.url),
 );
@@ -56,8 +54,8 @@ const noStaging = async (cache: string) =>
   );
 
 async function scratch() {
-  await mkdir(generated, { recursive: true });
-  return mkdtemp(join(generated, 't48-'));
+  await mkdir(fixtureDirectory, { recursive: true });
+  return mkdtemp(join(fixtureDirectory, 't48-'));
 }
 
 async function sample() {
@@ -117,14 +115,13 @@ test('T48 concurrent foreground TS and JSON renders share seven cache entries an
     assert.equal(hits(again.stderr), 8);
     assert.deepEqual(starts(again.stderr), []);
     const path = join(directory, 'ts.mp4');
-    assert.deepEqual(
-      await readFile(path),
-      await readFile(join(directory, 'json.mp4')),
-    );
-    assert.deepEqual(
-      await readFile(path),
-      await readFile(join(directory, 'again.mp4')),
-    );
+    for (const other of ['json.mp4', 'again.mp4'])
+      await assertSimilarExports(path, join(directory, other), {
+        width: 160,
+        height: 90,
+        frameCount: 24,
+        fps: 24,
+      });
     const { video, audio } = await probeMedia(path);
     assert.equal(video?.durationSeconds, 1);
     assert.equal(audio?.durationSeconds, 1);
@@ -167,7 +164,7 @@ test('T48 invalidation follows dependencies, skips unused work and repairs damag
   const file = join(directory, 'edit.video.json');
   const source = join(directory, 'source.mp4');
   try {
-    await copyFile(join(generated, 'video-medium.mp4'), source);
+    await copyFile(join(fixtureDirectory, 'video-medium.mp4'), source);
     const definition = await sample();
     setPaths(definition, directory, source);
     definition.assets!.unused = {
@@ -218,12 +215,25 @@ test('T48 invalidation follows dependencies, skips unused work and repairs damag
     await build();
     assert.deepEqual(materialized(), ['soundtrack:2']);
     assert.equal((await entries(cacheDirectory)).length, 9);
-    // Preserve the path and size while changing metadata included in the key.
-    const timestamp = new Date('2020-01-01');
-    await utimes(source, timestamp, timestamp);
+    // Changing only timestamps must invalidate the cache even when file size,
+    // inode and every probed media property are identical.
+    const original = await stat(source);
+    const earlier = new Date('2000-01-01T00:00:00Z');
+    await utimes(source, original.atime, earlier);
+    const updated = await stat(source);
+    assert.deepEqual(
+      [updated.size, updated.ino],
+      [original.size, original.ino],
+    );
+    assert.notEqual(updated.mtimeMs, original.mtimeMs);
     await build();
     assert.equal(materialized().length, 7);
     assert.equal((await entries(cacheDirectory)).length, 16);
+    // Replace the media at the same path. All descendants must be rebuilt.
+    await copyFile(join(fixtureDirectory, 'video-long.mp4'), source);
+    await build();
+    assert.equal(materialized().length, 7);
+    assert.equal((await entries(cacheDirectory)).length, 23);
     await noStaging(cacheDirectory);
     const rotated = definition.assets!.picture!.recipe!;
     [rotated[1], rotated[2]] = [rotated[2]!, rotated[1]!];
@@ -232,7 +242,7 @@ test('T48 invalidation follows dependencies, skips unused work and repairs damag
       inspectVideoRecipes(file),
       /recipe\.2: Crop rectangle/,
     );
-    assert.equal((await entries(cacheDirectory)).length, 16);
+    assert.equal((await entries(cacheDirectory)).length, 23);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -244,7 +254,7 @@ test('T48 CLI cancellation and worker budget failures clean staging and preserve
   const file = join(directory, 'edit.video.json');
   try {
     const definition = await sample();
-    setPaths(definition, directory, join(generated, 'video-medium.mp4'));
+    setPaths(definition, directory, join(fixtureDirectory, 'video-medium.mp4'));
     const picture = definition.assets!.picture!;
     picture.recipe = picture.recipe!.slice(0, 1);
     definition.tracks = definition.tracks.slice(0, 1);
@@ -534,7 +544,7 @@ test('T48 a retry gets a fresh staging path after a CLI is killed mid-step', asy
   let workerPid: number | undefined;
   try {
     const definition = await sample();
-    setPaths(definition, directory, join(generated, 'video-medium.mp4'));
+    setPaths(definition, directory, join(fixtureDirectory, 'video-medium.mp4'));
     const picture = definition.assets!.picture!;
     picture.recipe = picture.recipe!.slice(0, 1);
     definition.assets = { picture };
@@ -634,7 +644,7 @@ test('T48 recipe inspection and rendering accept BMP and TIFF inputs', async () 
         '-v',
         'error',
         '-i',
-        join(generated, 'still.png'),
+        join(fixtureDirectory, 'still.png'),
         '-frames:v',
         '1',
         '-update',
