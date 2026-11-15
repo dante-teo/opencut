@@ -1,11 +1,8 @@
-import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { cpus, release, version } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { MediaError } from './process.js';
 import { recipeInputArguments } from './probe.js';
 import type { MediaMetadata, MediaStream } from './probe.js';
-import { runRecipeProcess } from './recipe-process.js';
+import { nativeRecipeFingerprint, runRecipeProcess } from './recipe-process.js';
 import type { RecipeProcessLimits } from './recipe-process.js';
 
 const worker = fileURLToPath(new URL('./video-interpolate', import.meta.url));
@@ -15,20 +12,12 @@ export async function interpolationBackendVersion(signal: AbortSignal) {
     throw new MediaError(
       'AI interpolation requires an Apple Silicon Mac with VideoToolbox on macOS 26 or later.',
     );
-  const bytes = await readFile(worker, { signal }).catch((cause: unknown) => {
-    signal.throwIfAborted();
-    throw new MediaError(
-      'The VideoToolbox interpolation worker is missing. Build @opencut/media with a macOS 26+ SDK.',
-      { cause },
-    );
-  });
-  return [
+  return nativeRecipeFingerprint(
+    worker,
     'videotoolbox-low-latency-v2',
-    cpus()[0]?.model ?? process.arch,
-    release(),
-    version(),
-    createHash('sha256').update(bytes).digest('hex'),
-  ];
+    'interpolation',
+    signal,
+  );
 }
 
 export interface InterpolationPlan {
@@ -205,6 +194,7 @@ export async function runInterpolation(
   ];
   await runRecipeProcess(
     {
+      label: 'AI interpolation',
       timingPipe: `${output}.frames`,
       decoder: decode,
       worker: { executable: worker, args: native },

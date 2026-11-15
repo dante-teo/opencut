@@ -59,7 +59,7 @@ static id<VTFrameProcessorConfiguration> configure(NSString *effect, int width, 
             initWithFrameWidth:width frameHeight:height scaleFactor:(NSInteger)scale
             inputType:VTSuperResolutionScalerConfigurationInputTypeVideo usePrecomputedFlow:NO
             qualityPrioritization:VTSuperResolutionScalerConfigurationQualityPrioritizationNormal
-            revision:VTSuperResolutionScalerConfiguration.defaultRevision];
+            revision:VTSuperResolutionScalerConfigurationRevision1];
     }
     return nil;
 }

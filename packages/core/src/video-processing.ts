@@ -4,16 +4,21 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   MediaError,
+  enhancementBackendVersion,
   interpolationBackendVersion,
   probeRecipeMedia,
   recipeBackendVersion,
+  runEnhancement,
   runInterpolation,
   runRecipeProcess,
 } from '@opencut/media';
 import type { RecipeProcessLimits } from '@opencut/media';
 import { videoInputIdentity } from './video-input.js';
 import type { IdentifiedMedia } from './video-input.js';
-import { isInterpolationStep } from './video-recipe-schema.js';
+import {
+  isEnhancementStep,
+  isInterpolationStep,
+} from './video-recipe-schema.js';
 import { materializeRecipeEntry } from './video-recipe-cache.js';
 import {
   recipeArguments,
@@ -44,6 +49,9 @@ export interface VideoProcessingProgress {
 }
 
 const MiB = 1024 * 1024;
+type ProcessingLimits = RecipeProcessLimits & {
+  highQualityNativeBytes: number;
+};
 
 export async function processVideoRecipes(
   recipes: readonly RecipeInput[],
@@ -62,8 +70,12 @@ export async function processVideoRecipes(
   const ffmpeg = await recipeBackendVersion(processingSignal);
   let interpolationVersion:
     ReturnType<typeof interpolationBackendVersion> | undefined;
+  let enhancementVersion:
+    ReturnType<typeof enhancementBackendVersion> | undefined;
   const backends = {
     ffmpeg,
+    enhancement: () =>
+      (enhancementVersion ??= enhancementBackendVersion(processingSignal)),
     interpolation: () =>
       (interpolationVersion ??= interpolationBackendVersion(processingSignal)),
   };
@@ -99,9 +111,10 @@ async function processRecipe(
   directory: string,
   backends: {
     ffmpeg: string;
+    enhancement: () => ReturnType<typeof enhancementBackendVersion>;
     interpolation: () => ReturnType<typeof interpolationBackendVersion>;
   },
-  limits: RecipeProcessLimits,
+  limits: ProcessingLimits,
   signal: AbortSignal,
   onProgress?: VideoProcessingOptions['onProgress'],
 ) {
@@ -120,9 +133,11 @@ async function processRecipe(
       assertCurrent(current);
       // Old derived-media manifests predate the color and timing fields
       // needed by VideoToolbox. Refresh those inputs before planning the step.
+      const enhancement = isEnhancementStep(parameters) ? parameters : null;
       const source =
-        isInterpolationStep(parameters) &&
-        current.metadata.video?.colorRange === undefined
+        (enhancement && current.metadata.video?.hasHdrMetadata === undefined) ||
+        (isInterpolationStep(parameters) &&
+          current.metadata.video?.colorRange === undefined)
           ? await probeRecipeMedia(current.metadata.path, signal)
           : current.metadata;
       const inputMedia = recipeMedia(source);
@@ -137,6 +152,7 @@ async function processRecipe(
             step.parameters,
             step.format,
             ...(step.interpolation ? await backends.interpolation() : []),
+            ...(enhancement ? await backends.enhancement() : []),
           ]),
         )
         .digest('hex');
@@ -179,7 +195,21 @@ async function processRecipe(
               signal,
               progress,
             );
-          else
+          else if (enhancement) {
+            const enhancementLimits =
+              enhancement.type === 'superResolution' &&
+              enhancement.quality === 'high'
+                ? { ...limits, maxNativeBytes: limits.highQualityNativeBytes }
+                : limits;
+            await runEnhancement(
+              source,
+              enhancement,
+              output,
+              enhancementLimits,
+              signal,
+              progress,
+            );
+          } else
             await runRecipeProcess(
               recipeArguments(source, step, output),
               limits,
@@ -239,7 +269,8 @@ function processingSettings(options: VideoProcessingOptions) {
     throw new MediaError(
       'Recipe temporary budget must allow at least 1024 bytes per worker.',
     );
-  const limits: RecipeProcessLimits = {
+  const limits: ProcessingLimits = {
+    highQualityNativeBytes: options.maxNativeBytes ?? 2048 * MiB,
     maxTemporaryBytes: perWorkerBytes,
     maxNativeBytes: positive(
       'maxNativeBytes',

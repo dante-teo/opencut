@@ -195,6 +195,8 @@ cropped video and a normalized soundtrack.
 | `smoothSlowMotion`  | Synthesizes frames while extending picture duration by `1 / speed`. Drops the selected audio stream. See [AI interpolation](#ai-interpolation).                                                     |
 | `extractAudio`      | Selects the input’s default audio stream and outputs audio. Pads a delayed audio start with silence to retain its position.                                                                         |
 | `normalizeAudio`    | One-pass loudness normalization. Optional `targetLufs` defaults to −16 and accepts −40 through −10. Requires audio.                                                                                 |
+| `superResolution`   | Set even `width` and `height` in the source aspect ratio. Apple VideoToolbox uses the `high` (default) or `fast` preset.                                                                            |
+| `denoise`           | Apple VideoToolbox temporal noise filtering at `light`, `medium` (default), or `strong` strength.                                                                                                   |
 | `convert`           | `format` is `mov` (FFV1 with PCM) or `mp4` (H.264 with AAC and even dimensions) for video, `png` for images, and `wav` (float PCM) or `flac` for audio.                                             |
 
 Steps select the same primary video and audio streams as composition. By
@@ -309,6 +311,79 @@ fast foreground machinery sometimes blurred more on synthesized frames.
 Faster movement, flashes, and subtle cuts can also challenge scene detection.
 Review synthesized frames and cut boundaries in the final composition. See
 the [CLI processing limits and cache behavior](CLI.md#media-recipes).
+
+### AI enhancement
+
+The following `.video.json` asset recipe processes only seconds 2 through 6
+of a 720p or 1080p 16:9 source. The same steps and properties work in
+`.video.ts` and are typed by `VideoRecipe` in the SDK.
+
+```json
+{
+  "recipe": [
+    { "type": "trim", "start": 2, "end": 6 },
+    {
+      "type": "superResolution",
+      "backend": "videotoolbox",
+      "quality": "high",
+      "width": 3840,
+      "height": 2160
+    }
+  ]
+}
+```
+
+Set 2160 × 3840 for a 9:16 portrait input. Both dimensions must be even and
+match the source aspect ratio. To deliver UHD, set the composition canvas
+to the matching dimensions as well.
+
+Both enhancement operations set time zero to the earliest retained video or
+audio stream and preserve the delay between them. A `trim` before enhancement
+uses the source container's clock. A `trim` after enhancement uses the derived
+file's clock. For example, if an unselected track starts at 0 s, the selected
+video at 2 s, and the selected audio at 2.25 s, the derived video starts at 0 s
+and the audio at 0.25 s. Timeline clip offsets use the final recipe output.
+
+| Step and preset           | Processor                                      | Supported geometry and settings                                                                                                                                                                                                          |
+| ------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `superResolution`, `fast` | VideoToolbox low-latency super-resolution      | Uses a 1.5× or 2× model at supported source sizes. It picks 1.5× if that covers the target with even intermediate dimensions, and 2× otherwise. Try `high` if the selected factor is unavailable.                                        |
+| `superResolution`, `high` | VideoToolbox video super-resolution revision 1 | Runs the 4× model on supported sizes up to 1920 × 1080 or 1080 × 1920. Portrait frames rotate for inference and rotate back. The model uses the previous input and output, with a reset at detected cuts.                                |
+| `denoise`                 | VideoToolbox temporal noise filter             | Keeps the dimensions. `light`, `medium`, and `strong` correspond to strengths 0.25, 0.5, and 0.75. It uses references from the same detected shot, so an isolated frame has no filter result. A range with no eligible references fails. |
+
+The accepted `backend` value is `videotoolbox`, also the default. Both
+super-resolution presets run AI inference and use Lanczos to reduce the
+model output to the target size when needed. Temporal denoising may help
+with compression noise. Apple exposes no separate deblocking control here.
+
+Use Apple Silicon with macOS 26 or later and an OpenCut build made with the
+macOS 26+ SDK. Run `opencut system inspect --json` and look for
+`low-latency-super-resolution`, `video-super-resolution`, or
+`temporal-noise-filter`. For portrait `high`, check the transposed
+dimensions under `video-super-resolution`. The system probe reports known
+configurations and the offline model's readiness. The actual job verifies
+the model can initialize and process frames. OpenCut uses system-managed
+models and leaves model downloads to the system or user.
+
+Inputs need a constant frame cadence from 1 through 120 fps, square pixels,
+progressive 8-bit video-range SDR 4:2:0, and even dimensions. With audio,
+the source must declare its picture duration. Use `frameRate` before AI
+enhancement for variable-rate sources. The derived lossless MOV retains
+picture cadence, a partial final packet, relative audio timing, and
+supported primaries, transfer, matrix, and video range. When the matrix
+tag is missing, OpenCut resolves the matrix from the input dimensions and
+codec before enhancement and writes it to the derived file. Untagged range is
+interpreted as video range. HDR, full-range, higher-bit-depth, alpha, and
+unsupported model configurations produce errors. The preview and final MP4
+use the timeline renderer's BT.709 output space.
+
+Recipe order is processing order. Denoising before upscaling keeps its
+work at the smaller dimensions. Interpolating first runs enhancement over
+more frames, but keeps interpolation at the original dimensions. Upscaling
+first may take the picture outside the interpolation processor’s limits.
+Check `system inspect` for both processors when chaining them. For a
+comparison, use `resize` with `"method": "lanczos"` at the same target
+dimensions. Review several consecutive frames with fine text, faces,
+texture, and motion. UHD dimensions alone do not establish recovered detail.
 
 ## Inspect, preview and render
 

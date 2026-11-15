@@ -1000,7 +1000,9 @@ async function prepareTimeline(
       (options.outputFrameRate
         ? `fps=${outputRate.numerator}/${outputRate.denominator}:round=up:eof_action=pass,tpad=stop_mode=clone:stop=1,trim=end_frame=${outputFrameCount},settb=1/${outputRate.numerator},setpts=N*${outputRate.denominator},`
         : '') +
-      `format=${png ? 'rgb24' : 'yuv420p'}[video]`,
+      (png
+        ? 'format=rgb24[video]'
+        : 'format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709[video]'),
   );
   if (png) {
     args.push(

@@ -1,4 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { cpus, release, version } from 'node:os';
 import { MediaError, checkRenderSignal, runMediaTool } from './process.js';
 
 export interface RecipeProcessLimits {
@@ -11,7 +14,8 @@ export interface RecipeProcessLimits {
 
 const progress = ['-progress', 'pipe:1', '-stats_period', '0.25'];
 
-type InterpolationPipeline = {
+type NativeRecipePipeline = {
+  label: string;
   timingPipe: string;
   decoder: string[];
   worker: { executable: string; args: string[] };
@@ -41,7 +45,7 @@ function ffmpegLimits(limits: RecipeProcessLimits) {
 }
 
 export async function runRecipeProcess(
-  invocation: string[] | InterpolationPipeline,
+  invocation: string[] | NativeRecipePipeline,
   limits: RecipeProcessLimits,
   signal: AbortSignal,
   onTime: (seconds: number) => void,
@@ -199,7 +203,7 @@ export async function runRecipeProcess(
       if (failure) reject(failure);
       else if (
         sig === 'SIGXFSZ' ||
-        /File too large|File size limit exceeded/i.test(diagnostic)
+        /File too large|File ?size limit exceeded/i.test(diagnostic)
       )
         reject(
           new MediaError('Recipe step exceeded its temporary file limit.'),
@@ -207,7 +211,7 @@ export async function runRecipeProcess(
       else if (code !== 0 || (!pipeline && diagnostic))
         reject(
           new MediaError(
-            `${pipeline ? 'AI interpolation' : 'FFmpeg recipe step'} failed: ${diagnostic.trim() || sig || code}`,
+            `${pipeline ? invocation.label : 'FFmpeg recipe step'} failed: ${diagnostic.trim() || sig || code}`,
           ),
         );
       else resolve();
@@ -225,6 +229,28 @@ function recipeMemory(output: string, group: number | undefined) {
     if (pgid === group) kib += rss ?? 0;
   }
   return kib * 1024;
+}
+
+export async function nativeRecipeFingerprint(
+  worker: string,
+  backendVersion: string,
+  effect: string,
+  signal: AbortSignal,
+) {
+  const bytes = await readFile(worker, { signal }).catch((cause: unknown) => {
+    signal.throwIfAborted();
+    throw new MediaError(
+      `The VideoToolbox ${effect} worker is missing. Build @opencut/media with a macOS 26+ SDK.`,
+      { cause },
+    );
+  });
+  return [
+    backendVersion,
+    cpus()[0]?.model ?? process.arch,
+    release(),
+    version(),
+    createHash('sha256').update(bytes).digest('hex'),
+  ];
 }
 
 export async function recipeBackendVersion(signal: AbortSignal) {

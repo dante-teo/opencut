@@ -40,4 +40,9 @@ export {
   interpolationTiming,
   runInterpolation,
 } from './interpolate.js';
+export {
+  enhancementBackendVersion,
+  runEnhancement,
+  validateEnhancementOutput,
+} from './enhance.js';
 export type { InterpolationPlan } from './interpolate.js';

@@ -21,6 +21,8 @@ export interface MediaStream {
   frameRate: number | null;
   frameRateRatio: string | null;
   frameCount?: number | null;
+  nominalFrameRateRatio?: string | null;
+  hasHdrMetadata?: boolean;
   pixelFormat: string | null;
   /** Display geometry; optional for callers supplying legacy metadata. */
   sampleAspectRatio?: number;
@@ -114,6 +116,14 @@ function parseStream(value: unknown): MediaStream {
     frameRate,
     frameRateRatio: frameRate === null ? null : text(data.avg_frame_rate),
     frameCount: finiteNumber(data.nb_frames),
+    nominalFrameRateRatio: text(data.r_frame_rate),
+    hasHdrMetadata:
+      Array.isArray(data.side_data_list) &&
+      data.side_data_list.some((side) =>
+        /HDR|DOVI|Dolby Vision|Mastering display|Content light/i.test(
+          String(record(side).side_data_type ?? ''),
+        ),
+      ),
     pixelFormat: text(data.pix_fmt),
     colorSpace: text(data.color_space),
     colorRange: text(data.color_range),

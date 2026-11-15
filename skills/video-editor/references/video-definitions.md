@@ -111,6 +111,7 @@ definitions and fixture setup, see [Video as code](../../../docs/VIDEO_DEFINITIO
 
 Set `recipe` on an asset to run steps in order. Available types are `trim`,
 `crop`, `resize`, `frameRate`, `interpolateFrames`, `smoothSlowMotion`,
+`superResolution`, `denoise`,
 `extractAudio`, `normalizeAudio`, and `convert`.
 Set `kind` to the final result and use processed time for clip source ranges.
 Recipe trims use seconds from the input container start and retain the
@@ -133,3 +134,20 @@ video to show every synthesized frame.
 These steps require a supported Apple Silicon Mac on macOS 26+. Inspect
 hardware with `opencut system inspect --json`. On unsupported inputs the
 step fails. See the [AI recipe reference](../../../docs/VIDEO_DEFINITIONS.md#ai-interpolation).
+
+For AI upscaling, set `{ "type": "superResolution", "backend": "videotoolbox",
+"width": 3840, "height": 2160, "quality": "high" }` on a 16:9 asset.
+Use 2160 × 3840 for 9:16. Match the canvas to deliver UHD. Put `trim` before
+enhancement to select a range on the source container's clock. A later
+`trim` uses the derived clock, where the first retained stream starts at
+zero and the relative audio delay is preserved. `fast` uses a size-dependent
+1.5× or 2× model.
+`high` uses Apple's temporal 4× model and resizes to the target. For
+`denoise`, choose `light`, `medium`, or `strong` and check temporal
+noise-filter support before use. AI enhancement accepts constant-rate,
+progressive, square-pixel, 8-bit video-range SDR input. If the color matrix
+tag is missing, OpenCut resolves it from the input dimensions and codec
+before enhancement. Recipe order determines whether enhancement runs
+before or after interpolation. Compare
+the processed sequence with a Lanczos resize when judging detail and
+temporal consistency. See the [enhancement reference](../../../docs/VIDEO_DEFINITIONS.md#ai-enhancement).

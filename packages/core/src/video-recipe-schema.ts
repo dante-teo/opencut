@@ -11,6 +11,7 @@ export const interpolationPhaseDepth = {
   balanced: 2,
   high: 3,
 } as const;
+const enhancementBackend = z.literal('videotoolbox').default('videotoolbox');
 const interpolation = {
   ...frameRate,
   quality: z.enum(['fast', 'balanced', 'high']).default('balanced'),
@@ -54,6 +55,18 @@ export const videoRecipeSchema = z
         ...interpolation,
         speed: z.number().min(0.125).lt(1),
       }),
+      z.strictObject({
+        type: z.literal('superResolution'),
+        backend: enhancementBackend,
+        width: pixels,
+        height: pixels,
+        quality: z.enum(['fast', 'high']).default('high'),
+      }),
+      z.strictObject({
+        type: z.literal('denoise'),
+        backend: enhancementBackend,
+        quality: z.enum(['light', 'medium', 'strong']).default('medium'),
+      }),
       z.strictObject({ type: z.literal('extractAudio') }),
       z.strictObject({
         type: z.literal('normalizeAudio'),
@@ -68,6 +81,17 @@ export const videoRecipeSchema = z
 export type VideoRecipe = z.input<typeof videoRecipeSchema>;
 export type ResolvedVideoRecipe = z.output<typeof videoRecipeSchema>;
 export type RecipeFormat = z.output<typeof format>;
+
+export type EnhancementStep = Extract<
+  ResolvedVideoRecipe[number],
+  { type: 'superResolution' | 'denoise' }
+>;
+
+export function isEnhancementStep(
+  step: ResolvedVideoRecipe[number],
+): step is EnhancementStep {
+  return step.type === 'superResolution' || step.type === 'denoise';
+}
 
 export type InterpolationStep = Extract<
   ResolvedVideoRecipe[number],

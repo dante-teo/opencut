@@ -47,7 +47,10 @@ identity together with a directory rename.
 Aborted work removes its stage. A guard stops the encoder process group if
 the build process exits unexpectedly. The next request for a key can clear
 its abandoned stage and gets a fresh attempt directory. The AI recipe worker
-receives decoded pixels and presentation timestamps through bounded pipes and
-keeps a window of two source surfaces and one output surface. Its FFmpeg
-decoder and encoder share the step's process group and lifecycle. Watched revisions
+receives decoded pixels and presentation timestamps through bounded pipes.
+Interpolation keeps two input surfaces and one output surface. Video
+super-resolution keeps the current and previous input and output surfaces.
+Temporal denoising bounds its window by the model's reference counts and
+the configured frame limit. The FFmpeg decoder, worker and encoder share
+the step's process group and lifecycle. Watched revisions
 pin copies of their final derived assets just as they pin unprocessed sources.

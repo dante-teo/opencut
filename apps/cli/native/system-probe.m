@@ -39,6 +39,9 @@ static NSMutableDictionary *configurationInfo(id<VTFrameProcessorConfiguration> 
         @"modelStatus": modelStatus(config)
     } mutableCopy];
     if (@available(macOS 26.0, *)) {
+        if ([(id)config isKindOfClass:VTSuperResolutionScalerConfiguration.class]) {
+            info[@"revision"] = @(((VTSuperResolutionScalerConfiguration *)config).revision);
+        }
         if ([(id)config isKindOfClass:VTTemporalNoiseFilterConfiguration.class]) {
             VTTemporalNoiseFilterConfiguration *noise = (id)config;
             info[@"previousFrames"] = @(noise.previousFrameCount);

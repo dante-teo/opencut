@@ -15,3 +15,5 @@ On macOS, `opencut system inspect --json` reports the VideoToolbox processor
 and tested formats and dimensions. Recipe inspection checks declarations
 and input streams. Use normal `validate` with the same recipe limits as
 `render` to check whether the referenced AI recipe can actually build.
+For enhancement, check `low-latency-super-resolution`,
+`video-super-resolution`, or `temporal-noise-filter` in the system report.

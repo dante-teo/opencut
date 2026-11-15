@@ -4,11 +4,16 @@ import {
   MediaError,
   recipeInputArguments,
   videoSourceDuration,
+  validateEnhancementOutput,
 } from '@opencut/media';
 import type { InterpolationPlan, MediaMetadata } from '@opencut/media';
 import type { IdentifiedMedia } from './video-input.js';
-import { interpolationPhaseDepth } from './video-recipe-schema.js';
+import {
+  interpolationPhaseDepth,
+  isEnhancementStep,
+} from './video-recipe-schema.js';
 import type {
+  EnhancementStep,
   InterpolationStep,
   RecipeFormat,
   ResolvedVideoRecipe,
@@ -162,6 +167,9 @@ export function resolveRecipeStep(
     case 'interpolateFrames':
     case 'smoothSlowMotion':
       return resolveInterpolation(input, parameters);
+    case 'superResolution':
+    case 'denoise':
+      return resolveEnhancement(input, parameters);
     case 'extractAudio':
       if (!input.hasAudio)
         throw new Error('Audio extraction requires an audio stream.');
@@ -201,6 +209,64 @@ export function resolveRecipeStep(
       break;
   }
   return { parameters, format: output, media };
+}
+
+function resolveEnhancement(
+  input: RecipeMedia,
+  parameters: EnhancementStep,
+): ResolvedRecipeStep {
+  const { kind, width, height, frameRate, durationSeconds } = input;
+  if (
+    kind !== 'video' ||
+    !width ||
+    !height ||
+    width % 2 ||
+    height % 2 ||
+    !frameRate ||
+    !durationSeconds
+  )
+    throw new MediaError(
+      'AI enhancement requires timed video with even dimensions.',
+    );
+  const { media: rebased } = rebaseRecipeStreams(input, input.hasAudio);
+  if (parameters.type === 'denoise')
+    return { parameters, format: 'mov', media: { ...input, ...rebased } };
+  const { width: targetWidth, height: targetHeight, quality } = parameters;
+  const maximumScale = quality === 'fast' ? 2 : 4;
+  if (
+    targetWidth % 2 ||
+    targetHeight % 2 ||
+    targetWidth <= width ||
+    targetWidth > width * maximumScale ||
+    targetWidth * height !== targetHeight * width
+  )
+    throw new MediaError(
+      `AI super-resolution requires larger even dimensions with the original aspect ratio and a scale no greater than ${maximumScale}× at this quality.`,
+    );
+  return {
+    parameters,
+    format: 'mov',
+    media: { ...input, ...rebased, width: targetWidth, height: targetHeight },
+  };
+}
+
+function rebaseRecipeStreams(input: RecipeMedia, hasAudio: boolean) {
+  const pictureStart = input.videoStartSeconds ?? 0;
+  const audioStart = hasAudio ? input.audioStartSeconds : null;
+  const originShiftSeconds = Math.min(pictureStart, audioStart ?? pictureStart);
+  return {
+    originShiftSeconds,
+    media: {
+      hasAudio,
+      videoStartSeconds: pictureStart - originShiftSeconds,
+      audioStartSeconds:
+        audioStart === null ? null : audioStart - originShiftSeconds,
+      audioDurationSeconds:
+        hasAudio && input.audioDurationSeconds !== null
+          ? input.audioDurationSeconds - originShiftSeconds
+          : null,
+    },
+  };
 }
 
 function resolveInterpolation(
@@ -246,11 +312,10 @@ function resolveInterpolation(
     );
 
   const duration = durationSeconds / speed;
-  const hasAudio = preserveAudio && input.hasAudio;
-  const pictureStart = input.videoStartSeconds ?? 0;
-  const audioStart = hasAudio ? input.audioStartSeconds : null;
-  const originShiftSeconds = Math.min(pictureStart, audioStart ?? pictureStart);
-  const videoStart = pictureStart - originShiftSeconds;
+  const { originShiftSeconds, media: rebased } = rebaseRecipeStreams(
+    input,
+    preserveAudio && input.hasAudio,
+  );
   return {
     parameters,
     format: 'mov',
@@ -258,14 +323,7 @@ function resolveInterpolation(
       ...input,
       frameRate: fps,
       durationSeconds: duration,
-      videoStartSeconds: videoStart,
-      hasAudio,
-      audioStartSeconds:
-        audioStart === null ? null : audioStart - originShiftSeconds,
-      audioDurationSeconds:
-        hasAudio && input.audioDurationSeconds !== null
-          ? input.audioDurationSeconds - originShiftSeconds
-          : null,
+      ...rebased,
     },
     interpolation: {
       numerator,
@@ -275,7 +333,7 @@ function resolveInterpolation(
       sceneThreshold,
       sceneCuts,
       speed,
-      videoStartSeconds: videoStart,
+      videoStartSeconds: rebased.videoStartSeconds,
       originShiftSeconds,
       preserveAudio,
     },
@@ -443,6 +501,10 @@ export function validateRecipeOutput(
     throw new MediaError(
       'Recipe result did not contain the expected media streams, dimensions, or duration.',
     );
+  if (isEnhancementStep(step.parameters)) {
+    validateEnhancementOutput(input, output);
+    return;
+  }
   if (step.interpolation) {
     const { timing, videoStartSeconds, preserveAudio } = step.interpolation;
     const audio = preserveAudio ? input.audio : null;

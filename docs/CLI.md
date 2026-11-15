@@ -44,15 +44,15 @@ steps without transcoding. The normal `validate`, `inspect`, and `render`
 commands also accept these processing options when compiling referenced
 recipes.
 
-| Option                     | Default and scope                                                                                                                                     |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--recipe-cache`           | `$XDG_CACHE_HOME/opencut/recipes-v1`, or `~/.cache/opencut/recipes-v1`. Use a private local directory that supports file locks and atomic rename.     |
-| `--recipe-workers`         | 1 active step per invocation, configurable from 1 through 16.                                                                                         |
-| `--recipe-temp-bytes`      | 4 GiB for staged media per invocation, split evenly among workers. The OS file limit rounds down and can be stricter on Linux depending on the shell. |
-| `--recipe-memory-bytes`    | 1 GiB per active step. Caps individual FFmpeg allocations and checks process-group RSS for AI steps. RSS is sampled every 50 ms.                      |
-| `--recipe-buffered-frames` | 32 frames per FFmpeg filter graph. VideoToolbox keeps two input surfaces and one output surface and requires a limit of at least 3.                   |
-| `--recipe-max-pixels`      | 8,847,360 pixels per input or output frame.                                                                                                           |
-| `--recipe-timeout-ms`      | 1,800,000 milliseconds per step.                                                                                                                      |
+| Option                     | Default and scope                                                                                                                                                                                                         |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--recipe-cache`           | `$XDG_CACHE_HOME/opencut/recipes-v1`, or `~/.cache/opencut/recipes-v1`. Use a private local directory that supports file locks and atomic rename.                                                                         |
+| `--recipe-workers`         | 1 active step per invocation, configurable from 1 through 16.                                                                                                                                                             |
+| `--recipe-temp-bytes`      | 4 GiB for staged media per invocation, split evenly among workers. The OS file limit rounds down and can be stricter on Linux depending on the shell.                                                                     |
+| `--recipe-memory-bytes`    | 1 GiB per active step, or 2 GiB for high super-resolution. Caps individual FFmpeg allocations and checks process-group RSS for AI steps every 50 ms.                                                                      |
+| `--recipe-buffered-frames` | 32 frames per FFmpeg filter graph. VideoToolbox interpolation needs 3 surfaces, fast super-resolution 2, and high super-resolution 4. Denoise needs the current and output surfaces plus the configured reference window. |
+| `--recipe-max-pixels`      | 8,847,360 pixels per input or output frame.                                                                                                                                                                               |
+| `--recipe-timeout-ms`      | 1,800,000 milliseconds per step.                                                                                                                                                                                          |
 
 Processing limits apply to fresh recipe work. Cached media and composition
 outputs have their own disk usage. Matching inputs, parameters, and backend
@@ -83,3 +83,9 @@ combined RSS of the decoder, model worker, and encoder. It does not measure
 Apple driver or system-wide unified memory. Native capability checks happen
 on a fresh execution of `validate`, `inspect`, or `render`. See the
 [AI recipe settings and supported inputs](VIDEO_DEFINITIONS.md#ai-interpolation).
+
+`superResolution` and `denoise` use the same cache, progress, and cancellation
+controls. Put `trim` first to limit inference to a source range. For UHD,
+start with one recipe worker. Use `system inspect --json` for the supported
+configurations and model readiness, then `validate` to run the actual job.
+See [enhancement presets and limits](VIDEO_DEFINITIONS.md#ai-enhancement).
