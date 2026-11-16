@@ -1,6 +1,7 @@
 # OpenCut quick start
 
-OpenCut compiles a TypeScript definition into a video. Install
+OpenCut compiles a TypeScript definition into a video. See [Install OpenCut](INSTALL.md)
+for packaged installations. To run from source, install
 Node.js 24.12+ within the 24.x series, pnpm 11.20, FFmpeg, and ffprobe. From
 a checkout, run:
 

@@ -1,3 +1,5 @@
+#include <stdio.h>
+#include <string.h>
 #import <Foundation/Foundation.h>
 #import <VideoToolbox/VideoToolbox.h>
 #import <VideoToolbox/VTFrameProcessor_LowLatencyFrameInterpolation.h>
@@ -231,6 +233,10 @@ static void interpolate(int width, int height, BOOL offline, int32_t timescale, 
 }
 
 int main(int argc, const char **argv) {
+    if (argc == 2 && strcmp(argv[1], "--version") == 0) {
+        puts(OPENCUT_VERSION);
+        return 0;
+    }
     @autoreleasepool {
         if (@available(macOS 15.4, *)) {
             if (argc != 10) fail(@"Invalid interpolation worker arguments.");

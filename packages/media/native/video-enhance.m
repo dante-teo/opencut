@@ -1,3 +1,5 @@
+#include <stdio.h>
+#include <string.h>
 #import <Foundation/Foundation.h>
 #import <VideoToolbox/VideoToolbox.h>
 #import <VideoToolbox/VTFrameProcessor_LowLatencySuperResolutionScaler.h>
@@ -254,6 +256,10 @@ static void enhance(Options options) {
 }
 
 int main(int argc, const char **argv) {
+    if (argc == 2 && strcmp(argv[1], "--version") == 0) {
+        puts(OPENCUT_VERSION);
+        return 0;
+    }
     @autoreleasepool {
         if (@available(macOS 26.0, *)) {
             if (argc != 11) fail(@"Invalid enhancement worker arguments.");

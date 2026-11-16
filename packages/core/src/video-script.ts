@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { isBuiltin, registerHooks } from 'node:module';
+import { findPackageJSON, isBuiltin, registerHooks } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import {
@@ -20,6 +20,25 @@ export type ScriptImport = {
   path?: string;
   unresolved?: boolean;
 };
+
+const sdk = '@opencut/sdk';
+
+function isModuleNotFound(error: unknown) {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    error.code === 'ERR_MODULE_NOT_FOUND'
+  );
+}
+
+function isSdkAbsent(parentURL: string) {
+  // Find the manifest independently of the exported entry point.
+  try {
+    return findPackageJSON(sdk, parentURL) === undefined;
+  } catch (error) {
+    return isModuleNotFound(error);
+  }
+}
 
 export async function readDefinitionScript(
   path: string,
@@ -50,12 +69,25 @@ export async function readDefinitionScript(
       try {
         resolved = nextResolve(specifier, context);
       } catch (error) {
-        trace?.({
-          parent: fileURLToPath(parentURL),
-          specifier,
-          unresolved: true,
-        });
-        throw error;
+        // A global CLI or review app has its SDK beside the core, outside
+        // the authored project's normal Node module search path.
+        if (
+          specifier === sdk &&
+          isModuleNotFound(error) &&
+          isSdkAbsent(parentURL)
+        ) {
+          resolved = nextResolve(sdk, {
+            ...context,
+            parentURL: import.meta.url,
+          });
+        } else {
+          trace?.({
+            parent: fileURLToPath(parentURL),
+            specifier,
+            unresolved: true,
+          });
+          throw error;
+        }
       }
       if (trace && !isBuiltin(specifier))
         trace({

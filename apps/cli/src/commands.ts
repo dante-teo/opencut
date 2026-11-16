@@ -149,6 +149,10 @@ const commands = {
     args: '<request.json> --result <id|index> --directory <media-directory>',
     options: ['result', 'directory'],
   },
+  doctor: { args: '', options: [] },
+  'models inspect': { args: '', options: [] },
+  'models install': { args: '<bandit-v2>', options: [] },
+  'models remove': { args: '<bandit-v2>', options: [] },
   'system inspect': { args: '', options: [] },
 } satisfies Record<string, { args: string; options: string[] }>;
 

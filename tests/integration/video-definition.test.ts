@@ -187,6 +187,37 @@ describe('whole-video definitions', () => {
     expect(result.status, result.stderr).toBe(0);
   });
 
+  it('uses the bundled SDK only when the definition has no local SDK', async () => {
+    const path = join(directory, 'title.video.ts');
+    await writeFile(
+      path,
+      `import { defineVideo } from '@opencut/sdk';\nexport default defineVideo(${JSON.stringify(definition())});\n`,
+    );
+    const bundled = run('validate', path);
+    expect(bundled.status, bundled.stderr).toBe(0);
+    expect(JSON.parse(bundled.stdout)).toMatchObject({ frameCount: 600 });
+
+    const sdk = join(directory, 'node_modules', '@opencut', 'sdk');
+    const manifest = join(sdk, 'package.json');
+    await mkdir(sdk, { recursive: true });
+    await writeFile(manifest, '{"exports":"./index.mjs"}');
+    await writeFile(
+      join(sdk, 'index.mjs'),
+      'export const defineVideo = (input) => ({ ...input, canvas: { ...input.canvas, durationFrames: 720 } });',
+    );
+    const local = run('validate', path);
+    expect(local.status, local.stderr).toBe(0);
+    expect(JSON.parse(local.stdout)).toMatchObject({ frameCount: 720 });
+
+    await writeFile(manifest, '{"exports":"./missing.mjs"}');
+    const broken = run('validate', path);
+    expect(broken.status, broken.stdout).toBe(1);
+    expect(JSON.parse(broken.stderr)).toMatchObject({
+      ok: false,
+      error: { message: expect.stringContaining('missing.mjs') },
+    });
+  });
+
   it('validates and inspects from another directory without Electron or media tools', async () => {
     const folder = join(directory, 'definitions');
     await mkdir(folder);

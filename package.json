@@ -27,9 +27,13 @@
     "fixtures:generate": "tsx scripts/fixtures.ts generate",
     "fixtures:validate": "tsx scripts/fixtures.ts validate",
     "test:fixtures": "node --import tsx --test tests/fixtures/validation.native.spec.ts",
-    "test:media": "pnpm build:packages && pnpm --filter @opencut/cli build && node --import tsx --test tests/integration/*.native.spec.ts"
+    "test:media": "pnpm build:packages && pnpm --filter @opencut/cli build && node --import tsx --test tests/integration/*.native.spec.ts",
+    "release:pack": "node scripts/release/pack.mjs"
   },
   "devDependencies": {
+    "@electron/notarize": "3.1.2",
+    "@electron/osx-sign": "2.6.0",
+    "@electron/packager": "20.0.0",
     "@eslint/js": "9.39.5",
     "@opencut/core": "workspace:*",
     "@opencut/sdk": "workspace:*",
@@ -38,6 +42,7 @@
     "eslint": "9.39.5",
     "eslint-config-prettier": "10.1.8",
     "prettier": "3.9.10",
+    "tar": "7.5.23",
     "tsx": "4.23.15",
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.0",

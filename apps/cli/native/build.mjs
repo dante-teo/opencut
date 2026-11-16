@@ -1,12 +1,13 @@
 import process from 'node:process';
 import { warn } from 'node:console';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, rmSync } from 'node:fs';
 
 chmodSync('dist/index.js', 0o755);
 const binary = 'dist/system-probe';
 rmSync(binary, { force: true });
 if (process.platform === 'darwin') {
+  const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
   const sdk =
     process.env.SDKROOT ||
     spawnSync('/usr/bin/xcrun', ['--sdk', 'macosx', '--show-sdk-path'], {
@@ -26,6 +27,7 @@ if (process.platform === 'darwin') {
       '/usr/bin/clang',
       [
         '-O2',
+        '-DOPENCUT_VERSION=' + JSON.stringify(version),
         '-fobjc-arc',
         '-Wall',
         '-Wextra',

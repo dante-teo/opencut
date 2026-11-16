@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { link, lstat, mkdir, mkdtemp, rm, rmdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { dialoguePython, inspectDialogueModel } from './dialogue-model.js';
 import { probeMedia } from './probe.js';
 import {
   checkRenderSignal,
@@ -11,12 +12,16 @@ import {
   sourceFileStamp,
 } from './process.js';
 
+class DialogueDependencyError extends MediaError {
+  readonly code = 'MISSING_DEPENDENCY';
+}
+
 const exec = promisify(execFile);
 const separate = `
 import pathlib, shutil, sys
 import eluate
 source, directory = sys.argv[1:]
-result = eluate.elute(source, outputs=("speech",), output_dir=directory)
+result = eluate.elute(source, outputs=("speech",), output_dir=directory, checkpoint="multi")
 shutil.copyfile(result.speech, pathlib.Path(directory) / "speech.wav")
 `;
 
@@ -34,6 +39,13 @@ export async function separateDialogue(
   if (!metadata.audio || duration === null || duration <= 0 || duration > 600)
     throw new MediaError(
       'Choose a local file with an audio stream and a known duration up to 600 seconds.',
+    );
+  const readiness = await inspectDialogueModel(signal);
+  if (!readiness.ready)
+    throw new DialogueDependencyError(
+      'Bandit v2 is unavailable. Run opencut models inspect. Use ELUATE ' +
+        readiness.backend.requiredVersion +
+        ' in the selected Python environment and run opencut models install bandit-v2.',
     );
   const samples = Math.ceil(duration * 48000);
   const destination = resolve(outputDirectory);
@@ -90,19 +102,15 @@ export async function separateDialogue(
       control,
     );
     try {
-      await exec(
-        process.env.OPENCUT_DIALOGUE_PYTHON || 'python3',
-        ['-I', '-c', separate, input, work],
-        {
-          ...(signal ? { signal } : {}),
-          timeout: 1_800_000,
-          maxBuffer: 1024 * 1024,
-        },
-      );
+      await exec(dialoguePython(), ['-I', '-c', separate, input, work], {
+        ...(signal ? { signal } : {}),
+        timeout: 1_800_000,
+        maxBuffer: 1024 * 1024,
+      });
     } catch (cause) {
       checkRenderSignal(signal);
       throw new MediaError(
-        'Bandit v2 dialogue separation failed. Install ELUATE in the selected Python environment and run eluate setup to install its multilingual model.',
+        'Bandit v2 dialogue separation failed. Run opencut doctor --json to inspect the Python runtime and multilingual checkpoint.',
         { cause },
       );
     }

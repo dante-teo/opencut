@@ -1,11 +1,12 @@
 import { spawnSync } from 'node:child_process';
 import { warn } from 'node:console';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import process from 'node:process';
 
 const workers = ['video-interpolate', 'video-enhance'];
 for (const worker of workers) rmSync(`dist/${worker}`, { force: true });
 if (process.platform === 'darwin' && process.arch === 'arm64') {
+  const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
   const sdk =
     process.env.SDKROOT ||
     spawnSync('/usr/bin/xcrun', ['--sdk', 'macosx', '--show-sdk-path'], {
@@ -25,6 +26,7 @@ if (process.platform === 'darwin' && process.arch === 'arm64') {
         '/usr/bin/clang',
         [
           '-O2',
+          '-DOPENCUT_VERSION=' + JSON.stringify(version),
           '-fobjc-arc',
           '-Wall',
           '-Wextra',

@@ -1,5 +1,11 @@
 # OpenCut CLI
 
+Run `opencut doctor --json` to check prerequisites. For optional Bandit v2
+dialogue separation, follow the [model setup](../../../docs/INSTALL.md#optional-ai),
+then use `opencut models inspect --json` to check readiness. If
+`separate-dialogue --json` reports `MISSING_DEPENDENCY`, inspect the ELUATE
+runtime and checkpoint status. See [dialogue separation](../../../docs/CLI.md#dialogue-separation).
+
 Use `opencut --help` to list the primary workflow. Use `opencut render --help`
 for export controls or `opencut preview --help` for review commands. See the
 repository's [CLI overview](../../../docs/CLI.md) for command examples.

@@ -1,5 +1,11 @@
 # TypeScript SDK
 
+The installed CLI and review app include the authoring SDK. A `.video.ts`
+definition can import `@opencut/sdk` without setting up a Node project.
+For TypeScript editor support or SDK usage from a separate Node program,
+install `@opencut/cli` locally and use the `@opencut/cli/sdk` export in the
+examples below. See the [installation guide](INSTALL.md#npm).
+
 Use Node 24.12+ (within 24.x) and import the definition API from
 `@opencut/sdk`. A trusted .video.ts file should default-export
 `defineVideo({...})`.

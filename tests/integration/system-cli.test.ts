@@ -68,7 +68,7 @@ describe('system inspect', () => {
     } else {
       expect(vt).toMatchObject({
         status: 'unavailable',
-        reason: expect.stringContaining('Native probe was not built'),
+        reason: expect.stringContaining('Native probe is missing'),
       });
     }
   });
@@ -98,7 +98,7 @@ describe('system inspect', () => {
           memory: { installedBytes: totalmem() },
           videoToolbox: {
             status: 'unavailable',
-            reason: expect.stringContaining('Native probe was not built'),
+            reason: expect.stringContaining('Native probe is missing'),
           },
         });
       } finally {

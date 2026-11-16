@@ -1,3 +1,4 @@
+import manifest from '../package.json' with { type: 'json' };
 import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
@@ -41,7 +42,7 @@ export class OnlineMediaError extends Error {
 
 const pageSize = 20;
 const mediaLimit = 512 * 1024 * 1024;
-const userAgent = 'OpenCut/0.1.0 (media library)';
+const userAgent = 'OpenCut/' + manifest.version + ' (media library)';
 const mediaTypes: Record<string, [OnlineMediaKind, string]> = {
   '.jpg': ['image', 'image/jpeg'],
   '.jpeg': ['image', 'image/jpeg'],

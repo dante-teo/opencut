@@ -32,8 +32,9 @@ symlink. Output files must be new and their parent directories must exist.
 ## Author a definition
 
 Import `defineVideo` from `@opencut/sdk` and default-export the
-result. Put the SDK on the definition's Node package resolution path. Node
-24.12+ within 24.x runs the file with native type stripping. Use ESM and
+result. The installed CLI and review app resolve this import to their included
+SDK when the project has no local SDK. Node 24.12+ within 24.x runs the file
+with native type stripping. Use ESM and
 erasable TypeScript syntax. OpenCut evaluates the entry module once per
 compilation as trusted local code. The default export can also be a promise
 that resolves to a definition. Relative and absolute local ESM imports are

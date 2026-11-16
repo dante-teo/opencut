@@ -3,6 +3,11 @@ name: video-editor
 description: Create, review and render video with OpenCut TypeScript definitions.
 ---
 
+On Apple Silicon with macOS 15 or later, install the CLI with Homebrew or
+npm as described in the [installation guide](../../docs/INSTALL.md). Run
+`opencut doctor --json` to check FFmpeg, ffprobe, hardware and AI model
+readiness. The Electron review app is a separate download.
+
 Default-export a value from `defineVideo` in a `.video.ts` file. Import
 `defineVideo` from `@opencut/sdk`. Run `opencut --help` to
 discover commands and `opencut render --help` for export controls.

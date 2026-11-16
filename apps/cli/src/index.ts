@@ -55,6 +55,37 @@ async function run(args: string[]) {
       const { runDefinitionTool } = await import('./definition-tools.js');
       return runDefinitionTool(command, file, values);
     }
+    case 'doctor': {
+      const { doctor, formatDoctor } = await import('./doctor.js');
+      const result = await doctor();
+      return console.log(json ? JSON.stringify(result) : formatDoctor(result));
+    }
+    case 'models inspect':
+    case 'models install':
+    case 'models remove': {
+      if (file && file !== 'bandit-v2')
+        throw new UsageError("Choose the model 'bandit-v2'.");
+      const {
+        inspectDialogueModel,
+        installDialogueModel,
+        removeDialogueModel,
+      } = await import('@opencut/media');
+      if (command === 'models install') {
+        const { withCommandCancellation } = await import('./cancellation.js');
+        await withCommandCancellation(installDialogueModel);
+      }
+      if (command === 'models remove') await removeDialogueModel();
+      const result = await inspectDialogueModel();
+      return console.log(
+        json
+          ? JSON.stringify(result)
+          : 'Bandit v2 multilingual: ' +
+              result.model.status +
+              ' (ELUATE runtime: ' +
+              result.backend.status +
+              ')',
+      );
+    }
     case 'system inspect': {
       const { inspectSystem, formatSystem } = await import('./system.js');
       const result = await inspectSystem();

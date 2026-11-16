@@ -1,0 +1,157 @@
+name: OpenCut release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Sign, notarize and publish the GitHub release for this tag
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+  HOMEBREW_NO_AUTO_UPDATE: '1'
+
+jobs:
+  prepare:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+      - name: Check release ref
+        run: |
+          test "$(uname -m)" = arm64
+          version="$(node -p 'require("./package.json").version')"
+          test "$GITHUB_REF" = "refs/tags/v$version"
+          xcodebuild -version
+      - name: Install locked build dependencies
+        run: |
+          corepack enable pnpm
+          pnpm install --frozen-lockfile
+          brew install ffmpeg
+      - name: Validate
+        run: |
+          pnpm typecheck
+          pnpm lint
+          pnpm format:check
+          pnpm test
+          pnpm fixtures:generate
+          pnpm test:desktop
+          pnpm test:media
+      - name: Build and test the release artifacts
+        run: |
+          pnpm release:pack all
+          bash scripts/release/test-npm.sh dist/release/opencut-cli-*.tgz
+          node scripts/release/test-desktop.mjs dist/release/*-local.zip
+          bash scripts/release/test-brew.sh dist/release/opencut-cli-*.tgz dist/release/opencut.rb
+          cd dist/release
+          shasum -a 256 -c SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: preview
+          path: dist/release/
+          if-no-files-found: error
+          compression-level: 0
+
+  sign:
+    if: inputs.publish
+    needs: prepare
+    runs-on: macos-26
+    timeout-minutes: 60
+    environment: release-signing
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+      - run: |
+          corepack enable pnpm
+          ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install --frozen-lockfile
+          brew install ffmpeg
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: preview
+          path: dist/release
+      - name: Sign and notarize the review app
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY_BASE64 }}
+          OPENCUT_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          OPENCUT_NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+        run: |
+          umask 077
+          credentials="$(mktemp -d)"
+          export OPENCUT_SIGNING_KEYCHAIN="$credentials/signing.keychain-db"
+          export OPENCUT_NOTARY_KEY_PATH="$credentials/AuthKey.p8"
+          trap 'security delete-keychain "$OPENCUT_SIGNING_KEYCHAIN" || true; rm -rf "$credentials"' EXIT
+          : "${CERTIFICATE:?Missing Developer ID certificate}"
+          : "${NOTARY_KEY:?Missing notarization API key}"
+          printf '%s' "$CERTIFICATE" | base64 -D > "$credentials/signing.p12"
+          printf '%s' "$NOTARY_KEY" | base64 -D > "$OPENCUT_NOTARY_KEY_PATH"
+          password="$(openssl rand -hex 32)"
+          security create-keychain -p "$password" "$OPENCUT_SIGNING_KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$OPENCUT_SIGNING_KEYCHAIN"
+          security unlock-keychain -p "$password" "$OPENCUT_SIGNING_KEYCHAIN"
+          security import "$credentials/signing.p12" -k "$OPENCUT_SIGNING_KEYCHAIN" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$OPENCUT_SIGNING_KEYCHAIN"
+
+          (cd dist/release && shasum -a 256 -c SHA256SUMS)
+          archive="$(printf '%s\n' dist/release/*-local.zip)"
+          signed="${archive%-local.zip}.zip"
+          node scripts/release/sign.mjs "$archive" "$signed"
+          rm "$archive"
+      - name: Smoke test the signed app and generate final checksums
+        run: |
+          node scripts/release/test-desktop.mjs dist/release/*.zip
+          cd dist/release
+          shasum -a 256 ./*.tgz ./*.rb ./*.zip > SHA256SUMS
+          shasum -a 256 -c SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: distribution
+          path: dist/release/
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    if: inputs.publish
+    needs: sign
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release-publish
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: distribution
+          path: distribution
+      - name: Verify release assets and publish the selected tag
+        working-directory: distribution
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          sha256sum -c SHA256SUMS
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release already exists. Choose a new version." >&2
+            exit 1
+          fi
+          echo "See the [installation guide](https://github.com/$GH_REPO/blob/$GITHUB_REF_NAME/docs/INSTALL.md) and verify the downloads with SHA256SUMS." > "$RUNNER_TEMP/release-notes"
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "OpenCut $GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/release-notes" SHA256SUMS opencut.rb ./*.tgz ./*.zip

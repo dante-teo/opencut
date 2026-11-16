@@ -1,3 +1,4 @@
+import manifest from '../package.json' with { type: 'json' };
 export {
   ProjectFormatError,
   createProject,
@@ -30,14 +31,14 @@ export { resolveTransition, transitionOwner } from './transitions.js';
 export type { Transition, TransitionInput } from './transitions.js';
 export type { ClipSpeed } from './clip-timing.js';
 
-/** Shared application identity, introduced in T01. */
+/** Shared application identity. */
 export interface ApplicationInfo {
   readonly name: string;
   readonly version: string;
 }
 
 export function getApplicationInfo(): ApplicationInfo {
-  return { name: 'OpenCut', version: '0.1.0' };
+  return { name: 'OpenCut', version: manifest.version };
 }
 
 export type { TextLayer } from '@opencut/shared';

@@ -1,3 +1,5 @@
+#include <stdio.h>
+#include <string.h>
 #import "video-toolbox.h"
 #import <Metal/Metal.h>
 
@@ -91,7 +93,11 @@ static NSDictionary *effectInfo(NSString *effect) {
     return info;
 }
 
-int main(void) {
+int main(int argc, const char *argv[]) {
+    if (argc == 2 && strcmp(argv[1], "--version") == 0) {
+        puts(OPENCUT_VERSION);
+        return 0;
+    }
     @autoreleasepool {
         NSMutableArray *gpus = [NSMutableArray array];
         for (id<MTLDevice> device in MTLCopyAllDevices()) {

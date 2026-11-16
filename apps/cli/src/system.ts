@@ -9,6 +9,7 @@ import {
   totalmem,
 } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { getApplicationInfo } from '@opencut/core';
 import {
   hostRenderResources,
   renderQualityProfiles,
@@ -33,7 +34,7 @@ interface HardwareProfile {
   }[];
 }
 
-interface MetalDevice {
+export interface MetalDevice {
   name: string;
   hasUnifiedMemory: boolean;
   recommendedMaxWorkingSetBytes: number;
@@ -68,14 +69,25 @@ async function probeVideoToolbox() {
     const path = fileURLToPath(
       new URL('../dist/system-probe', import.meta.url),
     );
-    return { status: 'probed' as const, ...(await query<NativeProbe>(path)) };
+    const { stdout } = await exec(path, ['--version'], { timeout: 3000 });
+    const version = stdout.trim();
+    if (version !== getApplicationInfo().version)
+      return {
+        status: 'unavailable' as const,
+        reason: 'Native system probe version does not match OpenCut.',
+      };
+    return {
+      status: 'probed' as const,
+      version,
+      ...(await query<NativeProbe>(path)),
+    };
   } catch (failure) {
     const error = failure as NodeJS.ErrnoException;
     return {
       status: 'unavailable' as const,
       reason:
         error.code === 'ENOENT'
-          ? 'Native probe was not built; build the CLI with a macOS 26+ SDK.'
+          ? 'Native probe is missing. Reinstall OpenCut or rebuild from source with a macOS 26+ SDK.'
           : `Native probe failed (${error.code ?? error.name}).`,
     };
   }

@@ -14,6 +14,12 @@ The CLI, TypeScript SDK and Electron review app share the same timeline
 evaluator and rendering pipeline. Use Electron to watch a definition and
 export a reviewed revision.
 
+## Install
+
+Use npm or the Homebrew tap for the Apple Silicon CLI. The macOS review app
+is a separate download. See the [installation guide](docs/INSTALL.md) for
+release availability, system requirements and optional AI model setup.
+
 ## Run from source
 
 On macOS, install Node.js 24.12 or later within the 24.x series and pnpm

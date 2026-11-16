@@ -3,7 +3,10 @@
 `opencut --help` lists the primary commands. From a checkout use
 `node apps/cli/dist/index.js` after `pnpm build:packages` and
 `pnpm --filter @opencut/cli build`. FFmpeg and ffprobe are required for
-rendering media. Use `opencut system inspect --json` for hardware diagnostics.
+rendering media. See [Install OpenCut](INSTALL.md). Run `opencut doctor --json`
+without a project to check FFmpeg, ffprobe, hardware, native worker versions,
+and optional AI model readiness. `opencut system inspect --json` reports more
+detail about the host and VideoToolbox profiles.
 
 ```sh
 opencut validate edit.video.ts
@@ -44,10 +47,30 @@ memory pressure. Run the actual render to verify support for a particular
 source. The [benchmark instructions](#performance-benchmarks) use generated
 motion, audio and subtitle fixtures.
 
-Media tools include `probe`, `extract-frame`, and `separate-dialogue` on
-source paths. Choose a destination that supports hard links for
-`extract-frame` so it can publish the completed PNG atomically. Dialogue
-separation requires a separately installed ELUATE model.
+## Media tools
+
+`probe`, `extract-frame`, and `separate-dialogue` accept local source paths.
+Choose a destination that supports hard links for `extract-frame` so it can
+publish the completed PNG atomically.
+
+### Dialogue separation
+
+```sh
+opencut separate-dialogue recording.wav --output stems --json
+```
+
+The command writes `dialogue.wav` and `background.wav` to a new directory.
+If the ELUATE runtime or multilingual Bandit v2 checkpoint is unavailable,
+the JSON diagnostic on stderr has `error.code` set to `MISSING_DEPENDENCY`.
+Run `opencut models inspect --json` to see which prerequisite needs attention.
+Use `opencut models install bandit-v2` or `opencut models remove bandit-v2` to
+manage the checkpoint. See [optional AI setup](INSTALL.md#optional-ai).
+
+SIGINT (Ctrl-C) and SIGTERM also cancel the prerequisite checks, including the
+Python probes and checkpoint verification. The command exits with status 130
+for SIGINT and 143 for SIGTERM.
+
+## Online media
 
 `online search` reads a JSON request. `online download` returns the downloaded
 file's path and provenance for use in a definition. Cancelling an in-flight

@@ -48,7 +48,13 @@ protocol.registerSchemesAsPrivileged([
 
 const directory = fileURLToPath(new URL('.', import.meta.url));
 const rendererRoot = resolve(directory, '../renderer');
-const devURL = process.env.ELECTRON_RENDERER_URL;
+const devURL = app.isPackaged ? undefined : process.env.ELECTRON_RENDERER_URL;
+if (app.isPackaged && process.platform === 'darwin') {
+  // Finder launches with a system PATH that omits Homebrew's ARM prefix.
+  process.env.PATH = [process.env.PATH, '/opt/homebrew/bin']
+    .filter(Boolean)
+    .join(':');
+}
 const backgroundTest =
   !app.isPackaged && process.env.OPENCUT_DESKTOP_TEST_BACKGROUND === '1';
 if (backgroundTest && process.platform === 'darwin') {
