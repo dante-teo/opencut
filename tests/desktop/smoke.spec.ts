@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import manifest from '../../package.json' with { type: 'json' };
 import { launchDesktop, showDesktopTests } from './helpers.js';
 
 test('built desktop displays React through the sandboxed bridge', async () => {
@@ -12,7 +13,7 @@ test('built desktop displays React through the sandboxed bridge', async () => {
       page.getByRole('button', { name: 'Open definition' }),
     ).toBeVisible();
     await expect(page.getByRole('status')).toHaveText(
-      'OpenCut is running · v0.1.0',
+      `OpenCut is running · v${manifest.version}`,
     );
     expect(await page.evaluate(() => Object.keys(window.opencut))).toEqual([
       'exportDefinition',
@@ -129,7 +130,7 @@ test('built desktop displays React through the sandboxed bridge', async () => {
         const reopened = await nextWindow;
         reopened.on('pageerror', (error) => errors.push(error.message));
         await expect(reopened.getByRole('status')).toHaveText(
-          'OpenCut is running · v0.1.0',
+          `OpenCut is running · v${manifest.version}`,
         );
       });
     }
