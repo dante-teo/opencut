@@ -7,7 +7,7 @@ rate. Use the CLI or SDK for the full set of output controls.
 
 ```sh
 opencut render edit.video.ts --output final.mp4
-opencut render edit.video.ts --output portrait.mp4 --width 1080 --height 1920 --fps 30000/1001 --quality high
+opencut render edit.video.ts --output portrait.mp4 --width 1080 --height 1920 --fps 30000/1001 --quality maximum
 ```
 
 `opencut render --help` lists the quality, resolution, codec, bitrate, audio

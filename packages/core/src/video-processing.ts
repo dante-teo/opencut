@@ -1,17 +1,20 @@
 import { lstat, mkdir, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import {
   MediaError,
   enhancementBackendVersion,
+  hostRenderResources,
   interpolationBackendVersion,
   probeRecipeMedia,
   recipeBackendVersion,
   runEnhancement,
   runInterpolation,
   runRecipeProcess,
+  sampleMemoryPressure,
 } from '@opencut/media';
-import type { RecipeProcessLimits } from '@opencut/media';
+import type { InterpolationPlan, RecipeProcessLimits } from '@opencut/media';
 import { fingerprintFile, hashJson } from './video-integrity.js';
 import { videoInputIdentity } from './video-input.js';
 import type { IdentifiedMedia } from './video-input.js';
@@ -60,7 +63,35 @@ export interface RecipeRecovery {
 const MiB = 1024 * 1024;
 type ProcessingLimits = RecipeProcessLimits & {
   highQualityNativeBytes: number;
+  offlineInterpolationNativeBytes: number;
 };
+
+function recipeAdmission(budget: number, signal: AbortSignal) {
+  let reserved = 0;
+  let sampledAt = -Infinity;
+  let pressure: ReturnType<typeof sampleMemoryPressure>;
+  return async (bytes: number) => {
+    for (;;) {
+      signal.throwIfAborted();
+      if (performance.now() - sampledAt > 250) {
+        sampledAt = performance.now();
+        pressure = sampleMemoryPressure(signal);
+      }
+      const level = await pressure;
+      if (level === 'critical')
+        throw new MediaError(
+          'System memory pressure is critical. Free memory and retry the recipe.',
+        );
+      if (reserved + bytes <= budget && (level !== 'warning' || reserved === 0))
+        break;
+      await delay(100, undefined, { signal });
+    }
+    reserved += bytes;
+    return () => {
+      reserved -= bytes;
+    };
+  };
+}
 
 export async function processVideoRecipes(
   recipes: readonly RecipeInput[],
@@ -76,18 +107,27 @@ export async function processVideoRecipes(
   const processingSignal = signal
     ? AbortSignal.any([signal, controller.signal])
     : controller.signal;
-  const { concurrency, limits, directory } = processingSettings(options);
+  const { concurrency, limits, directory, nativeBudget } =
+    processingSettings(options);
+  const admit = recipeAdmission(nativeBudget, processingSignal);
   const ffmpeg = await recipeBackendVersion(processingSignal);
-  let interpolationVersion:
-    ReturnType<typeof interpolationBackendVersion> | undefined;
+  const interpolationVersions: Partial<
+    Record<
+      InterpolationPlan['backend'],
+      ReturnType<typeof interpolationBackendVersion>
+    >
+  > = {};
   let enhancementVersion:
     ReturnType<typeof enhancementBackendVersion> | undefined;
   const backends = {
     ffmpeg,
     enhancement: () =>
       (enhancementVersion ??= enhancementBackendVersion(processingSignal)),
-    interpolation: () =>
-      (interpolationVersion ??= interpolationBackendVersion(processingSignal)),
+    interpolation: (backend: InterpolationPlan['backend']) =>
+      (interpolationVersions[backend] ??= interpolationBackendVersion(
+        backend,
+        processingSignal,
+      )),
   };
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const cacheDirectory = await realpath(directory);
@@ -102,6 +142,7 @@ export async function processVideoRecipes(
             cacheDirectory,
             backends,
             limits,
+            admit,
             processingSignal,
             options.onProgress,
             recovery,
@@ -123,9 +164,12 @@ async function processRecipe(
   backends: {
     ffmpeg: string;
     enhancement: () => ReturnType<typeof enhancementBackendVersion>;
-    interpolation: () => ReturnType<typeof interpolationBackendVersion>;
+    interpolation: (
+      backend: InterpolationPlan['backend'],
+    ) => ReturnType<typeof interpolationBackendVersion>;
   },
   limits: ProcessingLimits,
+  admit: ReturnType<typeof recipeAdmission>,
   signal: AbortSignal,
   onProgress?: VideoProcessingOptions['onProgress'],
   recovery?: RecipeRecovery,
@@ -164,7 +208,12 @@ async function processRecipe(
         inputMedia,
         step.parameters,
         step.format,
-        ...(step.interpolation ? await backends.interpolation() : []),
+        ...(step.interpolation
+          ? [
+              step.interpolation,
+              await backends.interpolation(step.interpolation.backend),
+            ]
+          : []),
         ...(enhancement ? await backends.enhancement() : []),
       ]);
       const report = (
@@ -202,38 +251,46 @@ async function processRecipe(
             throw new MediaError(
               'Recipe step exceeds its decoded pixel limit.',
             );
-          report('started');
-          const progress = (seconds: number) => report('processing', seconds);
-          if (step.interpolation)
-            await runInterpolation(
-              source,
-              step.interpolation,
-              output,
-              limits,
-              signal,
-              progress,
-            );
-          else if (enhancement) {
-            const enhancementLimits =
-              enhancement.type === 'superResolution' &&
-              enhancement.quality === 'high'
-                ? { ...limits, maxNativeBytes: limits.highQualityNativeBytes }
-                : limits;
-            await runEnhancement(
-              source,
-              enhancement,
-              output,
-              enhancementLimits,
-              signal,
-              progress,
-            );
-          } else
-            await runRecipeProcess(
-              recipeArguments(source, step, output),
-              limits,
-              signal,
-              progress,
-            );
+          const maxNativeBytes =
+            enhancement?.type === 'superResolution' &&
+            enhancement.quality !== 'fast'
+              ? limits.highQualityNativeBytes
+              : step.interpolation?.backend === 'offline'
+                ? limits.offlineInterpolationNativeBytes
+                : limits.maxNativeBytes;
+          const release = await admit(maxNativeBytes);
+          try {
+            report('started');
+            const progress = (seconds: number) => report('processing', seconds);
+            const stageLimits = { ...limits, maxNativeBytes };
+            if (step.interpolation)
+              await runInterpolation(
+                source,
+                step.interpolation,
+                output,
+                stageLimits,
+                signal,
+                progress,
+              );
+            else if (enhancement)
+              await runEnhancement(
+                source,
+                enhancement,
+                output,
+                stageLimits,
+                signal,
+                progress,
+              );
+            else
+              await runRecipeProcess(
+                recipeArguments(source, step, output),
+                stageLimits,
+                signal,
+                progress,
+              );
+          } finally {
+            release();
+          }
           const info = await lstat(output);
           if (
             !info.isFile() ||
@@ -269,7 +326,18 @@ function pixels({ width, height }: RecipeMedia) {
 }
 
 export function processingSettings(options: VideoProcessingOptions) {
-  const concurrency = positive('concurrency', options.concurrency ?? 1, 16);
+  const host = hostRenderResources();
+  const concurrency = Math.min(
+    positive('concurrency', options.concurrency ?? 1, 16),
+    host.recipeWorkers,
+  );
+  const nativeBudget = Math.min(
+    positive(
+      'maxNativeBytes',
+      options.maxNativeBytes ?? host.nativeBudgetBytes,
+    ),
+    host.nativeBudgetBytes,
+  );
   const directory = resolve(
     options.cacheDirectory ??
       join(
@@ -288,12 +356,10 @@ export function processingSettings(options: VideoProcessingOptions) {
       'Recipe temporary budget must allow at least 1024 bytes per worker.',
     );
   const limits: ProcessingLimits = {
-    highQualityNativeBytes: options.maxNativeBytes ?? 2048 * MiB,
+    highQualityNativeBytes: Math.min(nativeBudget, 4096 * MiB),
+    offlineInterpolationNativeBytes: Math.min(nativeBudget, 2048 * MiB),
     maxTemporaryBytes: perWorkerBytes,
-    maxNativeBytes: positive(
-      'maxNativeBytes',
-      options.maxNativeBytes ?? 1024 * MiB,
-    ),
+    maxNativeBytes: Math.min(nativeBudget, 1024 * MiB),
     maxBufferedFrames: positive(
       'maxBufferedFrames',
       options.maxBufferedFrames ?? 32,
@@ -310,7 +376,7 @@ export function processingSettings(options: VideoProcessingOptions) {
       2_147_483_647,
     ),
   };
-  return { directory, concurrency, limits };
+  return { directory, concurrency, limits, nativeBudget };
 }
 
 function positive(name: string, value: number, max = Number.MAX_SAFE_INTEGER) {

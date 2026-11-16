@@ -1,22 +1,36 @@
+import { release } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { sourceColorMatrix } from '@opencut/shared';
 import { MediaError } from './process.js';
 import { recipeInputArguments } from './probe.js';
 import type { MediaMetadata, MediaStream } from './probe.js';
 import { nativeRecipeFingerprint, runRecipeProcess } from './recipe-process.js';
 import type { RecipeProcessLimits } from './recipe-process.js';
 
-export const interpolationBackendId = 'videotoolbox-low-latency-v2';
+export const interpolationBackendId = 'videotoolbox-interpolation-v3';
+const interpolationAlgorithms = {
+  'low-latency': 'videotoolbox-low-latency-nv12-midpoint',
+  offline: 'videotoolbox-frame-rate-conversion-revision-1-quality-rgba-half',
+} as const;
 
 const worker = fileURLToPath(new URL('./video-interpolate', import.meta.url));
 
-export async function interpolationBackendVersion(signal: AbortSignal) {
-  if (process.platform !== 'darwin' || process.arch !== 'arm64')
+export async function interpolationBackendVersion(
+  backend: InterpolationPlan['backend'],
+  signal: AbortSignal,
+) {
+  const offline = backend === 'offline';
+  if (
+    process.platform !== 'darwin' ||
+    process.arch !== 'arm64' ||
+    Number(release().split('.')[0]) < (offline ? 24 : 25)
+  )
     throw new MediaError(
-      'AI interpolation requires an Apple Silicon Mac with VideoToolbox on macOS 26 or later.',
+      `VideoToolbox ${backend} interpolation requires Apple Silicon and macOS ${offline ? '15.4' : '26'} or later. Run opencut system inspect --json.`,
     );
   return nativeRecipeFingerprint(
     worker,
-    interpolationBackendId,
+    interpolationAlgorithms[backend],
     'interpolation',
     signal,
   );
@@ -25,7 +39,7 @@ export async function interpolationBackendVersion(signal: AbortSignal) {
 export interface InterpolationPlan {
   numerator: number;
   denominator: number;
-  phaseDepth: number;
+  backend: keyof typeof interpolationAlgorithms;
   sceneThreshold: number;
   sceneCuts: number[];
   speed: number;
@@ -79,12 +93,37 @@ export async function runInterpolation(
   const lastDuration = duration - last * frame;
   const offset = Math.round(plan.videoStartSeconds * scale);
   const sar = video.sampleAspectRatio ?? 1;
+  const offline = plan.backend === 'offline';
+  const rawFormat = offline ? 'rgba' : 'nv12';
+  const colorSpace =
+    video.colorSpace && !['unknown', 'unspecified'].includes(video.colorSpace)
+      ? video.colorSpace
+      : sourceColorMatrix(null, video.width!, video.height!, video.codec);
+  const matrix = {
+    bt709: 'bt709',
+    bt601: 'bt601',
+    bt470bg: 'bt601',
+    smpte170m: 'bt601',
+    smpte240m: 'smpte240m',
+    bt2020nc: 'bt2020',
+  }[colorSpace];
+  if (offline && !matrix)
+    throw new MediaError(
+      'Offline interpolation cannot round-trip this SDR color matrix. Convert to BT.709 or explicitly select fast.',
+    );
   const colorOptions = [
     '-color_range',
     'tv',
     ...(
       [
-        ['-colorspace', video.colorSpace],
+        [
+          '-colorspace',
+          offline
+            ? colorSpace === 'bt601'
+              ? 'smpte170m'
+              : colorSpace
+            : video.colorSpace,
+        ],
         ['-color_primaries', video.colorPrimaries],
         ['-color_trc', video.colorTransfer],
         ['-chroma_sample_location', video.chromaLocation],
@@ -102,13 +141,22 @@ export async function runInterpolation(
     '-map',
     `0:${video.index}`,
     '-vf',
-    "format=yuv420p,setpts=PTS-STARTPTS,settb=AVTB,scdet,metadata=mode=print:key=lavfi.scd.score:file='pipe\\:3':direct=1",
+    [
+      'format=yuv420p,setpts=PTS-STARTPTS,settb=AVTB,scdet',
+      "metadata=mode=print:key=lavfi.scd.score:file='pipe\\:3':direct=1",
+      ...(offline
+        ? [
+            `scale=in_range=tv:out_range=pc:in_color_matrix=${matrix}:flags=accurate_rnd+full_chroma_int`,
+          ]
+        : []),
+      `format=${rawFormat}`,
+    ].join(','),
     '-fps_mode',
     'passthrough',
     '-threads:v',
     '1',
     '-pix_fmt',
-    'nv12',
+    rawFormat,
     '-f',
     'rawvideo',
     'pipe:1',
@@ -116,11 +164,11 @@ export async function runInterpolation(
   const encode = [
     '-copyts',
     // Rawvideo carries no tags. Set its range and matrix before conversion.
-    ...colorOptions,
+    ...(!offline ? colorOptions : []),
     '-f',
     'rawvideo',
     '-pixel_format',
-    'nv12',
+    rawFormat,
     '-video_size',
     `${width}x${height}`,
     '-framerate',
@@ -146,7 +194,15 @@ export async function runInterpolation(
     '-map',
     '0:v:0',
     '-vf',
-    `settb=1/${scale},setpts=PTS+${offset},setsar=${rotated ? 1 / sar : sar}:max=100000`,
+    [
+      ...(offline
+        ? [
+            `scale=in_range=pc:out_range=tv:out_color_matrix=${matrix}:flags=accurate_rnd+full_chroma_int`,
+            'format=yuv420p',
+          ]
+        : []),
+      `settb=1/${scale},setpts=PTS+${offset},setsar=${rotated ? 1 / sar : sar}:max=100000`,
+    ].join(','),
     '-enc_time_base:v',
     `1:${scale}`,
     '-fps_mode',
@@ -186,7 +242,7 @@ export async function runInterpolation(
   const native = [
     String(width),
     String(height),
-    String(plan.phaseDepth),
+    offline ? '1' : '0',
     String(scale),
     String(frame),
     String(duration),

@@ -6,6 +6,7 @@
 #import <VideoToolbox/VTFrameProcessor_TemporalNoiseFilter.h>
 
 static NSString *const FRC = @"frame-rate-conversion";
+static NSString *const FRCQuality = @"frame-rate-conversion-quality";
 static NSString *const LLI = @"low-latency-interpolation";
 static NSString *const SR = @"video-super-resolution";
 static NSString *const LLSR = @"low-latency-super-resolution";
@@ -14,7 +15,7 @@ static const OSType NV12 = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
 
 API_AVAILABLE(macos(15.4))
 static BOOL supports(NSString *effect) {
-    if ([effect isEqual:FRC]) {
+    if ([effect isEqual:FRC] || [effect isEqual:FRCQuality]) {
         if (@available(macOS 26.0, *)) return VTFrameRateConversionConfiguration.isSupported;
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -43,10 +44,13 @@ static NSArray<NSNumber *> *scales(NSString *effect, int width, int height) {
 
 API_AVAILABLE(macos(15.4))
 static id<VTFrameProcessorConfiguration> configure(NSString *effect, int width, int height, double scale) {
-    if ([effect isEqual:FRC]) return [[VTFrameRateConversionConfiguration alloc]
+    if ([effect isEqual:FRC] || [effect isEqual:FRCQuality]) return [[VTFrameRateConversionConfiguration alloc]
         initWithFrameWidth:width frameHeight:height usePrecomputedFlow:NO
-        qualityPrioritization:VTFrameRateConversionConfigurationQualityPrioritizationNormal
-        revision:VTFrameRateConversionConfiguration.defaultRevision];
+        qualityPrioritization:[effect isEqual:FRCQuality] ?
+            VTFrameRateConversionConfigurationQualityPrioritizationQuality :
+            VTFrameRateConversionConfigurationQualityPrioritizationNormal
+        revision:[effect isEqual:FRCQuality] ? VTFrameRateConversionConfigurationRevision1 :
+            VTFrameRateConversionConfiguration.defaultRevision];
     if (@available(macOS 26.0, *)) {
         if ([effect isEqual:LLI]) return [[VTLowLatencyFrameInterpolationConfiguration alloc]
             initWithFrameWidth:width frameHeight:height numberOfInterpolatedFrames:1];

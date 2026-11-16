@@ -4,6 +4,12 @@ Use `opencut --help` to list the primary workflow. Use `opencut render --help`
 for export controls or `opencut preview --help` for review commands. See the
 repository's [CLI overview](../../../docs/CLI.md) for command examples.
 
+Use `--quality fast|quality|maximum` for render, batch, and all preview
+commands. Preview defaults to `fast`, and final render and batch default
+to `quality`. `maximum` uses the same AI algorithms as `quality`.
+Timeline inspection also defaults to `quality` and accepts `--quality`.
+Use `system inspect --json` to see the profile settings and worker limits.
+
 Use `opencut recipes validate DEFINITION` and `opencut recipes inspect
 DEFINITION --json` for recipe checks without transcoding. `opencut render`
 automatically processes referenced recipes and reuses completed steps. The
@@ -29,7 +35,7 @@ The default filename is `<id>.mp4`. Use `--only id,id` for selective retries,
 work after a failure. See the [batch file contract and budgets](../../../docs/CLI.md#batch-rendering).
 
 Use `opencut build inspect DEFINITION --json` with the original
-`--recipe-cache`, `--params` and `--no-subtitles` selection to see recorded
+`--recipe-cache`, `--params`, `--quality` and `--no-subtitles` selection to see recorded
 processing and render states. Retry with the same cache to reuse stages
 marked `reusable`. An interrupted MP4 encode starts over. When a verified
 MP4 exists, `lastAttempt` reports a newer retry separately from the output.

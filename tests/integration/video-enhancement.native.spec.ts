@@ -242,7 +242,7 @@ test('T50 checks recipe declarations without running an enhancement backend', as
   } = await inspectVideoRecipes(valid);
   assert.deepEqual(inspection?.steps[0]?.parameters, {
     ...preset,
-    quality: 'high',
+    quality: 'quality',
   });
   assert.equal(inspection?.steps[0]?.media.width, 960);
   const mismatch = await writeDefinition(dir, 960, 544, [
@@ -357,7 +357,7 @@ for (const {
     matrix: 'smpte170m',
   },
   {
-    quality: 'high',
+    quality: 'quality',
     processor: 'video-super-resolution',
     nativeScale: 4,
     sourceSize: [1280, 720],
@@ -622,7 +622,7 @@ test('T50 denoise uses a temporal model where supported and fails explicitly oth
   );
   const cache = join(dir, 'cache');
   const file = await writeDefinition(dir, 640, 360, [
-    { type: 'denoise', quality: 'strong' },
+    { type: 'denoise', strength: 'strong' },
   ]);
   const processor = (await capabilities)['temporal-noise-filter'];
   if (processor?.status === 'hardware-unsupported') {

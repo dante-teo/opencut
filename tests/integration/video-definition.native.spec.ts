@@ -413,6 +413,61 @@ test('TypeScript definitions render mixed tracks, subtitles, grading, effects an
   }
 });
 
+test('T54 indexed seeks and sequential decoding agree on fractional project ticks', async () => {
+  requireTool('ffmpeg');
+  requireTool('ffprobe');
+  const directory = await mkdtemp(join(fixtureDirectory, 't54-seek-'));
+  try {
+    const indexed = join(directory, 'indexed.mp4');
+    runTool('ffmpeg', [
+      '-v',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=s=160x90:r=24:d=3',
+      '-c:v',
+      'libx264',
+      '-threads',
+      '1',
+      '-g',
+      '24',
+      indexed,
+    ]);
+    await copyFile(indexed, join(directory, 'sequential.mkv'));
+    const preview = async (name: string) => {
+      const file = join(directory, name + '.video.ts');
+      const body: VideoDefinition = {
+        canvas: { width: 160, height: 90, frameRate: 24, durationFrames: 72 },
+        assets: { video: { kind: 'video', path: name } },
+        tracks: [
+          { type: 'video', clips: [{ asset: 'video', at: 0, sourceOut: 72 }] },
+        ],
+      };
+      await writeFile(file, `export default ${JSON.stringify(body)};\n`);
+      return previewVideo(await compileVideo(file, { preview: true }));
+    };
+    const seek = await preview('indexed.mp4');
+    const sequential = await preview('sequential.mkv');
+    const { path: indexed49 } = await seek.frame(
+      49,
+      join(directory, 'indexed49.png'),
+    );
+    const { path: sequential49 } = await sequential.frame(
+      49,
+      join(directory, 'sequential49.png'),
+    );
+    const { path: sequential50 } = await sequential.frame(
+      50,
+      join(directory, 'sequential50.png'),
+    );
+    assert.equal(await hash(indexed49), await hash(sequential49));
+    assert.notEqual(await hash(indexed49), await hash(sequential50));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('T45 source-backed freezes match the corresponding extracted image and support relative fonts', async () => {
   requireTool('ffmpeg');
   requireTool('ffprobe');

@@ -11,7 +11,7 @@ const video = await compileVideo('edit.video.ts');
 const preview = previewVideo(video);
 await preview.frame(30, 'review.png');
 await renderCompiledVideo(video, 'delivery.mp4', {
-  quality: 'high',
+  quality: 'maximum',
   onProgress: ({ percent }) => console.error(percent),
 });
 ```
@@ -21,11 +21,21 @@ A compiled render checks the identity of each source it uses before copying
 it for the render. If a source has changed, compile the definition again.
 Pass an `AbortSignal` to cancel a foreground render.
 
+Final renders default to `quality`. Preview frames, clips, contact sheets
+and watches default to `fast`. Pass `quality: 'fast' | 'quality' | 'maximum'`
+to set the profile. You can choose the same profile when calling
+`compileVideo` to prepare its derived media in advance. If a compiled
+revision needs a different inherited recipe setting, OpenCut reprocesses
+the captured definition with the new profile and checks that its inputs
+still match the compiled revision. For a checkpointed build, inspect the
+new receipts with the render's quality profile and subtitle options.
+
 `watchVideo(path, { onStatus })` manages a temporary playback file, retains
 the last good revision on failure, and must be closed when finished. Use
 `withCurrent(generation, callback)` on the watcher to keep that revision’s
 media available during a render. The callback must finish before the watcher
-can close.
+can close. Changing the render quality inside that callback uses the
+selected revision's pinned inputs, including sources needed by AI recipes.
 
 The SDK also exposes `probeMedia`, `extractFrame`, `OnlineMediaLibrary`,
 `separateDialogue`, and subtitle parsing and file tools.
@@ -97,10 +107,10 @@ const verified = await verifyVideoPackage('./bundle');
 await renderVideo(verified.entry, 'delivery.mp4', { processing });
 ```
 
-Use the same compile options when inspecting or retrying a build.
-`inspectVideoBuild` hashes inputs and reports checkpoints for the current
-revision. When inspecting a build made by calling `renderVideo` with
-`burnSubtitles: false`, pass `preview: true` to select the same build.
+Use the same inputs, cache, and quality profile when inspecting or retrying a
+build. `inspectVideoBuild` hashes inputs and reports checkpoints for the
+current revision. If you called `renderVideo` at default quality with
+`burnSubtitles: false`, inspect it with `{ preview: true, quality: 'quality' }`.
 A recipe step can be reusable while still staged. A render with a valid
 published file can also carry a
 `lastAttempt` from a newer retry. See [build recovery](CLI.md#build-recovery).

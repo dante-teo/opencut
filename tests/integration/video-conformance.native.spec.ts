@@ -229,7 +229,7 @@ test(
       await preview.clip(
         { startFrame: 2, endFrame: 46 },
         run.path('preview.mp4'),
-        { quality: 'high' },
+        { quality: 'maximum' },
       )
     ).path;
     const positions = [
@@ -554,7 +554,7 @@ test(
       await previewVideo(compiled).clip(
         { startFrame: 14 * 24, endFrame: 18 * 24 },
         run.path('sync-preview.mp4'),
-        { quality: 'high' },
+        { quality: 'maximum' },
       )
     ).path;
     verifyVideoTimestamps(clip, rate, 96);

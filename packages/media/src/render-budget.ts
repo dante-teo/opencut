@@ -2,9 +2,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { stat } from 'node:fs/promises';
 import { MediaError } from './process.js';
 import { sampleProcessMemory } from './process-memory.js';
+import { hostRenderResources, sampleMemoryPressure } from './host-resources.js';
 
 interface RenderBudget {
-  remainingBytes: number;
+  remainingBytes: number | undefined;
   maxNativeBytes: number;
   children: Map<number, (error: Error) => void>;
   samplerFailure?: MediaError;
@@ -14,7 +15,7 @@ const storage = new AsyncLocalStorage<RenderBudget>();
 
 /** Each batch slot has its own share of the temporary disk and native budget. */
 export async function withRenderBudget<T>(
-  limits: { maxTemporaryBytes: number; maxNativeBytes: number },
+  limits: { maxTemporaryBytes?: number; maxNativeBytes: number },
   render: () => Promise<T>,
 ) {
   const children = new Map<number, (error: Error) => void>();
@@ -56,16 +57,40 @@ export async function withRenderBudget<T>(
   }
 }
 
+export async function withDefaultRenderBudget<T>(
+  signal: AbortSignal | undefined,
+  render: () => Promise<T>,
+) {
+  if (storage.getStore() || !['darwin', 'linux'].includes(process.platform))
+    return render();
+  const pressure = await sampleMemoryPressure(signal);
+  if (pressure === 'critical')
+    throw new MediaError(
+      'System memory pressure is critical. Free memory and retry rendering.',
+    );
+  const { nativeBudgetBytes } = hostRenderResources();
+  return withRenderBudget(
+    {
+      maxNativeBytes:
+        pressure === 'warning'
+          ? Math.floor(nativeBudgetBytes / 2)
+          : nativeBudgetBytes,
+    },
+    render,
+  );
+}
+
 export function accountRenderBytes(bytes: number) {
   const budget = storage.getStore();
-  if (!budget) return;
+  if (budget?.remainingBytes === undefined) return;
   if (bytes > budget.remainingBytes)
     throw new MediaError('Render exceeded its temporary disk budget.');
   budget.remainingBytes -= bytes;
 }
 
 export async function accountRenderFile(file: string) {
-  if (storage.getStore()) accountRenderBytes((await stat(file)).size);
+  if (storage.getStore()?.remainingBytes !== undefined)
+    accountRenderBytes((await stat(file)).size);
 }
 
 export function trackRenderProcess(
@@ -92,7 +117,8 @@ export function renderToolCommand(
     String(Math.min(budget.maxNativeBytes, 2_147_483_647)),
     ...args,
   ];
-  if (!writesFile) return { tool, args: bounded };
+  if (!writesFile || budget.remainingBytes === undefined)
+    return { tool, args: bounded };
   if (budget.remainingBytes < 1024)
     throw new MediaError(
       'Render has less than 1024 bytes of temporary disk budget remaining.',

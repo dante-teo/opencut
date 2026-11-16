@@ -24,16 +24,20 @@ discover commands and `opencut render --help` for export controls.
 4. Review the composition with `opencut preview DEFINITION --watch`, the
    desktop **Open definition** action, or a deterministic frame, clip, or
    contact sheet from `opencut preview --help`. Authored TypeScript executes as
-   trusted local code. A failed rebuild leaves the last valid preview available.
+   trusted local code. Preview defaults to `fast`. Use `--quality quality`
+   to review the final AI recipe processing. A failed rebuild leaves the
+   last valid preview available.
 5. Deliver a new MP4 with `opencut render DEFINITION --output final.mp4`.
-   The CLI does not need Electron or a running worker. Export an SRT or VTT
+   The CLI defaults to `quality` and runs directly. Use `--quality maximum`
+   for slower MP4 encoding with the same AI algorithms as `quality`.
+   Export an SRT or VTT
    with `opencut subtitles export DEFINITION --output final.srt` if requested.
 6. For variants, use `defineVideo(shape, compose)` with `videoParams` and
    reusable TypeScript helpers. Validate a sample with `--params params.json`.
    Run `opencut batch DEFINITION --variants variants.json --output-dir outputs --json`.
    Read each result and retry corrected entries with `--only id,id`.
 7. If interrupted, run `opencut build inspect DEFINITION --json` with the
-   same cache and parameters. Retry to reuse verified recipes and restart
+   same cache, quality and parameters. Retry to reuse verified recipes and restart
    unfinished encoding. For transfer, run `opencut package DEFINITION --output bundle`
    and `opencut package verify bundle`. Render `bundle/opencut.bundle.video.ts`
    with the required backends.

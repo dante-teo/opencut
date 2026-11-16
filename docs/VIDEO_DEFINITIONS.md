@@ -191,8 +191,8 @@ cropped video and a normalized soundtrack.
 | `smoothSlowMotion`  | Synthesizes frames while extending picture duration by `1 / speed`. Drops the selected audio stream. See [AI interpolation](#ai-interpolation).                                                     |
 | `extractAudio`      | Selects the input’s default audio stream and outputs audio. Pads a delayed audio start with silence to retain its position.                                                                         |
 | `normalizeAudio`    | One-pass loudness normalization. Optional `targetLufs` defaults to −16 and accepts −40 through −10. Requires audio.                                                                                 |
-| `superResolution`   | Set even `width` and `height` in the source aspect ratio. Apple VideoToolbox uses the `high` (default) or `fast` preset.                                                                            |
-| `denoise`           | Apple VideoToolbox temporal noise filtering at `light`, `medium` (default), or `strong` strength.                                                                                                   |
+| `superResolution`   | Set even `width` and `height` in the source aspect ratio. Optional `quality` overrides the render profile.                                                                                          |
+| `denoise`           | Apple VideoToolbox temporal noise filtering. Set `strength` to `light`, `medium` (default), or `strong`, independently of render quality.                                                           |
 | `convert`           | `format` is `mov` (FFV1 with PCM) or `mp4` (H.264 with AAC and even dimensions) for video, `png` for images, and `wav` (float PCM) or `flac` for audio.                                             |
 
 Steps select the same primary video and audio streams as composition. By
@@ -229,9 +229,7 @@ Use this asset recipe for 24 → 48 fps.
 ```ts
 import type { VideoRecipe } from '@opencut/sdk';
 
-const recipe: VideoRecipe = [
-  { type: 'interpolateFrames', numerator: 48, quality: 'balanced' },
-];
+const recipe: VideoRecipe = [{ type: 'interpolateFrames', numerator: 48 }];
 ```
 
 Use this recipe for half-speed picture at 30 fps.
@@ -245,7 +243,7 @@ const recipe: VideoRecipe = [
     type: 'smoothSlowMotion',
     numerator: 30,
     speed: 0.5,
-    quality: 'balanced',
+    quality: 'quality',
     sceneCuts: [1.2],
   },
 ];
@@ -261,16 +259,18 @@ const recipe: VideoRecipe = [
   at 0.125 s and 0.25 s, the derived picture starts at zero and audio at
   0.125 s. The recipe encodes the selected audio as float PCM and trims decoder
   padding beyond a declared audio endpoint.
-- `quality` selects `fast`, `balanced` (default), or `high`. VideoToolbox
-  provides up to one, three, or seven intermediate phases per pair,
-  respectively. Higher settings resolve finer source-time positions and can
-  cost more. The effective source sampling rate (`target fps / speed`) must
-  exceed the input cadence and stay within 2×, 4×, or 8× that cadence for the
-  selected quality. OpenCut uses the probed average for original media.
+- An authored `quality` of `fast`, `quality`, or `maximum` takes precedence over
+  the command's profile. Omit it to use `fast` in previews and `quality` in
+  final renders by default. `fast` uses the low-latency midpoint model and
+  supports a source-clock rate (`target fps / speed`) up to 2× input cadence.
+  `quality` and `maximum` use the same quality-priority offline VideoToolbox
+  Frame Rate Conversion revision 1 with on-the-fly optical flow. They compute
+  the requested phase within each input pair. Every profile requires a
+  source-clock rate above the input cadence.
 - The sampler follows decoded presentation timestamps, including variable
-  cadence. Original frames on the output grid retain their pixels. Between
-  originals the sampler uses the nearest available interior model phase
-  and may reuse that phase on long VFR intervals. If the duration ends
+  cadence. At source timestamps the sampler emits the source frame. The
+  offline backend round-trips 8-bit YUV through RGBA for its FP16 surfaces.
+  Fast can reuse the midpoint on long VFR intervals. If the duration ends
   between grid points, the final packet is shortened to keep the endpoint.
   Subsequent recipe steps use the declared cadence even when the shorter
   packet changes the average frame rate reported by a probe. For example,
@@ -287,8 +287,9 @@ const recipe: VideoRecipe = [
   A high-rate derived asset needs a matching canvas frame rate when the
   delivered composition should show every synthesized frame.
 
-Fresh AI steps require an Apple Silicon Mac running macOS 26 or later,
-OpenCut built with the macOS 26+ SDK, and FFmpeg with `scdet` and `libx264`.
+Fresh AI steps require an Apple Silicon Mac, OpenCut built with the macOS
+26+ SDK, and FFmpeg with `scdet` and `libx264`. Offline interpolation requires
+macOS 15.4 or later. Low-latency interpolation requires macOS 26 or later.
 OpenCut opens a VideoToolbox model session for the actual oriented dimensions
 and quality. Inputs must be even-sized, progressive, 8-bit, video-range SDR
 4:2:0 with right-angle rotation if a display matrix is present. Untagged range
@@ -320,7 +321,7 @@ const recipe: VideoRecipe = [
   {
     type: 'superResolution',
     backend: 'videotoolbox',
-    quality: 'high',
+    quality: 'quality',
     width: 3840,
     height: 2160,
   },
@@ -338,11 +339,14 @@ file's clock. For example, if an unselected track starts at 0 s, the selected
 video at 2 s, and the selected audio at 2.25 s, the derived video starts at 0 s
 and the audio at 0.25 s. Timeline clip offsets use the final recipe output.
 
-| Step and preset           | Processor                                      | Supported geometry and settings                                                                                                                                                                                                          |
-| ------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `superResolution`, `fast` | VideoToolbox low-latency super-resolution      | Uses a 1.5× or 2× model at supported source sizes. It picks 1.5× if that covers the target with even intermediate dimensions, and 2× otherwise. Try `high` if the selected factor is unavailable.                                        |
-| `superResolution`, `high` | VideoToolbox video super-resolution revision 1 | Runs the 4× model on supported sizes up to 1920 × 1080 or 1080 × 1920. Portrait frames rotate for inference and rotate back. The model uses the previous input and output, with a reset at detected cuts.                                |
-| `denoise`                 | VideoToolbox temporal noise filter             | Keeps the dimensions. `light`, `medium`, and `strong` correspond to strengths 0.25, 0.5, and 0.75. It uses references from the same detected shot, so an isolated frame has no filter result. A range with no eligible references fails. |
+When both operations fit the shot, interpolate before super-resolution to
+keep the interpolation surfaces at source resolution.
+
+| Step and preset                           | Processor                                      | Supported geometry and settings                                                                                                                                                                                                          |
+| ----------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `superResolution`, `fast`                 | VideoToolbox low-latency super-resolution      | Uses a 1.5× or 2× model at supported source sizes. It picks 1.5× if that covers the target with even intermediate dimensions, and 2× otherwise. Select `quality` if the required scale is unavailable.                                   |
+| `superResolution`, `quality` or `maximum` | VideoToolbox video super-resolution revision 1 | Runs the temporal 4× model on supported sizes up to 1920 × 1080 or 1080 × 1920. Portrait frames rotate for inference and rotate back. The model uses the previous input and output, with a reset at detected cuts.                       |
+| `denoise`                                 | VideoToolbox temporal noise filter             | Keeps the dimensions. `light`, `medium`, and `strong` correspond to strengths 0.25, 0.5, and 0.75. It uses references from the same detected shot, so an isolated frame has no filter result. A range with no eligible references fails. |
 
 The accepted `backend` value is `videotoolbox`, also the default. Both
 super-resolution presets run AI inference and use Lanczos to reduce the
@@ -352,7 +356,7 @@ with compression noise. Apple exposes no separate deblocking control here.
 Use Apple Silicon with macOS 26 or later and an OpenCut build made with the
 macOS 26+ SDK. Run `opencut system inspect --json` and look for
 `low-latency-super-resolution`, `video-super-resolution`, or
-`temporal-noise-filter`. For portrait `high`, check the transposed
+`temporal-noise-filter`. For offline portrait upscaling, check the transposed
 dimensions under `video-super-resolution`. The system probe reports known
 configurations and the offline model's readiness. The actual job verifies
 the model can initialize and process frames. OpenCut uses system-managed
@@ -390,7 +394,7 @@ opencut preview examples/video/review.video.ts --watch
 opencut timeline inspect examples/video/review.video.ts --timestamp 1
 opencut preview frame examples/video/review.video.ts --timestamp 1 --output frame.png
 opencut preview contact-sheet examples/video/review.video.ts --from 12 --to 36 --count 4 --output review.png
-opencut preview clip examples/video/review.video.ts --from 6 --to 42 --quality high --output review.mp4
+opencut preview clip examples/video/review.video.ts --from 6 --to 42 --quality maximum --output review.mp4
 ```
 
 A timestamp can be decimal
@@ -403,12 +407,17 @@ compiles and renders a playable revision with mixed audio. Use the timeline
 ruler or frame buttons to seek the composition. A build error appears beside
 the last valid revision, which stays playable while you fix the file.
 
+Desktop review uses the `fast` profile. If a recipe requires the offline
+processor to preview successfully, set `quality: 'quality'` on that recipe
+step. That setting applies to exports as well.
+
 CLI watch prints the build stages and the path of each playable MP4. Use
 `--size` to change the default 640-pixel cap on the longest side.
 With `--json`, stdout carries one event per line. Each event has a `status`
 (`compiling`, `rendering`, `ready`, or `error`), an attempted `generation`, and
 a `current` field. `current` is `null` until the first playable preview and
-then contains its `generation`, `sourceRevision`, `path`, and `frameCount`.
+then contains its `generation`, `sourceRevision`, `path`, `frameCount`, and
+`quality`.
 An `error` event also includes an `error` message and watch keeps running.
 
 A `ready` event can reuse the current MP4 when an edit leaves the render plan
@@ -418,7 +427,7 @@ watching and remove the temporary preview files.
 
 Watch mode debounces saves and tracks the entry, relative and absolute ESM
 imports, referenced font files, and local media. It reuses unchanged media
-snapshots and probe results. Changes to the render plan encode a full draft
+snapshots and probe results. Changes to the render plan encode a full preview
 playback movie with the shared renderer. Larger compositions take longer to
 refresh. Media may need temporary disk space for copies when the filesystem
 cannot clone them.

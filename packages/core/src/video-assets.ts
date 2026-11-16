@@ -7,13 +7,14 @@ import {
   validateEmbeddedFont,
   videoSourceDuration,
 } from '@opencut/media';
-import type { MediaMetadata } from '@opencut/media';
+import type { MediaMetadata, RenderQuality } from '@opencut/media';
 import type { MediaAsset } from './project.js';
 import { VideoDefinitionError } from './video-definition.js';
 import type { VideoAssetDefinition } from './video-definition.js';
 import { identifyVideoInput, videoInputIdentity } from './video-input.js';
 import type { IdentifiedMedia, RecordVideoInput } from './video-input.js';
 import { inspectRecipe } from './video-recipe.js';
+import { inheritsRenderQuality } from './video-recipe-schema.js';
 import type {
   RecipeMedia,
   RecipeInput,
@@ -35,13 +36,15 @@ export type VideoSourceProbes = Map<
 >;
 
 export interface VideoAssetOptions {
+  quality?: RenderQuality | undefined;
   signal?: AbortSignal | undefined;
   probes?: VideoSourceProbes;
   processing?: VideoProcessingOptions | undefined;
   recovery?: RecipeRecovery;
+  pinnedSources?: ReadonlyMap<string, string> | undefined;
   inputs?: {
     record: RecordVideoInput;
-    snapshotMedia(path: string): Promise<string>;
+    snapshotMedia(path: string, kind?: 'media' | 'font'): Promise<string>;
   };
 }
 
@@ -69,6 +72,8 @@ export async function compileVideoAssets(
     inputs,
     processing,
     recovery,
+    pinnedSources,
+    quality = 'quality',
   }: VideoAssetOptions,
 ) {
   const prepared: PreparedAsset[] = [];
@@ -76,17 +81,22 @@ export async function compileVideoAssets(
   for (const id of Object.keys(definitions).sort()) {
     const definition = definitions[id]!;
     const path = resolve(directory, definition.path);
+    const pinned = pinnedSources?.get(path);
     inputs?.record(identifyVideoInput(path, 'media'));
     if (definition.recipe) {
-      const recipe = await readAssetRecipe(id, definition, path, {
+      const source = pinned ?? path;
+      const recipe = await readAssetRecipe(id, definition, source, {
         signal,
         record: inputs?.record,
         probes,
+        quality,
       });
-      prepared.push({ id, definition, path, recipe });
+      if (pinned) recipe.inspection.source = path;
+      prepared.push({ id, definition, path: source, recipe });
       if (referenced.has(id)) required.push(recipe);
     } else {
-      const source = inputs ? await inputs.snapshotMedia(path) : path;
+      const source =
+        pinned ?? (inputs ? await inputs.snapshotMedia(path) : path);
       const media = await probeAsset(id, source, { signal, probes });
       prepared.push({
         id,
@@ -130,13 +140,17 @@ export async function compileVideoAssets(
       });
     }
   }
-  return { assets, recipes };
+  const qualitySensitive = required.some(({ inspection: { assetId } }) =>
+    definitions[assetId]?.recipe?.some(inheritsRenderQuality),
+  );
+  return { assets, recipes, qualitySensitive };
 }
 
 export async function inspectAssetRecipes(
   directory: string,
   definitions: Readonly<Record<string, VideoAssetDefinition>>,
   signal?: AbortSignal,
+  quality: RenderQuality = 'quality',
 ) {
   const recipes: VideoRecipeInspection[] = [];
   for (const id of Object.keys(definitions).sort()) {
@@ -146,7 +160,7 @@ export async function inspectAssetRecipes(
       id,
       definition,
       resolve(directory, definition.path),
-      { signal },
+      { signal, quality },
     );
     recipes.push(inspection);
   }
@@ -158,7 +172,7 @@ async function readAssetRecipe(
   id: string,
   definition: VideoAssetDefinition,
   path: string,
-  options: ProbeOptions,
+  { quality, ...options }: ProbeOptions & { quality: RenderQuality },
 ): Promise<RecipeInput> {
   if (definition.freezeFrame)
     throw new VideoDefinitionError(
@@ -172,6 +186,7 @@ async function readAssetRecipe(
       input.metadata,
       definition.recipe!,
       definition.kind,
+      quality,
     ),
   };
 }

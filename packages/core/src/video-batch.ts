@@ -1,7 +1,12 @@
 import { lstat, mkdir, realpath } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { MediaError, withRenderBudget } from '@opencut/media';
+import {
+  MediaError,
+  hostRenderResources,
+  sampleMemoryPressure,
+  withRenderBudget,
+} from '@opencut/media';
 import type { RenderProgress } from '@opencut/media';
 import { z } from 'zod';
 import type { VideoSourceProbes } from './video-assets.js';
@@ -148,9 +153,18 @@ export async function batchRenderVideo(
   if (process.platform !== 'darwin' && process.platform !== 'linux')
     throw new MediaError('Bounded batch rendering requires macOS or Linux.');
   const plan = planVariants(variants, options.only);
+  const host = hostRenderResources();
+  const pressure = options.signal?.aborted
+    ? 'unavailable'
+    : await sampleMemoryPressure();
+  if (pressure === 'critical')
+    throw new MediaError(
+      'System memory pressure is critical. Free memory and retry the batch.',
+    );
   const concurrency = Math.min(
     plan.length,
     boundedInteger('concurrency', options.concurrency ?? 1, 1, 8),
+    pressure === 'warning' ? 1 : host.recipeWorkers,
   );
   const limits = {
     maxTemporaryBytes: Math.floor(
@@ -161,10 +175,13 @@ export async function batchRenderVideo(
       ) / concurrency,
     ),
     maxNativeBytes: Math.floor(
-      boundedInteger(
-        'native bytes',
-        options.maxNativeBytes ?? 2048 * MiB,
-        concurrency * 32 * MiB,
+      Math.min(
+        boundedInteger(
+          'native bytes',
+          options.maxNativeBytes ?? host.nativeBudgetBytes,
+          concurrency * 32 * MiB,
+        ),
+        host.nativeBudgetBytes,
       ) / concurrency,
     ),
   };
@@ -259,6 +276,7 @@ export async function batchRenderVideo(
         params: variant.params,
         signal,
         preview: render.burnSubtitles === false,
+        quality: render.quality ?? 'quality',
         processing: {
           ...processing,
           onProgress(progress) {

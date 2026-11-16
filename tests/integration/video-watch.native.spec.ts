@@ -161,7 +161,7 @@ test('watch observes imports, missing files and in-place media changes without m
   const exportPath = join(directory, 'pinned.mp4');
   const exporting = watcher.withCurrent(recovered.generation, async (video) => {
     await holdExport;
-    return renderCompiledVideo(video, exportPath, { quality: 'draft' });
+    return renderCompiledVideo(video, exportPath, { quality: 'fast' });
   });
   try {
     await writeFile(still, await readFile(replacement));
@@ -468,7 +468,7 @@ test('definition previews agree with final composited frames and audio timing', 
     '--to',
     '42',
     '--quality',
-    'high',
+    'maximum',
     '--output',
     join(directory, 'clip.mp4'),
   );

@@ -47,7 +47,7 @@ static id<VTFrameProcessorConfiguration> configuration(Options options) {
                 fail(@"VideoToolbox low-latency super-resolution is unsupported on this Mac. Check opencut system inspect.");
             if (![[VTLowLatencySuperResolutionScalerConfiguration supportedScaleFactorsForFrameWidth:width
                 frameHeight:height] containsObject:@(options.scale)])
-                fail([NSString stringWithFormat:@"VideoToolbox does not support %dx%d at %.1f× in the fast preset. Check opencut system inspect or try high quality.", width, height, options.scale]);
+                fail([NSString stringWithFormat:@"VideoToolbox does not support %dx%d at %.1f× in the fast preset. Run opencut system inspect --json or explicitly select the quality profile.", width, height, options.scale]);
             return [[VTLowLatencySuperResolutionScalerConfiguration alloc]
                 initWithFrameWidth:width frameHeight:height scaleFactor:options.scale];
         case Video: {

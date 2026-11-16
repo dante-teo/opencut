@@ -126,24 +126,27 @@ the selected picture and audio. The first retained stream becomes time zero.
 For half-speed
 picture use `{ "type": "smoothSlowMotion", "numerator": 30, "speed": 0.5 }`;
 its duration doubles and the result is silent. Set optional `quality` to
-`fast`, `balanced` (default), or `high`. Specify known shot cuts in
+`fast`, `quality`, or `maximum` to override the selected render profile.
+Preview defaults to low-latency `fast`. Final render defaults to the
+quality-priority optical-flow backend, which `maximum` also uses. Specify known shot cuts in
 `sceneCuts` using seconds from the first picture frame entering that step.
 Use the declared cadence from the preceding interpolation step when choosing
 a target for a chained step. Match the canvas cadence to the final processed
 video to show every synthesized frame.
-These steps require a supported Apple Silicon Mac on macOS 26+. Inspect
+These steps require a supported Apple Silicon Mac. The offline backend
+requires macOS 15.4+, and fast requires macOS 26+. Inspect
 hardware with `opencut system inspect --json`. On unsupported inputs the
 step fails. See the [AI recipe reference](../../../docs/VIDEO_DEFINITIONS.md#ai-interpolation).
 
 For AI upscaling, set `{ "type": "superResolution", "backend": "videotoolbox",
-"width": 3840, "height": 2160, "quality": "high" }` on a 16:9 asset.
+"width": 3840, "height": 2160, "quality": "quality" }` on a 16:9 asset.
 Use 2160 × 3840 for 9:16. Match the canvas to deliver UHD. Put `trim` before
 enhancement to select a range on the source container's clock. A later
 `trim` uses the derived clock, where the first retained stream starts at
 zero and the relative audio delay is preserved. `fast` uses a size-dependent
 1.5× or 2× model.
-`high` uses Apple's temporal 4× model and resizes to the target. For
-`denoise`, choose `light`, `medium`, or `strong` and check temporal
+`quality` and `maximum` use Apple's temporal 4× model and resize to the target.
+For `denoise`, set `strength` to `light`, `medium`, or `strong` and check temporal
 noise-filter support before use. AI enhancement accepts constant-rate,
 progressive, square-pixel, 8-bit video-range SDR input. If the color matrix
 tag is missing, OpenCut resolves it from the input dimensions and codec

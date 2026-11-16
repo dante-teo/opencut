@@ -5,8 +5,9 @@ import {
   videoSourceDuration,
   validateEmbeddedFont,
   validateSubtitleBurnIn,
+  renderQualities,
 } from '@opencut/media';
-import type { MediaMetadata } from '@opencut/media';
+import type { MediaMetadata, RenderQuality } from '@opencut/media';
 import { compileVideoAssets, readEmbeddedFont } from './video-assets.js';
 import type { CompiledVideoAsset, VideoAssetOptions } from './video-assets.js';
 import { validateProject } from './project.js';
@@ -24,9 +25,11 @@ import type {
   ParsedVideoDefinition,
   VideoDefinition,
 } from './video-definition.js';
-import { identifyVideoInput } from './video-input.js';
+import { identifyVideoInput, videoInputIdentity } from './video-input.js';
 import type { RecordVideoInput } from './video-input.js';
 import type { VideoBuild } from './video-files.js';
+import { checkpointQualityCompilation } from './video-build.js';
+import type { VideoProcessingProgress } from './video-processing.js';
 import type { VideoRecipeInspection } from './video-recipe.js';
 
 function stableId(kind: string, ...parts: unknown[]) {
@@ -71,6 +74,11 @@ export interface CompiledVideo {
   readonly project: Project;
   readonly frameCount: number;
   readonly recipes: readonly VideoRecipeInspection[];
+  forQuality(
+    quality: RenderQuality,
+    preview: boolean,
+    signal?: AbortSignal,
+  ): Promise<CompiledVideo>;
   /** Media identity recorded before probing, keyed by the bound source path. */
   sourceIdentity(path: string): string | undefined;
   resolveRender(): Promise<
@@ -82,16 +90,79 @@ export async function compileDefinition(
   path: string,
   value: unknown,
   options: CompilationOptions = {},
-  getBuild?: (definition: ParsedVideoDefinition) => VideoBuild,
+  getBuild?: (
+    definition: ParsedVideoDefinition,
+    steps: VideoBuild['processing']['steps'],
+  ) => VideoBuild,
 ): Promise<CompiledVideo> {
-  const { signal, preview = false } = options;
+  const {
+    signal,
+    preview = false,
+    quality = preview ? 'fast' : 'quality',
+  } = options;
   signal?.throwIfAborted();
-  const definition = parseVideoDefinition(value);
-  const { project, assets, recipes } = await buildProject(
+  if (!renderQualities.includes(quality))
+    throw new VideoDefinitionError(
+      'Choose fast, quality, or maximum render quality.',
+    );
+  const definition = freeze(parseVideoDefinition(value));
+  const recipeSteps: VideoBuild['processing']['steps'][number][] = [];
+  const { processing, probes = new Map() } = options;
+  const authoredFiles = [
+    ...Object.values(definition.assets ?? {}).map(
+      ({ path }) => [path, 'media'] as const,
+    ),
+    ...Object.values(definition.fonts ?? {}).flatMap((font) =>
+      'path' in font ? [[font.path, 'font'] as const] : [],
+    ),
+  ].map(([file, kind]) => [resolve(dirname(path), file), kind] as const);
+  let pinnedSources = options.pinnedSources;
+  let profileIdentities = new Map(
+    authoredFiles.map(([file]) => {
+      const source = pinnedSources?.get(file) ?? file;
+      return [source, videoInputIdentity(source)];
+    }),
+  );
+  const checkInputs = (quality: RenderQuality) => {
+    for (const [file, identity] of profileIdentities)
+      if (videoInputIdentity(file) !== identity)
+        throw new VideoDefinitionError(
+          `Media or font '${file}' changed since compilation. Compile the definition again for ${quality}.`,
+        );
+  };
+  const { project, assets, recipes, qualitySensitive } = await buildProject(
     path,
     definition,
-    options,
+    {
+      ...options,
+      quality,
+      probes,
+      ...(getBuild && {
+        processing: {
+          ...processing,
+          onProgress(event: VideoProcessingProgress) {
+            if (event.status === 'completed' || event.status === 'cache-hit') {
+              const { assetId, step, key } = event;
+              recipeSteps.push({ assetId, step, key });
+            }
+            processing?.onProgress?.(event);
+          },
+        },
+      }),
+    },
   );
+  if (qualitySensitive && options.inputs && !pinnedSources) {
+    checkInputs(quality);
+    const snapshots = new Map<string, string>();
+    for (const [file, kind] of authoredFiles)
+      if (!snapshots.has(file))
+        snapshots.set(file, await options.inputs.snapshotMedia(file, kind));
+    checkInputs(quality);
+    pinnedSources = snapshots;
+    profileIdentities = new Map(
+      [...snapshots.values()].map((file) => [file, videoInputIdentity(file)]),
+    );
+  }
   let renderPlan: BoundRenderPlan;
   try {
     const plan = planProjectRender(project);
@@ -115,12 +186,57 @@ export async function compileDefinition(
     sourceMetadata.set(metadata.path, freeze(metadata));
     sourceIdentities.set(metadata.path, identity);
   }
-  return Object.freeze({
+  const build = getBuild?.(
+    definition,
+    recipeSteps.sort(
+      (a, b) => a.assetId.localeCompare(b.assetId) || a.step - b.step,
+    ),
+  );
+  const compiled: CompiledVideo = Object.freeze({
     path,
-    ...(getBuild && { build: freeze(getBuild(definition)) }),
+    ...(build && { build: freeze(build) }),
     project: freeze(project),
     frameCount: renderPlan.frameCount,
     recipes: freeze(recipes),
+    async forQuality(
+      next: RenderQuality,
+      preview: boolean,
+      signal?: AbortSignal,
+    ) {
+      signal?.throwIfAborted();
+      if (!renderQualities.includes(next))
+        throw new VideoDefinitionError(
+          'Choose fast, quality, or maximum render quality.',
+        );
+      if (!qualitySensitive || (next === 'fast') === (quality === 'fast'))
+        return compiled;
+      checkInputs(next);
+      return checkpointQualityCompilation(
+        compiled,
+        definition,
+        next,
+        preview,
+        signal,
+        async (recovery) => {
+          const rebuilt = await compileDefinition(
+            path,
+            definition,
+            {
+              quality: next,
+              preview,
+              signal,
+              processing,
+              probes,
+              pinnedSources,
+              ...(recovery && { recovery }),
+            },
+            getBuild,
+          );
+          checkInputs(next);
+          return rebuilt;
+        },
+      );
+    },
     sourceIdentity: (path: string) => sourceIdentities.get(path),
     async resolveRender() {
       return {
@@ -129,6 +245,7 @@ export async function compileDefinition(
       };
     },
   });
+  return compiled;
 }
 
 async function buildProject(
@@ -168,6 +285,7 @@ async function buildProject(
     definition.fonts,
     signal,
     inputs?.record,
+    options.pinnedSources,
   );
   const { subtitles } = definition;
   if (subtitles) {
@@ -285,6 +403,7 @@ async function loadFonts(
   definitions: VideoDefinition['fonts'],
   signal?: AbortSignal,
   record?: RecordVideoInput,
+  pinnedSources?: ReadonlyMap<string, string>,
 ) {
   const fonts = new Map<string, string>();
   const verifiedFonts = new Set<string>();
@@ -306,7 +425,7 @@ async function loadFonts(
       try {
         const file = resolve(dirname(path), font.path);
         record?.(identifyVideoInput(file, 'font'));
-        const data = await readEmbeddedFont(file);
+        const data = await readEmbeddedFont(pinnedSources?.get(file) ?? file);
         verifiedFonts.add(data);
         fonts.set(id, data);
       } catch (cause) {

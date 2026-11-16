@@ -17,7 +17,6 @@ export {
   validateVideoTimeline,
   validateSubtitleBurnIn,
   renderCodecs,
-  renderQualities,
   renderResolutions,
 } from './render.js';
 export type {
@@ -26,9 +25,10 @@ export type {
   VideoTimelineResult,
   RenderControls,
   RenderCodec,
-  RenderQuality,
   RenderResolution,
 } from './render.js';
+export { renderQualities, renderQualityProfiles } from '@opencut/shared';
+export type { RenderQuality } from '@opencut/shared';
 export type { RenderProgress } from './render-progress.js';
 export { renderContactSheet } from './contact-sheet.js';
 export { rasterizeTextLayer, validateEmbeddedFont } from './text.js';
@@ -46,7 +46,12 @@ export {
   validateEnhancementOutput,
 } from './enhance.js';
 export type { InterpolationPlan } from './interpolate.js';
-export { accountRenderFile, withRenderBudget } from './render-budget.js';
+export {
+  accountRenderFile,
+  withRenderBudget,
+  withDefaultRenderBudget,
+} from './render-budget.js';
+export { hostRenderResources, sampleMemoryPressure } from './host-resources.js';
 
 export { interpolationBackendId } from './interpolate.js';
 export { enhancementBackendId } from './enhance.js';

@@ -3,14 +3,19 @@ import {
   isStillImage,
   MediaError,
   recipeInputArguments,
+  renderQualityProfiles,
   videoSourceDuration,
   validateEnhancementOutput,
 } from '@opencut/media';
-import type { InterpolationPlan, MediaMetadata } from '@opencut/media';
+import type {
+  InterpolationPlan,
+  MediaMetadata,
+  RenderQuality,
+} from '@opencut/media';
 import type { IdentifiedMedia } from './video-input.js';
 import {
-  interpolationPhaseDepth,
   isEnhancementStep,
+  isInterpolationStep,
 } from './video-recipe-schema.js';
 import type {
   EnhancementStep,
@@ -19,7 +24,13 @@ import type {
   ResolvedVideoRecipe,
 } from './video-recipe-schema.js';
 
-type Step = ResolvedVideoRecipe[number];
+type ProfiledStep = Extract<
+  ResolvedVideoRecipe[number],
+  { type: 'interpolateFrames' | 'smoothSlowMotion' | 'superResolution' }
+>;
+type Step =
+  | Exclude<ResolvedVideoRecipe[number], ProfiledStep>
+  | (ProfiledStep & { quality: 'fast' | 'quality' });
 
 export type RecipeMedia = {
   kind: 'video' | 'image' | 'audio';
@@ -68,10 +79,21 @@ export function inspectRecipe(
   source: MediaMetadata,
   recipe: ResolvedVideoRecipe,
   kind: RecipeMedia['kind'],
+  quality: RenderQuality,
 ): VideoRecipeInspection {
   let input = recipeMedia(source);
-  const steps = recipe.map((parameters, index) => {
+  const steps = recipe.map((authored, index) => {
     try {
+      const profile =
+        renderQualityProfiles[
+          ('quality' in authored ? authored.quality : undefined) ?? quality
+        ];
+      const parameters =
+        authored.type === 'superResolution'
+          ? { ...authored, quality: profile.superResolution }
+          : isInterpolationStep(authored)
+            ? { ...authored, quality: profile.interpolation }
+            : authored;
       const { format, media } = resolveRecipeStep(input, parameters);
       input = media;
       return { parameters, format, media };
@@ -213,7 +235,7 @@ export function resolveRecipeStep(
 
 function resolveEnhancement(
   input: RecipeMedia,
-  parameters: EnhancementStep,
+  parameters: Extract<Step, EnhancementStep>,
 ): ResolvedRecipeStep {
   const { kind, width, height, frameRate, durationSeconds } = input;
   if (
@@ -271,7 +293,7 @@ function rebaseRecipeStreams(input: RecipeMedia, hasAudio: boolean) {
 
 function resolveInterpolation(
   input: RecipeMedia,
-  parameters: InterpolationStep,
+  parameters: Extract<Step, InterpolationStep>,
 ): ResolvedRecipeStep {
   const { numerator, denominator, quality, sceneCuts, sceneThreshold } =
     parameters;
@@ -292,10 +314,10 @@ function resolveInterpolation(
       'AI interpolation requires timed video, a target of 1–120 fps, and a higher sampling rate on the source clock (target fps / speed).',
     );
 
-  const phaseDepth = interpolationPhaseDepth[quality];
-  if (sourceRate > frameRate * 2 ** phaseDepth + 0.000001)
+  const offline = quality !== 'fast';
+  if (!offline && sourceRate > frameRate * 2 + 0.000001)
     throw new Error(
-      'The requested source-clock sampling rate exceeds this interpolation quality. Choose a higher quality, lower target fps, or faster speed.',
+      'Fast interpolation supports at most 2× sampling on the source clock. Choose quality interpolation, lower the target fps, or increase speed.',
     );
   if (!width || !height || width % 2 || height % 2)
     throw new Error(
@@ -329,7 +351,7 @@ function resolveInterpolation(
       numerator,
       denominator,
       timing: interpolationTiming(numerator, denominator, duration),
-      phaseDepth,
+      backend: offline ? 'offline' : 'low-latency',
       sceneThreshold,
       sceneCuts,
       speed,

@@ -13,7 +13,7 @@ import { commandUsage, type CommandOptions } from './commands.js';
 import { parseProcessingControls } from './recipe-options.js';
 import { UsageError } from './usage.js';
 import { readParams } from './json-argument.js';
-import { parseRenderControls } from './render-options.js';
+import { parseRenderControls, parseRenderQuality } from './render-options.js';
 
 type VideoCommand =
   'validate' | 'inspect' | 'render' | 'recipes inspect' | 'recipes validate';
@@ -52,7 +52,11 @@ export async function runVideoCommand(
     const params = await readParams(values.params, signal);
     if (command === 'recipes inspect' || command === 'recipes validate') {
       const result = await withDefinitionConsole(() =>
-        inspectVideoRecipes(file, { signal, params }),
+        inspectVideoRecipes(file, {
+          signal,
+          params,
+          quality: parseRenderQuality(values.quality, 'quality'),
+        }),
       );
       if (command === 'recipes inspect')
         console.log(JSON.stringify(result, null, 2));
@@ -82,6 +86,7 @@ export async function runVideoCommand(
       signal,
       params,
       preview: controls.burnSubtitles === false,
+      quality: controls.quality,
       processing,
     });
     if (command === 'validate') {

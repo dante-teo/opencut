@@ -4,6 +4,7 @@ import {
   access,
   mkdir,
   mkdtemp,
+  readFile,
   readdir,
   rm,
   writeFile,
@@ -12,9 +13,18 @@ import { arch, platform, release } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { compileVideo, inspectVideoRecipes, probeMedia } from '@opencut/sdk';
+import {
+  compileVideo,
+  inspectVideoBuild,
+  inspectVideoRecipes,
+  previewVideo,
+  probeMedia,
+  renderCompiledVideo,
+  watchVideo,
+} from '@opencut/sdk';
 import type {
   VideoDefinition,
   VideoProcessingProgress,
@@ -231,6 +241,148 @@ test('T49 rejects invalid effective rates and unordered scene boundaries during 
   );
 });
 
+test('T54 resolves preview and final interpolation separately and reuses equivalent offline work', async (t) => {
+  const dir = await fixture(t);
+  if (!dir) return;
+  const { stdout } = await exec(process.execPath, [
+    cli,
+    'system',
+    'inspect',
+    '--json',
+  ]);
+  if (
+    JSON.parse(stdout).videoToolbox.frameProcessors[
+      'frame-rate-conversion-quality'
+    ].status !== 'reported-supported'
+  ) {
+    t.skip('Offline VideoToolbox frame-rate conversion is unavailable.');
+    return;
+  }
+  await ffmpeg(
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=s=640x360:r=24:d=0.5',
+    '-vf',
+    tagged,
+    ...lossless,
+    join(dir, 'motion.mov'),
+  );
+  const file = await writeDefinition(
+    dir,
+    definition('motion.mov', [{ type: 'interpolateFrames', numerator: 48 }]),
+  );
+  const events: VideoProcessingProgress[] = [];
+  const processing = {
+    cacheDirectory: join(dir, 'cache'),
+    onProgress(event: VideoProcessingProgress) {
+      if (event.status === 'completed' || event.status === 'cache-hit')
+        events.push(event);
+    },
+  };
+  const video = await compileVideo(file, { preview: true, processing });
+  const review = await previewVideo(video).clip(
+    { startFrame: 0, endFrame: 8 },
+    join(dir, 'preview.mp4'),
+  );
+  assert.equal(review.quality, 'fast');
+  assert.equal(events.length, 1);
+  const final = await renderCompiledVideo(video, join(dir, 'quality.mp4'));
+  assert.equal(final.quality, 'quality');
+  assert.equal(events.length, 2);
+  assert.notEqual(events[0]!.key, events[1]!.key);
+  const maximum = await renderCompiledVideo(video, join(dir, 'maximum.mp4'), {
+    quality: 'maximum',
+  });
+  assert.equal(maximum.quality, 'maximum');
+  assert.match(maximum.warnings!.join('\n'), /same AI/);
+  assert.equal(events[2]!.key, events[1]!.key);
+  assert.deepEqual(
+    events.map(({ status }) => status),
+    ['completed', 'completed', 'cache-hit'],
+  );
+  const receipt = await inspectVideoBuild(file, { processing });
+  assert.equal(receipt.steps[0]?.key, events[1]!.key);
+  assert.deepEqual(
+    receipt.renders.map(({ output, state }) => [output, state]).sort(),
+    [
+      [maximum.path, 'rendered'],
+      [final.path, 'rendered'],
+    ].sort(),
+  );
+
+  const replacement = join(dir, 'replacement.mov');
+  await ffmpeg(
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=s=640x360:r=24:d=0.5',
+    '-vf',
+    `hflip,${tagged}`,
+    ...lossless,
+    replacement,
+  );
+  let status: import('@opencut/sdk').VideoWatchStatus | undefined;
+  const watcher = await watchVideo(file, {
+    processing,
+    onStatus(event) {
+      status = event;
+    },
+  });
+  async function readyAfter(generation: number) {
+    for (let attempt = 0; attempt < 150; attempt++) {
+      if (
+        status?.status === 'ready' &&
+        status.current &&
+        status.current.generation > generation
+      )
+        return status.current;
+      await delay(50);
+    }
+    assert.fail(
+      `Expected a ready revision after ${generation}, got ${status?.status}`,
+    );
+  }
+  try {
+    const { generation } = await readyAfter(0);
+    const exported = await watcher.withCurrent(generation, async (revision) => {
+      await writeFile(join(dir, 'motion.mov'), await readFile(replacement));
+      await readyAfter(generation);
+      return renderCompiledVideo(revision, join(dir, 'pinned-quality.mp4'));
+    });
+    assert.deepEqual(
+      await frameHashes(exported.path),
+      await frameHashes(final.path),
+    );
+  } finally {
+    await watcher.close();
+  }
+
+  await writeDefinition(
+    dir,
+    definition(
+      'motion.mov',
+      [{ type: 'interpolateFrames', numerator: 72 }],
+      72,
+    ),
+  );
+  const inspectArgs = [
+    cli,
+    'timeline',
+    'inspect',
+    file,
+    '--frame',
+    '0',
+    '--json',
+  ];
+  const inspected = await exec(process.execPath, inspectArgs);
+  assert.equal(JSON.parse(inspected.stdout).frame, 0);
+  await assert.rejects(
+    exec(process.execPath, [...inspectArgs, '--quality', 'fast']),
+    /at most 2×/,
+  );
+});
+
 test('T49 24→48 synthesizes frames, protects cuts and preserves pixels, tags and delayed PCM across repeated builds', async (t) => {
   const dir = await fixture(t);
   if (!dir) return;
@@ -329,7 +481,12 @@ test('T49 24→48 synthesizes frames, protects cuts and preserves pixels, tags a
 
   value.assets!.picture!.recipe = [
     { type: 'trim', start: 0.125, end: 0.625 },
-    { type: 'interpolateFrames', numerator: 48, sceneCuts: [0.375] },
+    {
+      type: 'interpolateFrames',
+      numerator: 48,
+      quality: 'fast',
+      sceneCuts: [0.375],
+    },
   ];
   await writeDefinition(dir, value);
   const trimmed = await frameHashes(await compiledPath(file, cache));
@@ -359,7 +516,7 @@ test('T49 30→60 works with portrait VFR timestamps and explicit cuts, and trim
     dir,
     definition(
       'portrait-cfr.mov',
-      [{ type: 'interpolateFrames', numerator: 60 }],
+      [{ type: 'interpolateFrames', numerator: 60, quality: 'fast' }],
       60,
       360,
       640,
@@ -418,16 +575,20 @@ test('T49 30→60 works with portrait VFR timestamps and explicit cuts, and trim
   near(output.audio!.durationSeconds!, input.audio!.durationSeconds!);
   assert.deepEqual([output.video?.width, output.video?.height], [360, 640]);
   near(output.video!.durationSeconds!, input.video!.durationSeconds!);
-  const original = await frameHashes(source);
   const frames = await frameHashes(derived);
   assert.equal(frames.length, 28);
-  assert.deepEqual(frames.slice(6, 12), Array(6).fill(original[3]));
-  assert.equal(frames[12], original[4]);
-  assert.notEqual(frames[1], original[0]);
-  assert.notEqual(frames[1], original[1]);
+  assert.deepEqual(frames.slice(6, 12), Array(6).fill(frames[6]));
+  assert.notEqual(frames[12], frames[6]);
+  assert.notEqual(frames[1], frames[0]);
+  assert.notEqual(frames[1], frames[2]);
 
   value.assets!.picture!.recipe = [
-    { type: 'smoothSlowMotion', speed: 0.47, numerator: 30, quality: 'high' },
+    {
+      type: 'smoothSlowMotion',
+      speed: 0.47,
+      numerator: 30,
+      quality: 'quality',
+    },
   ];
   await writeDefinition(dir, value);
   const slow = await compiledPath(file, cache);
@@ -475,7 +636,7 @@ test('T49 preserves a picture offset between target ticks and keeps early audio 
   const file = await writeDefinition(
     dir,
     definition('late-picture.mov', [
-      { type: 'interpolateFrames', numerator: 48 },
+      { type: 'interpolateFrames', numerator: 48, quality: 'fast' },
     ]),
   );
   const derived = await compiledPath(file, join(dir, 'cache'));
@@ -538,7 +699,7 @@ test('T49 rebases retained picture and audio when an earlier track is discarded'
   const file = await writeDefinition(
     dir,
     definition('multitrack.mov', [
-      { type: 'interpolateFrames', numerator: 48 },
+      { type: 'interpolateFrames', numerator: 48, quality: 'fast' },
     ]),
   );
   const cache = join(dir, 'cache');

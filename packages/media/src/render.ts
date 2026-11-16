@@ -36,6 +36,8 @@ import {
 import type { MediaMetadata } from './probe.js';
 import { checkRenderSignal, MediaError, runMediaTool } from './process.js';
 import { accountRenderBytes, accountRenderFile } from './render-budget.js';
+import { renderQualities, renderQualityProfiles } from '@opencut/shared';
+import type { RenderQuality } from '@opencut/shared';
 import { renderProgress } from './render-progress.js';
 import type { RenderProgress } from './render-progress.js';
 import { fitVisual } from './video-filter.js';
@@ -79,11 +81,9 @@ interface VisualTransition {
   layers: TransitionLayer[];
 }
 
-export const renderQualities = ['draft', 'balanced', 'high'] as const;
 export const renderResolutions = ['project', '720p', '1080p'] as const;
 export const renderCodecs = ['h264', 'hevc'] as const;
 export type RenderCodec = (typeof renderCodecs)[number];
-export type RenderQuality = (typeof renderQualities)[number];
 export type RenderResolution = (typeof renderResolutions)[number];
 export interface RenderControls {
   /** Trim the finished composition on the project grid; end is exclusive. */
@@ -439,7 +439,7 @@ async function prepareTimeline(
   checkRenderSignal(options.signal);
   validateOptions(options);
   const codec = options.codec ?? 'h264';
-  const quality = options.quality ?? 'balanced';
+  const quality = options.quality ?? 'quality';
   const resolution = options.resolution ?? 'project';
   if (
     !renderCodecs.includes(codec) ||
@@ -447,11 +447,7 @@ async function prepareTimeline(
     !renderResolutions.includes(resolution)
   )
     throw new MediaError('Unknown render codec, quality or resolution preset.');
-  const encoding = {
-    draft: { preset: 'ultrafast', crf: '28' },
-    balanced: { preset: 'veryfast', crf: '20' },
-    high: { preset: 'medium', crf: '16' },
-  }[quality];
+  const { encoding } = renderQualityProfiles[quality];
   const { width, height, frameRate, frameCount } = options;
   const { outputSize, videoBitrateKbps } = options;
   const audioBitrateKbps = options.audioBitrateKbps ?? 192;
@@ -906,7 +902,25 @@ async function prepareTimeline(
     // A source frame first covers the project tick at or after its PTS.
     // Rounding down or to nearest can show a frame before its presentation time.
     const { retiming } = clip;
-    const frameSampling = `fps=${rate}:start_time=0:round=${retiming ? 'near' : 'up'}:eof_action=pass,tpad=stop_mode=clone:stop=1,`;
+    const seekTarget = clip.sourceStartFrame + first - clip.timelineStartFrame;
+    // Indexed, zero-origin MOV/MP4 still previews can decode from the preceding
+    // keyframe. Keep its native PTS, including pre-roll frames before the seek,
+    // so the same frame covers the requested project tick even on VFR input.
+    const seekFrame =
+      png &&
+      !still &&
+      !transformed &&
+      !retiming &&
+      first < last &&
+      source.startTimeSeconds === 0 &&
+      video.startTimeSeconds === 0 &&
+      /\.(mp4|mov)$/i.test(source.path)
+        ? Math.max(0, seekTarget - Math.ceil((2 * numerator) / denominator))
+        : 0;
+    const seekSeconds = (seekFrame * denominator) / numerator;
+    // An fps start_time shifts the source and output grids independently.
+    // A seek preserves absolute PTS, so let fps start at the decoded keyframe.
+    const frameSampling = `fps=${rate}${seekFrame ? '' : ':start_time=0'}:round=${retiming ? 'near' : 'up'}:eof_action=pass,tpad=stop_mode=clone:stop=1,`;
     // Pick an absolute project frame before shifting to this piece's local clock.
     // Two source ns cover PTS rounding and truncation of the shared source origin.
     const frameNs = `(1000000000*${denominator}/${numerator})`;
@@ -917,9 +931,12 @@ async function prepareTimeline(
           `setpts=(ceil((PTS-(${retiming.sourceOriginNs})-2)*${retiming.speed.denominator}/${retiming.speed.numerator}/${frameNs})-${clip.timelineStartFrame})*${frameNs},` +
           frameSampling +
           `trim=end_frame=${clip.frameCount}`
-        : 'setpts=PTS-STARTPTS,' +
-          frameSampling +
-          `trim=start_frame=${clip.sourceStartFrame}:end_frame=${sourceEnd}`;
+        : seekFrame
+          ? frameSampling +
+            `trim=start_pts=${seekTarget}:end_pts=${seekTarget + last - first}`
+          : 'setpts=PTS-STARTPTS,' +
+            frameSampling +
+            `trim=start_frame=${clip.sourceStartFrame}:end_frame=${sourceEnd}`;
     const inputPath = held?.path ?? (await inputPathFor(source.path));
     if (transformed) {
       return transform({
@@ -944,13 +961,27 @@ async function prepareTimeline(
       rotated ? displayWidth : displayHeight,
       clip,
     );
-    args.push('-threads', '1', '-i', inputPath);
+    if (seekFrame && !args.includes('-copyts')) args.push('-copyts');
+    args.push(
+      '-threads',
+      '1',
+      ...(seekFrame ? ['-ss', seekSeconds.toFixed(6), '-noaccurate_seek'] : []),
+      '-i',
+      inputPath,
+    );
     if (!held) inputs.set(clip.clipId, input);
+    // Preserve sampling on the project grid, then crop the time range before
+    // scaling or converting frames that the preview will never show.
+    const ranged = !!options.range && first < last;
+    const rangeTrim =
+      ranged && !seekFrame
+        ? `trim=start_frame=${first - clip.timelineStartFrame}:end_frame=${last - clip.timelineStartFrame},`
+        : '';
     filters.push(
-      `[${input++}:${stream}]${sampling},` +
+      `[${input++}:${stream}]${sampling},${rangeTrim}` +
         `${fitVisual(geometry, matrix)},format=rgba,` +
         ((clip.opacity ?? 1) === 1 ? '' : `lut=a=val*${clip.opacity},`) +
-        `settb=1/${numerator},setpts=(N+${clip.timelineStartFrame})*${denominator}[${label}]`,
+        `settb=1/${numerator},setpts=(N+${ranged ? first : clip.timelineStartFrame})*${denominator}[${label}]`,
     );
     return { x: geometry.x, y: geometry.y, sync: framesync };
   };

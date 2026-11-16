@@ -9,11 +9,15 @@ import {
 } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
+import type { RenderQuality } from '@opencut/shared';
 import {
   parseVideoDefinition,
   VideoDefinitionError,
 } from './video-definition.js';
-import type { VideoParameters } from './video-definition.js';
+import type {
+  ParsedVideoDefinition,
+  VideoParameters,
+} from './video-definition.js';
 import {
   fileLease,
   fingerprintFile,
@@ -26,8 +30,12 @@ import { videoInputIdentity } from './video-input.js';
 import type { VideoInput } from './video-input.js';
 import type { CompilationOptions, CompiledVideo } from './video-compiler.js';
 import { processingSettings } from './video-processing.js';
+import type { RecipeRecovery } from './video-processing.js';
 import { findRecipeEntry } from './video-recipe-cache.js';
-import { recipeFormatSchema } from './video-recipe-schema.js';
+import {
+  inheritsRenderQuality,
+  recipeFormatSchema,
+} from './video-recipe-schema.js';
 
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
 const fingerprint = z.object({ sha256, bytes: z.int().nonnegative() });
@@ -67,6 +75,15 @@ type CompileReceipt = z.infer<typeof compileSchema>;
 type RenderReceipt = z.infer<typeof renderSchema>;
 type Stage = z.infer<typeof stageSchema>;
 type Fingerprint = Awaited<ReturnType<typeof fingerprintFile>>;
+type BuildInputs = Pick<
+  CompileReceipt,
+  'compositionSha256' | 'params' | 'preview' | 'inputs'
+> & {
+  cache: string;
+  path: string;
+  files: ReadonlyMap<string, Fingerprint>;
+  identities: ReadonlyMap<string, string>;
+};
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 const scratchPrefix = '.opencut-build-render-';
@@ -85,7 +102,7 @@ export async function prepareVideoBuild(
     params?: VideoParameters | undefined;
     verified: ReadonlyMap<string, Fingerprint> | undefined;
   },
-  { processing, preview: previewOption, signal }: CompilationOptions,
+  { processing, preview: previewOption, quality, signal }: CompilationOptions,
 ) {
   const { directory: cache } = processingSettings(processing ?? {});
   const preview = previewOption ?? false;
@@ -144,31 +161,62 @@ export async function prepareVideoBuild(
   const orderedInputs = [...inputs.values()].sort((a, b) =>
     a.path.localeCompare(b.path),
   );
-  const compositionSha256 = hashJson(definition);
+  return locateBuild(
+    {
+      cache,
+      path,
+      compositionSha256: hashJson(definition),
+      params,
+      preview,
+      inputs: orderedInputs,
+      files,
+      identities,
+    },
+    definition,
+    quality,
+  );
+}
+
+function locateBuild(
+  build: BuildInputs,
+  definition: ParsedVideoDefinition,
+  quality: RenderQuality = build.preview ? 'fast' : 'quality',
+) {
   const id = hashJson([
     1,
-    path,
-    compositionSha256,
-    params,
-    preview,
-    orderedInputs,
+    build.path,
+    build.compositionSha256,
+    build.params,
+    build.preview,
+    build.inputs,
+    ...(Object.values(definition.assets ?? {}).some(({ recipe }) =>
+      recipe?.some(inheritsRenderQuality),
+    )
+      ? [quality === 'fast' ? 'fast' : 'quality']
+      : []),
   ]);
-  return {
-    id,
-    cache,
-    path,
-    compositionSha256,
-    params,
-    preview,
-    inputs: orderedInputs,
-    files,
-    identities,
-    directory: join(cache, '.builds-v1', id),
-  };
+  return { ...build, id, directory: join(build.cache, '.builds-v1', id) };
 }
 
 type BuildIdentity = Awaited<ReturnType<typeof prepareVideoBuild>>;
 const checkpoints = new WeakMap<CompiledVideo, BuildIdentity>();
+
+export function checkpointQualityCompilation(
+  video: CompiledVideo,
+  definition: ParsedVideoDefinition,
+  quality: RenderQuality,
+  preview: boolean,
+  signal: AbortSignal | undefined,
+  compile: (recovery?: RecipeRecovery) => Promise<CompiledVideo>,
+) {
+  const previous = checkpoints.get(video);
+  if (!previous) return compile();
+  // Use the original recorded composition and input fingerprints.
+  const build = locateBuild({ ...previous, preview }, definition, quality);
+  return checkpointCompilation(build, signal, (record) =>
+    compile({ record, sources: build.files }),
+  );
+}
 
 export function authoredInputs(video: CompiledVideo) {
   return checkpoints.get(video)?.inputs.map(({ path }) => path) ?? [];

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { renderQualities } from '@opencut/shared';
 import { snapshotSchema, clipSchema, clipVisualSchema } from './project.js';
 import type { Project } from './project.js';
 import { evaluateTimelineFrame } from './evaluation.js';
@@ -79,6 +80,7 @@ const previewBase = z.strictObject({
   frameRate: frameRateSchema,
   width: z.int().positive(),
   height: z.int().positive(),
+  quality: z.enum(renderQualities),
 });
 export const previewFrameSchema = previewBase.extend({
   kind: z.literal('frame'),
@@ -93,7 +95,6 @@ export const previewClipSchema = previewBase.extend({
   endTime: timeSchema,
   frameCount: z.int().positive(),
   durationSeconds: z.number().positive(),
-  quality: z.enum(['draft', 'balanced', 'high']),
 });
 export const previewSheetSchema = previewBase.extend({
   kind: z.literal('contact-sheet'),

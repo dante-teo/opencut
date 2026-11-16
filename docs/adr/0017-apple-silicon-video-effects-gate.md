@@ -2,6 +2,10 @@
 
 Status: Accepted. Headless recipes expose low-latency interpolation, opt-in super-resolution, and temporal denoising on supported hardware.
 
+T54 adds quality-priority offline frame-rate conversion for final rendering.
+The measurements below describe the earlier Normal-priority interpolation
+prototype. See the [current render profiles](../CLI.md#render-quality-profiles).
+
 ## Decision
 
 | Capability          | Primary candidate                                                                                                                                                                                                   | Fallback                                                                                                                                                                                                                       |

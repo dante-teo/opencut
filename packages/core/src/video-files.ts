@@ -35,7 +35,7 @@ export function isVideoDefinitionPath(file: string) {
 
 export type VideoCompileOptions = Pick<
   CompilationOptions,
-  'signal' | 'preview' | 'processing'
+  'signal' | 'preview' | 'processing' | 'quality'
 > & {
   /** A JSON object validated by the TypeScript definition. */
   params?: unknown;
@@ -107,7 +107,6 @@ async function compileResolvedVideo(
 ) {
   if (!options.batch && params === undefined)
     return compileDefinition(path, value, options);
-  const steps: VideoBuild['processing']['steps'][number][] = [];
   const sha256 = await hashDefinition(
     path,
     sources,
@@ -117,40 +116,21 @@ async function compileResolvedVideo(
   const { directory, concurrency, limits } = processingSettings(
     options.processing ?? {},
   );
-  return compileDefinition(
-    path,
-    value,
-    {
-      ...options,
-      processing: {
-        ...options.processing,
-        onProgress(event) {
-          if (event.status === 'completed' || event.status === 'cache-hit') {
-            const { assetId, step, key } = event;
-            steps.push({ assetId, step, key });
-          }
-          options.processing?.onProgress?.(event);
-        },
-      },
+  return compileDefinition(path, value, options, (composition, steps) => ({
+    definition: {
+      path,
+      sha256,
+      compositionSha256: hashJson(composition),
     },
-    (composition) => ({
-      definition: {
-        path,
-        sha256,
-        compositionSha256: hashJson(composition),
-      },
-      ...(params !== undefined && { params }),
-      ...(options.batch && { batch: options.batch }),
-      processing: {
-        directory,
-        concurrency,
-        limits,
-        steps: steps.sort(
-          (a, b) => a.assetId.localeCompare(b.assetId) || a.step - b.step,
-        ),
-      },
-    }),
-  );
+    ...(params !== undefined && { params }),
+    ...(options.batch && { batch: options.batch }),
+    processing: {
+      directory,
+      concurrency,
+      limits,
+      steps,
+    },
+  }));
 }
 
 export type VideoBuildInspection = Awaited<
@@ -202,11 +182,20 @@ async function hashDefinition(
 /** Validate recipe order and input streams without transcoding or writing a cache. */
 export async function inspectVideoRecipes(
   file: string,
-  { signal, params }: Pick<VideoCompileOptions, 'signal' | 'params'> = {},
+  {
+    signal,
+    params,
+    quality,
+  }: Pick<VideoCompileOptions, 'signal' | 'params' | 'quality'> = {},
 ) {
   const { path, value } = await readVideoInput(file, { signal, params });
   const { assets = {} } = parseVideoDefinition(value);
-  const recipes = await inspectAssetRecipes(dirname(path), assets, signal);
+  const recipes = await inspectAssetRecipes(
+    dirname(path),
+    assets,
+    signal,
+    quality,
+  );
   return { path, recipes };
 }
 

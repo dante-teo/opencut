@@ -3,15 +3,25 @@
 OpenCut runs the same timeline planner and media engine for frame, clip,
 watch, desktop, and final export. Frame numbers use the authored canvas
 rate. A preview clip keeps the selected time range with an exclusive end.
+A single-frame preview selects the same project frame whether the engine
+seeks to an earlier keyframe or decodes from the beginning.
 A single-frame PNG and MP4 decoded at the same position can differ slightly
 from lossy encoding and chroma subsampling. Watched playback also uses a
-size cap and draft encoding.
+size cap and fast encoding.
+
+When comparing an AI-processed preview with a final render, use the same
+`--quality` on both commands. Preview defaults to `fast` and render defaults
+to `quality`, so their inherited interpolation and super-resolution settings
+can produce different pictures on the same frame grid. See the
+[render quality profiles](CLI.md#render-quality-profiles).
 
 CLI and Electron watchers stage referenced media for each revision so a
 file changing in place cannot mix old and new input within one published
 preview. A failed or superseded rebuild leaves the last complete playback
 available. Desktop export renders the selected revision using its staged
 inputs and retains those inputs while the render is active.
+When the final profile requires different AI processing, the watcher keeps
+the original recipe inputs available for that export as well.
 
 Run `pnpm test:consistency` for frame and audio alignment, preview recovery, and decoded comparison
 of an Electron export with a foreground SDK render.

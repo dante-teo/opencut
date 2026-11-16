@@ -3,7 +3,11 @@ import {
   processingOptionHelp,
   processingOptionTypes,
 } from './recipe-options.js';
-import { renderOptionHelp, renderOptionTypes } from './render-options.js';
+import {
+  qualityOption,
+  renderOptionHelp,
+  renderOptionTypes,
+} from './render-options.js';
 import { UsageError } from './usage.js';
 
 const optionTypes = {
@@ -38,6 +42,7 @@ const optionTypes = {
 const definition = '<definition.video.ts>';
 const params = '[--params <params.json>]';
 const position = '(--frame <n> | --timestamp <time>)';
+const previewOptions = ['quality', ...Object.keys(processingOptionTypes)];
 
 const commands = {
   package: {
@@ -46,8 +51,8 @@ const commands = {
   },
   'package verify': { args: '<directory>', options: [] },
   'build inspect': {
-    args: `${definition} [--recipe-cache <directory>] [--no-subtitles] ${params}`,
-    options: ['recipe-cache', 'no-subtitles', 'params'],
+    args: `${definition} [--recipe-cache <directory>] [--no-subtitles] ${qualityOption} ${params}`,
+    options: ['recipe-cache', 'no-subtitles', 'quality', 'params'],
   },
   validate: {
     args: `${definition} ${params}`,
@@ -57,14 +62,20 @@ const commands = {
     args: `${definition} ${params}`,
     options: ['params', ...Object.keys(processingOptionTypes)],
   },
-  'recipes inspect': { args: `${definition} ${params}`, options: ['params'] },
-  'recipes validate': { args: `${definition} ${params}`, options: ['params'] },
+  'recipes inspect': {
+    args: `${definition} ${qualityOption} ${params}`,
+    options: ['quality', 'params'],
+  },
+  'recipes validate': {
+    args: `${definition} ${qualityOption} ${params}`,
+    options: ['quality', 'params'],
+  },
   'timeline inspect': {
-    args: `${definition} ${position} ${params}`,
-    options: ['frame', 'timestamp', 'params'],
+    args: `${definition} ${position} ${qualityOption} ${params}`,
+    options: ['frame', 'timestamp', 'quality', 'params'],
   },
   render: {
-    args: `${definition} --output <new.mp4> ${params}`,
+    args: `${definition} --output <new.mp4> ${qualityOption} ${params}`,
     options: [
       'output',
       'params',
@@ -89,20 +100,36 @@ const commands = {
     ],
   },
   preview: {
-    args: `${definition} --watch [--size <64..1920>]`,
-    options: ['watch', 'size'],
+    args: `${definition} --watch [--size <64..1920>] ${qualityOption}`,
+    options: ['watch', 'size', ...previewOptions],
   },
   'preview frame': {
-    args: `${definition} ${position} --output <new.png> [--size <64..1920>] ${params}`,
-    options: ['frame', 'timestamp', 'output', 'size', 'params'],
+    args: `${definition} ${position} --output <new.png> [--size <64..1920>] ${qualityOption} ${params}`,
+    options: [
+      'frame',
+      'timestamp',
+      'output',
+      'size',
+      'params',
+      ...previewOptions,
+    ],
   },
   'preview clip': {
-    args: `${definition} --from <n> --to <n> --output <new.mp4> [--size <64..1920>] [--quality <draft|balanced|high>] ${params}`,
-    options: ['from', 'to', 'output', 'size', 'quality', 'params'],
+    args: `${definition} --from <n> --to <n> --output <new.mp4> [--size <64..1920>] ${qualityOption} ${params}`,
+    options: ['from', 'to', 'output', 'size', 'params', ...previewOptions],
   },
   'preview contact-sheet': {
-    args: `${definition} --output <new.png> [--from <n>] [--to <n>] [--count <1..16>] [--columns <1..16>] [--size <64..640>] ${params}`,
-    options: ['from', 'to', 'output', 'size', 'count', 'columns', 'params'],
+    args: `${definition} --output <new.png> [--from <n>] [--to <n>] [--count <1..16>] [--columns <1..16>] [--size <64..640>] ${qualityOption} ${params}`,
+    options: [
+      'from',
+      'to',
+      'output',
+      'size',
+      'count',
+      'columns',
+      'params',
+      ...previewOptions,
+    ],
   },
   'subtitles export': {
     args: `${definition} --output <new.srt|new.vtt> ${params}`,
@@ -203,7 +230,8 @@ export function printHelp(positionals: string[], json: boolean | undefined) {
             : renderOptionHelp,
         ]
       : []),
-    ...(['render', 'batch', 'validate', 'inspect'].includes(scope)
+    ...(['render', 'batch', 'validate', 'inspect'].includes(scope) ||
+    scope.startsWith('preview')
       ? [
           scope === 'batch'
             ? processingOptionHelp.replace(' --recipe-workers <count>', '')

@@ -281,24 +281,24 @@ test('T53 keeps the last published render receipt through failed retries', async
 
   const inspect = async () =>
     (await inspectVideoBuild(file, { processing })).renders[0]!;
-  await renderVideo(file, output, { processing, quality: 'draft' });
+  await renderVideo(file, output, { processing, quality: 'fast' });
   const published = await inspect();
   assert.equal(published.state, 'rendered');
   assert.ok(published.verified);
   assert.deepEqual(published.settings, {
-    quality: 'draft',
+    quality: 'fast',
     burnSubtitles: true,
   });
 
   await assert.rejects(
-    renderVideo(file, output, { processing, quality: 'high' }),
+    renderVideo(file, output, { processing, quality: 'maximum' }),
     /Refusing to overwrite existing output/,
   );
   const { lastAttempt, ...afterRetry } = await inspect();
   assert.deepEqual(afterRetry, published);
   assert.equal(lastAttempt?.state, 'failed');
   assert.deepEqual(lastAttempt.settings, {
-    quality: 'high',
+    quality: 'maximum',
     burnSubtitles: true,
   });
   assert.match(

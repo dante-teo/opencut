@@ -20,6 +20,30 @@ audio settings. Outputs are new files unless a supported render explicitly
 requests `--overwrite`. Use `--json` for machine output and SIGINT or SIGTERM
 to cancel foreground work. Render runs in the CLI with FFmpeg subprocesses.
 
+## Render quality profiles
+
+`render` and `batch` default to `quality`. All `preview` commands, including
+`preview --watch`, default to `fast`. Set `--quality fast|quality|maximum`
+to select a profile. It controls encoding and any interpolation or
+super-resolution step that has no authored quality override.
+`timeline inspect` defaults to `quality` and accepts the same flag to inspect
+another recipe profile.
+
+| Profile   | AI interpolation                                                        | AI super-resolution                  | MP4 encoder preset and CRF |
+| --------- | ----------------------------------------------------------------------- | ------------------------------------ | -------------------------- |
+| `fast`    | VideoToolbox low-latency midpoint                                       | VideoToolbox low-latency 1.5× or 2×  | ultrafast, 28              |
+| `quality` | VideoToolbox offline frame-rate conversion revision 1, quality priority | VideoToolbox temporal 4×, revision 1 | veryfast, 17               |
+| `maximum` | Same as `quality`                                                       | Same as `quality`                    | medium, 16                 |
+
+CRF applies when the video bitrate is unspecified. H.264 and HEVC use
+libx264 and libx265 respectively. PNG previews use lossless encoding.
+An unsupported AI step reports how to check its requirements. Select a
+different profile or adjust the recipe explicitly. `system inspect --json`
+lists the profile defaults, model configuration probes, host worker cap and
+memory pressure. Run the actual render to verify support for a particular
+source. The [benchmark instructions](#performance-benchmarks) use generated
+motion, audio and subtitle fixtures.
+
 Media tools include `probe`, `extract-frame`, and `separate-dialogue` on
 source paths. Choose a destination that supports hard links for
 `extract-frame` so it can publish the completed PNG atomically. Dialogue
@@ -41,22 +65,22 @@ opencut render edit.video.ts --recipe-cache ./recipe-cache --recipe-workers 2 --
 
 `recipes inspect` and `recipes validate` check source streams and ordered
 steps without transcoding. The normal `validate`, `inspect`, and `render`
-commands also accept these processing options when compiling referenced
+commands and all preview modes accept these processing options when compiling referenced
 recipes.
 
-| Option                     | Default and scope                                                                                                                                                                                                         |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--recipe-cache`           | `$XDG_CACHE_HOME/opencut/recipes-v3`, or `~/.cache/opencut/recipes-v3`. Use a private local directory that supports file locks and atomic rename.                                                                         |
-| `--recipe-workers`         | 1 active step per invocation, configurable from 1 through 16.                                                                                                                                                             |
-| `--recipe-temp-bytes`      | 4 GiB for staged media per invocation, split evenly among workers. The OS file limit rounds down and can be stricter on Linux depending on the shell.                                                                     |
-| `--recipe-memory-bytes`    | 1 GiB per active step, or 2 GiB for high super-resolution. Caps individual FFmpeg allocations and checks process-group RSS for AI steps every 50 ms.                                                                      |
-| `--recipe-buffered-frames` | 32 frames per FFmpeg filter graph. VideoToolbox interpolation needs 3 surfaces, fast super-resolution 2, and high super-resolution 4. Denoise needs the current and output surfaces plus the configured reference window. |
-| `--recipe-max-pixels`      | 8,847,360 pixels per input or output frame.                                                                                                                                                                               |
-| `--recipe-timeout-ms`      | 1,800,000 milliseconds per step.                                                                                                                                                                                          |
+| Option                     | Default and scope                                                                                                                                                                                                            |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--recipe-cache`           | `$XDG_CACHE_HOME/opencut/recipes-v3`, or `~/.cache/opencut/recipes-v3`. Use a private local directory that supports file locks and atomic rename.                                                                            |
+| `--recipe-workers`         | Defaults to 1. Accepts up to 16 as a ceiling, with a host cap based on CPUs and memory (at most 4). macOS memory-pressure warnings limit new work to one active stage.                                                       |
+| `--recipe-temp-bytes`      | 4 GiB for staged media per invocation, split evenly among workers. The OS file limit rounds down and can be stricter on Linux depending on the shell.                                                                        |
+| `--recipe-memory-bytes`    | Total native budget, capped at a quarter of installed memory (up to 8 GiB on Apple Silicon). Stages reserve up to 1 GiB normally, 2 GiB for offline interpolation, and 4 GiB for offline super-resolution.                   |
+| `--recipe-buffered-frames` | 32 frames per FFmpeg filter graph. VideoToolbox interpolation needs 3 surfaces, fast super-resolution 2, and offline super-resolution 4. Denoise needs the current and output surfaces plus the configured reference window. |
+| `--recipe-max-pixels`      | 8,847,360 pixels per input or output frame.                                                                                                                                                                                  |
+| `--recipe-timeout-ms`      | 1,800,000 milliseconds per step.                                                                                                                                                                                             |
 
 Processing limits apply to fresh recipe work. Cached media and composition
-outputs have their own disk usage. Matching inputs, parameters, and backend
-versions reuse completed entries. A backend version change rebuilds affected
+outputs have their own disk usage. Matching inputs, effective AI profiles,
+algorithm settings, and backend versions reuse completed entries. A backend version change rebuilds affected
 steps and their dependents on the next run. Older entries stay on disk until
 removed. Stop active builds before clearing the cache directory.
 
@@ -76,10 +100,11 @@ experimental may print a warning on stderr when opening the build cache.
 `interpolateFrames` and `smoothSlowMotion` add local VideoToolbox inference to
 referenced video recipes. Source identity, prior steps such as `trim`, target
 rate, quality, scene settings, and the backend build and OS identify the
-cached result. The same worker limits apply. The memory budget samples the
-combined RSS of the decoder, model worker, and encoder. It does not measure
-Apple driver or system-wide unified memory. Native capability checks happen
-on a fresh execution of `validate`, `inspect`, or `render`. See the
+cached result. The memory budget samples the combined RSS of the decoder,
+model worker, and encoder every 50 ms. macOS pressure is sampled separately
+to account for allocations outside that tree. New stages fail when pressure
+is critical. Native inference checks happen on a fresh execution of
+`validate`, `inspect`, `preview`, or `render`. See the
 [AI recipe settings and supported inputs](VIDEO_DEFINITIONS.md#ai-interpolation).
 
 `superResolution` and `denoise` use the same cache, progress, and cancellation
@@ -98,7 +123,7 @@ opencut render edit.video.ts --recipe-cache ./cache --output final.mp4
 Foreground compilation and rendering write local receipts in the recipe
 cache. `build inspect` resolves the current definition and inputs and reports
 their build ID, last compilation state, recorded recipe stages, and render
-states. Use the same cache, parameters and `--no-subtitles` selection as
+states. Use the same cache, parameters, `--quality` and `--no-subtitles` selection as
 the original build. Inspection evaluates trusted TypeScript and hashes
 inputs. If the definition or inputs changed, inspection addresses the new
 build.
@@ -202,14 +227,15 @@ final variant `result`. Filter these events by their `event` field when
 reading stderr, which also carries diagnostics and authoring logs.
 
 Batch runs directly on macOS or Linux. `--concurrency` accepts 1–8 and defaults
-to 1. Each slot owns at most one recipe step at a time. An AI step can run one
+to 1. The host caps active slots using the same worker ceiling as recipe work.
+Each slot owns at most one recipe step at a time. An AI step can run one
 inference worker with a decoder and an encoder. A transformed render layer
 can run a decoder and an encoder together. Shared source probes and the
 recipe cache reuse work across slots. Cache keys depend on the relevant
 source, ordered step parameters, and backend. Changes to layout, title, or
 captions alone leave matching recipe steps reusable.
 
-`--temp-bytes` (default 8 GiB) and `--memory-bytes` (default 2 GiB) divide
+`--temp-bytes` (default 8 GiB) and `--memory-bytes` (default host native budget) divide
 the batch budgets evenly across active slots. Recipe overrides may lower a
 slot's limits. The temporary budget covers staging for recipes and renders,
 including copied sources, layer intermediates, and the unfinished MP4.
@@ -233,3 +259,37 @@ parameters since the tag travels with the output.
 ```sh
 ffprobe -v error -show_entries format_tags=opencut_build -of json ./outputs/wide.mp4
 ```
+
+## Performance benchmarks
+
+Build with the macOS 26+ SDK, then run the benchmark from the repository root
+with Python 3.11+ and FFmpeg/ffprobe on PATH.
+
+```sh
+pnpm build:packages
+pnpm --filter @opencut/cli build
+python3 scripts/t54/benchmark.py t54-local
+```
+
+Use a new label for each run. The harness saves its metrics and playable
+outputs under `tests/fixtures/generated/<label>/`. It covers TypeScript
+validation, a preview clip, early and late frame seeks, 1080p and UHD
+composition with captions and audio, interpolation, super-resolution, a
+combined workload with one and two requested workers, a two-worker run
+with a 4 GiB recipe budget, and a 30-second
+interpolation input. Set `--sustained-seconds` to change the duration.
+Optionally pass `--action-fixture` with an existing redistributable 24 fps
+SDR excerpt of at least two seconds under the generated fixtures directory
+for visual review.
+
+Cold runs use a new build and recipe cache. Warm runs repeat with that cache
+and a fresh output file. macOS may retain models between runs. Wall time
+includes TypeScript evaluation, probing and output verification. Peak RSS
+samples the CLI and its descendants every 50 ms and excludes GPU driver
+and system allocations. Inspect the recorded OS pressure and thermal state
+before and after sustained runs. Frame metrics use matching dimensions and
+exclude the caption area. Interpolation uses held-out frames, and the
+temporal comparison scores differences between consecutive pictures against
+the same differences in the reference. Review the MP4s for motion artifacts.
+Check each case's `exitCode` in `benchmark.json`. The harness records diagnostics
+for unsuccessful cases and runs the rest of the matrix.

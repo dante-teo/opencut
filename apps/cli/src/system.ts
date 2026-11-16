@@ -9,6 +9,11 @@ import {
   totalmem,
 } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import {
+  hostRenderResources,
+  renderQualityProfiles,
+  sampleMemoryPressure,
+} from '@opencut/media';
 
 export const systemHelp =
   'Usage: opencut system inspect [--json]\nReport hardware and probe local VideoToolbox capabilities.';
@@ -78,7 +83,7 @@ async function probeVideoToolbox() {
 
 export async function inspectSystem() {
   const mac = process.platform === 'darwin';
-  const [profile, version, probe] = await Promise.all([
+  const [profile, version, probe, memoryPressure] = await Promise.all([
     mac
       ? query<HardwareProfile>('/usr/sbin/system_profiler', [
           '-json',
@@ -93,6 +98,7 @@ export async function inspectSystem() {
         )
       : null,
     probeVideoToolbox(),
+    sampleMemoryPressure(),
   ]);
   const hardware = profile?.SPHardwareDataType?.[0];
   const chip = hardware?.chip_type;
@@ -131,6 +137,20 @@ export async function inspectSystem() {
       unified: mac && !unified && !hardware && !devices.length ? null : unified,
     },
     videoToolbox: probe,
+    rendering: {
+      defaults: { preview: 'fast', render: 'quality' },
+      profiles: renderQualityProfiles,
+      maximumAiMatchesQuality: true,
+      interpolationProcessors: {
+        fast: 'low-latency-interpolation',
+        quality: 'frame-rate-conversion-quality',
+      },
+      superResolutionProcessors: {
+        fast: 'low-latency-super-resolution',
+        quality: 'video-super-resolution',
+      },
+      resources: { ...hostRenderResources(), memoryPressure },
+    },
   };
 }
 

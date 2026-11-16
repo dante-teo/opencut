@@ -6,7 +6,8 @@ import {
   VideoPreviewRangeError,
   type VideoWatchStatus,
 } from '@opencut/core/video';
-import type { RenderQuality } from '@opencut/media';
+import { parseRenderQuality } from './render-options.js';
+import { parseProcessingControls } from './recipe-options.js';
 import { commandUsage, type CommandOptions } from './commands.js';
 import { UsageError } from './usage.js';
 import { withCommandCancellation } from './cancellation.js';
@@ -26,6 +27,7 @@ function printWatchStatus(
           sourceRevision: current.sourceRevision,
           path: current.playback.path,
           frameCount: current.playback.frameCount,
+          quality: current.playback.quality,
         },
       }),
     );
@@ -58,6 +60,11 @@ export async function runInspectionCommand(
 ) {
   if (!isVideoDefinitionPath(file))
     throw new UsageError('Choose a .video.ts definition.');
+  const quality = parseRenderQuality(
+    values.quality,
+    command === 'timeline inspect' ? 'quality' : 'fast',
+  );
+  const processing = parseProcessingControls(values);
   if (command === 'preview') {
     if (!values.watch) throw new UsageError(`Usage: ${commandUsage(command)}`);
     const maxDimension = Number(values.size ?? 640);
@@ -70,6 +77,8 @@ export async function runInspectionCommand(
     return withCommandCancellation(async (signal) => {
       const watcher = await watchVideo(file, {
         maxDimension,
+        quality,
+        processing,
         signal,
         onStatus: (event) => printWatchStatus(event, values.json),
       });
@@ -134,11 +143,6 @@ export async function runInspectionCommand(
     throw new UsageError(
       `--size must be between 64 and ${sheet ? 640 : 1920}.`,
     );
-  if (
-    values.quality !== undefined &&
-    !['draft', 'balanced', 'high'].includes(values.quality)
-  )
-    throw new UsageError('--quality must be draft, balanced or high.');
   // Validate required ranges before file access, like other CLI argument errors.
   const requestedFrom =
     sheet || command === 'preview clip'
@@ -149,6 +153,8 @@ export async function runInspectionCommand(
     const video = await loadVideo(file, {
       signal,
       preview: true,
+      quality,
+      processing,
       params: await readParams(values.params, signal),
     });
     const tools = previewVideo(video);
@@ -156,7 +162,7 @@ export async function runInspectionCommand(
       console.log(JSON.stringify(tools.inspectFrame(selectedFrame!), null, 2));
       return;
     }
-    const options = { signal, maxDimension: size };
+    const options = { signal, maxDimension: size, quality };
     const startFrame = requestedFrom ?? 0;
     const endFrame = requestedTo ?? integer('to', tools.frameCount);
     const result =
@@ -172,7 +178,6 @@ export async function runInspectionCommand(
             })
           : await tools.clip({ startFrame, endFrame }, values.output!, {
               ...options,
-              quality: values.quality as RenderQuality | undefined,
               onProgress: (progress) =>
                 process.stderr.write(
                   values.json

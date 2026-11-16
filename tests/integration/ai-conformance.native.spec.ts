@@ -351,7 +351,7 @@ test(
       await previewVideo(compiled).clip(
         { startFrame: 3, endFrame: 29 },
         run.path('ai-preview.mp4'),
-        { maxDimension: 960, quality: 'high' },
+        { maxDimension: 960, quality: 'maximum' },
       )
     ).path;
     for (const path of [final, alternate])
@@ -501,7 +501,7 @@ test(
         picture: {
           kind: 'video',
           path: 'noisy.mov',
-          recipe: [{ type: 'denoise', quality: 'strong' }],
+          recipe: [{ type: 'denoise', strength: 'strong' }],
         },
       },
       tracks: [

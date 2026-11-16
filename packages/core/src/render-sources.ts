@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { extname, join } from 'node:path';
-import { accountRenderFile } from '@opencut/media';
+import { accountRenderFile, withDefaultRenderBudget } from '@opencut/media';
 import type { VideoTimelineOptions, VisualTimelineClip } from '@opencut/media';
 import type { ProjectRenderPlan } from './render-plan.js';
 import type { CompiledVideo } from './video-compiler.js';
@@ -21,22 +21,24 @@ export async function withRenderSources<T>(
   const staged = new Map<string, string>();
   let directory: string | undefined;
   try {
-    return await render({
-      ...plan,
-      async snapshotSource(path) {
-        const existing = staged.get(path);
-        if (existing) return existing;
-        const identity = video.sourceIdentity(path);
-        if (!identity)
-          throw new Error(`No compiled source identity for '${path}'.`);
-        directory ??= await mkdtemp(join(scratch, 'opencut-render-sources-'));
-        const snapshot = join(directory, `${staged.size}${extname(path)}`);
-        await accountRenderFile(path);
-        await copyVideoInput(path, identity, snapshot, signal);
-        staged.set(path, snapshot);
-        return snapshot;
-      },
-    });
+    return await withDefaultRenderBudget(signal, () =>
+      render({
+        ...plan,
+        async snapshotSource(path) {
+          const existing = staged.get(path);
+          if (existing) return existing;
+          const identity = video.sourceIdentity(path);
+          if (!identity)
+            throw new Error(`No compiled source identity for '${path}'.`);
+          directory ??= await mkdtemp(join(scratch, 'opencut-render-sources-'));
+          const snapshot = join(directory, `${staged.size}${extname(path)}`);
+          await accountRenderFile(path);
+          await copyVideoInput(path, identity, snapshot, signal);
+          staged.set(path, snapshot);
+          return snapshot;
+        },
+      }),
+    );
   } finally {
     if (directory) await rm(directory, { recursive: true, force: true });
   }

@@ -8,6 +8,7 @@ import { commandUsage } from './commands.js';
 import type { CommandOptions } from './commands.js';
 import { readParams } from './json-argument.js';
 import { parseProcessingControls } from './recipe-options.js';
+import { parseRenderQuality } from './render-options.js';
 import { UsageError } from './usage.js';
 import { withDefinitionConsole } from './video.js';
 
@@ -27,6 +28,7 @@ export async function runBuildCommand(
           params,
           processing: parseProcessingControls(values),
           preview: values['no-subtitles'] === true,
+          quality: parseRenderQuality(values.quality, 'quality'),
         }),
       );
       console.log(JSON.stringify(result, null, 2));

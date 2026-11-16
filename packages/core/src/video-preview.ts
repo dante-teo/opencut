@@ -19,7 +19,7 @@ import { withRenderSources } from './render-sources.js';
 export type PreviewPosition = number | RationalTime;
 export type VideoPreviewOptions = Pick<
   RenderControls,
-  'signal' | 'maxDimension'
+  'signal' | 'maxDimension' | 'quality'
 >;
 export type VideoPreviewRange = { startFrame?: number; endFrame?: number };
 export class VideoPreviewRangeError extends RangeError {}
@@ -68,11 +68,14 @@ export function previewVideo(video: CompiledVideo) {
     ) {
       const frame = previewFrameIndex(position, frameRate);
       const selection = range(frame, frame + 1);
-      const result = await withRenderSources(video, options.signal, (plan) =>
+      const quality = options.quality ?? 'fast';
+      const revision = await video.forQuality(quality, true, options.signal);
+      const result = await withRenderSources(revision, options.signal, (plan) =>
         renderTimelineFrame({
           ...plan,
           signal: options.signal,
           maxDimension: options.maxDimension,
+          quality,
           output,
           range: selection,
         }),
@@ -81,6 +84,7 @@ export function previewVideo(video: CompiledVideo) {
         ...base,
         ...result,
         kind: 'frame',
+        quality,
         frame,
         time: frameTime(frame, frameRate),
       });
@@ -99,6 +103,7 @@ export function previewVideo(video: CompiledVideo) {
         columns = Math.min(4, count),
         signal,
         maxDimension,
+        quality = 'fast',
       } = options;
       if (
         !Number.isSafeInteger(count) ||
@@ -119,9 +124,10 @@ export function previewVideo(video: CompiledVideo) {
             ? 0
             : Math.floor(((endFrame - startFrame - 1) * i) / (count - 1))),
       );
-      const result = await withRenderSources(video, signal, (plan) =>
+      const revision = await video.forQuality(quality, true, signal);
+      const result = await withRenderSources(revision, signal, (plan) =>
         renderContactSheet(
-          { ...plan, signal, maxDimension, output },
+          { ...plan, signal, maxDimension, quality, output },
           frames,
           columns,
         ),
@@ -130,6 +136,7 @@ export function previewVideo(video: CompiledVideo) {
         ...base,
         ...result,
         kind: 'contact-sheet',
+        quality,
         startFrame,
         endFrame,
         samples: frames.map((frame, i) => ({
@@ -143,8 +150,7 @@ export function previewVideo(video: CompiledVideo) {
     async clip(
       selection: Required<VideoPreviewRange>,
       output: string,
-      options: VideoPreviewOptions &
-        Pick<RenderControls, 'quality' | 'onProgress'> = {},
+      options: VideoPreviewOptions & Pick<RenderControls, 'onProgress'> = {},
     ) {
       const { startFrame, endFrame } = range(
         selection.startFrame,
@@ -157,14 +163,17 @@ export function previewVideo(video: CompiledVideo) {
         throw new VideoPreviewRangeError(
           'Preview clips are limited to 30 seconds; select a shorter range.',
         );
-      const { path, width, height, frameCount, durationSeconds, quality } =
-        await withRenderSources(video, options.signal, (plan) =>
+      const { signal, onProgress } = options;
+      const quality = options.quality ?? 'fast';
+      const revision = await video.forQuality(quality, true, signal);
+      const { path, width, height, frameCount, durationSeconds } =
+        await withRenderSources(revision, signal, (plan) =>
           renderVideoTimeline({
             ...plan,
-            signal: options.signal,
-            ...(options.onProgress && { onProgress: options.onProgress }),
+            signal,
+            ...(onProgress && { onProgress }),
             maxDimension: options.maxDimension ?? 640,
-            quality: options.quality ?? 'draft',
+            quality,
             output,
             range: { startFrame, endFrame },
           }),

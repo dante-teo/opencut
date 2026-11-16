@@ -15,11 +15,11 @@ const worker = fileURLToPath(new URL('./video-enhance', import.meta.url));
 type Enhancement =
   | {
       type: 'superResolution';
-      quality: 'fast' | 'high';
+      quality: 'fast' | 'quality' | 'maximum';
       width: number;
       height: number;
     }
-  | { type: 'denoise'; quality: 'light' | 'medium' | 'strong' };
+  | { type: 'denoise'; strength: 'light' | 'medium' | 'strong' };
 
 export async function enhancementBackendVersion(signal: AbortSignal) {
   if (
@@ -178,7 +178,7 @@ export async function runEnhancement(
   const width = (rotated ? video.height : video.width)!;
   const height = (rotated ? video.width : video.height)!;
   const upscale = operation.type === 'superResolution';
-  const offline = upscale && operation.quality === 'high';
+  const offline = upscale && operation.quality !== 'fast';
   const portrait = offline && width < height;
   const targetWidth = upscale ? operation.width : width;
   const targetHeight = upscale ? operation.height : height;
@@ -193,7 +193,7 @@ export async function runEnhancement(
         : 2;
   if (offline && (nativeWidth > 1920 || nativeHeight > 1080))
     throw new MediaError(
-      'VideoToolbox high quality supports inputs up to 1920×1080 or 1080×1920.',
+      'Offline VideoToolbox super-resolution supports inputs up to 1920×1080 or 1080×1920.',
     );
   const rawWidth = nativeWidth * nativeScale;
   const rawHeight = nativeHeight * nativeScale;
@@ -209,7 +209,7 @@ export async function runEnhancement(
   const matrix = matrices[colorSpace];
   if (offline && !matrix)
     throw new MediaError(
-      'VideoToolbox high quality cannot round-trip the source color matrix.',
+      'Offline VideoToolbox super-resolution cannot round-trip the source color matrix.',
     );
   const { ratio, scale, frame, count, lastDuration, tolerance } =
     enhancementTiming(input);
@@ -295,7 +295,7 @@ export async function runEnhancement(
           String(tolerance),
           String(
             operation.type === 'denoise'
-              ? { light: 0.25, medium: 0.5, strong: 0.75 }[operation.quality]
+              ? { light: 0.25, medium: 0.5, strong: 0.75 }[operation.strength]
               : 0,
           ),
           String(limits.maxBufferedFrames),

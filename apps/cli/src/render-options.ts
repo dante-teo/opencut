@@ -1,4 +1,6 @@
 import type { VideoRenderOptions } from '@opencut/core/video';
+import { renderQualities } from '@opencut/media';
+import type { RenderQuality } from '@opencut/media';
 import { positiveIntegerOption, UsageError } from './usage.js';
 
 export const renderOptionTypes = {
@@ -16,7 +18,20 @@ export const renderOptionTypes = {
   'no-subtitles': { type: 'boolean' },
 } as const;
 
-export const renderOptionHelp = `  --quality <draft|balanced|high> --resolution <project|720p|1080p>
+export const qualityOption = '[--quality <fast|quality|maximum>]';
+
+export function parseRenderQuality(
+  value: string | undefined,
+  fallback: RenderQuality,
+) {
+  if (value === undefined) return fallback;
+  const quality = renderQualities.find((profile) => profile === value);
+  if (!quality)
+    throw new UsageError('--quality must be fast, quality or maximum.');
+  return quality;
+}
+
+export const renderOptionHelp = `  --quality <fast|quality|maximum> --resolution <project|720p|1080p>
   --width <pixels> --height <pixels> --fps <n|n/d> --codec <h264|hevc>
   --video-bitrate <kbps> --audio-bitrate <kbps> --audio-rate <44100|48000>
   --audio-channels <1|2> --no-subtitles --overwrite`;
@@ -56,11 +71,7 @@ export function parseRenderControls(values: {
 
   const { quality, resolution, codec } = values;
   return {
-    quality: choice('quality', quality, [
-      'draft',
-      'balanced',
-      'high',
-    ]) as VideoRenderOptions['quality'],
+    quality: parseRenderQuality(quality, 'quality'),
     resolution: choice('resolution', resolution, [
       'project',
       '720p',

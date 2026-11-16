@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  symlinkSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { totalmem, tmpdir } from 'node:os';
@@ -34,6 +35,14 @@ describe('system inspect', () => {
       os: { platform: process.platform },
       architecture: { process: process.arch },
       memory: { installedBytes: totalmem() },
+      rendering: {
+        defaults: { preview: 'fast', render: 'quality' },
+        maximumAiMatchesQuality: true,
+        resources: {
+          nativeBudgetBytes: expect.any(Number),
+          recipeWorkers: expect.any(Number),
+        },
+      },
     });
     expect(stdout).not.toMatch(
       /serial_number|platform_UUID|provisioning_UDID/u,
@@ -50,6 +59,9 @@ describe('system inspect', () => {
       expect(vt.frameProcessors['frame-rate-conversion'].minimumMacOS).toBe(
         '15.4',
       );
+      expect(
+        vt.frameProcessors['frame-rate-conversion-quality'].minimumMacOS,
+      ).toBe('15.4');
       expect(vt.frameProcessors['temporal-noise-filter'].minimumMacOS).toBe(
         '26.0',
       );
@@ -68,6 +80,11 @@ describe('system inspect', () => {
       try {
         const module = join(staging, 'dist', 'system.mjs');
         mkdirSync(join(staging, 'dist'));
+        symlinkSync(
+          fileURLToPath(new URL('../node_modules', pathToFileURL(entry))),
+          join(staging, 'node_modules'),
+          'dir',
+        );
         copyFileSync(new URL('./system.js', pathToFileURL(entry)), module);
         const result = runNode(
           '--input-type=module',

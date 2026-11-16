@@ -2,8 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { extname, join, resolve } from 'node:path';
-import { renderVideoTimeline } from '@opencut/media';
-import type { VideoTimelineResult } from '@opencut/media';
+import { renderVideoTimeline, withDefaultRenderBudget } from '@opencut/media';
+import type { RenderQuality, VideoTimelineResult } from '@opencut/media';
 import { compileVideoInput, isVideoDefinitionPath } from './video-files.js';
 import { VideoDefinitionError } from './video-definition.js';
 import type { CompiledVideo } from './video-compiler.js';
@@ -34,6 +34,7 @@ export type VideoWatchStatus = {
 export interface VideoWatchOptions {
   onStatus: (status: VideoWatchStatus) => void;
   maxDimension?: number;
+  quality?: RenderQuality | undefined;
   processing?: VideoProcessingOptions;
   signal?: AbortSignal;
 }
@@ -58,7 +59,7 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
   const probes: VideoSourceProbes = new Map();
   const settings = {
     maxDimension: options.maxDimension ?? 640,
-    quality: 'draft' as const,
+    quality: options.quality ?? 'fast',
   };
   const renders = new Map<Promise<unknown>, Set<string>>();
   let published: Published | undefined;
@@ -153,15 +154,16 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
     try {
       const video = await compileVideoInput(path, {
         preview: true,
+        quality: settings.quality,
         signal,
         probes,
         processing: options.processing,
         scriptWorker: {},
         inputs: {
           record,
-          async snapshotMedia(file) {
+          async snapshotMedia(file, kind = 'media') {
             const canonical = await realpath(file).catch(() => file);
-            const input = identifyVideoInput(canonical, 'media');
+            const input = identifyVideoInput(canonical, kind);
             record(input);
             if (input.identity === null)
               throw new VideoDefinitionError(
@@ -218,13 +220,15 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
           : undefined;
       if (!playback) {
         emit('rendering', next);
-        playback = await renderVideoTimeline({
-          ...plan,
-          sourceMetadata,
-          ...settings,
-          output,
-          signal,
-        });
+        playback = await withDefaultRenderBudget(signal, () =>
+          renderVideoTimeline({
+            ...plan,
+            sourceMetadata,
+            ...settings,
+            output,
+            signal,
+          }),
+        );
       }
 
       if (!isCurrent(next, inputs)) return;

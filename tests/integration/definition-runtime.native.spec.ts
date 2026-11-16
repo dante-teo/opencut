@@ -157,7 +157,7 @@ test(
         output,
         '--overwrite',
         '--quality',
-        'draft',
+        'fast',
         '--width',
         '160',
         '--height',

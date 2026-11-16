@@ -38,6 +38,12 @@ static NSMutableDictionary *configurationInfo(id<VTFrameProcessorConfiguration> 
         @"destinationPixelFormats": destinationFormats,
         @"modelStatus": modelStatus(config)
     } mutableCopy];
+    if ([(id)config isKindOfClass:VTFrameRateConversionConfiguration.class]) {
+        VTFrameRateConversionConfiguration *conversion = (id)config;
+        info[@"revision"] = @(conversion.revision);
+        info[@"qualityPriority"] = conversion.qualityPrioritization ==
+            VTFrameRateConversionConfigurationQualityPrioritizationQuality ? @"quality" : @"normal";
+    }
     if (@available(macOS 26.0, *)) {
         if ([(id)config isKindOfClass:VTSuperResolutionScalerConfiguration.class]) {
             info[@"revision"] = @(((VTSuperResolutionScalerConfiguration *)config).revision);
@@ -52,7 +58,7 @@ static NSMutableDictionary *configurationInfo(id<VTFrameProcessorConfiguration> 
 }
 
 static NSDictionary *effectInfo(NSString *effect) {
-    BOOL earliest = [effect isEqual:FRC];
+    BOOL earliest = [effect isEqual:FRC] || [effect isEqual:FRCQuality];
     NSMutableDictionary *info = [@{
         @"minimumMacOS": earliest ? @"15.4" : @"26.0",
         @"status": @"os-unavailable"
@@ -94,7 +100,7 @@ int main(void) {
                 @"maxBufferBytes": @(device.maxBufferLength)}];
         }
         NSMutableDictionary *effects = [NSMutableDictionary dictionary];
-        for (NSString *effect in @[FRC, LLI, SR, LLSR, TN]) effects[effect] = effectInfo(effect);
+        for (NSString *effect in @[FRC, FRCQuality, LLI, SR, LLSR, TN]) effects[effect] = effectInfo(effect);
         printJSON(@{@"gpuDevices": gpus, @"codecs": codecs(), @"frameProcessors": effects,
             @"thermalState": @(NSProcessInfo.processInfo.thermalState)});
     }

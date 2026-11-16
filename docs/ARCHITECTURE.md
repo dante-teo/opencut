@@ -41,9 +41,10 @@ and probes each completed step before binding the timeline. A recipe is an
 ordered chain of single-output steps. A step key includes the source content
 hash or its predecessor’s key and output hash, plus the probed input metadata,
 step parameters and format, and the FFmpeg and ffprobe build versions. AI
-keys also include the VideoToolbox worker binary, chip, and OS version. Equivalent
-prefixes share results across assets and processes. Timeline-only edits leave
-those keys intact.
+steps resolve the inherited or authored profile before cache lookup. Their
+keys include effective quality, the algorithm and settings, the VideoToolbox
+worker fingerprint, chip, and OS version. Equivalent prefixes share results
+across assets and processes. Timeline-only edits leave those keys intact.
 
 A SQLite writer lock per cache shard coordinates foreground processes. Only
 one writer can encode or repair a particular entry. FFmpeg writes to a private

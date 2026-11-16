@@ -528,9 +528,9 @@ describe('video timeline executor safety', () => {
   });
 
   it.each([
-    ['draft', '720p', 1280, 720, 'ultrafast', '28'],
-    ['balanced', 'project', 320, 180, 'veryfast', '20'],
-    ['high', '1080p', 1920, 1080, 'medium', '16'],
+    ['fast', '720p', 1280, 720, 'ultrafast', '28'],
+    ['quality', 'project', 320, 180, 'veryfast', '17'],
+    ['maximum', '1080p', 1920, 1080, 'medium', '16'],
   ] as const)(
     'uses %s quality and %s resolution',
     async (quality, resolution, width, height, preset, crf) => {

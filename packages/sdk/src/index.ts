@@ -63,5 +63,6 @@ export {
 export type {
   MediaMetadata,
   RenderProgress,
+  RenderQuality,
   VideoTimelineResult,
 } from '@opencut/media';

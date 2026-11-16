@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { renderQualities } from '@opencut/shared';
 
 const pixels = z.int().min(1).max(16384);
 export const recipeFormatSchema = z.enum(['mov', 'mp4', 'png', 'wav', 'flac']);
@@ -6,15 +7,10 @@ const frameRate = {
   numerator: z.int().positive().max(120000),
   denominator: z.int().positive().max(120000).default(1),
 };
-export const interpolationPhaseDepth = {
-  fast: 1,
-  balanced: 2,
-  high: 3,
-} as const;
 const enhancementBackend = z.literal('videotoolbox').default('videotoolbox');
 const interpolation = {
   ...frameRate,
-  quality: z.enum(['fast', 'balanced', 'high']).default('balanced'),
+  quality: z.enum(renderQualities).optional(),
   sceneThreshold: z.number().positive().max(100).default(8),
   sceneCuts: z.array(z.number().positive()).max(4096).default([]),
 };
@@ -60,12 +56,12 @@ export const videoRecipeSchema = z
         backend: enhancementBackend,
         width: pixels,
         height: pixels,
-        quality: z.enum(['fast', 'high']).default('high'),
+        quality: z.enum(renderQualities).optional(),
       }),
       z.strictObject({
         type: z.literal('denoise'),
         backend: enhancementBackend,
-        quality: z.enum(['light', 'medium', 'strong']).default('medium'),
+        strength: z.enum(['light', 'medium', 'strong']).default('medium'),
       }),
       z.strictObject({ type: z.literal('extractAudio') }),
       z.strictObject({
@@ -105,4 +101,11 @@ export function isInterpolationStep(
   step: ResolvedVideoRecipe[number],
 ): step is InterpolationStep {
   return step.type === 'interpolateFrames' || step.type === 'smoothSlowMotion';
+}
+
+export function inheritsRenderQuality(step: ResolvedVideoRecipe[number]) {
+  return (
+    (isInterpolationStep(step) || step.type === 'superResolution') &&
+    step.quality === undefined
+  );
 }

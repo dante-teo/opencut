@@ -8,6 +8,7 @@ import type { CompiledVideo } from './video-compiler.js';
 import type { VideoProcessingOptions } from './video-processing.js';
 import { compileVideo } from './video-files.js';
 import type { VideoBuild, VideoCompileOptions } from './video-files.js';
+import { isInterpolationStep } from './video-recipe-schema.js';
 
 export type VideoRenderOptions = Omit<
   RenderControls,
@@ -70,16 +71,21 @@ async function protectInputs(
 export async function renderCompiledVideo(
   video: CompiledVideo,
   output: string,
-  { burnSubtitles = true, ...options }: CompiledVideoRenderOptions = {},
+  {
+    burnSubtitles = true,
+    quality = 'quality',
+    ...options
+  }: CompiledVideoRenderOptions = {},
 ) {
   const { onProgress, signal, overwrite, ...settings } = options;
+  video = await video.forQuality(quality, !burnSubtitles, signal);
   // Record the controls the shared renderer receives, including runtime callers.
   const { range, maxDimension }: RenderControls = settings;
   const build: VideoRenderBuild | undefined = video.build && {
     version: 1,
     ...video.build,
     render: {
-      quality: settings.quality ?? 'balanced',
+      quality,
       codec: settings.codec ?? 'h264',
       resolution: settings.resolution ?? 'project',
       ...(range !== undefined && { range: structuredClone(range) }),
@@ -104,7 +110,7 @@ export async function renderCompiledVideo(
   return checkpointRender(
     video,
     output,
-    { ...settings, burnSubtitles },
+    { ...settings, quality, burnSubtitles },
     signal,
     (scratchDirectory, onVerifiedOutput) =>
       withRenderSources(
@@ -125,6 +131,7 @@ export async function renderCompiledVideo(
           const result = await renderVideoTimeline({
             ...plan,
             ...settings,
+            quality,
             signal,
             overwrite,
             ...(onProgress && { onProgress }),
@@ -133,6 +140,19 @@ export async function renderCompiledVideo(
             ...(onVerifiedOutput && { onVerifiedOutput }),
             output,
           });
+          if (
+            quality === 'maximum' &&
+            video.recipes.some(({ steps }) =>
+              steps.some(
+                ({ parameters }) =>
+                  parameters.type === 'superResolution' ||
+                  isInterpolationStep(parameters),
+              ),
+            )
+          )
+            (result.warnings ??= []).push(
+              'Maximum uses the same AI interpolation and super-resolution settings as quality. Authored recipe overrides still apply.',
+            );
           return { ...result, ...(build && { build }) };
         },
         scratchDirectory,
@@ -150,6 +170,7 @@ export async function renderVideo(
     signal: options.signal,
     preview: options.burnSubtitles === false,
     processing,
+    quality: options.quality ?? 'quality',
     params,
   });
   return renderCompiledVideo(video, output, options);
