@@ -22,8 +22,9 @@ release availability, system requirements and optional AI model setup.
 
 ## Run from source
 
-On macOS, install Node.js 24.12 or later within the 24.x series and pnpm
-11.20.0, then run these commands from the repository root:
+On macOS, install Node.js 24.12 or later within the 24.x series, pnpm 11.20.0,
+and Apple’s Command Line Tools for Xcode or Xcode itself. The build compiles
+a native RSS helper against the macOS SDK. Run from the repository root:
 
 ```sh
 pnpm install

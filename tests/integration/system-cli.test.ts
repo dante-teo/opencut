@@ -24,6 +24,17 @@ const runNode = (...args: string[]) =>
   });
 const run = (...args: string[]) => runNode(entry, ...args);
 
+it('reports the render memory helper independently of FFmpeg availability', () => {
+  const { status, stdout } = run('doctor', '--json');
+  expect(status).toBe(0);
+  const report = JSON.parse(stdout);
+  expect(report.media.rssHelper).toEqual(
+    process.platform === 'darwin'
+      ? { status: 'available', version: report.application.version }
+      : { status: 'not-applicable', version: null },
+  );
+});
+
 describe('system inspect', () => {
   it('reports this host without a project or disclosing device identifiers', () => {
     const { status, stdout, stderr } = run('system', 'inspect', '--json');

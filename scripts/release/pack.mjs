@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import {
   constants,
   copyFileSync,
+  cpSync,
   existsSync,
   lutimesSync,
   mkdirSync,
@@ -87,8 +88,17 @@ async function packCli() {
   writeFileSync(join(path, 'dist/sdk.d.ts'), sdk);
   writeFileSync(
     join(path, 'README.md'),
-    readFileSync(join(root, 'docs/INSTALL.md')),
+    '# OpenCut\n\n[Installation and requirements](docs/INSTALL.md)\n\n' +
+      '[Agent Skill](skills/video-editor/SKILL.md)\n\n' +
+      '[CLI reference](docs/CLI.md) · [TypeScript SDK](docs/SDK.md)\n',
   );
+  mkdirSync(join(path, 'docs'));
+  for (const name of ['INSTALL', 'CLI', 'SDK', 'VIDEO_DEFINITIONS']) {
+    const file = 'docs/' + name + '.md';
+    copyFileSync(join(root, file), join(path, file));
+  }
+  for (const directory of ['skills/video-editor', 'examples/video'])
+    cpSync(join(root, directory), join(path, directory), { recursive: true });
   writeManifest(path, {
     name: manifest.name,
     version,
@@ -106,7 +116,7 @@ async function packCli() {
     cpu: ['arm64'],
     bin: manifest.bin,
     exports: { './sdk': { types: './dist/sdk.d.ts', import: './dist/sdk.js' } },
-    files: ['dist'],
+    files: ['dist', 'docs', 'skills', 'examples'],
     dependencies,
     bundledDependencies: Object.keys(dependencies),
     publishConfig: { access: 'public' },
@@ -200,8 +210,8 @@ async function packDesktop() {
 }
 
 function auditNative(path, cli) {
-  const binaries = ['video-enhance', 'video-interpolate'].map((name) =>
-    join(path, 'node_modules/@opencut/media/dist', name),
+  const binaries = ['process-memory', 'video-enhance', 'video-interpolate'].map(
+    (name) => join(path, 'node_modules/@opencut/media/dist', name),
   );
   if (cli) binaries.push(join(path, 'dist/system-probe'));
   for (const file of binaries) {

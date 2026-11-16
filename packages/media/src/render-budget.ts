@@ -30,19 +30,14 @@ export async function withRenderBudget<T>(
     sampling = true;
     const active = [...children];
     sampleProcessMemory(
-      ['-o', 'rss=', '-p', active.map(([pid]) => pid).join(',')],
-      1024 * 1024,
-      (error, stdout) => {
+      { pids: active.map(([pid]) => pid) },
+      (error, bytes) => {
         sampling = false;
         if (error) {
           budget.samplerFailure = error;
           for (const stop of children.values()) stop(error);
           return;
         }
-        const bytes = stdout
-          .trim()
-          .split(/\s+/)
-          .reduce((sum, value) => sum + Number(value) * 1024, 0);
         if (bytes > limits.maxNativeBytes)
           for (const [pid, stop] of active)
             if (children.has(pid))

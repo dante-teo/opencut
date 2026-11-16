@@ -75,7 +75,7 @@ static NSDictionary *effectInfo(NSString *effect) {
         }
         info[@"status"] = @"reported-supported";
         NSMutableArray *cases = [NSMutableArray array];
-        for (NSArray<NSNumber *> *dimensions in @[@[@640,@360], @[@1280,@720], @[@720,@1280],
+        for (NSArray<NSNumber *> *dimensions in @[@[@640,@360], @[@960,@540], @[@1280,@720], @[@720,@1280],
                                                     @[@1920,@1080], @[@1080,@1920], @[@3840,@2160], @[@2160,@3840]]) {
             int w = dimensions[0].intValue, h = dimensions[1].intValue;
             BOOL scaler = [effect isEqual:SR] || [effect isEqual:LLSR];

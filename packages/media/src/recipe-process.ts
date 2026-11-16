@@ -152,18 +152,12 @@ export async function runRecipeProcess(
       if (sampling || failure || child.pid === undefined) return;
       sampling = true;
       sampleProcessMemory(
-        pipeline
-          ? ['-axo', 'pgid=,rss=']
-          : ['-o', 'rss=', '-p', String(child.pid)],
-        pipeline ? 1024 * 1024 : 1024,
-        (error, stdout) => {
+        pipeline ? { group: child.pid } : { pids: [child.pid] },
+        (error, bytes) => {
           sampling = false;
           if (closed) return;
           if (error) stop(error);
-          else if (
-            recipeMemory(stdout, pipeline ? child.pid : undefined) >
-            limits.maxNativeBytes
-          )
+          else if (bytes > limits.maxNativeBytes)
             stop(
               new MediaError('Recipe step exceeded its native memory limit.'),
             );
@@ -219,16 +213,6 @@ export async function runRecipeProcess(
     signal.addEventListener('abort', cancel, { once: true });
     if (signal.aborted) cancel();
   });
-}
-
-function recipeMemory(output: string, group: number | undefined) {
-  if (group === undefined) return Number(output.trim()) * 1024;
-  let kib = 0;
-  for (const line of output.trim().split('\n')) {
-    const [pgid, rss] = line.trim().split(/\s+/).map(Number);
-    if (pgid === group) kib += rss ?? 0;
-  }
-  return kib * 1024;
 }
 
 export async function nativeRecipeFingerprint(

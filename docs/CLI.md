@@ -3,10 +3,7 @@
 `opencut --help` lists the primary commands. From a checkout use
 `node apps/cli/dist/index.js` after `pnpm build:packages` and
 `pnpm --filter @opencut/cli build`. FFmpeg and ffprobe are required for
-rendering media. See [Install OpenCut](INSTALL.md). Run `opencut doctor --json`
-without a project to check FFmpeg, ffprobe, hardware, native worker versions,
-and optional AI model readiness. `opencut system inspect --json` reports more
-detail about the host and VideoToolbox profiles.
+rendering media. See [Install OpenCut](INSTALL.md).
 
 ```sh
 opencut validate edit.video.ts
@@ -22,6 +19,20 @@ Use `opencut render --help` for quality, resolution, codec, frame rate and
 audio settings. Outputs are new files unless a supported render explicitly
 requests `--overwrite`. Use `--json` for machine output and SIGINT or SIGTERM
 to cancel foreground work. Render runs in the CLI with FFmpeg subprocesses.
+
+## Check the installation
+
+Run `opencut doctor --json` from the environment that will run the export.
+`media.ready` reports whether FFmpeg, ffprobe, and the default H.264 and AAC
+encoders are available. On macOS it also requires the bundled RSS helper
+to match the installed version and successfully sample memory. If
+`media.ready` is false, read `media.hint`. A missing or mismatched RSS helper
+calls for reinstalling the package or rebuilding a source checkout.
+
+Check optional AI separately under `ai`. `opencut system inspect --json`
+reports VideoToolbox configurations and model status for sample input sizes.
+Run a short preview of the actual input with the intended profile in the
+same environment to confirm the processor can initialize.
 
 ## Render quality profiles
 
@@ -263,11 +274,12 @@ the batch budgets evenly across active slots. Recipe overrides may lower a
 slot's limits. The temporary budget covers staging for recipes and renders,
 including copied sources, layer intermediates, and the unfinished MP4.
 Published outputs and completed cache entries consume persistent disk space.
-OpenCut samples native child-process RSS with `/bin/ps` and caps FFmpeg
-allocation sizes. If the host blocks or cannot run `/bin/ps`, the active
-render or recipe stops and reports a sampling error. TypeScript authoring
-runs with a capped V8 old-generation heap. These limits
-have the granularity of process sampling, file limits, and heap accounting.
+OpenCut samples native child-process RSS with its bundled, unprivileged
+sampler on macOS and with `/bin/ps` on Linux. It also caps FFmpeg
+allocation sizes. If sampling fails, the render or recipe stops and
+reports the error. TypeScript authoring runs with a capped V8 old-generation
+heap. These limits have the granularity of process sampling, file limits,
+and heap accounting.
 Canvas allocations, shared process memory, and VideoToolbox driver
 allocations contribute to system memory outside the native RSS budget.
 

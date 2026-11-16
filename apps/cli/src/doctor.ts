@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { getApplicationInfo } from '@opencut/core';
 import {
   inspectDialogueModel,
+  inspectRenderMemory,
   inspectVideoToolboxWorkers,
 } from '@opencut/media';
 import { inspectSystem } from './system.js';
@@ -38,13 +39,15 @@ async function inspectExecutable(tool: 'ffmpeg' | 'ffprobe') {
 }
 
 export async function doctor() {
-  const [ffmpeg, ffprobe, system, workers, dialogue] = await Promise.all([
-    inspectExecutable('ffmpeg'),
-    inspectExecutable('ffprobe'),
-    inspectSystem(),
-    inspectVideoToolboxWorkers(),
-    inspectDialogueModel(),
-  ]);
+  const [ffmpeg, ffprobe, rssHelper, system, workers, dialogue] =
+    await Promise.all([
+      inspectExecutable('ffmpeg'),
+      inspectExecutable('ffprobe'),
+      inspectRenderMemory(),
+      inspectSystem(),
+      inspectVideoToolboxWorkers(),
+      inspectDialogueModel(),
+    ]);
   const { stdout } =
     ffmpeg.status === 'available'
       ? await exec(ffmpeg.path, ['-hide_banner', '-encoders'], options).catch(
@@ -57,22 +60,27 @@ export async function doctor() {
   const missingEncoders = ['libx264', 'aac'].filter(
     (name) => !encoders.has(name),
   );
-  const ready =
+  const toolsReady =
     ffmpeg.status === 'available' &&
     ffprobe.status === 'available' &&
     !missingEncoders.length;
+  const hint = [
+    ...(!toolsReady ? [installHint] : []),
+    ...('hint' in rssHelper ? [rssHelper.hint] : []),
+  ].join(' ');
   return {
     doctorVersion: 1,
     application: getApplicationInfo(),
     node: process.version,
     system,
     media: {
-      ready,
+      ready: !hint,
       ffmpeg,
       ffprobe,
+      rssHelper,
       missingEncoders,
       hevc: encoders.has('libx265'),
-      ...(!ready && { hint: installHint }),
+      ...(hint && { hint }),
     },
     ai: {
       videoToolbox: {
@@ -99,6 +107,9 @@ export function formatDoctor(result: Awaited<ReturnType<typeof doctor>>) {
       ')',
     'FFmpeg: ' + result.media.ffmpeg.status,
     'ffprobe: ' + result.media.ffprobe.status,
+    ...(result.media.rssHelper.status === 'not-applicable'
+      ? []
+      : ['RSS helper: ' + result.media.rssHelper.status]),
     'Default MP4 export: ' + (result.media.ready ? 'ready' : result.media.hint),
     'VideoToolbox: ' + result.system.videoToolbox.status,
     'Bandit v2 dialogue model: ' + result.ai.dialogue.model.status,

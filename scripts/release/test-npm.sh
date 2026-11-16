@@ -23,12 +23,13 @@ export DEVELOPER_DIR=/var/empty
 export OPENCUT_DIALOGUE_PYTHON="$work/missing-python"
 unset NODE_PATH NODE_OPTIONS SDKROOT
 mkdir -p "$HOME" "$work/project" "$work/caller"
-cp "$root"/tests/distribution/*.ts "$work/project/"
+cp "$root"/tests/distribution/{smoke.video,title}.ts "$work/project/"
 printf '{"type":"module","private":true}\n' > "$work/project/package.json"
 cd "$work/caller"
 
 npm --offline --prefix "$work/prefix" install --global "$archive"
 cli="$work/prefix/bin/opencut"
+package_dir="$work/prefix/lib/node_modules/@opencut/cli"
 "$cli" --version
 "$cli" doctor --json > doctor.json
 PATH=/usr/bin:/bin "$node_dir/node" "$cli" doctor --json > without-ffmpeg.json
@@ -38,6 +39,7 @@ import { readFileSync } from 'node:fs';
 const read = (file) => JSON.parse(readFileSync(file, 'utf8'));
 const doctor = read('doctor.json');
 assert(doctor.media.ready, JSON.stringify(doctor.media));
+assert.deepEqual(doctor.media.rssHelper, { status: 'available', version: doctor.application.version });
 assert.equal(doctor.system.videoToolbox.status, 'probed');
 assert.equal(doctor.system.videoToolbox.version, doctor.application.version);
 for (const worker of Object.values(doctor.ai.videoToolbox.workers)) {
@@ -47,6 +49,19 @@ for (const worker of Object.values(doctor.ai.videoToolbox.workers)) {
 assert.equal(doctor.ai.dialogue.model.status, 'missing');
 assert.equal(doctor.ai.dialogue.backend.status, 'missing');
 assert.equal(read('without-ffmpeg.json').media.ffmpeg.status, 'missing');
+JS
+
+rss_helper="$package_dir/node_modules/@opencut/media/dist/process-memory"
+mv "$rss_helper" "$work/process-memory"
+"$cli" doctor --json > without-rss-helper.json
+mv "$work/process-memory" "$rss_helper"
+node --input-type=module - <<'JS'
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+const { media } = JSON.parse(readFileSync('without-rss-helper.json', 'utf8'));
+assert.equal(media.ready, false);
+assert.equal(media.rssHelper.status, 'missing');
+assert.match(media.hint, /Reinstall OpenCut/);
 JS
 
 definition="$work/project/smoke.video.ts"
@@ -83,6 +98,8 @@ npx --yes --cache "$work/npx-cache" @opencut/cli --version
   node node_modules/@opencut/cli/node_modules/typescript/lib/tsc.js --noEmit \
     --module NodeNext --skipLibCheck --allowImportingTsExtensions --strict typed.video.ts
 )
-test ! -e "$work/prefix/lib/node_modules/@opencut/cli/node_modules/electron"
+test ! -e "$package_dir/node_modules/electron"
+bash "$root/scripts/release/test-workflows.sh" "$cli" \
+  "${OPENCUT_RELEASE_EVALUATION_DIR:-$work/evaluation}" --package-dir "$package_dir"
 npm --offline --prefix "$work/prefix" uninstall --global @opencut/cli
 test ! -e "$cli"

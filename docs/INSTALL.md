@@ -29,6 +29,15 @@ For editor type checking or SDK use from a separate Node program, install
 `@opencut/cli` locally and import from `@opencut/cli/sdk`. Use ESM and
 TypeScript syntax supported by Node's type stripping.
 
+The package includes the official [Agent Skill](../skills/video-editor/SKILL.md),
+its references, the CLI and SDK guides, and the authoring examples. In a
+local Node project, find the Skill at
+`node_modules/@opencut/cli/skills/video-editor/SKILL.md`. A global npm
+installation places it under `$(npm root -g)/@opencut/cli`.
+Copy the bundled [opening card](../examples/video/opening-card.video.ts)
+into your project before running it. Node's TypeScript loader excludes
+definitions under `node_modules`.
+
 ```sh
 opencut preview frame my-video.video.ts --frame 0 -o preview.png
 opencut render my-video.video.ts -o final.mp4
@@ -45,6 +54,11 @@ brew install dante-teo/tap/opencut
 brew upgrade dante-teo/tap/opencut
 brew uninstall dante-teo/tap/opencut
 ```
+
+Find the Skill at
+`$(brew --prefix opencut)/libexec/skills/video-editor/SKILL.md`.
+Definitions use the SDK bundled with the formula. For SDK calls from a
+separate Node program, use the local Node package installation above.
 
 ## OpenCut Review for macOS
 
@@ -84,7 +98,7 @@ archive and Formula, and `desktop` builds the local review ZIP. Each target
 writes its own `SHA256SUMS`.
 
 The staging tool bundles the SDK, core, media runtime, native addons, Noto
-fonts and prebuilt VideoToolbox workers. It checks the Mach-O architecture,
+fonts, VideoToolbox workers and the macOS RSS helper. It checks the Mach-O architecture,
 deployment target, library paths and executable versions. It omits Electron
 from the npm archive. The CLI archive uses sorted paths and fixed timestamps.
 Both distributions retain their dependencies' license notices and package
@@ -95,11 +109,36 @@ The local app ZIP is for smoke testing. Developer ID signing and notarization
 add Apple-issued timestamps and a stapled ticket to the distribution app.
 
 Before cutting a release, synchronize the version in the root and workspace
-package manifests. Run the manually dispatched [release workflow](../.github/workflows/release.yml)
+package manifests. Run the manually dispatched [release workflow](https://github.com/dante-teo/opencut/actions/workflows/release.yml)
 on the matching `vMAJOR.MINOR.PATCH` tag with `publish` off to generate
 test artifacts. The workflow tests the CLI archive in isolated npm installs,
 a temporary Homebrew tap and an unpacked review app. A Homebrew upgrade
 test uses the same archive under a simulated older keg version for the first release.
+The two CLI installation checks render the bundled opening card and run the
+installed-runtime workflow suite with Python 3.11+, FFmpeg and ffprobe.
+Software rendering, Lanczos upscaling, and failure handling run on every host.
+The recovery check uses a software recipe when offline interpolation is
+unavailable. A passing run can include skipped AI cases. Check the
+`skipped` entries in `evaluation.json` for the processor or model reason.
+From the checkout, pass an installed executable and a new temporary project
+directory outside the checkout to retain the results for local review.
+
+```sh
+work="$(mktemp -d)"
+bash scripts/release/test-workflows.sh "$(command -v opencut)" "$work/project"
+```
+
+To keep results from a local npm or Homebrew installation check, set
+`OPENCUT_RELEASE_EVALUATION_DIR` to the absolute path of a new directory
+outside the checkout before running the check.
+
+The evaluation records input and output hashes, exact decoded cadence,
+command timings, sampled process RSS and workspace/cache usage in
+`evaluation.json`. The raw doctor and render results identify the host,
+worker versions, profiles and cache keys. Sampled process RSS measures
+the CLI and observed descendants. Check system memory pressure separately
+for allocations outside those processes. When both UHD outputs are present,
+compare the decoded AI and Lanczos results.
 
 For authorized publication, configure protected `release-signing` and
 `release-publish` environments with required reviewers and tag restrictions.

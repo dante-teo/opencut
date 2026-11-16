@@ -1,6 +1,7 @@
 # OpenCut CLI
 
-Run `opencut doctor --json` to check prerequisites. For optional Bandit v2
+Run `opencut doctor --json` in the environment that will render. Read
+`media.hint` if `media.ready` is false. For optional Bandit v2
 dialogue separation, follow the [model setup](../../../docs/INSTALL.md#optional-ai),
 then use `opencut models inspect --json` to check readiness. If
 `separate-dialogue --json` reports `MISSING_DEPENDENCY`, inspect the ELUATE
@@ -29,6 +30,8 @@ and input streams. Use normal `validate` with the same recipe limits as
 `render` to check whether the referenced AI recipe can actually build.
 For enhancement, check `low-latency-super-resolution`,
 `video-super-resolution`, or `temporal-noise-filter` in the system report.
+Check a short preview of the actual input to confirm whether the requested
+processor can start. See the [installation checks](../../../docs/CLI.md#check-the-installation).
 
 Render a variant with `opencut render DEFINITION --params params.json -o final.mp4`.
 Use the same parameter file with one-shot validation, inspection, preview

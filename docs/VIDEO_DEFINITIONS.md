@@ -6,6 +6,12 @@ evaluator, compositor, and audio mixer.
 
 ## Run the example
 
+With the installed CLI, start with the [opening card](../examples/video/opening-card.video.ts)
+and follow the [headless review loop](../skills/video-editor/references/workflow.md).
+The opening card needs no input media.
+
+### Checkout examples
+
 The [showcase](../examples/video/showcase.video.ts) renders a 20-second
 video using the repository's synthetic media fixtures. Run the
 commands from the checkout root with Node 24.12+ within 24.x, pnpm 11.20.0, and
@@ -101,9 +107,11 @@ The optional `version` field defaults to `1`. The optional top-level `name` defa
   Key times are rational seconds from the clip's timeline start. Changing a
   source in point or speed leaves those offsets intact. Keys must fit within
   the resulting playback duration.
-- Media grading takes `grade: { exposure, temperature, tint, contrast,
-saturation, curve }`. Curve points have increasing `input` and an
-  `output`, with fixed endpoints at zero and one.
+- Media grading takes all six fields in
+  `grade: { exposure: 0, temperature: 0, tint: 0, contrast: 1, saturation: 1, curve: [] }`.
+  That example is neutral. Contrast and saturation range from 0 to 3.
+  Supply interior curve points as `{ input, output }` with increasing
+  inputs between zero and one. OpenCut supplies the endpoints.
 - Clip audio accepts `volume`, `muted`, `fadeIn`, `fadeOut`, `gainKeys` and
   `effects`. Fades take a project-frame count or an object with rational
   `duration` and optional gains `from` and `to`. `gainKeys` holds
@@ -386,7 +394,7 @@ texture, and motion. UHD dimensions alone do not establish recovered detail.
 
 ## Inspect, preview and render
 
-Open [the review example](../examples/video/review.video.ts) to try a two-second
+With the checkout fixtures generated, open [the review example](../examples/video/review.video.ts) to try a two-second
 composition with video, an image overlay, subtitles, a dissolve and an audio
 track. Edit its imported `review-title.ts` to update the title and project name.
 

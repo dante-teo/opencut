@@ -25,7 +25,7 @@ cleanup() {
 }
 trap cleanup EXIT
 mkdir -p "$work/tap/Formula" "$work/project"
-cp "$root"/tests/distribution/*.ts "$work/project/"
+cp "$root"/tests/distribution/{smoke.video,title}.ts "$work/project/"
 printf '{"type":"module","private":true}\n' > "$work/project/package.json"
 cd "$work/project"
 export XDG_CACHE_HOME="$work/cache" HOMEBREW_CACHE="$work/brew-cache"
@@ -50,8 +50,11 @@ tap_path="$(brew --repository local/opencut-release)"
 cp "$work/opencut.rb" "$tap_path/Formula/opencut.rb"
 brew upgrade "$formula_name"
 brew test "$formula_name"
-bin="$(brew --prefix "$formula_name")/bin/opencut"
+prefix="$(brew --prefix "$formula_name")"
+bin="$prefix/bin/opencut"
 "$bin" render smoke.video.ts -o final.mp4
 test "$(ffprobe -v error -select_streams v:0 -show_entries stream=nb_frames -of csv=p=0 final.mp4)" = 12
+bash "$root/scripts/release/test-workflows.sh" "$bin" \
+  "${OPENCUT_RELEASE_EVALUATION_DIR:-$work/evaluation}" --package-dir "$prefix/libexec"
 brew uninstall "$formula_name"
 test ! -e "$bin"

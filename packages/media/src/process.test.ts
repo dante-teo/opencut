@@ -155,12 +155,12 @@ describe('render subprocess lifecycle', () => {
   const limits = { maxTemporaryBytes: 4096, maxNativeBytes: 1024 };
 
   it.each(['EPERM', 'ENOENT'])(
-    'stops and waits for the media subprocess when ps fails with %s',
+    'stops and waits for the media subprocess when RSS sampling fails with %s',
     async (code) => {
       vi.useFakeTimers();
       try {
         const child = pending();
-        const cause = Object.assign(new Error(`spawn /bin/ps ${code}`), {
+        const cause = Object.assign(new Error(`spawn sampler ${code}`), {
           code,
         });
         vi.mocked(execFile).mockImplementationOnce((...args: unknown[]) => {
@@ -183,7 +183,9 @@ describe('render subprocess lifecycle', () => {
         expect(await outcome).toMatchObject({
           name: 'MediaError',
           message: expect.stringContaining(
-            'Cannot sample native memory with /bin/ps',
+            process.platform === 'darwin' && code === 'ENOENT'
+              ? 'Reinstall OpenCut'
+              : 'Cannot sample native memory:',
           ),
           cause,
         });
@@ -194,7 +196,7 @@ describe('render subprocess lifecycle', () => {
     },
   );
 
-  it('continues sampling when ps reports a PID that has already exited', async () => {
+  it('continues sampling when the sampled PID has already exited', async () => {
     vi.useFakeTimers();
     try {
       const child = pending();
@@ -204,7 +206,10 @@ describe('render subprocess lifecycle', () => {
           output: string,
           diagnostic: string,
         ) => void;
-        if (vi.mocked(execFile).mock.calls.length === 2)
+        const exited = vi.mocked(execFile).mock.calls.length === 2;
+        if (process.platform === 'darwin')
+          callback(null, exited ? '0' : '2048', '');
+        else if (exited)
           callback(Object.assign(new Error('ps exited'), { code: 1 }), '', '');
         else callback(null, '2', '');
         return {} as ChildProcess;
@@ -218,6 +223,33 @@ describe('render subprocess lifecycle', () => {
       child.close(new Error('terminated'));
       expect(await outcome).toMatchObject({
         message: 'Render exceeded its native memory budget.',
+      });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects an invalid RSS sample and stops the child', async () => {
+    vi.useFakeTimers();
+    try {
+      const child = pending();
+      vi.mocked(execFile).mockImplementationOnce((...args: unknown[]) => {
+        const callback = args[3] as (
+          error: Error | null,
+          output: string,
+          diagnostic: string,
+        ) => void;
+        callback(null, 'invalid', '');
+        return {} as ChildProcess;
+      });
+      const render = withRenderBudget(limits, () => runMediaTool('ffmpeg', []));
+      const outcome = render.catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(50);
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+      child.close(new Error('terminated'));
+      expect(await outcome).toMatchObject({
+        message: 'Cannot sample native memory: Invalid RSS sample.',
       });
       expect(vi.getTimerCount()).toBe(0);
     } finally {

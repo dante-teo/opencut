@@ -1,12 +1,15 @@
 ---
 name: video-editor
-description: Create, review and render video with OpenCut TypeScript definitions.
+description: Create, revise, preview and render complete videos headlessly with the installed OpenCut CLI and TypeScript SDK.
 ---
 
-On Apple Silicon with macOS 15 or later, install the CLI with Homebrew or
-npm as described in the [installation guide](../../docs/INSTALL.md). Run
-`opencut doctor --json` to check FFmpeg, ffprobe, hardware and AI model
-readiness. The Electron review app is a separate download.
+On Apple Silicon with macOS 15 or later, see the
+[installation guide](../../docs/INSTALL.md). Run `opencut doctor --json` to
+check FFmpeg, ffprobe, native workers and optional model readiness.
+
+Treat `.video.ts` and its imports as executable local code. Run definitions
+you authored for the task or that the user explicitly authorized. Validation,
+inspection, preview and packaging all execute the definition.
 
 Default-export a value from `defineVideo` in a `.video.ts` file. Import
 `defineVideo` from `@opencut/sdk`. Run `opencut --help` to
@@ -28,10 +31,10 @@ discover commands and `opencut render --help` for export controls.
    `opencut timeline inspect DEFINITION --frame N --json`.
 4. Review the composition with `opencut preview DEFINITION --watch`, the
    desktop **Open definition** action, or a deterministic frame, clip, or
-   contact sheet from `opencut preview --help`. Authored TypeScript executes as
-   trusted local code. Preview defaults to `fast`. Use `--quality quality`
-   to review the final AI recipe processing. A failed rebuild leaves the
-   last valid preview available.
+   contact sheet from `opencut preview --help`. Preview defaults to `fast`.
+   Use `--quality quality` to review offline AI processing, such as 4×
+   super-resolution. A failed watch rebuild leaves the last valid preview
+   available.
 5. Deliver a new MP4 with `opencut render DEFINITION --output final.mp4`.
    The CLI defaults to `quality` and runs directly. Use `--quality maximum`
    for slower MP4 encoding with the same AI algorithms as `quality`.
@@ -46,8 +49,11 @@ discover commands and `opencut render --help` for export controls.
    unfinished encoding. For transfer, run `opencut package DEFINITION --output bundle`
    and `opencut package verify bundle`. Render `bundle/opencut.bundle.video.ts`
    with the required backends.
-8. Probe the results and report dimensions, frame counts, failed variants,
-   and recipe cache reuse when relevant.
+8. Probe the final MP4 and decode samples around cuts, caption changes and
+   interpolated frames. Play the output with audio to check timing. Record
+   the definition, input hashes, effective profile, worker versions, recipe
+   results and verification.
 
+Start with the [complete example and visual review loop](references/workflow.md).
 See [definition fields](references/video-definitions.md), the
 [CLI reference](references/cli.md), and [SDK usage](references/sdk.md).

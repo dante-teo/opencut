@@ -13,6 +13,7 @@ export {
   removeDialogueModel,
 } from './dialogue-model.js';
 export { inspectVideoToolboxWorkers } from './video-toolbox-workers.js';
+export { inspectRenderMemory } from './process-memory.js';
 export { separateDialogue } from './dialogue.js';
 export { MediaError, RenderCancelledError } from './process.js';
 export type { MediaMetadata, MediaStream } from './probe.js';
