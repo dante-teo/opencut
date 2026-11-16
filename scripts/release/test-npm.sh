@@ -13,26 +13,31 @@ trap cleanup EXIT
 node_dir="$(dirname "$(command -v node)")"
 ffmpeg_dir="$(dirname "$(command -v ffmpeg)")"
 ffprobe_dir="$(dirname "$(command -v ffprobe)")"
+pnpm_dir="$(dirname "$(command -v pnpm)")"
+pnpm_version="$(pnpm --version)"
+export COREPACK_HOME="${COREPACK_HOME:-${XDG_CACHE_HOME:-$HOME/.cache}/node/corepack}"
 
 export HOME="$work/home" XDG_CACHE_HOME="$work/cache"
-export PATH="$node_dir:$ffmpeg_dir:$ffprobe_dir:/usr/bin:/bin"
-export npm_config_cache="$work/npm-cache" npm_config_userconfig=/dev/null
-export npm_config_fund=false npm_config_audit=false
-export npm_config_globalconfig="$work/global.npmrc" npm_config_update_notifier=false
+export XDG_CONFIG_HOME="$work/config" XDG_STATE_HOME="$work/state"
+export PNPM_HOME="$work/pnpm"
+export PATH="$PNPM_HOME/bin:$node_dir:$pnpm_dir:$ffmpeg_dir:$ffprobe_dir:/usr/bin:/bin"
+export COREPACK_ENABLE_NETWORK=0
 export DEVELOPER_DIR=/var/empty
 export OPENCUT_DIALOGUE_PYTHON="$work/missing-python"
 unset NODE_PATH NODE_OPTIONS SDKROOT
 mkdir -p "$HOME" "$work/project" "$work/caller"
 cp "$root"/tests/distribution/{smoke.video,title}.ts "$work/project/"
-printf '{"type":"module","private":true}\n' > "$work/project/package.json"
+printf '{"type":"module","private":true,"packageManager":"pnpm@%s"}\n' "$pnpm_version" > "$work/project/package.json"
+cp "$work/project/package.json" "$work/caller/package.json"
 cd "$work/caller"
 
-npm --offline --prefix "$work/prefix" install --global "$archive"
-cli="$work/prefix/bin/opencut"
-package_dir="$work/prefix/lib/node_modules/@opencut/cli"
+pnpm add --offline -g "$archive"
+cli="$PNPM_HOME/bin/opencut"
+package_dir="$(pnpm list -g --json @dantea/opencut | node -p \
+  'JSON.parse(require("node:fs").readFileSync(0, "utf8"))[0].dependencies["@dantea/opencut"].path')"
 "$cli" --version
 "$cli" doctor --json > doctor.json
-PATH=/usr/bin:/bin "$node_dir/node" "$cli" doctor --json > without-ffmpeg.json
+PATH=/usr/bin:/bin "$node_dir/node" "$package_dir/dist/index.js" doctor --json > without-ffmpeg.json
 node --input-type=module - <<'JS'
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -77,8 +82,12 @@ test -s fast.png && test -s sheet.png
 "$cli" package "$definition" -o bundle
 "$cli" render bundle/opencut.bundle.video.ts -o bundled.mp4
 
-# Exercise the exact scoped install and npx spelling against the same bytes
-# through an isolated loopback registry, without publishing to npm.
+test ! -e "$package_dir/node_modules/electron"
+bash "$root/scripts/release/test-workflows.sh" "$cli" \
+  "${OPENCUT_RELEASE_EVALUATION_DIR:-$work/evaluation}" --package-dir "$package_dir"
+
+# Exercise the documented registry commands against the same bytes through a
+# loopback registry.
 node "$root/scripts/release/serve-artifact.mjs" "$archive" "$work/port" &
 server=$!
 for ((attempt=0; attempt<100; attempt++)); do
@@ -86,20 +95,21 @@ for ((attempt=0; attempt<100; attempt++)); do
   sleep 0.1
 done
 registry_port="$(cat "$work/port")"
-export npm_config_registry="http://127.0.0.1:$registry_port"
-npm --cache "$work/named-cache" --prefix "$work/named" install --global @opencut/cli
-"$work/named/bin/opencut" --version
-npx --yes --cache "$work/npx-cache" @opencut/cli --version
+export pnpm_config_registry="http://127.0.0.1:$registry_port"
+export pnpm_config_minimum_release_age=0
+export pnpm_config_trust_policy=off
+pnpm dlx @dantea/opencut --help
+pnpm remove -g @dantea/opencut
+test ! -e "$cli"
+pnpm add -g @dantea/opencut
+"$cli" --version
 (
   cd "$work/project"
-  npm install --offline "$archive"
-  node --input-type=module -e 'import {defineVideo} from "@opencut/cli/sdk"; if (typeof defineVideo !== "function") process.exit(1)'
-  sed 's|@opencut/sdk|@opencut/cli/sdk|' smoke.video.ts > typed.video.ts
-  node node_modules/@opencut/cli/node_modules/typescript/lib/tsc.js --noEmit \
+  pnpm add @dantea/opencut
+  node --input-type=module -e 'import {defineVideo} from "@dantea/opencut/sdk"; if (typeof defineVideo !== "function") process.exit(1)'
+  sed 's|@opencut/sdk|@dantea/opencut/sdk|' smoke.video.ts > typed.video.ts
+  node node_modules/@dantea/opencut/node_modules/typescript/lib/tsc.js --noEmit \
     --module NodeNext --skipLibCheck --allowImportingTsExtensions --strict typed.video.ts
 )
-test ! -e "$package_dir/node_modules/electron"
-bash "$root/scripts/release/test-workflows.sh" "$cli" \
-  "${OPENCUT_RELEASE_EVALUATION_DIR:-$work/evaluation}" --package-dir "$package_dir"
-npm --offline --prefix "$work/prefix" uninstall --global @opencut/cli
+pnpm remove -g @dantea/opencut
 test ! -e "$cli"

@@ -3,8 +3,8 @@
 The installed CLI and review app include the authoring SDK. A `.video.ts`
 definition can import `@opencut/sdk` without setting up a Node project.
 For TypeScript editor support or SDK usage from a separate Node program,
-install `@opencut/cli` locally and use the `@opencut/cli/sdk` export in the
-examples below. See the [installation guide](INSTALL.md#npm).
+install `@dantea/opencut` locally and use the `@dantea/opencut/sdk` export in the
+examples below. See the [installation guide](INSTALL.md#pnpm).
 
 Use Node 24.12+ (within 24.x). The CLI resolves bundled SDK imports from
 trusted `.video.ts` definitions, which should default-export
@@ -16,7 +16,7 @@ import {
   compileVideo,
   previewVideo,
   renderCompiledVideo,
-} from '@opencut/cli/sdk';
+} from '@dantea/opencut/sdk';
 
 const video = await compileVideo('edit.video.ts');
 const preview = previewVideo(video);
@@ -60,7 +60,7 @@ hard links to publish the completed PNG atomically.
 ## Media recipes
 
 ```ts
-import { inspectVideoRecipes, renderVideo } from '@opencut/cli/sdk';
+import { inspectVideoRecipes, renderVideo } from '@dantea/opencut/sdk';
 
 const { recipes } = await inspectVideoRecipes('edit.video.ts');
 console.log(recipes);
@@ -104,7 +104,7 @@ import {
   packageVideo,
   renderVideo,
   verifyVideoPackage,
-} from '@opencut/cli/sdk';
+} from '@dantea/opencut/sdk';
 
 const processing = { cacheDirectory: './recipe-cache' };
 const status = await inspectVideoBuild('src/edit.video.ts', { processing });
@@ -143,8 +143,8 @@ compiled project and its build record are deeply frozen. See the
 [authoring example](VIDEO_DEFINITIONS.md#reusable-functions-and-parameters).
 
 ```ts
-import { batchRenderVideo, renderVideo } from '@opencut/cli/sdk';
-import type { VideoVariant } from '@opencut/cli/sdk';
+import { batchRenderVideo, renderVideo } from '@dantea/opencut/sdk';
+import type { VideoVariant } from '@dantea/opencut/sdk';
 
 const file = 'examples/video/short-batch.video.ts';
 const variants = [

@@ -1,3 +1,4 @@
+#include "pixel-transfer.h"
 #include <stdio.h>
 #include <string.h>
 #import <Foundation/Foundation.h>
@@ -81,49 +82,30 @@ static id<VTFrameProcessorConfiguration> configuration(Options options) {
 }
 
 API_AVAILABLE(macos(26.0))
-static VTFrameProcessorFrame *makeFrame(NSDictionary *attributes, int width, int height, OSType format, CMTime pts) {
+static CVPixelBufferPoolRef makePool(NSDictionary *attributes, int width, int height, OSType format)
+    CF_RETURNS_RETAINED {
     NSMutableDictionary *resolved = [attributes mutableCopy];
     resolved[(__bridge NSString *)kCVPixelBufferPixelFormatTypeKey] = @(format);
+    resolved[(__bridge NSString *)kCVPixelBufferWidthKey] = @(width);
+    resolved[(__bridge NSString *)kCVPixelBufferHeightKey] = @(height);
     resolved[(__bridge NSString *)kCVPixelBufferIOSurfacePropertiesKey] = @{};
+    CVPixelBufferPoolRef pool = NULL;
+    OSStatus status = CVPixelBufferPoolCreate(NULL, NULL, (__bridge CFDictionaryRef)resolved, &pool);
+    if (status || !pool)
+        fail([NSString stringWithFormat:@"Cannot create enhancement pixel buffer pool (%d).", status]);
+    return pool;
+}
+
+API_AVAILABLE(macos(26.0))
+static VTFrameProcessorFrame *makeFrame(CVPixelBufferPoolRef pool, CMTime pts) {
     CVPixelBufferRef buffer = NULL;
-    OSStatus status = CVPixelBufferCreate(NULL, width, height, format, (__bridge CFDictionaryRef)resolved, &buffer);
+    OSStatus status = CVPixelBufferPoolCreatePixelBuffer(NULL, pool, &buffer);
     if (status || !buffer)
         fail([NSString stringWithFormat:@"Cannot allocate VideoToolbox enhancement buffer (%d).", status]);
     VTFrameProcessorFrame *frame = [[VTFrameProcessorFrame alloc] initWithBuffer:buffer presentationTimeStamp:pts];
     CVPixelBufferRelease(buffer);
     if (!frame) fail(@"VideoToolbox rejected an enhancement frame buffer.");
     return frame;
-}
-
-// The offline processor uses RGBA half-float surfaces. Only one packed RGBA8
-// row is needed to move a surface across the pipe.
-static void transfer(FILE *file, CVPixelBufferRef buffer, BOOL write, uint8_t *packed) {
-    CVPixelBufferLockFlags flags = write ? kCVPixelBufferLock_ReadOnly : 0;
-    if (CVPixelBufferLockBaseAddress(buffer, flags)) fail(@"Could not lock an enhancement buffer.");
-    BOOL planar = CVPixelBufferIsPlanar(buffer);
-    size_t planes = planar ? CVPixelBufferGetPlaneCount(buffer) : 1;
-    size_t width = CVPixelBufferGetWidth(buffer);
-    for (size_t plane = 0; plane < planes; plane++) {
-        uint8_t *base = planar ? CVPixelBufferGetBaseAddressOfPlane(buffer, plane) : CVPixelBufferGetBaseAddress(buffer);
-        size_t stride = planar ? CVPixelBufferGetBytesPerRowOfPlane(buffer, plane) : CVPixelBufferGetBytesPerRow(buffer);
-        size_t rows = planar ? CVPixelBufferGetHeightOfPlane(buffer, plane) : CVPixelBufferGetHeight(buffer);
-        size_t bytes = planar ? width : width * 4;
-        if (planar && stride == width) { bytes *= rows; rows = 1; }
-        for (size_t y = 0; y < rows; y++) {
-            uint8_t *row = base + y * stride;
-            uint8_t *wire = planar ? row : packed;
-            _Float16 *rgba = (_Float16 *)row;
-            if (write && !planar)
-                for (size_t i = 0; i < bytes; i++)
-                    wire[i] = (uint8_t)lrintf(fminf(1, fmaxf(0, rgba[i])) * 255);
-            size_t size = write ? fwrite(wire, 1, bytes, file) : fread(wire, 1, bytes, file);
-            if (size != bytes)
-                fail(write ? @"Could not write an enhanced frame." : @"Decoded enhancement frame was truncated.");
-            if (!write && !planar)
-                for (size_t i = 0; i < bytes; i++) rgba[i] = (_Float16)(wire[i] / 255.0f);
-        }
-    }
-    CVPixelBufferUnlockBaseAddress(buffer, flags);
 }
 
 @interface InputFrame : NSObject
@@ -135,7 +117,7 @@ static void transfer(FILE *file, CVPixelBufferRef buffer, BOOL write, uint8_t *p
 
 API_AVAILABLE(macos(26.0))
 static InputFrame *readFrame(FILE *timing, int64_t index, Options options, int64_t *origin,
-                             NSDictionary *attributes, OSType format, uint8_t *row) {
+                             CVPixelBufferPoolRef pool, uint8_t *scratch) {
     char line[256];
     if (!fgets(line, sizeof(line), timing)) {
         if (ferror(timing)) fail(@"Cannot read decoded enhancement frame timing.");
@@ -153,9 +135,8 @@ static InputFrame *readFrame(FILE *timing, int64_t index, Options options, int64
         fail(@"AI enhancement needs a constant frame cadence. Convert variable-rate input with a frameRate recipe first.");
     InputFrame *input = [InputFrame new];
     input.cut = score >= 8;
-    input.frame = makeFrame(attributes, options.width, options.height, format,
-        CMTimeMake(index * options.frameTicks, options.clock));
-    transfer(stdin, input.frame.buffer, NO, row);
+    input.frame = makeFrame(pool, CMTimeMake(index * options.frameTicks, options.clock));
+    transferPixels(stdin, input.frame.buffer, ReadPixels, scratch);
     return input;
 }
 
@@ -187,8 +168,9 @@ static void enhance(Options options) {
     FILE *timing = fdopen(3, "r");
     if (!timing) fail(@"Cannot open decoded enhancement timing pipe.");
     int width = (int)(options.width * options.scale), height = (int)(options.height * options.scale);
-    uint8_t *row = format == RGBAHalf ? malloc((size_t)width * 4) : NULL;
-    if (format == RGBAHalf && !row) fail(@"Could not allocate enhancement transfer row.");
+    CVPixelBufferPoolRef inputPool = makePool(config.sourcePixelBufferAttributes, options.width, options.height, format);
+    CVPixelBufferPoolRef outputPool = makePool(config.destinationPixelBufferAttributes, width, height, format);
+    uint8_t *scratch = allocatePixelTransferScratch(format, width);
     NSMutableArray<InputFrame *> *queue = [NSMutableArray array];
     NSMutableArray<VTFrameProcessorFrame *> *past = [NSMutableArray array];
     VTFrameProcessorFrame *previousOutput = nil;
@@ -197,7 +179,7 @@ static void enhance(Options options) {
     while (YES) @autoreleasepool {
         while (!eof && queue.count <= (NSUInteger)futureCount) {
             InputFrame *input = readFrame(timing, index + (int64_t)queue.count, options,
-                &origin, config.sourcePixelBufferAttributes, format, row);
+                &origin, inputPool, scratch);
             if (input) [queue addObject:input];
             else eof = YES;
         }
@@ -212,8 +194,7 @@ static void enhance(Options options) {
         for (NSUInteger i = 1; i < queue.count && !queue[i].cut; i++) [future addObject:queue[i].frame];
         VTFrameProcessorFrame *result = input.frame;
         if (options.mode != Noise || past.count || future.count) {
-            result = makeFrame(config.destinationPixelBufferAttributes, width, height, format,
-                input.frame.presentationTimeStamp);
+            result = makeFrame(outputPool, input.frame.presentationTimeStamp);
             id<VTFrameProcessorParameters> params;
             switch (options.mode) {
                 case Fast:
@@ -237,7 +218,7 @@ static void enhance(Options options) {
             calls++;
             reset = NO;
         }
-        transfer(stdout, result.buffer, YES, row);
+        transferPixels(stdout, result.buffer, WritePixels, scratch);
         if (pastCount) {
             [past addObject:input.frame];
             if (past.count > (NSUInteger)pastCount) [past removeObjectAtIndex:0];
@@ -251,8 +232,10 @@ static void enhance(Options options) {
     if (!calls) fail(@"AI enhancement did not run inference on any frames. Temporal noise filtering needs at least two frames from the same shot.");
     if (fflush(stdout)) fail(@"Could not flush the enhanced video stream.");
     fclose(timing);
-    free(row);
+    free(scratch);
     [processor endSession];
+    CFRelease(inputPool);
+    CFRelease(outputPool);
 }
 
 int main(int argc, const char **argv) {

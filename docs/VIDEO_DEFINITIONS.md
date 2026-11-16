@@ -348,8 +348,11 @@ file's clock. For example, if an unselected track starts at 0 s, the selected
 video at 2 s, and the selected audio at 2.25 s, the derived video starts at 0 s
 and the audio at 0.25 s. Timeline clip offsets use the final recipe output.
 
-When both operations fit the shot, interpolate before super-resolution to
-keep the interpolation surfaces at source resolution.
+OpenCut runs the steps in recipe order. Denoising before upscaling keeps
+denoising at the smaller dimensions. For 30 → 60 fps, upscaling first
+enhances half as many frames, but interpolation then has to support and
+process the larger frames. Interpolating first keeps interpolation at the
+original dimensions and doubles the number of frames sent to enhancement.
 
 | Step and preset                           | Processor                                      | Supported geometry and settings                                                                                                                                                                                                          |
 | ----------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -359,8 +362,14 @@ keep the interpolation surfaces at source resolution.
 
 The accepted `backend` value is `videotoolbox`, also the default. Both
 super-resolution presets run AI inference and use Lanczos to reduce the
-model output to the target size when needed. Temporal denoising may help
-with compression noise. Apple exposes no separate deblocking control here.
+model output to the target size when needed. The requested size controls the
+result. The temporal model still computes its full 4× output. Its input size
+limit applies to the frame reaching the step, after any explicit crop or
+resize. OpenCut reports unsupported dimensions and leaves any source resize
+to the recipe author.
+
+Temporal denoising may help with compression noise. Apple exposes no
+separate deblocking control here.
 
 Use Apple Silicon with macOS 26 or later and an OpenCut build made with the
 macOS 26+ SDK. Run `opencut system inspect --json` and look for
@@ -383,10 +392,6 @@ interpreted as video range. HDR, full-range, higher-bit-depth, alpha, and
 unsupported model configurations produce errors. The preview and final MP4
 use the timeline renderer's BT.709 output space.
 
-Recipe order is processing order. Denoising before upscaling keeps its
-work at the smaller dimensions. Interpolating first runs enhancement over
-more frames, but keeps interpolation at the original dimensions. Upscaling
-first may take the picture outside the interpolation processor’s limits.
 Check `system inspect` for both processors when chaining them. For a
 comparison, use `resize` with `"method": "lanczos"` at the same target
 dimensions. Review several consecutive frames with fine text, faces,

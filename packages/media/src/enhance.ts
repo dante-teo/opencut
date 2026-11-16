@@ -1,4 +1,4 @@
-import { release } from 'node:os';
+import { availableParallelism, release } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { sourceColorMatrix } from '@opencut/shared';
 import { interpolationTiming } from './interpolate.js';
@@ -9,6 +9,8 @@ import { nativeRecipeFingerprint, runRecipeProcess } from './recipe-process.js';
 import type { RecipeProcessLimits } from './recipe-process.js';
 
 export const enhancementBackendId = 'videotoolbox-enhancement-v4';
+// Encoder changes invalidate cached artifacts without changing the package contract.
+const enhancementCacheVersion = `${enhancementBackendId}:encoder-v2`;
 
 const worker = fileURLToPath(new URL('./video-enhance', import.meta.url));
 
@@ -32,7 +34,7 @@ export async function enhancementBackendVersion(signal: AbortSignal) {
     );
   return nativeRecipeFingerprint(
     worker,
-    enhancementBackendId,
+    enhancementCacheVersion,
     'enhancement',
     signal,
   );
@@ -257,6 +259,8 @@ export async function runEnhancement(
     `settb=1/${scale}`,
     `setpts=PTS+${offset}`,
   ];
+  // Keep the lossless encoder at zero frame delay while bounding CPU work.
+  const encodeThreads = String(Math.min(4, availableParallelism()));
   const colors = [
     '-color_range',
     'tv',
@@ -337,6 +341,8 @@ export async function runEnhancement(
           : []),
         '-map',
         '0:v:0',
+        '-filter_threads',
+        encodeThreads,
         '-vf',
         encodeFilters.join(','),
         '-enc_time_base:v',
@@ -352,7 +358,9 @@ export async function runEnhancement(
         '-qp',
         '0',
         '-threads:v',
-        '1',
+        encodeThreads,
+        '-thread_type:v',
+        'slice',
         '-pix_fmt',
         'yuv420p',
         ...colors,

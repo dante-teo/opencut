@@ -28,16 +28,16 @@ if (process.platform === 'darwin') {
     '-isysroot',
     sdk,
   ];
-  function compile(source, output, flags = []) {
+  function compile(sources, output, flags = []) {
     const { status, error } = spawnSync(
       '/usr/bin/clang',
-      [...compilerFlags, ...flags, source, '-o', output],
+      [...compilerFlags, ...flags, ...sources, '-o', output],
       { stdio: 'inherit' },
     );
     if (error) throw error;
     if (status !== 0) process.exit(status ?? 1);
   }
-  compile('native/process-memory.c', 'dist/process-memory');
+  compile(['native/process-memory.c'], 'dist/process-memory');
   if (process.arch !== 'arm64') process.exit(0);
   if (
     !existsSync(
@@ -47,12 +47,20 @@ if (process.platform === 'darwin') {
     warn('OpenCut: VideoToolbox AI recipes require a macOS 26+ SDK to build.');
   } else {
     for (const worker of workers) {
-      compile(`native/${worker}.m`, `dist/${worker}`, [
-        '-fobjc-arc',
-        ...['Foundation', 'VideoToolbox', 'CoreMedia', 'CoreVideo'].flatMap(
-          (framework) => ['-framework', framework],
-        ),
-      ]);
+      compile(
+        [`native/${worker}.m`, 'native/pixel-transfer.m'],
+        `dist/${worker}`,
+        [
+          '-fobjc-arc',
+          ...[
+            'Foundation',
+            'VideoToolbox',
+            'CoreMedia',
+            'CoreVideo',
+            'Accelerate',
+          ].flatMap((framework) => ['-framework', framework]),
+        ],
+      );
     }
   }
 }

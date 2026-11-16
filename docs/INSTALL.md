@@ -2,21 +2,22 @@
 
 The first distribution target is Apple Silicon with macOS 15 or later. The CLI needs native Node.js 24.12 or later within the 24.x series. Rendering also needs FFmpeg and ffprobe on PATH. Use a build with libx264 and AAC for default MP4 exports and libx265 for HEVC exports.
 
-## npm
+## pnpm
 
-After the package is published, install it globally or run it on demand.
+Install the CLI from the npm registry or run it on demand. If pnpm's global
+bin directory is missing from `PATH`, run `pnpm setup` and open a new shell
+before using `pnpm add -g`.
 
 ```sh
-npm install -g @opencut/cli
+pnpm add -g @dantea/opencut
 opencut doctor --json
-npx @opencut/cli --help
+pnpm dlx @dantea/opencut --help
 ```
 
-Before publication, install or run the packed archive directly.
+You can also install the packed archive directly.
 
 ```sh
-npm install -g ./opencut-cli-0.1.0-macos-arm64.tgz
-npx --package ./opencut-cli-0.1.0-macos-arm64.tgz opencut --help
+pnpm add -g ./opencut-cli-0.1.0-macos-arm64.tgz
 ```
 
 Run the CLI from any directory. A definition can import `@opencut/sdk` and
@@ -26,14 +27,13 @@ reports the import error. Repair or reinstall the project's SDK. Third-party
 imports resolve from the definition's project as usual.
 
 For editor type checking or SDK use from a separate Node program, install
-`@opencut/cli` locally and import from `@opencut/cli/sdk`. Use ESM and
-TypeScript syntax supported by Node's type stripping.
+locally with `pnpm add @dantea/opencut` and import from `@dantea/opencut/sdk`.
+Use ESM and TypeScript syntax supported by Node's type stripping.
 
 The package includes the official [Agent Skill](../skills/video-editor/SKILL.md),
 its references, the CLI and SDK guides, and the authoring examples. In a
 local Node project, find the Skill at
-`node_modules/@opencut/cli/skills/video-editor/SKILL.md`. A global npm
-installation places it under `$(npm root -g)/@opencut/cli`.
+`node_modules/@dantea/opencut/skills/video-editor/SKILL.md`.
 Copy the bundled [opening card](../examples/video/opening-card.video.ts)
 into your project before running it. Node's TypeScript loader excludes
 definitions under `node_modules`.
@@ -43,7 +43,7 @@ opencut preview frame my-video.video.ts --frame 0 -o preview.png
 opencut render my-video.video.ts -o final.mp4
 ```
 
-Use `npm uninstall -g @opencut/cli` to uninstall and rerun the install command to upgrade. The CLI executes trusted local TypeScript.
+Use `pnpm remove -g @dantea/opencut` to uninstall and rerun the install command to upgrade. The CLI executes trusted local TypeScript.
 
 ## Homebrew
 
@@ -111,9 +111,12 @@ add Apple-issued timestamps and a stapled ticket to the distribution app.
 Before cutting a release, synchronize the version in the root and workspace
 package manifests. Run the manually dispatched [release workflow](https://github.com/dante-teo/opencut/actions/workflows/release.yml)
 on the matching `vMAJOR.MINOR.PATCH` tag with `publish` off to generate
-test artifacts. The workflow tests the CLI archive in isolated npm installs,
-a temporary Homebrew tap and an unpacked review app. A Homebrew upgrade
-test uses the same archive under a simulated older keg version for the first release.
+test artifacts. The workflow tests the CLI with pnpm, a temporary Homebrew
+tap and an unpacked review app. The pnpm smoke test installs the tarball
+offline, then serves the same archive from a local test registry to exercise
+global install, `pnpm dlx`, local SDK import and uninstall. A Homebrew
+upgrade test uses the same archive under a simulated older keg version for
+the first release.
 The two CLI installation checks render the bundled opening card and run the
 installed-runtime workflow suite with Python 3.11+, FFmpeg and ffprobe.
 Software rendering, Lanczos upscaling, and failure handling run on every host.
@@ -128,7 +131,7 @@ work="$(mktemp -d)"
 bash scripts/release/test-workflows.sh "$(command -v opencut)" "$work/project"
 ```
 
-To keep results from a local npm or Homebrew installation check, set
+To keep results from a local pnpm or Homebrew installation check, set
 `OPENCUT_RELEASE_EVALUATION_DIR` to the absolute path of a new directory
 outside the checkout before running the check.
 
@@ -149,7 +152,7 @@ signs and notarizes the app, tests the signed app and uploads the validated
 artifacts to a new release. It fails when a release for the tag already exists.
 
 Publish the verified npm tarball separately from an account authorized for the
-`@opencut` scope. Use a narrowly scoped publish credential. Once the release
+`@dantea` scope. Use a narrowly scoped publish credential. Once the release
 URL resolves, add the generated `opencut.rb` to `Formula/opencut.rb` in
 `dante-teo/homebrew-tap` and verify with `brew install dante-teo/tap/opencut`.
 Use a new version to replace published artifacts.

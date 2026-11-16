@@ -22,7 +22,7 @@ const server = createServer((request, response) => {
     response.end(request.method === 'HEAD' ? undefined : bytes);
     return;
   }
-  if (decodeURIComponent(request.url ?? '') !== '/@opencut/cli') {
+  if (decodeURIComponent(request.url ?? '') !== '/' + manifest.name) {
     response.writeHead(404).end();
     return;
   }

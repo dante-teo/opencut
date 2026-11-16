@@ -145,14 +145,18 @@ enhancement to select a range on the source container's clock. A later
 `trim` uses the derived clock, where the first retained stream starts at
 zero and the relative audio delay is preserved. `fast` uses a size-dependent
 1.5× or 2× model.
-`quality` and `maximum` use Apple's temporal 4× model and resize to the target.
+`quality` and `maximum` compute the temporal model's full 4× output before
+resizing to the target. The model's input limit applies after earlier recipe
+steps. OpenCut reports unsupported dimensions.
 For `denoise`, set `strength` to `light`, `medium`, or `strong` and check temporal
 noise-filter support before use. AI enhancement accepts constant-rate,
 progressive, square-pixel, 8-bit video-range SDR input. If the color matrix
 tag is missing, OpenCut resolves it from the input dimensions and codec
 before enhancement. Recipe order determines whether enhancement runs
-before or after interpolation. Compare
-the processed sequence with a Lanczos resize when judging detail and
+before or after interpolation. Enhancing before doubling the frame rate halves
+the number of enhanced frames, but requires interpolation support at the larger
+size. Interpolating first keeps interpolation smaller and doubles enhancement
+work. Compare the processed sequence with a Lanczos resize when judging detail and
 temporal consistency. See the [enhancement reference](../../../docs/VIDEO_DEFINITIONS.md#ai-enhancement).
 
 ## Parameterized composition

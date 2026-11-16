@@ -22,6 +22,8 @@ discover commands and `opencut render --help` for export controls.
    transcoding. Use `interpolateFrames` to preserve duration at a higher
    frame rate or `smoothSlowMotion` to extend picture duration and mute it.
    Use `superResolution` for AI upscaling and `denoise` on supported hardware.
+   Preserve authored quality; never silently downsize a source or substitute a
+   lighter model to satisfy an unsupported processor.
    Check [AI recipe support and scene boundaries](references/video-definitions.md#media-recipes).
 2. Set canvas size, frame rate, ordered tracks, and clip ranges. Use integer
    frame positions or exact rationals as documented. Add subtitles, effects,

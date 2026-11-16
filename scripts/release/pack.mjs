@@ -100,7 +100,7 @@ async function packCli() {
   for (const directory of ['skills/video-editor', 'examples/video'])
     cpSync(join(root, directory), join(path, directory), { recursive: true });
   writeManifest(path, {
-    name: manifest.name,
+    name: '@dantea/opencut',
     version,
     description:
       'OpenCut video-as-code CLI and TypeScript SDK for Apple Silicon',

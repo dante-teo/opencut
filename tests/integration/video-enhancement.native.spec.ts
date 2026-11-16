@@ -18,6 +18,7 @@ import { promisify } from 'node:util';
 import {
   compileVideo,
   inspectVideoRecipes,
+  packageVideo,
   probeMedia,
   renderVideo,
   watchVideo,
@@ -648,4 +649,50 @@ test('T50 denoise uses a temporal model where supported and fails explicitly oth
     await frameHashes(result, 'null'),
     await frameHashes(source, 'null'),
   );
+});
+
+test('enhancement packages keep the existing v4 backend contract', async (t) => {
+  const directory = await scratch(t);
+  await makeSource(directory, 640, 360, 6);
+  const definition = await writeDefinition(directory, 640, 360, [
+    { type: 'denoise', strength: 'medium' },
+  ]);
+  const { entry, manifest } = await packageVideo(
+    definition,
+    join(directory, 'bundle'),
+  );
+
+  assert.equal(
+    manifest.requirements.native.find(({ kind }) => kind === 'enhancement')
+      ?.version,
+    'videotoolbox-enhancement-v4',
+  );
+  await inspectVideoRecipes(entry);
+});
+
+test('shared pixel transfer preserves conversion across padded rows and strips', async (t) => {
+  if (!hasWorker)
+    return t.skip('Requires the Apple Silicon enhancement worker.');
+  const directory = await scratch(t);
+  const binary = join(directory, 'transfer');
+  await exec(
+    '/usr/bin/clang',
+    [
+      '-O2',
+      '-fobjc-arc',
+      '-Wall',
+      '-Wextra',
+      '-Werror',
+      'tests/integration/pixel-transfer.m',
+      'packages/media/native/pixel-transfer.m',
+      '-o',
+      binary,
+      ...['Foundation', 'CoreVideo', 'Accelerate'].flatMap((framework) => [
+        '-framework',
+        framework,
+      ]),
+    ],
+    { timeout: 30_000 },
+  );
+  await exec(binary, [], { timeout: 15_000 });
 });

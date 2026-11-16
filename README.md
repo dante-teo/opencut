@@ -16,7 +16,7 @@ export a reviewed revision.
 
 ## Install
 
-Use npm or the Homebrew tap for the Apple Silicon CLI. The macOS review app
+Use pnpm or the Homebrew tap for the Apple Silicon CLI. The macOS review app
 is a separate download. See the [installation guide](docs/INSTALL.md) for
 release availability, system requirements and optional AI model setup.
 

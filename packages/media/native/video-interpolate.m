@@ -1,3 +1,4 @@
+#include "pixel-transfer.h"
 #include <stdio.h>
 #include <string.h>
 #import <Foundation/Foundation.h>
@@ -38,42 +39,6 @@ static CVPixelBufferRef makeBuffer(NSDictionary *attributes, int width, int heig
     if (status || !buffer)
         fail([NSString stringWithFormat:@"Cannot allocate VideoToolbox interpolation buffer (%d).", status]);
     return buffer;
-}
-
-static void transfer(FILE *file, CVPixelBufferRef buffer, BOOL write, uint8_t *packed) {
-    CVPixelBufferLockFlags flags = write ? kCVPixelBufferLock_ReadOnly : 0;
-    if (CVPixelBufferLockBaseAddress(buffer, flags))
-        fail(@"Could not lock an interpolation pixel buffer.");
-    size_t width = CVPixelBufferGetWidth(buffer);
-    if (packed) {
-        uint8_t *base = CVPixelBufferGetBaseAddress(buffer);
-        size_t stride = CVPixelBufferGetBytesPerRow(buffer);
-        for (size_t y = 0; y < CVPixelBufferGetHeight(buffer); y++) {
-            _Float16 *rgba = (_Float16 *)(base + y * stride);
-            if (write)
-                for (size_t i = 0; i < width * 4; i++)
-                    packed[i] = (uint8_t)lrintf(fminf(1, fmaxf(0, rgba[i])) * 255);
-            size_t bytes = write ? fwrite(packed, 1, width * 4, file) :
-                fread(packed, 1, width * 4, file);
-            if (bytes != width * 4) fail(@"Offline interpolation pixel stream was truncated.");
-            if (!write)
-                for (size_t i = 0; i < width * 4; i++) rgba[i] = (_Float16)(packed[i] / 255.0f);
-        }
-    } else for (size_t plane = 0; plane < 2; plane++) {
-        uint8_t *base = CVPixelBufferGetBaseAddressOfPlane(buffer, plane);
-        size_t stride = CVPixelBufferGetBytesPerRowOfPlane(buffer, plane);
-        size_t rows = CVPixelBufferGetHeightOfPlane(buffer, plane);
-        // Batch tightly packed planes. IOSurface alignment may instead require row I/O.
-        size_t chunk = stride == width ? width * rows : width;
-        size_t count = stride == width ? 1 : rows;
-        for (size_t row = 0; row < count; row++) {
-            uint8_t *data = base + row * stride;
-            size_t bytes = write ? fwrite(data, 1, chunk, file) : fread(data, 1, chunk, file);
-            if (bytes != chunk)
-                fail(write ? @"Could not write an interpolated frame." : @"Decoded frame was truncated.");
-        }
-    }
-    CVPixelBufferUnlockBaseAddress(buffer, flags);
 }
 
 typedef struct {
@@ -151,11 +116,10 @@ static void interpolate(int width, int height, BOOL offline, int32_t timescale, 
     CVPixelBufferRef previous = makeBuffer(config.sourcePixelBufferAttributes, width, height, format);
     CVPixelBufferRef next = makeBuffer(config.sourcePixelBufferAttributes, width, height, format);
     CVPixelBufferRef result = makeBuffer(config.destinationPixelBufferAttributes, width, height, format);
-    uint8_t *packed = offline ? malloc((size_t)width * 4) : NULL;
-    if (offline && !packed) fail(@"Cannot allocate offline interpolation transfer row.");
+    uint8_t *scratch = allocatePixelTransferScratch(format, width);
     FrameTiming first;
     if (!readTiming(metadata, 0, &first)) fail(@"The video stream contains no decoded frames.");
-    transfer(stdin, previous, NO, packed);
+    transferPixels(stdin, previous, ReadPixels, scratch);
     int64_t left = 0, tick = 0, index = 1;
     NSUInteger nextCut = 0;
     int64_t lastReference = -1;
@@ -163,7 +127,7 @@ static void interpolate(int width, int height, BOOL offline, int32_t timescale, 
     FrameTiming timing;
     while (readTiming(metadata, index, &timing)) @autoreleasepool {
         index++;
-        transfer(stdin, next, NO, packed);
+        transferPixels(stdin, next, ReadPixels, scratch);
         int64_t right = timing.pts - first.pts;
         if (right <= left) fail(@"AI interpolation requires strictly increasing decoded video timestamps.");
         BOOL cut = timing.score >= threshold;
@@ -208,7 +172,7 @@ static void interpolate(int width, int height, BOOL offline, int32_t timescale, 
                 }
                 output = result;
             }
-            transfer(stdout, output, YES, packed);
+            transferPixels(stdout, output, WritePixels, scratch);
             tick += step;
         }
         CVPixelBufferRef swap = previous;
@@ -222,10 +186,10 @@ static void interpolate(int width, int height, BOOL offline, int32_t timescale, 
     if ((double)duration * speed * 1000000 / timescale < left - 1)
         fail(@"Decoded picture extends beyond its declared duration. Remux the input with correct video timing.");
     // No future reference is available for the final source frame.
-    for (; tick < duration; tick += step) transfer(stdout, previous, YES, packed);
+    for (; tick < duration; tick += step) transferPixels(stdout, previous, WritePixels, scratch);
     if (fflush(stdout)) fail(@"Could not flush interpolated video.");
     fclose(metadata);
-    free(packed);
+    free(scratch);
     [processor endSession];
     CVPixelBufferRelease(result);
     CVPixelBufferRelease(next);

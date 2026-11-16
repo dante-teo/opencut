@@ -114,8 +114,9 @@ recipes.
 
 Processing limits apply to fresh recipe work. Cached media and composition
 outputs have their own disk usage. Matching inputs, effective AI profiles,
-algorithm settings, and backend versions reuse completed entries. A backend version change rebuilds affected
-steps and their dependents on the next run. Older entries stay on disk until
+algorithm settings, and backend fingerprints reuse completed entries. A change
+to the worker, encoder settings or system version can rebuild affected steps
+and their dependents on the next run. Older entries stay on disk until
 removed. Stop active builds before clearing the cache directory.
 
 Foreground rendering reports step starts, media time, completions, and cache
@@ -217,8 +218,9 @@ Caches, native models, system frameworks and third-party Node packages
 are not copied. Choose a compatible OpenCut build and FFmpeg
 installation. VideoToolbox recipes still require supported Apple Silicon
 hardware and macOS; Apple does not expose a separate model version, so
-results can vary with the OS. OpenCut requires the recorded backend
-version and does not substitute another algorithm.
+results can vary with the OS. The recorded backend version identifies the
+required processing behavior. A compatible worker or encoder update can
+invalidate cached media while preserving compatibility with existing packages.
 
 Packaging needs space for the listed payload once, plus small manifest
 and filesystem overhead. Sources shared by clips are copied once per path;
