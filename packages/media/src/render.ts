@@ -40,7 +40,7 @@ import { renderQualities, renderQualityProfiles } from '@opencut/shared';
 import type { RenderQuality } from '@opencut/shared';
 import { renderProgress } from './render-progress.js';
 import type { RenderProgress } from './render-progress.js';
-import { fitVisual } from './video-filter.js';
+import { fitVisual, indexedSeekArgs } from './video-filter.js';
 import { stageTransformLayer } from './transform-layer.js';
 import type { TransformLayerOptions } from './transform-layer.js';
 import { rasterizeTextLayer } from './text.js';
@@ -530,7 +530,8 @@ async function prepareTimeline(
     throw new MediaError(
       'Preview range must satisfy 0 <= start < end <= timeline frame count; range and outputFrameRate cannot be combined.',
     );
-  if (png && endFrame - startFrame !== 1)
+  const rangeFrameCount = endFrame - startFrame;
+  if (png && rangeFrameCount !== 1)
     throw new MediaError('PNG rendering requires exactly one project frame.');
   if (codec === 'hevc' && (outputWidth < 16 || outputHeight < 16))
     throw new MediaError(
@@ -557,7 +558,7 @@ async function prepareTimeline(
   )
     throw new MediaError('Output frame rate must be between 1 and 120 fps.');
   const ticks =
-    BigInt(endFrame - startFrame) *
+    BigInt(rangeFrameCount) *
     BigInt(denominator) *
     BigInt(outputRate.numerator);
   const divisor = BigInt(numerator) * BigInt(outputRate.denominator);
@@ -673,7 +674,7 @@ async function prepareTimeline(
   };
   filters.push(
     `color=c=${opaqueCanvasColor(options.backgroundColor ?? '#000000')}:s=${width}x${height}:r=${rate},` +
-      `format=rgba,trim=end_frame=${frameCount},settb=1/${numerator},setpts=N*${denominator}[canvas0]`,
+      `format=rgba,trim=end_frame=${rangeFrameCount},settb=1/${numerator},setpts=(N+${startFrame})*${denominator}[canvas0]`,
   );
   const transitions = options.visualTransitions ?? [];
   const byOwner = new Map<string, VisualTransition[]>();
@@ -726,6 +727,7 @@ async function prepareTimeline(
   validateSubtitleBurnIn(visibleClips);
   const heldFrames = new Map<string, HeldFrame>();
   const framesync = 'eof_action=pass:repeatlast=0';
+  const holdLastFrame = 'repeatlast=1';
   const prepareLayer = async (
     clip: VisualTimelineClip,
     label: string,
@@ -737,8 +739,13 @@ async function prepareTimeline(
       usesLayerTransform(clip.rotation, !!clip.animation);
     const first = Math.max(startFrame, clip.timelineStartFrame);
     const last = Math.min(endFrame, clip.timelineStartFrame + clip.frameCount);
+    // Direct callers also validate off-range clips. Keep their full source
+    // window for preflight, even though the overlay gate excludes them.
+    const inRange = first < last;
+    const layerStart = inRange ? first : clip.timelineStartFrame;
+    const layerFrames = inRange ? last - first : clip.frameCount;
     const transform = (source: TransformLayerOptions['source']) => {
-      if (first >= last) return;
+      if (!inRange) return;
       encoders.add('ffv1');
       const hold =
         !clip.animation && (source.kind === 'text' || !source.sampling);
@@ -750,8 +757,8 @@ async function prepareTimeline(
               width,
               height,
               rate: frameRate,
-              startFrame: first,
-              frameCount: hold ? 1 : last - first,
+              startFrame: layerStart,
+              frameCount: hold ? 1 : layerFrames,
               visual: clip,
               ...(clip.grade && { grade: clip.grade }),
               source,
@@ -765,9 +772,9 @@ async function prepareTimeline(
         },
       );
       filters.push(
-        `[${layerInput}:v]format=rgba,settb=1/${numerator},setpts=(N+${first})*${denominator}[${label}]`,
+        `[${layerInput}:v]format=rgba,settb=1/${numerator},setpts=(N+${layerStart})*${denominator}[${label}]`,
       );
-      return { x: 0, y: 0, sync: hold ? 'repeatlast=1' : framesync };
+      return { x: 0, y: 0, sync: hold ? holdLastFrame : framesync };
     };
     if (clip.text) {
       const text = clip.text;
@@ -808,7 +815,7 @@ async function prepareTimeline(
       filters.push(
         `[${textInput}:v]format=rgba,settb=1/${numerator},setpts=0[${label}]`,
       );
-      return { x, y, sync: 'repeatlast=1' };
+      return { x, y, sync: holdLastFrame };
     }
     const source = await readSource(clip);
     const { video } = source;
@@ -898,45 +905,41 @@ async function prepareTimeline(
       throw new MediaError(
         `Clip '${clip.clipId}' source out exceeds the current video duration or its duration is unknown. Re-import the media and trim to a known video range.`,
       );
-    // Sample before trimming so source selection is invariant under splitting.
-    // A source frame first covers the project tick at or after its PTS.
-    // Rounding down or to nearest can show a frame before its presentation time.
+    const clipOffset = layerStart - clip.timelineStartFrame;
+    const sourceFirst = clip.sourceStartFrame + clipOffset;
     const { retiming } = clip;
-    const seekTarget = clip.sourceStartFrame + first - clip.timelineStartFrame;
-    // Indexed, zero-origin MOV/MP4 still previews can decode from the preceding
-    // keyframe. Keep its native PTS, including pre-roll frames before the seek,
-    // so the same frame covers the requested project tick even on VFR input.
+    // Keep preroll timestamps so indexed and sequential decoding sample the
+    // same source frame even across variable-frame-rate gaps.
     const seekFrame =
-      png &&
+      (png || transformed) &&
       !still &&
-      !transformed &&
       !retiming &&
-      first < last &&
+      inRange &&
       source.startTimeSeconds === 0 &&
       video.startTimeSeconds === 0 &&
       /\.(mp4|mov)$/i.test(source.path)
-        ? Math.max(0, seekTarget - Math.ceil((2 * numerator) / denominator))
+        ? Math.max(0, sourceFirst - Math.ceil((2 * numerator) / denominator))
         : 0;
     const seekSeconds = (seekFrame * denominator) / numerator;
-    // An fps start_time shifts the source and output grids independently.
-    // A seek preserves absolute PTS, so let fps start at the decoded keyframe.
-    const frameSampling = `fps=${rate}${seekFrame ? '' : ':start_time=0'}:round=${retiming ? 'near' : 'up'}:eof_action=pass,tpad=stop_mode=clone:stop=1,`;
-    // Pick an absolute project frame before shifting to this piece's local clock.
-    // Two source ns cover PTS rounding and truncation of the shared source origin.
-    const frameNs = `(1000000000*${denominator}/${numerator})`;
-    const sampling = still
-      ? `loop=loop=-1:size=1:start=0,trim=end_frame=${clip.frameCount}`
-      : retiming
-        ? 'setpts=PTS-STARTPTS,settb=1/1000000000,' +
-          `setpts=(ceil((PTS-(${retiming.sourceOriginNs})-2)*${retiming.speed.denominator}/${retiming.speed.numerator}/${frameNs})-${clip.timelineStartFrame})*${frameNs},` +
-          frameSampling +
-          `trim=end_frame=${clip.frameCount}`
-        : seekFrame
-          ? frameSampling +
-            `trim=start_pts=${seekTarget}:end_pts=${seekTarget + last - first}`
-          : 'setpts=PTS-STARTPTS,' +
-            frameSampling +
-            `trim=start_frame=${clip.sourceStartFrame}:end_frame=${sourceEnd}`;
+    const frameSampling = (indexed = false) =>
+      `fps=${rate}${indexed ? '' : ':start_time=0'}:round=${retiming ? 'near' : 'up'}:eof_action=pass,tpad=stop_mode=clone:stop=1`;
+    const sequentialSampling = `setpts=PTS-STARTPTS,${frameSampling()},trim=start_frame=${sourceFirst}:end_frame=${sourceFirst + layerFrames}`;
+    let sampling: string;
+    if (still) {
+      sampling = 'trim=end_frame=1';
+    } else if (retiming) {
+      // Sample on the project grid before trimming. Two nanoseconds cover
+      // PTS rounding and truncation of the shared source origin.
+      const frameNs = `(1000000000*${denominator}/${numerator})`;
+      sampling =
+        'setpts=PTS-STARTPTS,settb=1/1000000000,' +
+        `setpts=(ceil((PTS-(${retiming.sourceOriginNs})-2)*${retiming.speed.denominator}/${retiming.speed.numerator}/${frameNs})-${clip.timelineStartFrame})*${frameNs},` +
+        `${frameSampling()},trim=start_frame=${clipOffset}:end_frame=${clipOffset + layerFrames}`;
+    } else if (seekFrame) {
+      sampling = `${frameSampling(true)},trim=start_pts=${sourceFirst}:end_pts=${sourceFirst + layerFrames}`;
+    } else {
+      sampling = sequentialSampling;
+    }
     const inputPath = held?.path ?? (await inputPathFor(source.path));
     if (transformed) {
       return transform({
@@ -950,7 +953,15 @@ async function prepareTimeline(
           : displayWidth / displayHeight,
         matrix,
         ...(!still && {
-          sampling: `${sampling},trim=start_frame=${first - clip.timelineStartFrame}:end_frame=${last - clip.timelineStartFrame}`,
+          sampling: {
+            filter: sampling,
+            ...(seekFrame && {
+              seek: {
+                seconds: seekSeconds,
+                fallbackFilter: sequentialSampling,
+              },
+            }),
+          },
         }),
       });
     }
@@ -965,29 +976,28 @@ async function prepareTimeline(
     args.push(
       '-threads',
       '1',
-      ...(seekFrame ? ['-ss', seekSeconds.toFixed(6), '-noaccurate_seek'] : []),
+      ...indexedSeekArgs(seekSeconds),
       '-i',
       inputPath,
     );
     if (!held) inputs.set(clip.clipId, input);
-    // Preserve sampling on the project grid, then crop the time range before
-    // scaling or converting frames that the preview will never show.
-    const ranged = !!options.range && first < last;
-    const rangeTrim =
-      ranged && !seekFrame
-        ? `trim=start_frame=${first - clip.timelineStartFrame}:end_frame=${last - clip.timelineStartFrame},`
-        : '';
     filters.push(
-      `[${input++}:${stream}]${sampling},${rangeTrim}` +
+      `[${input++}:${stream}]${sampling},` +
         `${fitVisual(geometry, matrix)},format=rgba,` +
         ((clip.opacity ?? 1) === 1 ? '' : `lut=a=val*${clip.opacity},`) +
-        `settb=1/${numerator},setpts=(N+${ranged ? first : clip.timelineStartFrame})*${denominator}[${label}]`,
+        `settb=1/${numerator},setpts=(N+${layerStart})*${denominator}[${label}]`,
     );
-    return { x: geometry.x, y: geometry.y, sync: framesync };
+    // A fitted still has identical pixels throughout its gated interval.
+    return {
+      x: geometry.x,
+      y: geometry.y,
+      sync: still ? holdLastFrame : framesync,
+    };
   };
 
+  // Overlay counts from zero while its input timestamps use project time.
   const enabled = (start: number, end: number) =>
-    `gte(n,${start})*lt(n,${end})`;
+    `gte(n,${start - startFrame})*lt(n,${end - startFrame})`;
   let canvas = 0;
   const overlay = (
     label: string,
@@ -1042,7 +1052,7 @@ async function prepareTimeline(
     }
   }
   filters.push(
-    `[canvas${canvas}]trim=start_frame=${startFrame}:end_frame=${endFrame},settb=1/${numerator},setpts=N*${denominator},scale=${outputWidth}:${outputHeight}:out_color_matrix=bt709,setsar=1,` +
+    `[canvas${canvas}]settb=1/${numerator},setpts=N*${denominator},scale=${outputWidth}:${outputHeight}:out_color_matrix=bt709,setsar=1,` +
       (options.outputFrameRate
         ? `fps=${outputRate.numerator}/${outputRate.denominator}:round=up:eof_action=pass,tpad=stop_mode=clone:stop=1,trim=end_frame=${outputFrameCount},settb=1/${outputRate.numerator},setpts=N*${outputRate.denominator},`
         : '') +

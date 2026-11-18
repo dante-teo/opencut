@@ -28,3 +28,8 @@ export function fitVisual(
     'setsar=1'
   );
 }
+
+/** Seek by input timestamp and pass preroll through to the sampler. */
+export function indexedSeekArgs(seconds: number) {
+  return seconds ? ['-ss', seconds.toFixed(6), '-noaccurate_seek'] : [];
+}

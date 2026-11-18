@@ -63,11 +63,18 @@ function fractionPixels(
 export function frameIndex(
   time: RationalTime,
   rate: FrameRate,
-  nearest = false,
+  rounding: 'floor' | 'nearest' | 'ceil' = 'floor',
 ): bigint {
   const numerator = BigInt(time.numerator) * BigInt(rate.numerator);
   const denominator = BigInt(time.denominator) * BigInt(rate.denominator);
-  return (numerator + (nearest ? denominator / 2n : 0n)) / denominator;
+  switch (rounding) {
+    case 'ceil':
+      return (numerator + denominator - 1n) / denominator;
+    case 'nearest':
+      return (numerator + denominator / 2n) / denominator;
+    case 'floor':
+      return numerator / denominator;
+  }
 }
 
 /** Non-drop nominal labels, using exact project-frame counts even at 30000/1001. */
@@ -118,7 +125,7 @@ export function framePosition(frame: bigint, rate: FrameRate): RationalTime {
 }
 
 export function snapToFrame(time: RationalTime, rate: FrameRate) {
-  return framePosition(frameIndex(time, rate, true), rate);
+  return framePosition(frameIndex(time, rate, 'nearest'), rate);
 }
 
 export const isSubtitleLane = (id: string) => id.startsWith('subtitle:');

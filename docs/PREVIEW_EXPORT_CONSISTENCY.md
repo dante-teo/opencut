@@ -3,8 +3,6 @@
 OpenCut runs the same timeline planner and media engine for frame, clip,
 watch, desktop, and final export. Frame numbers use the authored canvas
 rate. A preview clip keeps the selected time range with an exclusive end.
-A single-frame preview selects the same project frame whether the engine
-seeks to an earlier keyframe or decodes from the beginning.
 A single-frame PNG and MP4 decoded at the same position can differ slightly
 from lossy encoding and chroma subsampling. Watched playback also uses a
 size cap and fast encoding.
@@ -15,6 +13,25 @@ to `quality`, so their inherited interpolation and super-resolution settings
 can produce different pictures on the same frame grid. See the
 [render quality profiles](CLI.md#render-quality-profiles).
 
+## Rendering work
+
+For a range preview, OpenCut starts the canvas at the requested frame.
+Static image layers reuse their fitted pixels throughout the visible
+interval. These optimizations apply automatically at every quality profile.
+
+For eligible 1× clips in MP4 or MOV sources with zero-based timestamps,
+single-frame previews and transformed layers can start at an earlier
+keyframe. The decoder keeps preroll timestamps to sample on the authored
+frame grid. A seek can land after the requested presentation time across
+a long variable-frame-rate gap. If an indexed transform decode yields too
+few frames, OpenCut discards that attempt and decodes the layer from the
+beginning, which can take longer.
+
+See the [performance benchmarks](CLI.md#performance-benchmarks) for
+the CLI harness.
+
+## Watched revisions
+
 CLI and Electron watchers stage referenced media for each revision so a
 file changing in place cannot mix old and new input within one published
 preview. A failed or superseded rebuild leaves the last complete playback
@@ -23,8 +40,12 @@ inputs and retains those inputs while the render is active.
 When the final profile requires different AI processing, the watcher keeps
 the original recipe inputs available for that export as well.
 
-Run `pnpm test:consistency` for frame and audio alignment, preview recovery, and decoded comparison
-of an Electron export with a foreground SDK render.
+Run `pnpm test:consistency` for frame and audio alignment, preview recovery,
+and decoded comparison of an Electron export with a foreground SDK render.
+The suite compares graded exports and frame previews across a long
+variable-frame-rate gap against sequential decoding. Desktop tests cover
+playhead restoration across frame-rate changes and selections made before
+preview metadata loads.
 
 ## Video-as-Code conformance
 

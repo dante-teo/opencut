@@ -52,7 +52,7 @@ export function ProjectTimeline({
 }: {
   project: Project | undefined;
   selected: string | null;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, start: RationalTime) => void;
   position: RationalTime;
   onSeek: (time: RationalTime) => void;
 }) {
@@ -415,6 +415,8 @@ export function ProjectTimeline({
                         speed.numerator === speed.denominator
                           ? ''
                           : `${Number((speed.numerator / speed.denominator).toPrecision(4))}× · `;
+                      const inspect = () =>
+                        onSelect(clip.id, clip.timelineStart);
                       return (
                         <g
                           key={clip.id}
@@ -430,12 +432,12 @@ export function ProjectTimeline({
                                 ? 'text'
                                 : track.type)
                           }
-                          onClick={() => onSelect(clip.id)}
+                          onClick={inspect}
                           onKeyDown={(event) => {
                             if (event.key !== 'Enter' && event.key !== ' ')
                               return;
                             event.preventDefault();
-                            onSelect(clip.id);
+                            inspect();
                           }}
                         >
                           <title>
@@ -483,7 +485,7 @@ export function ProjectTimeline({
                         relativePixels(end, origin, zoom),
                       );
                       const inspect = () =>
-                        onSelect(transitionOwner(transition));
+                        onSelect(transitionOwner(transition), start);
                       const label = `${transitionNames[transition.kind]}, ${transition.frames} frames`;
                       return (
                         <rect

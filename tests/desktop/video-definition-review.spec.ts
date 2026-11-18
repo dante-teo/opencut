@@ -11,9 +11,12 @@ test('reviews consecutive definition builds and keeps the last playable revision
   const directory = await mkdtemp(join(fixtureDirectory, 't46-desktop-'));
   const path = join(directory, 'review.video.ts');
   const helper = join(directory, 'review-title.ts');
-  const source = (
-    await readFile('examples/video/review.video.ts', 'utf8')
-  ).replace('../../tests/fixtures/generated', '..');
+  const source = (await readFile('examples/video/review.video.ts', 'utf8'))
+    .replace('../../tests/fixtures/generated', '..')
+    .replace(
+      'start: { numerator: 3, denominator: 4 }',
+      'start: { numerator: 19, denominator: 25 }',
+    );
   await copyFile('examples/video/review-title.ts', helper);
   await writeFile(path, source);
   const { application, page } = await launchDesktop();
@@ -34,6 +37,21 @@ test('reviews consecutive definition builds and keeps the last playable revision
     });
     await expect(status).toContainText('Preview ready', { timeout: 25_000 });
     const movie = workspace.getByLabel('Compiled timeline preview');
+    async function expectPlaybackAt(frame: number, totalFrames = 48, fps = 24) {
+      await expect(workspace.getByLabel('Current frame')).toHaveText(
+        `Frame ${frame} / ${totalFrames - 1}`,
+        { timeout: 25_000 },
+      );
+      await expect
+        .poll(() =>
+          movie.evaluate(
+            (video: HTMLVideoElement, fps) =>
+              Math.floor(video.currentTime * fps),
+            fps,
+          ),
+        )
+        .toBe(frame);
+    }
     const initialURL = await movie.getAttribute('src');
     await expect
       .poll(() => movie.evaluate((video: HTMLVideoElement) => video.readyState))
@@ -48,16 +66,29 @@ test('reviews consecutive definition builds and keeps the last playable revision
       video.pause();
       video.currentTime = 0;
     });
-    await expect(workspace.getByLabel('Current frame')).toHaveText(
-      'Frame 0 / 47',
-    );
+    await expectPlaybackAt(0);
     await workspace.getByRole('button', { name: 'Next frame' }).click();
-    await expect(workspace.getByLabel('Current frame')).toHaveText(
-      'Frame 1 / 47',
-    );
+    await expectPlaybackAt(1);
     await expect(
       workspace.getByRole('button', { name: 'Inspect clip first' }),
     ).toBeVisible();
+
+    await workspace
+      .getByRole('button', { name: 'Inspect clip second' })
+      .click();
+    await expectPlaybackAt(24);
+    await workspace
+      .getByRole('button', { name: 'Cross-dissolve, 8 frames' })
+      .click();
+    await expectPlaybackAt(20);
+    await workspace.getByLabel('Scrollable timeline').evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    const subtitle = workspace.getByRole('button', {
+      name: 'Inspect subtitle caption',
+    });
+    await subtitle.press('Enter');
+    await expectPlaybackAt(19);
 
     await writeFile(path, 'export default {');
     await expect(workspace.getByRole('alert')).toContainText('Cannot load');
@@ -87,6 +118,7 @@ test('reviews consecutive definition builds and keeps the last playable revision
       workspace.getByRole('heading', { name: 'Helper changed edited' }),
     ).toBeVisible({ timeout: 25_000 });
     await expect(movie).not.toHaveAttribute('src', secondURL!);
+    await expectPlaybackAt(19);
     const output = join(directory, 'review.mp4');
     await application.evaluate(({ dialog }, path) => {
       dialog.showSaveDialog = async () => ({ canceled: false, filePath: path });
@@ -107,11 +139,85 @@ test('reviews consecutive definition builds and keeps the last playable revision
     await expect(workspace.getByRole('alert')).toContainText(
       'Refusing to overwrite',
     );
+    await movie.evaluate((video: HTMLVideoElement) => {
+      video.currentTime = 1.75;
+    });
+    await expectPlaybackAt(42);
+    function revisionAtRate(frameRate: number, durationFrames: number) {
+      return `export default {
+        name: 'Revision at ${frameRate} fps',
+        canvas: { width: 320, height: 180, frameRate: ${frameRate}, durationFrames: ${durationFrames} },
+        tracks: [{ type: 'text', clips: [{ at: 0, duration: ${durationFrames}, text: { content: 'End' } }] }]
+      };`;
+    }
+    await writeFile(path, revisionAtRate(30, 60));
+    await expectPlaybackAt(52, 60, 30);
+    await expect
+      .poll(() =>
+        movie.evaluate((video: HTMLVideoElement) => video.currentTime),
+      )
+      .toBeCloseTo(1.75, 5);
+
+    await writeFile(path, revisionAtRate(24, 48));
+    await expectPlaybackAt(42);
+
+    await writeFile(path, revisionAtRate(30, 6));
+    await expectPlaybackAt(5, 6, 30);
     await workspace.getByRole('button', { name: 'Close definition' }).click();
     await expect(page.getByLabel('Review workspace')).toBeVisible();
   } finally {
     await application.close();
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('seeks to a timeline selection made while preview metadata loads', async () => {
+  const { application, page } = await launchDesktop();
+  try {
+    await application.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({
+        canceled: false,
+        filePaths: [path],
+      });
+    }, videoExample('review.video.ts'));
+    await page.evaluate(() => {
+      // Defer metadata fetching until the timeline selection has happened.
+      const original = HTMLVideoElement.prototype.setAttribute;
+      HTMLVideoElement.prototype.setAttribute = function (name, value) {
+        original.call(this, name, name === 'preload' ? 'none' : value);
+      };
+    });
+    await page.getByRole('button', { name: 'Open definition' }).click();
+    const workspace = page.getByLabel('Definition review');
+    const movie = workspace.getByLabel('Compiled timeline preview');
+    await expect(movie).toHaveAttribute('preload', 'none');
+    await expect(workspace.getByLabel('Current frame')).toHaveText(
+      'Frame 0 / 47',
+    );
+    await workspace
+      .getByRole('button', { name: 'Inspect clip second' })
+      .click();
+    await movie.evaluate((video: HTMLVideoElement) => {
+      if (video.readyState !== HTMLMediaElement.HAVE_NOTHING) {
+        throw new Error(
+          'Expected metadata to remain deferred during the selection',
+        );
+      }
+      video.preload = 'auto';
+      video.load();
+    });
+    await expect
+      .poll(() =>
+        movie.evaluate((video: HTMLVideoElement) =>
+          Math.floor(video.currentTime * 24),
+        ),
+      )
+      .toBe(24);
+    await expect(workspace.getByLabel('Current frame')).toHaveText(
+      'Frame 24 / 47',
+    );
+  } finally {
+    await application.close();
   }
 });
 

@@ -36,7 +36,11 @@ discover commands and `opencut render --help` for export controls.
    contact sheet from `opencut preview --help`. Preview defaults to `fast`.
    Use `--quality quality` to review offline AI processing, such as 4×
    super-resolution. A failed watch rebuild leaves the last valid preview
-   available.
+   available. Desktop review keeps the playhead at the same timeline time
+   across rebuilds, including frame-rate changes, and clamps it to the last
+   frame if the revision ends earlier. Select a clip, subtitle, or transition
+   to pause on the first frame at or after its start. A selection made during
+   loading takes effect when the preview is ready.
 5. Deliver a new MP4 with `opencut render DEFINITION --output final.mp4`.
    The CLI defaults to `quality` and runs directly. Use `--quality maximum`
    for slower MP4 encoding with the same AI algorithms as `quality`.

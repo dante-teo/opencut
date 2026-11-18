@@ -425,7 +425,11 @@ test('T54 indexed seeks and sequential decoding agree on fractional project tick
       '-f',
       'lavfi',
       '-i',
-      'testsrc2=s=160x90:r=24:d=3',
+      'testsrc2=s=160x90:r=24:d=8',
+      '-vf',
+      "select='not(between(n,149,152))'",
+      '-fps_mode',
+      'vfr',
       '-c:v',
       'libx264',
       '-threads',
@@ -435,13 +439,38 @@ test('T54 indexed seeks and sequential decoding agree on fractional project tick
       indexed,
     ]);
     await copyFile(indexed, join(directory, 'sequential.mkv'));
-    const preview = async (name: string) => {
+    const preview = async (name: string, graded = false) => {
       const file = join(directory, name + '.video.ts');
       const body: VideoDefinition = {
-        canvas: { width: 160, height: 90, frameRate: 24, durationFrames: 72 },
+        canvas: {
+          width: 160,
+          height: 90,
+          frameRate: { numerator: 24000, denominator: 1001 },
+          durationFrames: 72,
+        },
         assets: { video: { kind: 'video', path: name } },
         tracks: [
-          { type: 'video', clips: [{ asset: 'video', at: 0, sourceOut: 72 }] },
+          {
+            type: 'video',
+            clips: [
+              {
+                asset: 'video',
+                at: 0,
+                sourceIn: 96,
+                sourceOut: 168,
+                ...(graded && {
+                  grade: {
+                    exposure: 0,
+                    contrast: 1,
+                    saturation: 0.6,
+                    temperature: 0,
+                    tint: 0,
+                    curve: [],
+                  },
+                }),
+              },
+            ],
+          },
         ],
       };
       await writeFile(file, `export default ${JSON.stringify(body)};\n`);
@@ -463,6 +492,95 @@ test('T54 indexed seeks and sequential decoding agree on fractional project tick
     );
     assert.equal(await hash(indexed49), await hash(sequential49));
     assert.notEqual(await hash(indexed49), await hash(sequential50));
+    const range = { startFrame: 49, endFrame: 60 };
+    const graded = await preview('indexed.mp4', true);
+    const reference = await preview('sequential.mkv', true);
+    const actual = await graded.clip(range, join(directory, 'graded.mp4'));
+    const expected = await reference.clip(
+      range,
+      join(directory, 'reference.mp4'),
+    );
+    assert.equal(await hash(actual.path), await hash(expected.path));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('transformed layers decode sequentially when an indexed seek skips over a VFR gap', async () => {
+  requireTool('ffmpeg');
+  requireTool('ffprobe');
+  const directory = await mkdtemp(join(fixtureDirectory, 't54-seek-gap-'));
+  try {
+    const indexed = join(directory, 'gap.mp4');
+    const sequential = join(directory, 'gap.mkv');
+    runTool('ffmpeg', [
+      '-v',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=s=160x90:r=24:d=9',
+      '-vf',
+      "select='not(between(n,72,191))'",
+      '-fps_mode',
+      'vfr',
+      '-c:v',
+      'libx264',
+      '-threads',
+      '1',
+      '-g',
+      '240',
+      '-sc_threshold',
+      '0',
+      '-bf',
+      '3',
+      '-force_key_frames',
+      '8',
+      indexed,
+    ]);
+    // Use the same input bytes under a name that selects sequential decoding.
+    await copyFile(indexed, sequential);
+    const timeline = (path: string, output: string) => ({
+      width: 160,
+      height: 90,
+      frameRate: { numerator: 24, denominator: 1 },
+      frameCount: 84,
+      visualClips: [
+        {
+          clipId: 'gap',
+          path,
+          timelineStartFrame: 0,
+          sourceStartFrame: 120,
+          frameCount: 84,
+          grade: {
+            exposure: 0,
+            contrast: 1,
+            saturation: 0.6,
+            temperature: 0,
+            tint: 0,
+            curve: [],
+          },
+        },
+      ],
+      output: join(directory, output),
+    });
+    const reference = await renderVideoTimeline(
+      timeline(sequential, 'reference.mp4'),
+    );
+    const actual = await renderVideoTimeline(timeline(indexed, 'render.mp4'));
+    assert.equal(await hash(actual.path), await hash(reference.path));
+
+    // The single-frame attempt inside the gap produces no indexed frames.
+    const range = { startFrame: 15, endFrame: 16 };
+    const expectedFrame = await renderTimelineFrame({
+      ...timeline(sequential, 'reference.png'),
+      range,
+    });
+    const actualFrame = await renderTimelineFrame({
+      ...timeline(indexed, 'frame.png'),
+      range,
+    });
+    assert.equal(await hash(actualFrame.path), await hash(expectedFrame.path));
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

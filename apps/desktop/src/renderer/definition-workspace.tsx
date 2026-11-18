@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { frameTime } from '@opencut/core';
-import type { RationalTime } from '@opencut/core';
 import type { DefinitionReview } from '../bridge.js';
 import { ProjectTimeline } from './project-timeline.js';
 import { frameIndex } from './timeline-geometry.js';
@@ -14,22 +13,38 @@ function DefinitionPlayback({
   const rate = project.settings.frameRate;
   const fps = rate.numerator / rate.denominator;
   const player = useRef<HTMLVideoElement>(null);
-  const [frame, setFrame] = useState(0);
+  const resumeTime = useRef(0);
+  const [time, setTime] = useState(0);
   const [selection, setSelection] = useState<string | null>(null);
+  const attachPlayer = useCallback((video: HTMLVideoElement | null) => {
+    if (!video) return;
+    player.current = video;
+    return () => {
+      // Capture the outgoing element before a rendered revision replaces it.
+      if (video.readyState >= 1) resumeTime.current = video.currentTime;
+      player.current = null;
+    };
+  }, []);
+  const lastFrame = frameCount - 1;
+  const clampFrame = (index: number) => Math.max(0, Math.min(lastFrame, index));
+  const frameAt = (seconds: number) => Math.floor(seconds * fps);
+  const frame = clampFrame(frameAt(time));
 
-  const clamp = (frame: number) => Math.max(0, Math.min(frameCount - 1, frame));
-  function seek(next: number) {
+  function seekTime(seconds: number) {
     const video = player.current;
-    if (!video || video.readyState < 1) return;
-    video.pause();
-    const position = clamp(next);
-    // Seek inside the requested sample so browser timestamp rounding cannot
-    // put the playhead back on the previous frame at fractional frame rates.
-    video.currentTime = (position + 0.25) / fps;
-    setFrame(position);
+    const target =
+      seconds >= frameCount / fps ? (lastFrame + 0.25) / fps : seconds;
+    resumeTime.current = target;
+    setTime(target);
+    if (video && video.readyState >= 1) {
+      video.pause();
+      if (video.currentTime !== target) video.currentTime = target;
+    }
   }
-  function seekTimeline(time: RationalTime) {
-    seek(Number(frameIndex(time, rate)));
+
+  function seek(index: number) {
+    // Seek inside the sample to allow for browser timestamp rounding.
+    seekTime((clampFrame(index) + 0.25) / fps);
   }
   return (
     <>
@@ -38,25 +53,25 @@ function DefinitionPlayback({
         aria-label="Definition viewer"
       >
         <video
-          ref={player}
+          key={url}
+          ref={attachPlayer}
+          onLoadedMetadata={() => seekTime(resumeTime.current)}
           src={url}
           controls
           preload="auto"
           aria-label="Compiled timeline preview"
-          onTimeUpdate={(event) =>
-            setFrame(clamp(Math.floor(event.currentTarget.currentTime * fps)))
-          }
+          onTimeUpdate={(event) => setTime(event.currentTarget.currentTime)}
         />
         <div className="timeline-controls">
           <button onClick={() => seek(frame - 1)} disabled={frame === 0}>
             Previous frame
           </button>
           <output aria-label="Current frame">
-            Frame {frame} / {frameCount - 1}
+            Frame {frame} / {lastFrame}
           </output>
           <button
             onClick={() => seek(frame + 1)}
-            disabled={frame === frameCount - 1}
+            disabled={frame === lastFrame}
           >
             Next frame
           </button>
@@ -65,9 +80,13 @@ function DefinitionPlayback({
       <ProjectTimeline
         project={project}
         selected={selection}
-        onSelect={setSelection}
+        onSelect={(id, start) => {
+          setSelection(id);
+          // Review the first project sample at or after the item's start.
+          seek(Number(frameIndex(start, rate, 'ceil')));
+        }}
         position={frameTime(frame, rate)}
-        onSeek={seekTimeline}
+        onSeek={(time) => seek(Number(frameIndex(time, rate)))}
       />
     </>
   );
@@ -156,7 +175,7 @@ export function DefinitionWorkspace({
         )}
         {feedback.error && <pre role="alert">{feedback.error}</pre>}
       </div>
-      {current && <DefinitionPlayback key={current.url} revision={current} />}
+      {current && <DefinitionPlayback key={state.path} revision={current} />}
     </div>
   );
 }

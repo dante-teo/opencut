@@ -1,3 +1,4 @@
+import { rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import {
@@ -17,6 +18,7 @@ import type {
 } from '@opencut/shared';
 import { checkRenderSignal, MediaError } from './process.js';
 import { renderToolCommand, trackRenderProcess } from './render-budget.js';
+import { indexedSeekArgs } from './video-filter.js';
 
 type TransformSource =
   | { kind: 'text'; rasterize: () => Promise<Buffer>; x: number; y: number }
@@ -29,7 +31,10 @@ type TransformSource =
       aspect: number;
       matrix: string;
       /** Project-frame sampling and range filters. Still images need neither. */
-      sampling?: string;
+      sampling?: {
+        filter: string;
+        seek?: { seconds: number; fallbackFilter: string };
+      };
     };
 
 export interface TransformLayerOptions {
@@ -60,7 +65,8 @@ function rawSource(
   const decodeWidth = Math.max(1, Math.floor(width * limit));
   const decodeHeight = Math.max(1, Math.floor(height * limit));
   const filters = [
-    sampling,
+    sampling?.filter,
+    sampling?.seek ? 'setpts=PTS-STARTPTS' : undefined,
     `scale=${decodeWidth}:${decodeHeight}:in_color_matrix=${matrix}`,
     'format=rgba',
   ];
@@ -72,6 +78,9 @@ function rawSource(
     args: [
       '-threads',
       '1',
+      ...(sampling?.seek
+        ? ['-copyts', ...indexedSeekArgs(sampling.seek.seconds)]
+        : []),
       '-i',
       path,
       '-map',
@@ -153,8 +162,39 @@ async function* decodedFrames(
   if (used) throw new MediaError('FFmpeg returned a partial transform frame.');
 }
 
+class IncompleteTransformFrames extends MediaError {}
+
 /** Stage one alpha-preserving layer. Only the current input and output frames are held in memory. */
 export async function stageTransformLayer(
+  options: TransformLayerOptions,
+  destination: string,
+) {
+  const { source, signal } = options;
+  try {
+    await writeTransformLayer(options, destination);
+  } catch (error) {
+    if (
+      source.kind !== 'media' ||
+      !(error instanceof IncompleteTransformFrames)
+    )
+      throw error;
+    const seek = source.sampling?.seek;
+    if (!seek) throw error;
+    checkRenderSignal(signal);
+    // A demuxer can seek by DTS to a keyframe that starts after the requested
+    // presentation tick. Discard the short stage and sample from the origin.
+    await rm(destination, { force: true });
+    await writeTransformLayer(
+      {
+        ...options,
+        source: { ...source, sampling: { filter: seek.fallbackFilter } },
+      },
+      destination,
+    );
+  }
+}
+
+async function writeTransformLayer(
   options: TransformLayerOptions,
   destination: string,
 ) {
@@ -229,7 +269,7 @@ export async function stageTransformLayer(
       signal.throwIfAborted();
       if (media && decoded && (!media.still || i === 0)) {
         if ((await decoded.next()).done)
-          throw new MediaError(
+          throw new IncompleteTransformFrames(
             'FFmpeg returned fewer transform frames than expected.',
           );
         if (options.grade) gradePixels(media.pixels.data, options.grade);

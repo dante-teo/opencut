@@ -33,8 +33,10 @@ node apps/cli/dist/index.js batch examples/video/short-batch.video.ts \
 
 Run `pnpm dev` for the optional Electron app. **Open definition** watches
 the chosen file and its inputs, shows the last playable revision, and lets
-you export it. **Open video** plays a local source file. Edit the definition
-in your usual text editor.
+you export it. Select a clip, subtitle, or transition in the timeline to
+inspect its start. Edit the definition in your usual text editor and the
+preview rebuilds at your current timeline position. **Open video** plays a
+local source file.
 
 - [Definition format and examples](VIDEO_DEFINITIONS.md)
 - [CLI commands](CLI.md)
