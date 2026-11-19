@@ -13,6 +13,7 @@ import { UsageError } from './usage.js';
 const optionTypes = {
   ...processingOptionTypes,
   ...renderOptionTypes,
+  'picture-cache': { type: 'string' },
   output: { type: 'string', short: 'o' },
   root: { type: 'string' },
   resource: { type: 'string', multiple: true },
@@ -75,10 +76,11 @@ const commands = {
     options: ['frame', 'timestamp', 'quality', 'params'],
   },
   render: {
-    args: `${definition} --output <new.mp4> ${qualityOption} ${params}`,
+    args: `${definition} --output <new.mp4> [--picture-cache <directory>] ${qualityOption} ${params}`,
     options: [
       'output',
       'params',
+      'picture-cache',
       ...Object.keys(renderOptionTypes),
       ...Object.keys(processingOptionTypes),
     ],

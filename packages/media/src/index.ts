@@ -36,6 +36,7 @@ export type {
 } from './render.js';
 export { renderQualities, renderQualityProfiles } from '@opencut/shared';
 export type { RenderQuality } from '@opencut/shared';
+export type { PictureCache, PictureRange } from './picture-cache.js';
 export type { RenderProgress } from './render-progress.js';
 export { renderContactSheet } from './contact-sheet.js';
 export { rasterizeTextLayer, validateEmbeddedFont } from './text.js';

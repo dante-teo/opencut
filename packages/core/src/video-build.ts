@@ -31,7 +31,7 @@ import type { VideoInput } from './video-input.js';
 import type { CompilationOptions, CompiledVideo } from './video-compiler.js';
 import { processingSettings } from './video-processing.js';
 import type { RecipeRecovery } from './video-processing.js';
-import { findRecipeEntry } from './video-recipe-cache.js';
+import { findMediaEntry } from './video-media-cache.js';
 import {
   inheritsRenderQuality,
   recipeFormatSchema,
@@ -471,7 +471,7 @@ export async function inspectBuildCheckpoint(
       : compile.state;
   const steps = [];
   for (const step of compile.steps) {
-    const result = await findRecipeEntry(cache, step.key, step.format, signal);
+    const result = await findMediaEntry(cache, step.key, step.format, signal);
     const entry = result?.entry;
     steps.push({
       ...step,

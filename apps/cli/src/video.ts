@@ -47,6 +47,9 @@ export async function runVideoCommand(
   if (command === 'render' && !output?.toLowerCase().endsWith('.mp4'))
     throw new UsageError(`Usage: ${commandUsage(command)}`);
 
+  const pictureCacheDirectory = values['picture-cache'];
+  if (pictureCacheDirectory !== undefined && !pictureCacheDirectory.trim())
+    throw new UsageError('--picture-cache requires a directory.');
   const controls = command === 'render' ? parseRenderControls(values) : {};
   await withCommandCancellation(async (signal) => {
     const params = await readParams(values.params, signal);
@@ -114,6 +117,7 @@ export async function runVideoCommand(
     } else {
       const result = await renderCompiledVideo(video, output!, {
         ...controls,
+        pictureCacheDirectory,
         signal,
         ...(!values.json && {
           onProgress: (event: RenderProgress) => {
@@ -138,6 +142,9 @@ export async function runVideoCommand(
       else {
         for (const warning of result.warnings ?? [])
           process.stderr.write(`Warning: ${warning}\n`);
+        for (const { startFrame, endFrame, status } of result.pictureRanges ??
+          [])
+          console.log(`Picture [${startFrame}, ${endFrame}): ${status}`);
         console.log(`Saved ${result.frameCount} frames to ${result.path}`);
       }
     }

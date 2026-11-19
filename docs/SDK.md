@@ -28,9 +28,16 @@ await renderCompiledVideo(video, 'delivery.mp4', {
 ```
 
 Use `renderVideo(file, output, options)` to compile and render in one call.
-A compiled render checks the identity of each source it uses before copying
-it for the render. If a source has changed, compile the definition again.
+A compiled render checks source identities before decoding or reusing
+picture. It copies media on first decode. If a source has changed, compile
+the definition again.
 Pass an `AbortSignal` to cancel a foreground render.
+
+Pass the same `pictureCacheDirectory` to `renderVideo` or
+`renderCompiledVideo` on the initial export and revisions. The result
+includes `pictureRanges` with zero-based project frames in `startFrame`
+and `endFrame` (exclusive) and a `status` of `reused` or `rendered`.
+See [picture cache behavior and storage](CLI.md#reuse-picture-between-exports).
 
 Final renders default to `quality`. Preview frames, clips, contact sheets
 and watches default to `fast`. Pass `quality: 'fast' | 'quality' | 'maximum'`

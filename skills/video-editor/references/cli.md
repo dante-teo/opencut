@@ -24,6 +24,13 @@ automatically processes referenced recipes and reuses completed steps. The
 `--recipe-cache` to choose a cache and `--recipe-workers` and the other
 [recipe flags](../../../docs/CLI.md#media-recipes) to set processing limits.
 
+For revisions, pass the same `--picture-cache <directory>` on the initial
+export and each subsequent `render`. OpenCut can reuse lossless picture
+ranges after a timeline shift, including ranges with captions that shift
+together with picture. Audio is mixed on the revised timeline. Read
+`pictureRanges` in JSON for the status of each half-open project-frame range.
+See [picture cache options](../../../docs/CLI.md#reuse-picture-between-exports).
+
 On macOS, `opencut system inspect --json` reports the VideoToolbox processor
 and tested formats and dimensions. Recipe inspection checks declarations
 and input streams. Use normal `validate` with the same recipe limits as

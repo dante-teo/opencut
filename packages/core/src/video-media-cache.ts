@@ -19,9 +19,8 @@ import {
   writeCheckpoint,
 } from './video-integrity.js';
 import type { IdentifiedMedia } from './video-input.js';
-import type { RecipeFormat } from './video-recipe-schema.js';
 
-type RecipeEntry = IdentifiedMedia & { sha256: string };
+type MediaEntry = IdentifiedMedia & { sha256: string };
 const stageDirectory = (directory: string, key: string) =>
   join(directory, `.${key}.stage`);
 
@@ -41,10 +40,10 @@ const receipt = z.strictObject({
   ),
 });
 
-export async function materializeRecipeEntry(
+export async function materializeMediaEntry(
   directory: string,
   key: string,
-  format: RecipeFormat,
+  format: string,
   signal: AbortSignal,
   encode: (output: string) => Promise<MediaMetadata>,
 ) {
@@ -59,7 +58,7 @@ export async function materializeRecipeEntry(
     const filename = `media.${format}`;
     const publish = async (
       attempt: string,
-      entry: RecipeEntry,
+      entry: MediaEntry,
       reused: boolean,
     ) => {
       signal.throwIfAborted();
@@ -73,7 +72,7 @@ export async function materializeRecipeEntry(
         reused,
       };
     };
-    const cached = await findRecipeEntry(directory, key, format, signal);
+    const cached = await findMediaEntry(directory, key, format, signal);
     if (cached?.directory === target)
       return { entry: cached.entry, reused: true };
     await rm(target, { recursive: true, force: true });
@@ -111,15 +110,15 @@ export async function materializeRecipeEntry(
 }
 
 /** Find validated media without publishing or removing anything. */
-export async function findRecipeEntry(
+export async function findMediaEntry(
   directory: string,
   key: string,
-  format: RecipeFormat,
+  format: string,
   signal?: AbortSignal,
-): Promise<{ directory: string; entry: RecipeEntry } | undefined> {
+): Promise<{ directory: string; entry: MediaEntry } | undefined> {
   const target = join(directory, key);
   const published = async () => {
-    const entry = await readRecipeEntry(target, key, format, signal);
+    const entry = await readMediaEntry(target, key, format, signal);
     return entry && { directory: target, entry };
   };
   const cached = await published();
@@ -135,7 +134,7 @@ export async function findRecipeEntry(
   for (const name of attempts) {
     if (!/^attempt-[a-zA-Z0-9]{6}$/.test(name)) continue;
     const attempt = join(staging, name);
-    const entry = await readRecipeEntry(attempt, key, format, signal).catch(
+    const entry = await readMediaEntry(attempt, key, format, signal).catch(
       async (error: unknown) => {
         // An inspector can race a writer moving the attempt to its final location.
         if (signal?.aborted || (await statIfPresent(attempt))) throw error;
@@ -152,12 +151,12 @@ async function statIfPresent(path: string) {
   });
 }
 
-async function readRecipeEntry(
+async function readMediaEntry(
   target: string,
   key: string,
-  format: RecipeFormat,
+  format: string,
   signal?: AbortSignal,
-): Promise<RecipeEntry | undefined> {
+): Promise<MediaEntry | undefined> {
   const path = join(target, `media.${format}`);
   const manifest = join(target, 'result.json');
   try {

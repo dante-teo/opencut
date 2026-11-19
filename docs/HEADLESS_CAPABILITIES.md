@@ -11,6 +11,7 @@
 | Inspect build recovery                  | `build inspect`                                          | `inspectVideoBuild`                                       |
 | Package and verify local dependencies   | `package`, `package verify`                              | `packageVideo`, `verifyVideoPackage`                      |
 | Export MP4                              | `render`                                                 | `renderVideo`, `renderCompiledVideo`                      |
+| Reuse rendered picture                  | `render --picture-cache`                                 | `pictureCacheDirectory` in render options                 |
 | Work with subtitles                     | `subtitles export`                                       | `parseSubtitles`, `readSubtitleFile`, `writeSubtitleFile` |
 | Inspect and extract source media        | `probe`, `extract-frame`                                 | `probeMedia`, `extractFrame`                              |
 | Separate dialogue                       | `separate-dialogue`                                      | `separateDialogue`                                        |

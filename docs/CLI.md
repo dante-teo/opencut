@@ -17,8 +17,40 @@ opencut subtitles export edit.video.ts --output captions.srt
 
 Use `opencut render --help` for quality, resolution, codec, frame rate and
 audio settings. Outputs are new files unless a supported render explicitly
-requests `--overwrite`. Use `--json` for machine output and SIGINT or SIGTERM
-to cancel foreground work. Render runs in the CLI with FFmpeg subprocesses.
+requests `--overwrite`. OpenCut protects source files and their aliases,
+including when picture is cached. Use `--json` for machine output and SIGINT
+or SIGTERM to cancel foreground work. Render runs in the CLI with FFmpeg
+subprocesses.
+
+## Reuse picture between exports
+
+```sh
+opencut render edit.video.ts --picture-cache ./render-cache -o first.mp4
+# Edit the definition, then pass the same cache directory.
+opencut render edit.video.ts --picture-cache ./render-cache -o revision.mp4
+```
+
+The picture cache uses the FFV1 encoder in FFmpeg to store lossless composited
+picture on the project frame grid. Shots, overlays, subtitles and transitions
+set the range boundaries. A range can move to a different timeline frame and
+reuse its picture if its source samples and visual layers stay the same.
+Edits to visual sources, framing, grades, captions and transitions rebuild
+the ranges they affect. Edits to audio tracks and mix settings reuse
+unchanged picture. Each export mixes audio on the current timeline and
+encodes a new MP4 at the requested output frame rate. The [recipe cache](#media-recipes)
+stores upstream processing such as frame interpolation.
+
+Render prints `Picture [start, end): reused` or `rendered` for each range.
+With `--json`, `pictureRanges` contains `startFrame`, `endFrame` and `status`.
+Ranges use zero-based project frames with an exclusive end, even when the
+output frame rate differs.
+
+Use a private local cache directory with room for lossless video. Cache files
+are kept under `picture-v1` until removed. Stop active renders before clearing
+the cache. The first render can take longer while it populates the cache.
+For eligible MP4 and MOV footage, cache misses can seek into the source.
+OpenCut falls back to sequential decoding when a seek cannot preserve frame
+selection.
 
 ## Check the installation
 

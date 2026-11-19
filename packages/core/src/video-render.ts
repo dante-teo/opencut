@@ -9,12 +9,14 @@ import type { VideoProcessingOptions } from './video-processing.js';
 import { compileVideo } from './video-files.js';
 import type { VideoBuild, VideoCompileOptions } from './video-files.js';
 import { isInterpolationStep } from './video-recipe-schema.js';
+import { openPictureCache } from './video-picture-cache.js';
 
 export type VideoRenderOptions = Omit<
   RenderControls,
   'range' | 'maxDimension'
 > & {
   burnSubtitles?: boolean;
+  pictureCacheDirectory?: string | undefined;
   processing?: VideoProcessingOptions | undefined;
   params?: VideoCompileOptions['params'];
 };
@@ -74,6 +76,7 @@ export async function renderCompiledVideo(
   {
     burnSubtitles = true,
     quality = 'quality',
+    pictureCacheDirectory,
     ...options
   }: CompiledVideoRenderOptions = {},
 ) {
@@ -128,12 +131,17 @@ export async function renderCompiledVideo(
             plan.visualClips = plan.visualClips.filter(
               (clip) => !clip.subtitle,
             );
+          const pictureCache =
+            pictureCacheDirectory === undefined
+              ? undefined
+              : await openPictureCache(pictureCacheDirectory, video, signal);
           const result = await renderVideoTimeline({
             ...plan,
             ...settings,
             quality,
             signal,
             overwrite,
+            pictureCache,
             ...(onProgress && { onProgress }),
             ...(buildMetadata && { buildMetadata }),
             ...(scratchDirectory && { scratchDirectory }),

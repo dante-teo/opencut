@@ -10,6 +10,11 @@ Use `renderVideo` to compile and render in one call. If `renderCompiledVideo`
 reports that source media changed, recompile before retrying.
 See the repository's [SDK guide](../../../docs/SDK.md) for the public API.
 
+For picture reuse, pass the same `pictureCacheDirectory` to `renderVideo`
+or `renderCompiledVideo` on the initial export and revisions. Read
+`pictureRanges` for the status of each range in project frames.
+See [picture cache behavior](../../../docs/CLI.md#reuse-picture-between-exports).
+
 Use `inspectVideoRecipes(file)` for recipe validation and inspection without
 transcoding. `compileVideo`, `renderVideo`, and `watchVideo` accept `processing`
 options for the cache, worker limits, and step progress.

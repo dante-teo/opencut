@@ -13,7 +13,7 @@ import type { Project, TimelineClip } from './project.js';
 import { continuesMediaRun, resolveTimeline } from './evaluation.js';
 import type { ResolvedMediaClip } from './evaluation.js';
 import { resolveAudioFade } from './audio.js';
-import { compareTimes } from './time.js';
+import { compareTimes, frameTime } from './time.js';
 import type { FrameRate, RationalTime } from './time.js';
 
 export class RenderError extends Error {
@@ -26,7 +26,10 @@ interface VisualRenderProperties {
   clipId: string;
   timelineStartFrame: number;
   sourceStartFrame: number;
-  retiming?: RenderTimeMapping & { sourceOriginNs: number };
+  retiming?: RenderTimeMapping & {
+    sourceOriginNs: number;
+    localSourceOriginNs: number;
+  };
   frameCount: number;
   x: number;
   y: number;
@@ -112,9 +115,11 @@ function exactFrame(
   return Number(frame);
 }
 
-/** The affine source origin stays identical for every piece of a split. */
-function sourceOriginNanoseconds(clip: TimelineClip): number {
-  const origin = clipSourcePosition(clip, { numerator: 0, denominator: 1 });
+function sourceOriginNanoseconds(
+  clip: TimelineClip,
+  time: RationalTime = { numerator: 0, denominator: 1 },
+): number {
+  const origin = clipSourcePosition(clip, time);
   return Number((origin.numerator * 1_000_000_000n) / origin.denominator);
 }
 
@@ -301,6 +306,10 @@ export function planProjectRender(
           retiming: {
             ...retiming,
             sourceOriginNs: sourceOriginNanoseconds(clip),
+            localSourceOriginNs: sourceOriginNanoseconds(
+              clip,
+              frameTime(start, frameRate),
+            ),
           },
         }),
         ...visual,
@@ -336,6 +345,10 @@ export function planProjectRender(
           sourceOut,
           speed: clipSpeed(clip),
           sourceOriginNs: sourceOriginNanoseconds(clip),
+          localSourceOriginNs: sourceOriginNanoseconds(
+            clip,
+            frameTime(startFrame, frameRate),
+          ),
         },
       };
     }),

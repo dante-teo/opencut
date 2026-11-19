@@ -3,9 +3,8 @@
 The source of truth is a TypeScript [video definition](VIDEO_DEFINITIONS.md).
 A compile reads the definition and probes the referenced media, validates the
 result against the timeline model, and binds a render plan. The in-memory
-snapshot is immutable. Preview and render verify the identity of each media
-file they use and keep a private copy for the duration of the operation, so
-one output uses a consistent set of source bytes.
+snapshot is immutable. Before decoding media, preview and render verify its
+identity and stage a private copy for the duration of the operation.
 
 - `@opencut/shared` holds platform-neutral time, color, compositing, transition,
   and animation primitives.
@@ -28,6 +27,15 @@ definition. It observes source, imported modules and referenced media. Failed
 or superseded builds cannot publish over the last valid preview. Export pins
 the selected revision's source copies for the duration of the render. The
 watcher removes superseded copies after the last export using them finishes.
+
+Foreground renders can cache lossless picture ranges on the project frame grid.
+A range key describes its ordered visual layers and source samples in local
+time, so moving the range preserves its key when its picture stays the same.
+The renderer checks visual source identities on cache hits. It assembles the
+ranges on the project clock before output frame-rate conversion, mixes audio
+from the current plan, and encodes the MP4. Export preflight checks the plan
+and required encoders. Render execution materializes the cache entries.
+See [picture reuse between exports](CLI.md#reuse-picture-between-exports).
 
 A batch compiles each TypeScript variant in a fresh worker, then passes its
 immutable composition to the shared renderer. Variants share source probes

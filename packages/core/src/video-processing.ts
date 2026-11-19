@@ -23,7 +23,7 @@ import {
   isInterpolationStep,
 } from './video-recipe-schema.js';
 import type { RecipeFormat } from './video-recipe-schema.js';
-import { materializeRecipeEntry } from './video-recipe-cache.js';
+import { materializeMediaEntry } from './video-media-cache.js';
 import {
   recipeArguments,
   recipeMedia,
@@ -235,7 +235,7 @@ async function processRecipe(
         key,
         format: step.format,
       });
-      const { entry, reused } = await materializeRecipeEntry(
+      const { entry, reused } = await materializeMediaEntry(
         directory,
         key,
         step.format,

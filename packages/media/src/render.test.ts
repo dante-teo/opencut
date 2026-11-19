@@ -495,6 +495,39 @@ describe('video timeline executor safety', () => {
     expect(runMediaTool).not.toHaveBeenCalled();
   });
 
+  it('preserves a source linked to the destination during a cached render', async () => {
+    const original = join(directory, 'source.mp4');
+    await writeFile(original, 'source sentinel');
+    const materialize = vi.fn(async () => ({
+      path: join(directory, 'cached.nut'),
+      reused: true,
+    }));
+    await expect(
+      renderVideoTimeline({
+        ...options,
+        segments: [
+          {
+            kind: 'clip',
+            clipId: 'visual-only',
+            path: original,
+            sourceStartFrame: 0,
+            frameCount: 12,
+          },
+        ],
+        overwrite: true,
+        pictureCache: {
+          backend: 'test',
+          sourceIdentity: () => original,
+          materialize,
+        },
+        onVerifiedOutput: async () => link(original, options.output),
+      }),
+    ).rejects.toThrow(/source media/);
+    expect(materialize).toHaveBeenCalledTimes(1);
+    expect(await readFile(original, 'utf8')).toBe('source sentinel');
+    expect(await readFile(options.output, 'utf8')).toBe('source sentinel');
+  });
+
   it.each(['rendering', 'verifying'] as const)(
     'cancels during %s before publication and cleans up',
     async (phase) => {
@@ -649,6 +682,76 @@ describe('video timeline executor safety', () => {
   });
 });
 
+describe('indexed decoding for cached picture', () => {
+  it.each([
+    { originPts: 0, seekPts: 149149, indexed: true },
+    { originPts: 0, seekPts: 149150, indexed: false },
+    { originPts: 0, seekPts: 180000, indexed: false },
+    { originPts: 1001, seekPts: 90090, indexed: false },
+    { originPts: 0, seekPts: undefined, indexed: false },
+  ])(
+    'requires a zero origin and predecessor frame ($originPts, $seekPts)',
+    async ({ originPts, seekPts, indexed }) => {
+      vi.mocked(probeMedia).mockImplementation(async (path) =>
+        path.endsWith('render.mp4')
+          ? { ...verified, path }
+          : { ...source, path, video: { ...stream, durationSeconds: 10 } },
+      );
+      vi.mocked(runMediaTool).mockImplementation(async (tool, args) => {
+        if (args.includes('framecrc')) {
+          const pts = args.includes('-ss') ? seekPts : originPts;
+          return Buffer.from(
+            '#tb 0: 1/30000\n' +
+              (pts === undefined
+                ? ''
+                : `0, ${pts}, ${pts}, 1001, 6, 0x00000000\n`),
+          );
+        }
+        if (tool === 'ffprobe')
+          return Buffer.from(
+            args.includes('-count_packets')
+              ? '12'
+              : '{"streams":[{"nb_read_frames":"12"}]}',
+          );
+        await writeFile(args.at(-1)!, 'rendered output');
+        return Buffer.alloc(0);
+      });
+      const cachePath = join(directory, 'cached.nut');
+      await renderVideoTimeline({
+        ...options,
+        segments: [
+          {
+            kind: 'clip',
+            clipId: 'late',
+            path: source.path,
+            sourceStartFrame: 150,
+            frameCount: 12,
+          },
+        ],
+        pictureCache: {
+          backend: 'test',
+          sourceIdentity: () => source.path,
+          async materialize(_key, encode) {
+            await encode(cachePath);
+            return { path: cachePath, reused: false };
+          },
+        },
+      });
+      const args = vi
+        .mocked(runMediaTool)
+        .mock.calls.find(
+          ([tool, args]) => tool === 'ffmpeg' && args.at(-1) === cachePath,
+        )![1];
+      expect(args.includes('-ss')).toBe(indexed);
+      expect(args[args.indexOf('-filter_complex') + 1]).toContain(
+        indexed
+          ? 'trim=start_pts=150:end_pts=162'
+          : 'trim=start_frame=150:end_frame=162',
+      );
+    },
+  );
+});
+
 describe('export preflight', () => {
   it('checks the exact media plan and encoders without rendering or creating output files', async () => {
     vi.mocked(runMediaTool).mockResolvedValue(
@@ -671,6 +774,32 @@ describe('export preflight', () => {
     expect(runMediaTool).toHaveBeenCalledTimes(1);
     expect(vi.mocked(runMediaTool).mock.calls[0]![1]).toContain('-encoders');
   });
+  it('checks FFV1 availability without consulting or populating the picture cache', async () => {
+    const pictureCache = {
+      backend: 'test',
+      sourceIdentity: vi.fn(),
+      materialize: vi.fn(),
+    };
+    vi.mocked(runMediaTool).mockResolvedValue(
+      Buffer.from(' V..... libx264\n A..... aac'),
+    );
+    await expect(
+      validateVideoTimeline({ ...options, pictureCache }),
+    ).rejects.toThrow("encoder 'ffv1' is unavailable");
+    vi.mocked(runMediaTool).mockResolvedValue(
+      Buffer.from(' V..... libx264\n A..... aac\n V..... ffv1'),
+    );
+    await expect(
+      validateVideoTimeline({ ...options, pictureCache }),
+    ).resolves.toMatchObject({
+      frameCount: 12,
+    });
+    expect(pictureCache.sourceIdentity).not.toHaveBeenCalled();
+    expect(pictureCache.materialize).not.toHaveBeenCalled();
+    expect(runMediaTool).toHaveBeenCalledTimes(2);
+    expect(await readdir(directory)).toEqual([]);
+  });
+
   it('rejects unavailable encoders and tools before output creation', async () => {
     vi.mocked(runMediaTool).mockResolvedValue(Buffer.from(' V..... libx264'));
     await expect(validateVideoTimeline(options)).rejects.toThrow(

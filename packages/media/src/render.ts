@@ -26,6 +26,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { constants } from 'node:fs';
+import type { Stats } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
 import {
   probeMedia,
@@ -41,9 +42,12 @@ import type { RenderQuality } from '@opencut/shared';
 import { renderProgress } from './render-progress.js';
 import type { RenderProgress } from './render-progress.js';
 import { fitVisual, indexedSeekArgs } from './video-filter.js';
+import { pictureSeekCheck } from './picture-seek.js';
 import { stageTransformLayer } from './transform-layer.js';
 import type { TransformLayerOptions } from './transform-layer.js';
 import { rasterizeTextLayer } from './text.js';
+import { cachePicture } from './picture-cache.js';
+import type { PictureCache, PictureRange } from './picture-cache.js';
 
 interface VisualTimelineProperties {
   crop?: NonNullable<import('@opencut/shared').VisualTransform['crop']>;
@@ -52,7 +56,10 @@ interface VisualTimelineProperties {
   timelineStartFrame: number;
   sourceStartFrame: number;
   frameCount: number;
-  retiming?: RenderTimeMapping & { sourceOriginNs: number };
+  retiming?: RenderTimeMapping & {
+    sourceOriginNs: number;
+    localSourceOriginNs?: number;
+  };
   x?: number;
   y?: number;
   scale?: number;
@@ -114,6 +121,7 @@ interface RenderAudioFade {
 export interface VideoTimelineOptions extends RenderControls {
   /** Serialize build provenance in a custom MP4 format tag. */
   buildMetadata?: string;
+  pictureCache?: PictureCache | undefined;
   /** Parent for private scratch on the destination filesystem. */
   scratchDirectory?: string;
   /** Record a verified file before publication so a caller can reconcile a crash. */
@@ -180,6 +188,7 @@ export interface VideoTimelineResult {
   durationSeconds: number;
   metadata: MediaMetadata;
   warnings?: string[];
+  pictureRanges?: PictureRange[];
 }
 
 function validateOptions(options: VideoTimelineOptions): void {
@@ -235,7 +244,7 @@ function validateOptions(options: VideoTimelineOptions): void {
             clip.frameCount <= 0 ||
             (clip.retiming !== undefined &&
               (!validRetiming(clip.retiming) ||
-                !Number.isInteger(clip.retiming.sourceOriginNs))) ||
+                !validSourceOrigin(clip.retiming))) ||
             !Number.isSafeInteger(clip.sourceStartFrame + clip.frameCount) ||
             !Number.isSafeInteger(clip.timelineStartFrame + clip.frameCount) ||
             clip.timelineStartFrame + clip.frameCount > frameCount ||
@@ -323,6 +332,16 @@ function timeDifference(a: Rational, b: Rational): bigint {
   return (
     BigInt(a.numerator) * BigInt(b.denominator) -
     BigInt(b.numerator) * BigInt(a.denominator)
+  );
+}
+
+function validSourceOrigin(
+  retiming: NonNullable<VisualTimelineClip['retiming']>,
+) {
+  return (
+    Number.isInteger(retiming.sourceOriginNs) &&
+    (retiming.localSourceOriginNs === undefined ||
+      Number.isInteger(retiming.localSourceOriginNs))
   );
 }
 
@@ -430,12 +449,47 @@ export function validateSubtitleBurnIn(
   }
 }
 
+async function existingOutput(path: string) {
+  return lstat(path).catch((error: unknown) => {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT')
+      return null;
+    throw error;
+  });
+}
+
+async function protectSourceFiles(
+  options: VideoTimelineOptions,
+  destination: Stats | null,
+) {
+  if (!options.overwrite || !destination) return;
+  const paths = new Set<string>();
+  for (const clip of options.visualClips ?? options.segments ?? [])
+    if ('path' in clip && clip.path) paths.add(clip.path);
+  for (const transition of options.visualTransitions ?? [])
+    for (const layer of transition.layers) paths.add(layer.path);
+  for (const clip of options.audioClips ?? []) paths.add(clip.path);
+  for (const path of paths) {
+    checkRenderSignal(options.signal);
+    const source = await stat(path).catch((error: unknown) => {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT')
+        return null;
+      throw error;
+    });
+    if (source?.dev === destination.dev && source.ino === destination.ino)
+      throw new MediaError(
+        `Render output must not replace source media '${path}'.`,
+      );
+  }
+}
+
 /** Prepare filters and stage unique held frames when executing a render. */
 async function prepareTimeline(
   options: VideoTimelineOptions,
-  png = false,
+  mode: 'mp4' | 'png' | 'picture' = 'mp4',
   scratch?: ReturnType<typeof renderScratch>,
+  checkPictureSeek?: ReturnType<typeof pictureSeekCheck>,
 ) {
+  const png = mode === 'png';
   checkRenderSignal(options.signal);
   validateOptions(options);
   const codec = options.codec ?? 'h264';
@@ -570,16 +624,12 @@ async function prepareTimeline(
     throw new MediaError(
       `Render output must have a ${png ? '.png' : '.mp4'} extension.`,
     );
-  try {
-    const existing = await lstat(path);
-    if (!options.overwrite || !existing.isFile())
-      throw new MediaError(
-        `Refusing to overwrite existing output '${path}'. Use --overwrite for a regular file.`,
-      );
-  } catch (error) {
-    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT'))
-      throw error;
-  }
+  const existing = await existingOutput(path);
+  if (existing && (!options.overwrite || !existing.isFile()))
+    throw new MediaError(
+      `Refusing to overwrite existing output '${path}'. Use --overwrite for a regular file.`,
+    );
+  await protectSourceFiles(options, existing);
   try {
     if (!(await stat(dirname(path))).isDirectory())
       throw new Error('Not a directory');
@@ -622,6 +672,7 @@ async function prepareTimeline(
     warnings,
     stagedInputs,
     encoders,
+    pictureRanges: undefined as PictureRange[] | undefined,
   };
   const filters: string[] = [];
   const sources = new Map(options.sourceMetadata);
@@ -629,28 +680,6 @@ async function prepareTimeline(
   const inputs = new Map<string, number>();
   const readSource = async (clip: { path: string; clipId: string }) => {
     checkRenderSignal(options.signal);
-    if (options.overwrite) {
-      // Never let explicit replacement target any source, including aliases.
-      const existing = await stat(path).catch((error: unknown) => {
-        if (
-          error instanceof Error &&
-          'code' in error &&
-          error.code === 'ENOENT'
-        )
-          return null;
-        throw error;
-      });
-      const original = await stat(clip.path).catch(() => null);
-      if (
-        existing &&
-        original &&
-        existing.dev === original.dev &&
-        existing.ino === original.ino
-      )
-        throw new MediaError(
-          `Render output must not replace source media '${clip.path}'.`,
-        );
-    }
     let source = sources.get(clip.path);
     if (!source) {
       try {
@@ -666,16 +695,6 @@ async function prepareTimeline(
     }
     return source;
   };
-  let input = 0;
-  const registerInput = (filename: string, write: StagedInput['write']) => {
-    const argumentIndex = args.push('-threads', '1', '-i', filename) - 1;
-    stagedInputs.push({ filename, argumentIndex, write });
-    return input++;
-  };
-  filters.push(
-    `color=c=${opaqueCanvasColor(options.backgroundColor ?? '#000000')}:s=${width}x${height}:r=${rate},` +
-      `format=rgba,trim=end_frame=${rangeFrameCount},settb=1/${numerator},setpts=(N+${startFrame})*${denominator}[canvas0]`,
-  );
   const transitions = options.visualTransitions ?? [];
   const byOwner = new Map<string, VisualTransition[]>();
   const windows = new Map<string, TransitionRamp[]>();
@@ -700,7 +719,7 @@ async function prepareTimeline(
           !visualClips.some(({ clipId }) => clipId === layer.clipId) ||
           !layer.retiming ||
           !validRetiming(layer.retiming) ||
-          !Number.isInteger(layer.retiming.sourceOriginNs) ||
+          !validSourceOrigin(layer.retiming) ||
           layer.timelineStartFrame !== ramp.startFrame ||
           layer.frameCount !== ramp.endFrame - ramp.startFrame ||
           layer.ramp.startFrame !== ramp.startFrame ||
@@ -718,6 +737,12 @@ async function prepareTimeline(
       windows.set(layer.clipId, ranges);
     }
   }
+  let input = 0;
+  const registerInput = (filename: string, write: StagedInput['write']) => {
+    const argumentIndex = args.push('-threads', '1', '-i', filename) - 1;
+    stagedInputs.push({ filename, argumentIndex, write });
+    return input++;
+  };
   const overlapsRange = (clip: VisualTimelineClip) =>
     clip.timelineStartFrame < endFrame &&
     clip.timelineStartFrame + clip.frameCount > startFrame;
@@ -725,18 +750,39 @@ async function prepareTimeline(
     (clip) => !clip.subtitle || overlapsRange(clip),
   );
   validateSubtitleBurnIn(visibleClips);
+  const pictureCache =
+    mode === 'mp4' && scratch ? options.pictureCache : undefined;
+  if (options.pictureCache) encoders.add('ffv1');
+  if (!pictureCache)
+    filters.push(
+      `color=c=${opaqueCanvasColor(options.backgroundColor ?? '#000000')}:s=${width}x${height}:r=${rate},` +
+        `format=rgba,trim=end_frame=${rangeFrameCount},settb=1/${numerator},setpts=(N+${startFrame})*${denominator}[canvas0]`,
+    );
   const heldFrames = new Map<string, HeldFrame>();
   const framesync = 'eof_action=pass:repeatlast=0';
   const holdLastFrame = 'repeatlast=1';
+  const transformsLayer = (clip: VisualTimelineClip) =>
+    !!(clip.grade || clip.crop) ||
+    usesLayerTransform(clip.rotation, !!clip.animation);
+  const rasterize = (
+    clip: VisualTimelineClip & { text: TextLayer },
+    transformed = transformsLayer(clip),
+  ) =>
+    (options.rasterizeText ?? rasterizeTextLayer)(
+      width,
+      height,
+      clip.text,
+      clip,
+      options.signal,
+      transformed,
+    );
   const prepareLayer = async (
     clip: VisualTimelineClip,
     label: string,
     scratchName: string,
     ramp?: TransitionRamp,
   ) => {
-    const transformed =
-      Boolean(ramp || clip.grade || clip.crop) ||
-      usesLayerTransform(clip.rotation, !!clip.animation);
+    const transformed = !!ramp || transformsLayer(clip);
     const first = Math.max(startFrame, clip.timelineStartFrame);
     const last = Math.min(endFrame, clip.timelineStartFrame + clip.frameCount);
     // Direct callers also validate off-range clips. Keep their full source
@@ -777,24 +823,14 @@ async function prepareTimeline(
       return { x: 0, y: 0, sync: hold ? holdLastFrame : framesync };
     };
     if (clip.text) {
-      const text = clip.text;
-      const rasterize = () =>
-        (options.rasterizeText ?? rasterizeTextLayer)(
-          width,
-          height,
-          text,
-          clip,
-          options.signal,
-          transformed,
-        );
       checkRenderSignal(options.signal);
-      const { x, y, png, warning } = await rasterize();
+      const { x, y, png, warning } = await rasterize(clip, transformed);
       checkRenderSignal(options.signal);
       if (warning) warnings.push(`Clip '${clip.clipId}': ${warning}`);
       if (!png) return;
       // Let the text raster cache own the bytes between preparation and staging.
       const readRaster = async () => {
-        const { png } = await rasterize();
+        const { png } = await rasterize(clip, transformed);
         if (!png)
           throw new MediaError(
             `Clip '${clip.clipId}' lost its text raster during export.`,
@@ -910,8 +946,8 @@ async function prepareTimeline(
     const { retiming } = clip;
     // Keep preroll timestamps so indexed and sequential decoding sample the
     // same source frame even across variable-frame-rate gaps.
-    const seekFrame =
-      (png || transformed) &&
+    const candidateSeekFrame =
+      (png || transformed || checkPictureSeek) &&
       !still &&
       !retiming &&
       inRange &&
@@ -920,7 +956,18 @@ async function prepareTimeline(
       /\.(mp4|mov)$/i.test(source.path)
         ? Math.max(0, sourceFirst - Math.ceil((2 * numerator) / denominator))
         : 0;
-    const seekSeconds = (seekFrame * denominator) / numerator;
+    const inputPath = held?.path ?? (await inputPathFor(source.path));
+    const seekSeconds = (candidateSeekFrame * denominator) / numerator;
+    const useIndexedSeek =
+      candidateSeekFrame > 0 &&
+      (!checkPictureSeek ||
+        (await checkPictureSeek(
+          inputPath,
+          stream,
+          seekSeconds,
+          sourceFirst,
+          frameRate,
+        )));
     const frameSampling = (indexed = false) =>
       `fps=${rate}${indexed ? '' : ':start_time=0'}:round=${retiming ? 'near' : 'up'}:eof_action=pass,tpad=stop_mode=clone:stop=1`;
     const sequentialSampling = `setpts=PTS-STARTPTS,${frameSampling()},trim=start_frame=${sourceFirst}:end_frame=${sourceFirst + layerFrames}`;
@@ -931,16 +978,20 @@ async function prepareTimeline(
       // Sample on the project grid before trimming. Two nanoseconds cover
       // PTS rounding and truncation of the shared source origin.
       const frameNs = `(1000000000*${denominator}/${numerator})`;
+      const origin = retiming.localSourceOriginNs ?? retiming.sourceOriginNs;
+      const start =
+        retiming.localSourceOriginNs === undefined
+          ? clip.timelineStartFrame
+          : 0;
       sampling =
         'setpts=PTS-STARTPTS,settb=1/1000000000,' +
-        `setpts=(ceil((PTS-(${retiming.sourceOriginNs})-2)*${retiming.speed.denominator}/${retiming.speed.numerator}/${frameNs})-${clip.timelineStartFrame})*${frameNs},` +
+        `setpts=(ceil((PTS-(${origin})-2)*${retiming.speed.denominator}/${retiming.speed.numerator}/${frameNs})-${start})*${frameNs},` +
         `${frameSampling()},trim=start_frame=${clipOffset}:end_frame=${clipOffset + layerFrames}`;
-    } else if (seekFrame) {
+    } else if (useIndexedSeek) {
       sampling = `${frameSampling(true)},trim=start_pts=${sourceFirst}:end_pts=${sourceFirst + layerFrames}`;
     } else {
       sampling = sequentialSampling;
     }
-    const inputPath = held?.path ?? (await inputPathFor(source.path));
     if (transformed) {
       return transform({
         kind: 'media',
@@ -955,7 +1006,7 @@ async function prepareTimeline(
         ...(!still && {
           sampling: {
             filter: sampling,
-            ...(seekFrame && {
+            ...(useIndexedSeek && {
               seek: {
                 seconds: seekSeconds,
                 fallbackFilter: sequentialSampling,
@@ -972,11 +1023,11 @@ async function prepareTimeline(
       rotated ? displayWidth : displayHeight,
       clip,
     );
-    if (seekFrame && !args.includes('-copyts')) args.push('-copyts');
+    if (useIndexedSeek && !args.includes('-copyts')) args.push('-copyts');
     args.push(
       '-threads',
       '1',
-      ...indexedSeekArgs(seekSeconds),
+      ...(useIndexedSeek ? indexedSeekArgs(seekSeconds) : []),
       '-i',
       inputPath,
     );
@@ -1009,7 +1060,7 @@ async function prepareTimeline(
     );
     canvas++;
   };
-  for (const [index, clip] of visibleClips.entries()) {
+  for (const [index, clip] of (pictureCache ? [] : visibleClips).entries()) {
     const label = `layer${index}`;
     // A transition can contribute even when its owner's base clip is off-range.
     const placement =
@@ -1051,8 +1102,68 @@ async function prepareTimeline(
       overlay(group, { x: 0, y: 0, sync: framesync }, gate);
     }
   }
+  let picture = `[canvas${canvas}]settb=1/${numerator},setpts=N*${denominator},scale=${outputWidth}:${outputHeight}:out_color_matrix=bt709,setsar=1`;
+  if (pictureCache) {
+    const checkSeek = pictureSeekCheck(options.signal);
+    const { concat, ranges } = await cachePicture({
+      options,
+      cache: pictureCache,
+      visualClips,
+      byOwner,
+      startFrame,
+      endFrame,
+      outputWidth,
+      outputHeight,
+      warnings,
+      rasterize,
+      encode: async (startFrame, endFrame, destination) => {
+        const staging = renderScratch(
+          options.output,
+          '.opencut-picture-',
+          options.scratchDirectory,
+        );
+        try {
+          const segment = await prepareTimeline(
+            {
+              ...options,
+              range: { startFrame, endFrame },
+              outputFrameRate: undefined,
+            },
+            'picture',
+            staging,
+            checkSeek,
+          );
+          await staging.stage(segment, options.signal);
+          await runMediaTool(
+            'ffmpeg',
+            [...segment.args, destination],
+            4 * 1024 * 1024,
+            600_000,
+            {
+              signal: options.signal,
+              writesFile: true,
+            },
+          );
+        } finally {
+          await staging.close();
+        }
+      },
+    });
+    prepared.pictureRanges = ranges;
+    args.push('-f', 'concat', '-safe', '0', '-protocol_whitelist', 'file');
+    const pictureInput = registerInput('picture.ffconcat', (destination) =>
+      writeFile(destination, concat, {
+        flag: 'wx',
+        signal: options.signal,
+      }),
+    );
+    // Concat transports pictures in order. Regenerate their timestamps on the
+    // project grid so container time bases and range boundaries cannot accrue drift.
+    picture = `[${pictureInput}:v]settb=1/${numerator},setpts=N*${denominator},setsar=1`;
+  }
   filters.push(
-    `[canvas${canvas}]settb=1/${numerator},setpts=N*${denominator},scale=${outputWidth}:${outputHeight}:out_color_matrix=bt709,setsar=1,` +
+    picture +
+      ',' +
       (options.outputFrameRate
         ? `fps=${outputRate.numerator}/${outputRate.denominator}:round=up:eof_action=pass,tpad=stop_mode=clone:stop=1,trim=end_frame=${outputFrameCount},settb=1/${outputRate.numerator},setpts=N*${outputRate.denominator},`
         : '') +
@@ -1060,7 +1171,7 @@ async function prepareTimeline(
         ? 'format=rgb24[video]'
         : 'format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709[video]'),
   );
-  if (png) {
+  if (mode !== 'mp4') {
     args.push(
       '-filter_complex_threads',
       '1',
@@ -1068,16 +1179,37 @@ async function prepareTimeline(
       filters.join(';'),
       '-map',
       '[video]',
-      '-an',
-      '-frames:v',
-      '1',
-      '-c:v',
-      'png',
-      '-threads',
-      '1',
-      '-f',
-      'image2',
     );
+    if (png)
+      args.push(
+        '-an',
+        '-frames:v',
+        '1',
+        '-c:v',
+        'png',
+        '-threads',
+        '1',
+        '-f',
+        'image2',
+      );
+    else
+      args.push(
+        '-map_metadata',
+        '-1',
+        '-an',
+        '-c:v',
+        'ffv1',
+        '-level',
+        '3',
+        '-threads',
+        '2',
+        '-fps_mode',
+        'passthrough',
+        '-enc_time_base:v',
+        `1/${numerator}`,
+        '-f',
+        'nut',
+      );
     return prepared;
   }
   // Round absolute project boundaries to the nearest 48 kHz sample. Never sum
@@ -1411,7 +1543,7 @@ async function prepareTimeline(
   return prepared;
 }
 
-/** Full preflight uses the exact same plan, media probes and filters as execution. */
+/** Validate the composition and required encoders without populating the picture cache. */
 export async function validateVideoTimeline(options: VideoTimelineOptions) {
   const prepared = await prepareTimeline(options);
   const encoders = (
@@ -1491,7 +1623,7 @@ export async function renderVideoTimeline(
     options.scratchDirectory,
   );
   try {
-    const prepared = await prepareTimeline(options, false, scratch);
+    const prepared = await prepareTimeline(options, 'mp4', scratch);
     await scratch.stage(prepared, options.signal);
     const {
       args,
@@ -1571,19 +1703,12 @@ export async function renderVideoTimeline(
     checkRenderSignal(options.signal);
     try {
       if (options.overwrite) {
-        const destination = await lstat(path).catch((error: unknown) => {
-          if (
-            error instanceof Error &&
-            'code' in error &&
-            error.code === 'ENOENT'
-          )
-            return null;
-          throw error;
-        });
+        const destination = await existingOutput(path);
         if (destination && !destination.isFile())
           throw new MediaError(
             `Refusing to overwrite non-regular output '${path}'.`,
           );
+        await protectSourceFiles(options, destination);
         checkRenderSignal(options.signal);
         // Same-filesystem rename replaces a complete file atomically.
         await rename(rendered, path);
@@ -1609,6 +1734,7 @@ export async function renderVideoTimeline(
       durationSeconds,
       metadata: { ...metadata, path },
       ...(warnings.length ? { warnings } : {}),
+      ...(prepared.pictureRanges && { pictureRanges: prepared.pictureRanges }),
     };
   } finally {
     await scratch.close();
@@ -1619,7 +1745,7 @@ export async function renderVideoTimeline(
 export async function renderTimelineFrame(options: VideoTimelineOptions) {
   const scratch = renderScratch(options.output, '.opencut-frame-');
   try {
-    const prepared = await prepareTimeline(options, true, scratch);
+    const prepared = await prepareTimeline(options, 'png', scratch);
     await scratch.stage(prepared, options.signal);
     const rendered = join(await scratch.open(), 'frame.png');
     await runMediaTool(
