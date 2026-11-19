@@ -1,5 +1,7 @@
 import { maximumVisualScale } from '@opencut/shared';
 import type {
+  AudioRole,
+  ProfessionalMix,
   RenderTimeMapping,
   TransitionRamp,
   VisualAnimation,
@@ -65,6 +67,7 @@ export interface ProjectRenderPlan {
   /** Bottom to top, by track array order, then timeline start. */
   visualClips: VisualRenderClip[];
   audioClips: AudioRenderClip[];
+  professionalMix?: ProfessionalMix;
   visualTransitions?: Array<{
     afterClipId: string;
     layers: Array<
@@ -74,6 +77,8 @@ export interface ProjectRenderPlan {
 }
 
 export interface AudioRenderClip {
+  trackId?: string;
+  role?: AudioRole;
   clipId: string;
   assetId: string;
   timelineStartFrame: number;
@@ -172,6 +177,9 @@ export function planProjectRender(
     );
   const visualClips: VisualRenderClip[] = [];
   const audioClips: AudioRenderClip[] = [];
+  const roles = new Map(
+    project.tracks.map((track) => [track.id, track.audioRole]),
+  );
   if (compareTimes(timeline.duration, { numerator: 600, denominator: 1 }) > 0)
     throw new RenderError(
       'Rendering supports at most 600 seconds. Shorten the timeline.',
@@ -258,7 +266,9 @@ export function planProjectRender(
             ? undefined
             : clip.id;
       previousMedia = clip;
+      const role = roles.get(clip.trackId);
       audioClips.push({
+        ...(role && { role, trackId: clip.trackId }),
         clipId: clip.id,
         assetId: clip.assetId,
         timelineStartFrame: start,
@@ -361,6 +371,9 @@ export function planProjectRender(
     backgroundColor: project.settings.backgroundColor ?? '#000000',
     visualClips,
     audioClips,
+    ...(project.professionalMix && {
+      professionalMix: project.professionalMix,
+    }),
     ...(visualTransitions.length && { visualTransitions }),
   };
 }

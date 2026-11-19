@@ -80,7 +80,11 @@ const track = trackSchema.omit({ id: true, name: true, type: true }).extend({
   id: entityIdSchema.optional(),
   name: trackSchema.shape.name.optional(),
 });
-const visualOnlyTrack = track.omit({ volume: true, muted: true });
+const visualOnlyTrack = track.omit({
+  volume: true,
+  muted: true,
+  audioRole: true,
+});
 const asset = assetSchema
   .pick({ name: true, freezeFrame: true, provenance: true })
   .partial()
@@ -127,6 +131,7 @@ export const videoDefinitionSchema = z.strictObject({
   subtitles: subtitles.optional(),
   transitions: z.array(transitionSchema).optional(),
   markers: z.array(markerSchema).optional(),
+  professionalMix: snapshotSchema.shape.professionalMix,
 });
 
 export type VideoDefinition = z.input<typeof videoDefinitionSchema>;

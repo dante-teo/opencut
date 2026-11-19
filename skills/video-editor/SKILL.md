@@ -63,3 +63,9 @@ discover commands and `opencut render --help` for export controls.
 Start with the [complete example and visual review loop](references/workflow.md).
 See [definition fields](references/video-definitions.md), the
 [CLI reference](references/cli.md), and [SDK usage](references/sdk.md).
+
+For dialogue cleanup and automatic music ducking, route audio or video tracks
+with `audioRole: 'dialogue'`, `'music'` or `'other'` and enable
+`professionalMix` in the definition. Use `opencut mix analyze <file.video.ts> --json`
+for editable curves and a loudness report before encoding picture. See the
+[mix definition, delivery presets and offline AI options](../../docs/AUDIO_MIX.md).

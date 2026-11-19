@@ -19,6 +19,11 @@ test('built desktop displays React through the sandboxed bridge', async () => {
       'exportDefinition',
       'cancelDefinitionExport',
       'onDefinitionExportProgress',
+      'createDialogueMix',
+      'applyDialogueMix',
+      'compareDialogueMix',
+      'loadDialogueMix',
+      'saveDialogueMix',
       'openDefinition',
       'closeDefinition',
       'onDefinitionChanged',
@@ -156,6 +161,9 @@ test('definition and local source actions stay reachable at supported window siz
       );
       await expect(
         page.getByRole('button', { name: 'Open definition' }),
+      ).toBeInViewport();
+      await expect(
+        page.getByRole('button', { name: 'Create dialogue mix' }),
       ).toBeInViewport();
       await expect(
         page.getByRole('button', { name: 'Open video' }),

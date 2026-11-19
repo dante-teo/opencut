@@ -308,6 +308,8 @@ the batch budgets evenly across active slots. Recipe overrides may lower a
 slot's limits. The temporary budget covers staging for recipes and renders,
 including copied sources, layer intermediates, and the unfinished MP4.
 Published outputs and completed cache entries consume persistent disk space.
+For Professional Dialogue Mix, DeepFilterNet counts toward the slot’s native RSS
+budget, and the temporary file-size limit applies while it writes its staged WAV.
 OpenCut samples native child-process RSS with its bundled, unprivileged
 sampler on macOS and with `/bin/ps` on Linux. It also caps FFmpeg
 allocation sizes. If sampling fails, the render or recipe stops and
@@ -362,3 +364,7 @@ temporal comparison scores differences between consecutive pictures against
 the same differences in the reference. Review the MP4s for motion artifacts.
 Check each case's `exitCode` in `benchmark.json`. The harness records diagnostics
 for unsuccessful cases and runs the rest of the matrix.
+
+## Professional Dialogue Mix
+
+Use `opencut mix analyze <definition.video.ts> --json` to obtain editable automation and measured loudness without rendering picture. `render`, `preview --watch` and `preview clip` use the mix authored in the definition. See [mix settings, overrides and comparison options](AUDIO_MIX.md#delivery-and-inspection).

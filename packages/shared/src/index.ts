@@ -251,3 +251,5 @@ export { transitionOpacity } from './transition.js';
 export type { TransitionRamp } from './transition.js';
 export { renderQualities, renderQualityProfiles } from './render-quality.js';
 export type { RenderQuality } from './render-quality.js';
+
+export * from './professional-mix.js';

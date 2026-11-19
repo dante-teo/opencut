@@ -23,6 +23,7 @@ export interface MediaToolControl {
   signal?: AbortSignal | undefined;
   onStdout?: (chunk: Buffer) => void;
   writesFile?: boolean;
+  onDiagnostics?: (diagnostics: string) => void;
 }
 
 export async function localFile(file: string): Promise<string> {
@@ -44,9 +45,9 @@ export async function sourceFileStamp(path: string) {
 }
 
 // execFile passes arguments directly, without shell expansion. Bound both runtime
-// and buffered output; close stdin so neither executable can wait for user input.
+// and buffered output, and close stdin so tools cannot wait for user input.
 export async function runMediaTool(
-  tool: 'ffprobe' | 'ffmpeg',
+  tool: string,
   args: string[],
   maxBuffer = 4 * 1024 * 1024,
   timeoutMs = 60_000,
@@ -103,7 +104,10 @@ export async function runMediaTool(
         if (error && 'code' in error && error.code === 'ENOENT') {
           reject(
             new MediaError(
-              `Required executable '${tool}' was not found on PATH. Install FFmpeg/ffprobe manually to use media commands.`,
+              `Required executable '${tool}' was not found on PATH.` +
+                (tool === 'ffmpeg' || tool === 'ffprobe'
+                  ? ' Install FFmpeg/ffprobe manually to use media commands.'
+                  : ''),
               { cause: error },
             ),
           );
@@ -121,7 +125,7 @@ export async function runMediaTool(
           );
           return;
         }
-        if (error || diagnostics) {
+        if (error || (diagnostics && !control?.onDiagnostics)) {
           reject(
             new MediaError(
               `${tool} failed: ${diagnostics || error?.message || 'unknown execution failure'}`,
@@ -130,7 +134,12 @@ export async function runMediaTool(
           );
           return;
         }
-        resolve(stdout);
+        try {
+          control?.onDiagnostics?.(diagnostics);
+          resolve(stdout);
+        } catch (cause) {
+          reject(cause);
+        }
       },
     );
     if (!closed)

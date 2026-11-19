@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { frameTime } from '@opencut/core';
 import type { DefinitionReview } from '../bridge.js';
 import { ProjectTimeline } from './project-timeline.js';
+import { DialogueMix } from './dialogue-mix.js';
 import { frameIndex } from './timeline-geometry.js';
 
 function DefinitionPlayback({
@@ -175,7 +176,23 @@ export function DefinitionWorkspace({
         )}
         {feedback.error && <pre role="alert">{feedback.error}</pre>}
       </div>
-      {current && <DefinitionPlayback key={state.path} revision={current} />}
+      {current && (
+        <>
+          <DefinitionPlayback key={state.path} revision={current} />
+          <details className="dialogue-mix" key={state.path}>
+            <summary>Professional Dialogue Mix</summary>
+            <DialogueMix
+              key={current.sourceRevision}
+              revision={current}
+              disabled={
+                progress !== null ||
+                status === 'compiling' ||
+                status === 'rendering'
+              }
+            />
+          </details>
+        </>
+      )}
     </div>
   );
 }

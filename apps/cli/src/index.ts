@@ -30,6 +30,7 @@ async function run(args: string[]) {
     case 'recipes validate':
     case 'validate':
     case 'inspect':
+    case 'mix analyze':
     case 'render': {
       const { runVideoCommand } = await import('./video.js');
       return runVideoCommand(command, file, values);

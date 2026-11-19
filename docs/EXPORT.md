@@ -29,3 +29,7 @@ Use `opencut subtitles export edit.video.ts --output captions.srt` for a
 sidecar. See the [definition format](VIDEO_DEFINITIONS.md) for supported
 effects and the [preview comparison](PREVIEW_EXPORT_CONSISTENCY.md) for
 sampling and playback limits.
+
+## Professional audio delivery
+
+Mix-enabled definitions measure and normalize the full composition before encoding. OpenCut checks the decoded AAC true peak before publishing the export. See [delivery targets and controls](AUDIO_MIX.md#delivery-and-inspection).

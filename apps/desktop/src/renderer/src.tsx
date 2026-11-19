@@ -50,7 +50,19 @@ function App() {
         <section className="workspace" aria-label="Review workspace">
           <div className="project-toolbar">
             <h1>Review</h1>
-            <button onClick={openDefinition}>Open definition</button>
+            <div className="project-actions">
+              <button onClick={openDefinition}>Open definition</button>
+              <button
+                onClick={() => {
+                  setDefinitionError('');
+                  void window.opencut
+                    .createDialogueMix()
+                    .catch((error: Error) => setDefinitionError(error.message));
+                }}
+              >
+                Create dialogue mix
+              </button>
+            </div>
           </div>
           <Preview />
         </section>

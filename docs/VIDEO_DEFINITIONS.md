@@ -530,3 +530,7 @@ under `project/`. Render the generated `opencut.bundle.video.ts` at the
 package root.
 A named font file travels with the bundle. The receiving machine supplies
 OpenCut, FFmpeg and any system AI backends required by the recipes.
+
+## Professional Dialogue Mix
+
+`professionalMix` enables dialogue cleanup, editable gain automation, music ducking and output loudness management. Set `audioRole` on audio or video tracks to route them as `dialogue`, `music` or `other`. See [settings and examples](AUDIO_MIX.md).

@@ -11,13 +11,14 @@ import {
 } from 'electron';
 import iconPath from '../../resources/opencut-icon.png?asset';
 import { randomUUID } from 'node:crypto';
-import { stat } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getApplicationInfo } from '@opencut/core';
 import {
   isVideoDefinitionPath,
   renderCompiledVideo,
+  videoMixEditSchema,
 } from '@opencut/core/video';
 import { probeMedia } from '@opencut/media';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -31,6 +32,7 @@ import {
   type DefinitionExportResult,
   type PreviewSource,
 } from '../bridge.js';
+import { createDialogueMixDefinition } from './create-dialogue-mix.js';
 import { servePreviewFile } from './preview-file.js';
 
 protocol.registerSchemesAsPrivileged([
@@ -283,6 +285,178 @@ app
             throw new Error('Choose a .video.ts file.');
           previewFile = null;
           definitionReview.open(path);
+        } finally {
+          selectingDefinition = false;
+        }
+      },
+    );
+    ipcMain.handle(
+      DEFINITION_CHANNELS.createMix,
+      async (event, ...args: unknown[]) => {
+        assertSender(event);
+        if (args.length) throw new Error('Unexpected mix arguments.');
+        if (
+          !mainWindow ||
+          selectingDefinition ||
+          openingPreview ||
+          definitionExport
+        )
+          return;
+        const window = mainWindow;
+        selectingDefinition = true;
+        const pickAudio = (title: string) =>
+          dialog.showOpenDialog(window, {
+            title,
+            properties: ['openFile', 'multiSelections'],
+            filters: [
+              {
+                name: 'Audio',
+                extensions: [
+                  'wav',
+                  'flac',
+                  'm4a',
+                  'mp3',
+                  'aac',
+                  'aiff',
+                  'ogg',
+                  'opus',
+                  'mp4',
+                  'mov',
+                ],
+              },
+            ],
+          });
+        try {
+          const { filePaths: voice, canceled } = await pickAudio(
+            'Choose dialogue recordings',
+          );
+          assertSender(event);
+          if (canceled || !voice.length) return;
+          const { filePaths: music } = await pickAudio(
+            'Choose background music (Cancel to skip)',
+          );
+          assertSender(event);
+          const { filePaths: picture } = await dialog.showOpenDialog(window, {
+            title: 'Choose video picture (Cancel to skip)',
+            properties: ['openFile'],
+            filters: [
+              { name: 'Video', extensions: ['mp4', 'mov', 'mkv', 'webm'] },
+            ],
+          });
+          assertSender(event);
+          const destination = await dialog.showSaveDialog(window, {
+            title: 'Save dialogue mix definition',
+            defaultPath: 'Dialogue Mix.video.ts',
+            filters: [{ name: 'Video definitions', extensions: ['ts'] }],
+          });
+          assertSender(event);
+          if (destination.canceled || !destination.filePath) return;
+          if (!isVideoDefinitionPath(destination.filePath))
+            throw new Error('Choose a new .video.ts filename.');
+          await createDialogueMixDefinition(
+            destination.filePath,
+            voice,
+            music,
+            picture[0],
+          );
+          assertSender(event);
+          previewFile = null;
+          definitionReview.open(destination.filePath);
+        } finally {
+          selectingDefinition = false;
+        }
+      },
+    );
+    ipcMain.handle(
+      DEFINITION_CHANNELS.applyMix,
+      async (event, ...args: unknown[]) => {
+        assertSender(event);
+        const [generation, edit] = args;
+        if (
+          args.length !== 2 ||
+          typeof generation !== 'number' ||
+          !Number.isSafeInteger(generation) ||
+          generation < 1
+        )
+          throw new Error('Expected a preview generation and mix settings.');
+        if (selectingDefinition || definitionExport)
+          throw new Error('Another review action is in progress.');
+        await definitionReview.applyMix(
+          generation,
+          edit === null ? null : videoMixEditSchema.parse(edit),
+        );
+      },
+    );
+    ipcMain.handle(
+      DEFINITION_CHANNELS.compareMix,
+      async (event, ...args: unknown[]) => {
+        assertSender(event);
+        const [generation, comparison] = args;
+        if (
+          args.length !== 2 ||
+          typeof generation !== 'number' ||
+          !Number.isSafeInteger(generation) ||
+          generation < 1 ||
+          (comparison !== 'after' && comparison !== 'before')
+        )
+          throw new Error('Expected a preview generation and comparison mode.');
+        if (selectingDefinition || definitionExport)
+          throw new Error('Another review action is in progress.');
+        await definitionReview.compareMix(generation, comparison);
+      },
+    );
+    ipcMain.handle(
+      DEFINITION_CHANNELS.saveMix,
+      async (event, ...args: unknown[]) => {
+        assertSender(event);
+        if (args.length !== 1)
+          throw new Error('Expected one set of mix settings.');
+        const edit = videoMixEditSchema.parse(args[0]);
+        if (!mainWindow || selectingDefinition || definitionExport) return null;
+        selectingDefinition = true;
+        try {
+          const destination = await dialog.showSaveDialog(mainWindow, {
+            title: 'Save mix settings',
+            defaultPath: 'mix.json',
+            filters: [{ name: 'Mix settings', extensions: ['json'] }],
+          });
+          assertSender(event);
+          if (destination.canceled || !destination.filePath) return null;
+          if (!destination.filePath.toLowerCase().endsWith('.json'))
+            throw new Error('Choose a new .json filename.');
+          await writeFile(
+            destination.filePath,
+            JSON.stringify(edit, null, 2) + '\n',
+            { flag: 'wx' },
+          );
+          return destination.filePath;
+        } finally {
+          selectingDefinition = false;
+        }
+      },
+    );
+    ipcMain.handle(
+      DEFINITION_CHANNELS.loadMix,
+      async (event, ...args: unknown[]) => {
+        assertSender(event);
+        if (args.length) throw new Error('Unexpected mix arguments.');
+        if (!mainWindow || selectingDefinition || definitionExport) return null;
+        selectingDefinition = true;
+        try {
+          const result = await dialog.showOpenDialog(mainWindow, {
+            title: 'Open mix settings',
+            properties: ['openFile'],
+            filters: [{ name: 'Mix settings', extensions: ['json'] }],
+          });
+          assertSender(event);
+          const [path] = result.filePaths;
+          if (result.canceled || !path) return null;
+          const file = await stat(path);
+          if (!file.isFile() || file.size > 16 * 1024 * 1024)
+            throw new Error('Choose a mix JSON file smaller than 16 MiB.');
+          return videoMixEditSchema.parse(
+            JSON.parse(await readFile(path, 'utf8')),
+          );
         } finally {
           selectingDefinition = false;
         }

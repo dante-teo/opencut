@@ -1,3 +1,4 @@
+import type { VideoMixEdit } from '@opencut/shared';
 import { realpath } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import {
@@ -39,6 +40,7 @@ export type VideoCompileOptions = Pick<
 > & {
   /** A JSON object validated by the TypeScript definition. */
   params?: unknown;
+  audioMixEdit?: VideoMixEdit | undefined;
 };
 
 type InputOptions = CompilationOptions &

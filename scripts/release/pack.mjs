@@ -93,7 +93,13 @@ async function packCli() {
       '[CLI reference](docs/CLI.md) · [TypeScript SDK](docs/SDK.md)\n',
   );
   mkdirSync(join(path, 'docs'));
-  for (const name of ['INSTALL', 'CLI', 'SDK', 'VIDEO_DEFINITIONS']) {
+  for (const name of [
+    'INSTALL',
+    'CLI',
+    'SDK',
+    'AUDIO_MIX',
+    'VIDEO_DEFINITIONS',
+  ]) {
     const file = 'docs/' + name + '.md';
     copyFileSync(join(root, file), join(path, file));
   }

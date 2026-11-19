@@ -115,7 +115,9 @@ gain. Audio-track entries retain trackType so consumers can require a stream.
 Unknown sources are candidates, not a guarantee of audible media. Metadata can be
 stale: adapters must probe actual streams. The evaluator does not normalize gains,
 limit samples, account for stream delays or claim that candidate-free audio is the
-only possible silence. Existing export sums gains and applies its safety limiter.
+only possible silence. The standard mix sums gains and applies a safety limiter.
+For Professional Dialogue Mix, the mix report includes the generated gain curves.
+See [Professional Dialogue Mix](AUDIO_MIX.md).
 
 ## Export integration and limits
 
@@ -130,7 +132,9 @@ each project frame's start.
 
 FFmpeg samples video at the project rate and loops still images. Export
 uses stream origins and rounds audio boundaries on a 48 kHz grid. Contiguous
-pieces of a retimed clip share a tempo pass before their per-clip effects.
+pieces of the same source with compatible speed and effects share a tempo pass.
+Professional Dialogue Mix cuts the resulting dialogue into clip-local segments
+for analysis and enhancement.
 See [preview and export consistency](PREVIEW_EXPORT_CONSISTENCY.md).
 
 `evaluateTimeline` and `evaluateTimelineFrame` validate and resolve a fresh snapshot

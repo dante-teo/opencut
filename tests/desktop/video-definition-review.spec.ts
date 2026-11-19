@@ -269,3 +269,96 @@ test('previews and exports a recipe-backed definition', async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('imports dialogue and music, compares the processed mix and exports through desktop', async () => {
+  test.setTimeout(90_000);
+  const directory = await mkdtemp(join(fixtureDirectory, 'desktop-mix-'));
+  const definition = join(directory, 'Desk mix.video.ts');
+  const output = join(directory, 'desktop.mp4');
+  const settings = join(directory, 'mix.json');
+  const source = join(fixtureDirectory, 'audio-tone.wav');
+  const { application, page } = await launchDesktop();
+  try {
+    await application.evaluate(
+      ({ dialog }, args) => {
+        dialog.showOpenDialog = async (...call: unknown[]) => {
+          const title =
+            (call.at(-1) as { title?: string } | undefined)?.title ?? '';
+          return title.startsWith('Choose dialogue') ||
+            title.startsWith('Choose background')
+            ? { canceled: false, filePaths: [args.source] }
+            : { canceled: true, filePaths: [] };
+        };
+        dialog.showSaveDialog = async (...call: unknown[]) => {
+          const title = (call.at(-1) as { title?: string } | undefined)?.title;
+          return {
+            canceled: false,
+            filePath:
+              title === 'Save dialogue mix definition'
+                ? args.definition
+                : title === 'Save mix settings'
+                  ? args.settings
+                  : args.output,
+          };
+        };
+      },
+      { source, definition, output, settings },
+    );
+    await page.getByRole('button', { name: 'Create dialogue mix' }).click();
+    const workspace = page.getByLabel('Definition review');
+    const status = workspace.getByRole('status', {
+      name: 'Compilation status',
+    });
+    await expect(status).toContainText('Preview ready', { timeout: 30_000 });
+    await workspace
+      .getByText('Professional Dialogue Mix', { exact: true })
+      .click();
+    const panel = workspace.getByLabel('Dialogue mix settings');
+    await expect(panel.getByLabel('Dialogue audio role')).toHaveValue(
+      'dialogue',
+    );
+    await expect(panel.getByLabel('Music audio role')).toHaveValue('music');
+    await panel.getByLabel('Preset').selectOption('clear-voiceover');
+    await panel.getByRole('button', { name: 'Apply to preview' }).click();
+    await expect(status).toContainText('Revision 2', { timeout: 30_000 });
+    await expect(panel.getByLabel('Preset')).toHaveValue('clear-voiceover');
+    await expect(panel.getByLabel('Mix loudness')).toContainText('After');
+    await panel.getByLabel('Preset').selectOption('natural-cinematic');
+    await panel.getByLabel('Enable mix').uncheck();
+    await panel.getByRole('button', { name: 'Compare before' }).click();
+    await expect(panel.getByLabel('Mix loudness')).toContainText(
+      'Before (level matched)',
+      { timeout: 30_000 },
+    );
+    await expect(panel.getByLabel('Preset')).toHaveValue('natural-cinematic');
+    await expect(panel.getByLabel('Enable mix')).not.toBeChecked();
+    await panel.getByRole('button', { name: 'Save mix settings' }).click();
+    await expect(panel.getByText(/^Saved /)).toContainText('mix.json');
+    const { mix, roles } = JSON.parse(await readFile(settings, 'utf8')) as {
+      mix: { preset: string; enabled: boolean };
+      roles: Record<string, string>;
+    };
+    expect(mix).toMatchObject({ preset: 'natural-cinematic', enabled: false });
+    expect(roles).toEqual({ dialogue: 'dialogue', music: 'music' });
+    await workspace.getByRole('button', { name: 'Export MP4' }).click();
+    await expect(workspace.getByLabel('Export result')).toContainText(
+      'desktop.mp4',
+      { timeout: 30_000 },
+    );
+    const direct = await renderVideo(definition, join(directory, 'sdk.mp4'), {
+      audioMixEdit: {
+        mix: { preset: 'clear-voiceover' },
+        roles: { dialogue: 'dialogue', music: 'music' },
+      },
+    });
+    await assertSimilarExports(output, direct.path, {
+      width: direct.width,
+      height: direct.height,
+      frameCount: direct.frameCount,
+      fps: 30,
+    });
+  } finally {
+    await application.close();
+    await rm(directory, { force: true, recursive: true });
+  }
+});

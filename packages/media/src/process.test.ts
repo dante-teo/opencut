@@ -196,39 +196,46 @@ describe('render subprocess lifecycle', () => {
     },
   );
 
-  it('continues sampling when the sampled PID has already exited', async () => {
-    vi.useFakeTimers();
-    try {
-      const child = pending();
-      vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
-        const callback = args[3] as (
-          error: Error | null,
-          output: string,
-          diagnostic: string,
-        ) => void;
-        const exited = vi.mocked(execFile).mock.calls.length === 2;
-        if (process.platform === 'darwin')
-          callback(null, exited ? '0' : '2048', '');
-        else if (exited)
-          callback(Object.assign(new Error('ps exited'), { code: 1 }), '', '');
-        else callback(null, '2', '');
-        return {} as ChildProcess;
-      });
-      const render = withRenderBudget(limits, () => runMediaTool('ffmpeg', []));
-      const outcome = render.catch((error: unknown) => error);
-      await vi.advanceTimersByTimeAsync(50);
-      expect(child.kill).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(50);
-      expect(child.kill).toHaveBeenCalledWith('SIGTERM');
-      child.close(new Error('terminated'));
-      expect(await outcome).toMatchObject({
-        message: 'Render exceeded its native memory budget.',
-      });
-      expect(vi.getTimerCount()).toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+  it.each(['ffmpeg', '/local/deep-filter'])(
+    'continues sampling %s when the sampled PID has already exited',
+    async (tool) => {
+      vi.useFakeTimers();
+      try {
+        const child = pending();
+        vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+          const callback = args[3] as (
+            error: Error | null,
+            output: string,
+            diagnostic: string,
+          ) => void;
+          const exited = vi.mocked(execFile).mock.calls.length === 2;
+          if (process.platform === 'darwin')
+            callback(null, exited ? '0' : '2048', '');
+          else if (exited)
+            callback(
+              Object.assign(new Error('ps exited'), { code: 1 }),
+              '',
+              '',
+            );
+          else callback(null, '2', '');
+          return {} as ChildProcess;
+        });
+        const render = withRenderBudget(limits, () => runMediaTool(tool, []));
+        const outcome = render.catch((error: unknown) => error);
+        await vi.advanceTimersByTimeAsync(50);
+        expect(child.kill).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(50);
+        expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+        child.close(new Error('terminated'));
+        expect(await outcome).toMatchObject({
+          message: 'Render exceeded its native memory budget.',
+        });
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it('rejects an invalid RSS sample and stops the child', async () => {
     vi.useFakeTimers();

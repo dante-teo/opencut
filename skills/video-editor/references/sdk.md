@@ -40,3 +40,7 @@ Use `packageVideo(definition, destination, { root, resources, params, signal })`
 `verifyVideoPackage(destination)` to share a project. Pass the verified
 result's `entry` to `renderVideo` after relocation; it is already resolved
 for the recorded parameters.
+
+Use `analyzeVideoMix(compiledVideo)` to obtain editable automation and measured final
+loudness. `compileVideo` and `renderVideo` accept `audioMixEdit`. Mix-enabled exports
+include `audioMix` in the result. See [Professional Dialogue Mix](../../../docs/AUDIO_MIX.md).

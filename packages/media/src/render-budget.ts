@@ -100,18 +100,21 @@ export function trackRenderProcess(
 
 /** Bound individual writes at the OS level before charging the finished file. */
 export function renderToolCommand(
-  tool: 'ffmpeg' | 'ffprobe',
+  tool: string,
   args: string[],
   writesFile = false,
 ) {
   const budget = storage.getStore();
   if (!budget) return { tool, args };
   if (budget.samplerFailure) throw budget.samplerFailure;
-  const bounded = [
-    '-max_alloc',
-    String(Math.min(budget.maxNativeBytes, 2_147_483_647)),
-    ...args,
-  ];
+  const bounded =
+    tool === 'ffmpeg' || tool === 'ffprobe'
+      ? [
+          '-max_alloc',
+          String(Math.min(budget.maxNativeBytes, 2_147_483_647)),
+          ...args,
+        ]
+      : args;
   if (!writesFile || budget.remainingBytes === undefined)
     return { tool, args: bounded };
   if (budget.remainingBytes < 1024)

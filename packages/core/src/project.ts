@@ -5,6 +5,7 @@ import { textLayerSchema } from './text-style.js';
 import { subtitleTrackSchema, validSubtitleWords } from './subtitles.js';
 import { visualKeyframesSchema, visualValueSchema } from './keyframes.js';
 import { clipDuration, clipSpeedSchema } from './clip-timing.js';
+import { audioRoleSchema, professionalMixSchema } from './professional-mix.js';
 import { clipAudioShape, resolveAudioFade, trackAudioShape } from './audio.js';
 import {
   addTimes,
@@ -102,6 +103,7 @@ export const trackSchema = z.strictObject({
   name: entityNameSchema,
   type: mediaType,
   ...trackAudioShape,
+  audioRole: audioRoleSchema.optional(),
 });
 export const clipVisualSchema = z.strictObject({
   crop: z
@@ -200,6 +202,7 @@ export const snapshotSchema = z.strictObject({
   subtitles: subtitleTrackSchema.optional(),
   transitions: z.array(transitionSchema).optional(),
   markers: z.array(markerSchema).optional(),
+  professionalMix: professionalMixSchema.optional(),
 });
 
 export type MediaReference = z.infer<typeof mediaReferenceSchema>;
@@ -343,6 +346,23 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
   }
   const assets = new Map(project.assets.map((asset) => [asset.id, asset]));
   const tracks = new Map(project.tracks.map((track) => [track.id, track]));
+  const mix = project.professionalMix;
+  const references = new Set(Object.keys(mix?.automation?.dialogue ?? {}));
+  const reference = mix?.matching?.referenceClip;
+  if (reference) references.add(reference);
+  for (const id of references) {
+    const clip = project.clips.find((clip) => clip.id === id);
+    if (
+      !clip ||
+      tracks.get(clip.trackId)?.audioRole !== 'dialogue' ||
+      clip.text
+    )
+      add(
+        '/professionalMix',
+        'invalid_audio_reference',
+        `Mix clip '${id}' must belong to a dialogue track.`,
+      );
+  }
   project.assets.forEach((asset, index) => {
     if (
       asset.freezeFrame &&

@@ -1,3 +1,8 @@
+import { prepareProfessionalMix } from './professional-mix.js';
+import type { AudioMixCache } from './professional-mix.js';
+import type { AudioMixReport } from './audio-mastering.js';
+import { audioSampleAtFrame, buildAudioGraph } from './audio-graph.js';
+import type { AudioRenderClip } from './audio-graph.js';
 import { decodeStillFrame } from './frame.js';
 import {
   canvasColorPattern,
@@ -6,10 +11,10 @@ import {
   sourceColorMatrix,
   usesLayerTransform,
   maximumVisualScale,
-  roomEchoes,
 } from '@opencut/shared';
 import type {
   RenderTimeMapping,
+  ProfessionalMix,
   TextLayer,
   VisualAnimation,
   TransitionRamp,
@@ -28,12 +33,7 @@ import {
 import { constants } from 'node:fs';
 import type { Stats } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
-import {
-  probeMedia,
-  isStillImage,
-  videoSourceDuration,
-  audioSourceDuration,
-} from './probe.js';
+import { probeMedia, isStillImage, videoSourceDuration } from './probe.js';
 import type { MediaMetadata } from './probe.js';
 import { checkRenderSignal, MediaError, runMediaTool } from './process.js';
 import { accountRenderBytes, accountRenderFile } from './render-budget.js';
@@ -107,15 +107,10 @@ export interface RenderControls {
   audioBitrateKbps?: number | undefined;
   audioSampleRate?: 44100 | 48000 | undefined;
   audioChannels?: 1 | 2 | undefined;
+  audioComparison?: 'before' | 'after' | undefined;
   overwrite?: boolean | undefined;
   signal?: AbortSignal | undefined;
   onProgress?: (progress: RenderProgress) => void;
-}
-
-interface RenderAudioFade {
-  duration: { numerator: number; denominator: number };
-  from: number;
-  to: number;
 }
 
 export interface VideoTimelineOptions extends RenderControls {
@@ -150,29 +145,9 @@ export interface VideoTimelineOptions extends RenderControls {
         frameCount: number;
       }
   >;
-  audioClips?: Array<{
-    clipId: string;
-    path: string;
-    timelineStartFrame: number;
-    sourceStartFrame: number;
-    frameCount: number;
-    retiming?: RenderTimeMapping;
-    tempoRunId?: string;
-    volume: number;
-    muted: boolean;
-    fadeIn?: RenderAudioFade;
-    fadeOut?: RenderAudioFade;
-    gainKeys?: { time: Rational; value: number }[];
-    effects?: Array<
-      | { type: 'eq'; frequency: number; db: number }
-      | { type: 'compressor'; threshold: number; ratio: number }
-      | { type: 'limiter'; ceiling: number }
-      | { type: 'de-esser'; amount: number }
-      | { type: 'reverb'; mix: number }
-    >;
-    required: boolean;
-    padAudio?: true;
-  }>;
+  audioClips?: AudioRenderClip[];
+  professionalMix?: ProfessionalMix;
+  audioMixCache?: AudioMixCache;
   output: string;
 }
 
@@ -189,6 +164,7 @@ export interface VideoTimelineResult {
   metadata: MediaMetadata;
   warnings?: string[];
   pictureRanges?: PictureRange[];
+  audioMix?: AudioMixReport;
 }
 
 function validateOptions(options: VideoTimelineOptions): void {
@@ -292,27 +268,6 @@ function validateOptions(options: VideoTimelineOptions): void {
 }
 
 type Rational = RenderTimeMapping['sourceIn'];
-
-function gainExpression(keys: { sample: number; value: number }[]) {
-  const first = keys[0]!;
-  const intervals = [{ end: first.sample, value: String(first.value) }];
-  for (let i = 1; i < keys.length; i++) {
-    const left = keys[i - 1]!;
-    const right = keys[i]!;
-    if (right.sample > left.sample)
-      intervals.push({
-        end: right.sample,
-        value: `${left.value}+(${right.value}-${left.value})*(n-${left.sample})/${right.sample - left.sample}`,
-      });
-  }
-  intervals.push({ end: Infinity, value: String(keys.at(-1)!.value) });
-  function build(start: number, end: number): string {
-    if (end - start === 1) return intervals[start]!.value;
-    const middle = Math.floor((start + end) / 2);
-    return `if(lt(n,${intervals[middle - 1]!.end}),${build(start, middle)},${build(middle, end)})`;
-  }
-  return build(0, intervals.length);
-}
 
 function validRational(time: Rational | undefined): time is Rational {
   return (
@@ -673,6 +628,7 @@ async function prepareTimeline(
     stagedInputs,
     encoders,
     pictureRanges: undefined as PictureRange[] | undefined,
+    audioMix: undefined as AudioMixReport | undefined,
   };
   const filters: string[] = [];
   const sources = new Map(options.sourceMetadata);
@@ -1212,265 +1168,51 @@ async function prepareTimeline(
       );
     return prepared;
   }
-  // Round absolute project boundaries to the nearest 48 kHz sample. Never sum
-  // independently rounded durations: fractional frame rates must not accumulate drift.
-  const sample = (
-    frame: number,
-    rate = frameRate,
-    offset?: RenderAudioFade['duration'],
-    sign = 1n,
-  ) => {
-    const scale = BigInt(offset?.denominator ?? 1);
-    const divisor = BigInt(rate.numerator) * scale;
-    const n =
-      (BigInt(frame) * BigInt(rate.denominator) * scale +
-        sign * BigInt(offset?.numerator ?? 0) * BigInt(rate.numerator)) *
-      48000n;
-    return Number((2n * n + divisor) / (2n * divisor));
-  };
-  const sampleTime = (time: Rational, offset?: Rational, sign = 1n) =>
-    sample(
-      time.numerator,
-      { numerator: time.denominator, denominator: 1 },
-      offset,
-      sign,
+  const from = audioSampleAtFrame(startFrame, frameRate);
+  const to = options.range
+    ? from + audioSampleAtFrame(outputFrameCount, outputRate)
+    : audioSampleAtFrame(outputFrameCount, outputRate);
+  const mix = options.professionalMix;
+  let audioMap = '[audio]';
+  if (mix && mix.enabled !== false && scratch) {
+    const result = await prepareProfessionalMix(
+      options,
+      mix,
+      await scratch.open(),
+      readSource,
+      {
+        base: audioSampleAtFrame(frameCount, frameRate),
+        from,
+        to,
+      },
     );
-  const totalSamples = options.range
-    ? sample(frameCount)
-    : sample(outputFrameCount, outputRate);
-  const audioLabels = ['[silence]'];
-  filters.push(
-    `anullsrc=r=48000:cl=stereo,atrim=end_sample=${totalSamples},asettb=1/48000,asetpts=N[silence]`,
-  );
-  type AudioClip = NonNullable<VideoTimelineOptions['audioClips']>[number];
-  const timelineSample = (
-    clip: AudioClip,
-    edge: 'start' | 'end',
-    fade?: Rational,
-  ) => {
-    const sign = edge === 'start' ? 1n : -1n;
-    if (clip.retiming) {
-      const time =
-        edge === 'start'
-          ? clip.retiming.timelineStart
-          : clip.retiming.timelineEnd;
-      return sampleTime(time, fade, sign);
-    }
-    const frame =
-      clip.timelineStartFrame + (edge === 'start' ? 0 : clip.frameCount);
-    return sample(frame, frameRate, fade, sign);
-  };
-  const effectChain = (clip: AudioClip, count: number) => {
-    const filters: string[] = [];
-    const linear = (db: number) => 10 ** (db / 20);
-    for (const effect of clip.effects ?? []) {
-      switch (effect.type) {
-        case 'eq':
-          filters.push(
-            `equalizer=f=${effect.frequency}:width_type=q:w=1:g=${effect.db}`,
-          );
-          break;
-        case 'compressor':
-          filters.push(
-            `acompressor=threshold=${linear(effect.threshold)}:ratio=${effect.ratio}:attack=5:release=100`,
-          );
-          break;
-        case 'limiter':
-          filters.push(
-            `alimiter=limit=${linear(effect.ceiling)}:level=0:latency=1`,
-          );
-          break;
-        case 'de-esser':
-          if (effect.amount)
-            filters.push(`deesser=i=${effect.amount}:m=0.5:f=0.5`);
-          break;
-        case 'reverb':
-          if (effect.mix)
-            filters.push(
-              `aecho=1:1:${roomEchoes.map((echo) => echo.seconds * 1000).join('|')}:${roomEchoes.map((echo) => echo.gain * effect.mix).join('|')}`,
-              `atrim=end_sample=${count}`,
-            );
-          break;
-      }
-    }
-    return filters.length ? filters.join(',') + ',' : '';
-  };
-  const envelope = (clip: AudioClip, start: number, end: number) => {
-    const filters: string[] = [];
-    if (clip.fadeIn) {
-      const length =
-        timelineSample(clip, 'start', clip.fadeIn.duration) - start;
-      if (length > 0)
-        filters.push(
-          `afade=t=in:ss=0:ns=${length}:c=tri:silence=${clip.fadeIn.from}:unity=${clip.fadeIn.to}`,
-        );
-    }
-    if (clip.fadeOut) {
-      const release = timelineSample(clip, 'end', clip.fadeOut.duration);
-      if (end > release)
-        filters.push(
-          `afade=t=out:ss=${release - start}:ns=${end - release}:c=tri:silence=${clip.fadeOut.to}:unity=${clip.fadeOut.from}`,
-        );
-    }
-    filters.push(`volume=${clip.muted ? 0 : clip.volume}`);
-    if (clip.gainKeys?.length) {
-      const keys = clip.gainKeys.map(({ time, value }) => ({
-        sample: timelineSample(clip, 'start', time) - start,
-        value,
-      }));
-      const expression = gainExpression(keys);
-      filters.push(
-        `aeval='val(0)*${expression}|val(1)*${expression}':c=stereo`,
-      );
-    }
-    return filters.join(',');
-  };
-  const runs: AudioClip[][] = [];
-  for (const clip of options.audioClips ?? []) {
-    const run = runs.at(-1);
-    const previous = run?.at(-1);
-    if (
-      run &&
-      previous?.retiming &&
-      clip.retiming &&
-      clip.tempoRunId !== undefined &&
-      clip.tempoRunId === previous.tempoRunId &&
-      clip.path === previous.path &&
-      clip.required === previous.required &&
-      clip.padAudio === previous.padAudio &&
-      JSON.stringify(clip.effects ?? []) ===
-        JSON.stringify(previous.effects ?? []) &&
-      timeDifference(
-        previous.retiming.timelineEnd,
-        clip.retiming.timelineStart,
-      ) === 0n &&
-      timeDifference(previous.retiming.sourceOut, clip.retiming.sourceIn) ===
-        0n &&
-      timeDifference(previous.retiming.speed, clip.retiming.speed) === 0n
-    )
-      run.push(clip);
-    else runs.push([clip]);
+    prepared.audioMix = result.report;
+    warnings.push(...result.report.warnings);
+    args.push('-i', result.path);
+    audioMap = `${input++}:a:0`;
+  } else {
+    await buildAudioGraph(
+      options,
+      {
+        filters,
+        readSource,
+        inputPathFor,
+        openInput: (clip, path) => {
+          const existing = inputs.get(clip.clipId);
+          if (existing !== undefined) return existing;
+          args.push('-threads', '1', '-i', path);
+          return input++;
+        },
+      },
+      {
+        total: options.range
+          ? audioSampleAtFrame(frameCount, frameRate)
+          : audioSampleAtFrame(outputFrameCount, outputRate),
+        from,
+        to: options.range ? audioSampleAtFrame(endFrame, frameRate) : to,
+      },
+    );
   }
-  for (const [index, run] of runs.entries()) {
-    const first = run[0]!;
-    const last = run.at(-1)!;
-    const source = await readSource(first);
-    const { audio, video } = source;
-    if (!audio) {
-      if (first.required)
-        throw new MediaError(
-          `Clip '${first.clipId}' requires an audio stream. Re-import or relink the audio asset.`,
-        );
-      continue;
-    }
-    const origin =
-      video?.startTimeSeconds ??
-      audio.startTimeSeconds ??
-      source.startTimeSeconds ??
-      0;
-    const offset = (audio.startTimeSeconds ?? origin) - origin;
-    const duration = audioSourceDuration(source);
-    if (
-      last.required &&
-      !last.padAudio &&
-      (duration === null ||
-        (last.retiming
-          ? seconds(last.retiming.sourceOut)
-          : ((last.sourceStartFrame + last.frameCount) * denominator) /
-            numerator) >
-          duration + 0.000001)
-    )
-      throw new MediaError(
-        `Clip '${last.clipId}' source out exceeds the current audio duration or its duration is unknown. Re-import the media and trim to a known audio range.`,
-      );
-    const pieces = run
-      .map((clip) => ({
-        clip,
-        start: timelineSample(clip, 'start'),
-        end: timelineSample(clip, 'end'),
-      }))
-      .filter(({ start, end }) => end > start);
-    if (!pieces.some(({ clip }) => !clip.muted && clip.volume > 0)) continue;
-
-    const start = pieces[0]!.start;
-    const count = pieces.at(-1)!.end - start;
-    const sourceStart = first.retiming
-      ? sampleTime(first.retiming.sourceIn)
-      : sample(first.sourceStartFrame);
-    const sourceEnd = last.retiming
-      ? sampleTime(last.retiming.sourceOut)
-      : sourceStart + count;
-    if (sourceEnd <= sourceStart) continue;
-    let audioInput = inputs.get(first.clipId);
-    if (audioInput === undefined) {
-      audioInput = input++;
-      args.push('-threads', '1', '-i', await inputPathFor(source.path));
-    }
-    const speed = first.retiming ? seconds(first.retiming.speed) : 1;
-    // Keep one tempo filter across contiguous pieces. Only the run tail needs
-    // padding to drain the tempo window, and each atempo pass stays within 0.5–2.
-    const tempo =
-      speed === 1
-        ? ''
-        : 'apad=pad_len=4800,' +
-          (speed < 0.5
-            ? `atempo=0.5,atempo=${speed * 2},`
-            : speed > 2
-              ? `atempo=2,atempo=${speed / 2},`
-              : `atempo=${speed},`);
-    const fitDuration = first.retiming
-      ? `apad,atrim=end_sample=${count},asettb=1/48000,asetpts=N,`
-      : '';
-    const inputFilter =
-      `[${audioInput}:${audio.index}]asetpts=PTS-STARTPTS+(${offset.toFixed(9)})/TB,` +
-      'aresample=48000:async=1:min_hard_comp=0:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,' +
-      `apad,atrim=start_sample=${sourceStart}:end_sample=${sourceEnd},asettb=1/48000,asetpts=N,` +
-      tempo +
-      fitDuration +
-      effectChain(first, count);
-    const delay = `adelay=${start}S:all=1[a${index}]`;
-    if (pieces.length === 1) {
-      const piece = pieces[0]!;
-      filters.push(
-        inputFilter +
-          envelope(piece.clip, piece.start, piece.end) +
-          ',' +
-          delay,
-      );
-    } else {
-      // Route each sample to its piece once, apply that piece's envelope, then
-      // join on the sample clock before mixing with other tracks.
-      const labels = pieces.map((_, i) => `[run${index}p${i}]`);
-      const boundaries = pieces.slice(1).map((piece) => piece.start - start);
-      filters.push(
-        inputFilter +
-          `asegment=samples=${boundaries.join('|')}` +
-          labels.join(''),
-      );
-      const adjusted = pieces.map((piece, i) => {
-        const label = `[run${index}g${i}]`;
-        filters.push(
-          labels[i]! +
-            'asettb=1/48000,asetpts=N,' +
-            envelope(piece.clip, piece.start, piece.end) +
-            label,
-        );
-        return label;
-      });
-      filters.push(
-        adjusted.join('') +
-          `concat=n=${pieces.length}:v=0:a=1,asettb=1/48000,asetpts=N,` +
-          delay,
-      );
-    }
-    audioLabels.push(`[a${index}]`);
-  }
-  // Stable linear gains, independent of the number of active sources. Match the
-  // existing composer limiter, including latency compensation for sync markers.
-  filters.push(
-    `${audioLabels.join('')}amix=inputs=${audioLabels.length}:duration=first:normalize=0,` +
-      `alimiter=limit=0.95:level=0:latency=1,atrim=start_sample=${sample(startFrame)}:end_sample=${options.range ? sample(endFrame) : totalSamples},asettb=1/48000,asetpts=N[audio]`,
-  );
   checkRenderSignal(options.signal);
   const metadataInput = options.buildMetadata === undefined ? -1 : input;
   if (options.buildMetadata !== undefined) {
@@ -1498,7 +1240,7 @@ async function prepareTimeline(
     '-map',
     '[video]',
     '-map',
-    '[audio]',
+    audioMap,
     '-map_metadata',
     String(metadataInput),
     '-c:v',
@@ -1527,14 +1269,18 @@ async function prepareTimeline(
     'bt709',
     '-video_track_timescale',
     String(outputRate.numerator),
-    '-c:a',
-    'aac',
-    '-b:a',
-    `${audioBitrateKbps}k`,
-    '-ar',
-    String(audioSampleRate),
-    '-ac',
-    String(audioChannels),
+    ...(prepared.audioMix
+      ? ['-c:a', 'copy']
+      : [
+          '-c:a',
+          'aac',
+          '-b:a',
+          `${audioBitrateKbps}k`,
+          '-ar',
+          String(audioSampleRate),
+          '-ac',
+          String(audioChannels),
+        ]),
     '-movflags',
     metadataInput < 0 ? '+faststart' : '+faststart+use_metadata_tags',
     '-f',
@@ -1735,7 +1481,42 @@ export async function renderVideoTimeline(
       metadata: { ...metadata, path },
       ...(warnings.length ? { warnings } : {}),
       ...(prepared.pictureRanges && { pictureRanges: prepared.pictureRanges }),
+      ...(prepared.audioMix && { audioMix: prepared.audioMix }),
     };
+  } finally {
+    await scratch.close();
+  }
+}
+
+/** Analyze and verify a mix without composing or encoding picture. */
+export async function analyzeTimelineAudioMix(options: VideoTimelineOptions) {
+  validateOptions(options);
+  const mix = options.professionalMix;
+  if (!mix || mix.enabled === false)
+    throw new MediaError('Enable Professional Dialogue Mix before analyzing.');
+  const scratch = renderScratch(
+    options.output,
+    '.opencut-mix-',
+    options.scratchDirectory,
+  );
+  try {
+    const base = audioSampleAtFrame(options.frameCount, options.frameRate);
+    const sources = new Map(options.sourceMetadata);
+    const result = await prepareProfessionalMix(
+      options,
+      mix,
+      await scratch.open(),
+      async ({ path }) => {
+        let metadata = sources.get(path);
+        if (!metadata) {
+          metadata = await probeMedia(path, options.signal);
+          sources.set(path, metadata);
+        }
+        return metadata;
+      },
+      { base, from: 0, to: base },
+    );
+    return result.report;
   } finally {
     await scratch.close();
   }

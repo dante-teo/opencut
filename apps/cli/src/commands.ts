@@ -14,6 +14,9 @@ const optionTypes = {
   ...processingOptionTypes,
   ...renderOptionTypes,
   'picture-cache': { type: 'string' },
+  'mix-settings': { type: 'string' },
+  'mix-comparison': { type: 'string' },
+  'mix-cache': { type: 'string' },
   output: { type: 'string', short: 'o' },
   root: { type: 'string' },
   resource: { type: 'string', multiple: true },
@@ -45,7 +48,22 @@ const params = '[--params <params.json>]';
 const position = '(--frame <n> | --timestamp <time>)';
 const previewOptions = ['quality', ...Object.keys(processingOptionTypes)];
 
+const mixOptions = ['mix-settings', 'mix-comparison', 'mix-cache'];
+const mixUsage =
+  '[--mix-settings <mix.json>] [--mix-comparison <before|after>] [--mix-cache <directory>]';
+
 const commands = {
+  'mix analyze': {
+    args: `${definition} ${mixUsage} ${params}`,
+    options: [
+      'params',
+      'audio-rate',
+      'audio-channels',
+      'audio-bitrate',
+      ...mixOptions,
+      ...Object.keys(processingOptionTypes),
+    ],
+  },
   package: {
     args: `${definition} --output <new-directory> [--root <directory>] [--resource <path> ...] ${params}`,
     options: ['output', 'root', 'resource', 'params'],
@@ -76,11 +94,12 @@ const commands = {
     options: ['frame', 'timestamp', 'quality', 'params'],
   },
   render: {
-    args: `${definition} --output <new.mp4> [--picture-cache <directory>] ${qualityOption} ${params}`,
+    args: `${definition} --output <new.mp4> [--picture-cache <directory>] ${qualityOption} ${mixUsage} ${params}`,
     options: [
       'output',
       'params',
       'picture-cache',
+      ...mixOptions,
       ...Object.keys(renderOptionTypes),
       ...Object.keys(processingOptionTypes),
     ],
@@ -102,8 +121,8 @@ const commands = {
     ],
   },
   preview: {
-    args: `${definition} --watch [--size <64..1920>] ${qualityOption}`,
-    options: ['watch', 'size', ...previewOptions],
+    args: `${definition} --watch [--size <64..1920>] ${qualityOption} ${mixUsage}`,
+    options: ['watch', 'size', ...previewOptions, ...mixOptions],
   },
   'preview frame': {
     args: `${definition} ${position} --output <new.png> [--size <64..1920>] ${qualityOption} ${params}`,
@@ -117,8 +136,16 @@ const commands = {
     ],
   },
   'preview clip': {
-    args: `${definition} --from <n> --to <n> --output <new.mp4> [--size <64..1920>] ${qualityOption} ${params}`,
-    options: ['from', 'to', 'output', 'size', 'params', ...previewOptions],
+    args: `${definition} --from <n> --to <n> --output <new.mp4> [--size <64..1920>] ${qualityOption} ${mixUsage} ${params}`,
+    options: [
+      'from',
+      'to',
+      'output',
+      'size',
+      'params',
+      ...previewOptions,
+      ...mixOptions,
+    ],
   },
   'preview contact-sheet': {
     args: `${definition} --output <new.png> [--from <n>] [--to <n>] [--count <1..16>] [--columns <1..16>] [--size <64..640>] ${qualityOption} ${params}`,

@@ -12,6 +12,7 @@ import { commandUsage, type CommandOptions } from './commands.js';
 import { UsageError } from './usage.js';
 import { withCommandCancellation } from './cancellation.js';
 import { readParams } from './json-argument.js';
+import { readMixControls } from './mix-options.js';
 import { loadVideo } from './video.js';
 
 function printWatchStatus(
@@ -76,6 +77,7 @@ export async function runInspectionCommand(
       throw new UsageError('--size must be between 64 and 1920.');
     return withCommandCancellation(async (signal) => {
       const watcher = await watchVideo(file, {
+        ...(await readMixControls(values, signal)),
         maxDimension,
         quality,
         processing,
@@ -150,7 +152,12 @@ export async function runInspectionCommand(
       : undefined;
   const requestedTo = command === 'preview clip' ? integer('to') : undefined;
   await withCommandCancellation(async (signal) => {
+    const { audioMixEdit, ...mixControls } = await readMixControls(
+      values,
+      signal,
+    );
     const video = await loadVideo(file, {
+      audioMixEdit,
       signal,
       preview: true,
       quality,
@@ -178,6 +185,7 @@ export async function runInspectionCommand(
             })
           : await tools.clip({ startFrame, endFrame }, values.output!, {
               ...options,
+              ...mixControls,
               onProgress: (progress) =>
                 process.stderr.write(
                   values.json

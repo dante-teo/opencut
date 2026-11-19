@@ -64,3 +64,21 @@ export type {
 export { packageVideo, verifyVideoPackage } from './video-package.js';
 export type { VideoPackageOptions } from './video-package.js';
 export type { VideoPackageManifest } from './video-package-format.js';
+
+export { analyzeVideoMix } from './video-audio-mix.js';
+export type { AudioMixAnalysisOptions } from './video-audio-mix.js';
+export {
+  audioRoleSchema,
+  professionalMixSchema,
+  videoMixEditSchema,
+} from './professional-mix.js';
+export type {
+  AudioRole,
+  DeliveryPreset,
+  DialoguePreset,
+  MixAutomation,
+  MixGainPoint,
+  ProfessionalMix,
+  VideoMixEdit,
+} from '@opencut/shared';
+export type { AudioMixReport } from '@opencut/media';

@@ -1,3 +1,5 @@
+import type { VideoMixEdit } from '@opencut/shared';
+import { videoMixEditSchema } from './professional-mix.js';
 import { createHash } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import {
@@ -63,7 +65,10 @@ type FontStyle = {
   font?: string | undefined;
   embeddedFont?: string | null | undefined;
 };
-export type CompilationOptions = VideoAssetOptions & { preview?: boolean };
+export type CompilationOptions = VideoAssetOptions & {
+  preview?: boolean;
+  audioMixEdit?: VideoMixEdit | undefined;
+};
 
 const epoch = '1970-01-01T00:00:00.000Z';
 
@@ -74,6 +79,7 @@ export interface CompiledVideo {
   readonly project: Project;
   readonly frameCount: number;
   readonly recipes: readonly VideoRecipeInspection[];
+  readonly audioMixEdit?: VideoMixEdit;
   forQuality(
     quality: RenderQuality,
     preview: boolean,
@@ -106,6 +112,10 @@ export async function compileDefinition(
       'Choose fast, quality, or maximum render quality.',
     );
   const definition = freeze(parseVideoDefinition(value));
+  const audioMixEdit =
+    options.audioMixEdit === undefined
+      ? undefined
+      : freeze(videoMixEditSchema.parse(options.audioMixEdit));
   const recipeSteps: VideoBuild['processing']['steps'][number][] = [];
   const { processing, probes = new Map() } = options;
   const authoredFiles = [
@@ -136,6 +146,7 @@ export async function compileDefinition(
     {
       ...options,
       quality,
+      audioMixEdit,
       probes,
       ...(getBuild && {
         processing: {
@@ -196,6 +207,7 @@ export async function compileDefinition(
     path,
     ...(build && { build: freeze(build) }),
     project: freeze(project),
+    ...(audioMixEdit && { audioMixEdit }),
     frameCount: renderPlan.frameCount,
     recipes: freeze(recipes),
     async forQuality(
@@ -228,6 +240,7 @@ export async function compileDefinition(
               processing,
               probes,
               pinnedSources,
+              audioMixEdit,
               ...(recovery && { recovery }),
             },
             getBuild,
@@ -253,7 +266,7 @@ async function buildProject(
   definition: ParsedVideoDefinition,
   options: CompilationOptions,
 ) {
-  const { signal, inputs } = options;
+  const { signal, inputs, audioMixEdit } = options;
   const {
     canvas,
     assets = {},
@@ -265,6 +278,9 @@ async function buildProject(
     transitions,
     markers,
   } = definition;
+  const professionalMix = audioMixEdit
+    ? audioMixEdit.mix
+    : definition.professionalMix;
   const { frameRate: authoredRate, ...settings } = canvas;
   const frameRate =
     typeof authoredRate === 'number'
@@ -278,6 +294,7 @@ async function buildProject(
     clips: [],
     transitions,
     markers,
+    ...(professionalMix && { professionalMix }),
   };
 
   const resolveFont = await loadFonts(
@@ -308,8 +325,16 @@ async function buildProject(
   for (const [trackIndex, track] of tracks.entries()) {
     const { id, name, type, clips, ...properties } = track;
     const trackId = id ?? generatedTrackId(track, occurrences);
+    const roles = audioMixEdit?.roles;
+    const role =
+      roles && Object.hasOwn(roles, trackId) ? roles[trackId] : undefined;
+    if (role && type !== 'audio' && type !== 'video')
+      throw new VideoDefinitionError(
+        `Track '${trackId}' does not support audio routing.`,
+      );
     project.tracks.push({
       ...properties,
+      ...(role && { audioRole: role }),
       id: trackId,
       name: name ?? type,
       type: type === 'audio' ? 'audio' : 'video',
@@ -344,6 +369,9 @@ async function buildProject(
     }
   }
 
+  for (const id of Object.keys(audioMixEdit?.roles ?? {}))
+    if (!project.tracks.some((track) => track.id === id))
+      throw new VideoDefinitionError(`Unknown audio track '${id}'.`);
   const clipAssets = new Set(
     project.clips.flatMap(({ assetId }) => (assetId ? [assetId] : [])),
   );

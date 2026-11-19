@@ -21,6 +21,7 @@ export type { FrameResult } from './frame.js';
 export {
   renderVideoTimeline,
   renderTimelineFrame,
+  analyzeTimelineAudioMix,
   validateVideoTimeline,
   validateSubtitleBurnIn,
   renderCodecs,
@@ -63,3 +64,6 @@ export { hostRenderResources, sampleMemoryPressure } from './host-resources.js';
 
 export { interpolationBackendId } from './interpolate.js';
 export { enhancementBackendId } from './enhance.js';
+
+export type { AudioMixReport, LoudnessMeasurement } from './audio-mastering.js';
+export type { AudioMixCache } from './professional-mix.js';

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { watchVideo } from '@opencut/core/video';
+import type { VideoMixEdit } from '@opencut/core/video';
 import type { DefinitionReview } from '../bridge.js';
 
 export class DefinitionReviewSession {
@@ -42,6 +43,9 @@ export class DefinitionReviewSession {
                 sourceRevision: current.sourceRevision,
                 project: current.video.project,
                 frameCount: current.video.frameCount,
+                ...(current.playback.audioMix && {
+                  audioMix: current.playback.audioMix,
+                }),
                 url,
               };
             }
@@ -66,6 +70,22 @@ export class DefinitionReviewSession {
             error: error instanceof Error ? error.message : String(error),
           });
       }
+    });
+  }
+
+  async applyMix(generation: number, edit: VideoMixEdit | null) {
+    const watcher = this.watcher;
+    if (!watcher) throw new Error('Open a definition with a valid preview.');
+    await watcher.withCurrent(generation, async () => {
+      watcher.setAudioMix(edit ?? undefined);
+    });
+  }
+
+  async compareMix(generation: number, comparison: 'before' | 'after') {
+    const watcher = this.watcher;
+    if (!watcher) throw new Error('Open a definition with a valid preview.');
+    await watcher.withCurrent(generation, async (video) => {
+      watcher.setAudioMix(video.audioMixEdit, comparison);
     });
   }
 

@@ -116,3 +116,5 @@ export type {
 
 export { defineVideo } from './video-definition.js';
 export type { VideoDefinition } from './video-definition.js';
+
+export { deliveryTargets, dialoguePresetControls } from '@opencut/shared';

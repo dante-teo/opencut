@@ -9,6 +9,8 @@ import type { VideoProcessingOptions } from './video-processing.js';
 import { compileVideo } from './video-files.js';
 import type { VideoBuild, VideoCompileOptions } from './video-files.js';
 import { isInterpolationStep } from './video-recipe-schema.js';
+import type { VideoMixEdit } from '@opencut/shared';
+import { openAudioMixCache } from './video-audio-mix.js';
 import { openPictureCache } from './video-picture-cache.js';
 
 export type VideoRenderOptions = Omit<
@@ -17,19 +19,23 @@ export type VideoRenderOptions = Omit<
 > & {
   burnSubtitles?: boolean;
   pictureCacheDirectory?: string | undefined;
+  audioMixCacheDirectory?: string | undefined;
+  audioMixEdit?: VideoCompileOptions['audioMixEdit'];
   processing?: VideoProcessingOptions | undefined;
   params?: VideoCompileOptions['params'];
 };
 
 export type CompiledVideoRenderOptions = Omit<
   VideoRenderOptions,
-  'processing' | 'params'
+  'processing' | 'params' | 'audioMixEdit'
 >;
 export type VideoRenderConfiguration = Omit<
   RenderControls,
   'onProgress' | 'signal' | 'overwrite'
 > &
-  Pick<CompiledVideoRenderOptions, 'burnSubtitles'>;
+  Pick<CompiledVideoRenderOptions, 'burnSubtitles'> & {
+    audioMixEdit?: VideoMixEdit;
+  };
 export interface VideoRenderBuild extends VideoBuild {
   readonly version: 1;
   readonly render: Readonly<VideoRenderConfiguration>;
@@ -77,6 +83,7 @@ export async function renderCompiledVideo(
     burnSubtitles = true,
     quality = 'quality',
     pictureCacheDirectory,
+    audioMixCacheDirectory,
     ...options
   }: CompiledVideoRenderOptions = {},
 ) {
@@ -106,6 +113,10 @@ export async function renderCompiledVideo(
       audioSampleRate: settings.audioSampleRate ?? 48000,
       audioChannels: settings.audioChannels ?? 2,
       burnSubtitles,
+      ...(settings.audioComparison && {
+        audioComparison: settings.audioComparison,
+      }),
+      ...(video.audioMixEdit && { audioMixEdit: video.audioMixEdit }),
     },
   };
   const buildMetadata = build && JSON.stringify(build);
@@ -113,7 +124,12 @@ export async function renderCompiledVideo(
   return checkpointRender(
     video,
     output,
-    { ...settings, quality, burnSubtitles },
+    {
+      ...settings,
+      quality,
+      burnSubtitles,
+      ...(video.audioMixEdit && { audioMixEdit: video.audioMixEdit }),
+    },
     signal,
     (scratchDirectory, onVerifiedOutput) =>
       withRenderSources(
@@ -135,6 +151,10 @@ export async function renderCompiledVideo(
             pictureCacheDirectory === undefined
               ? undefined
               : await openPictureCache(pictureCacheDirectory, video, signal);
+          const audioMixCache = await openAudioMixCache(
+            audioMixCacheDirectory,
+            signal,
+          );
           const result = await renderVideoTimeline({
             ...plan,
             ...settings,
@@ -142,6 +162,7 @@ export async function renderCompiledVideo(
             signal,
             overwrite,
             pictureCache,
+            ...(audioMixCache && { audioMixCache }),
             ...(onProgress && { onProgress }),
             ...(buildMetadata && { buildMetadata }),
             ...(scratchDirectory && { scratchDirectory }),
@@ -172,7 +193,7 @@ export async function renderCompiledVideo(
 export async function renderVideo(
   file: string,
   output: string,
-  { params, processing, ...options }: VideoRenderOptions = {},
+  { params, processing, audioMixEdit, ...options }: VideoRenderOptions = {},
 ) {
   const video = await compileVideo(file, {
     signal: options.signal,
@@ -180,6 +201,7 @@ export async function renderVideo(
     processing,
     quality: options.quality ?? 'quality',
     params,
+    audioMixEdit,
   });
   return renderCompiledVideo(video, output, options);
 }

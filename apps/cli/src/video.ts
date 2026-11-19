@@ -1,5 +1,6 @@
 import { Console } from 'node:console';
 import {
+  analyzeVideoMix,
   compileVideo,
   inspectProject,
   inspectVideoRecipes,
@@ -15,8 +16,15 @@ import { UsageError } from './usage.js';
 import { readParams } from './json-argument.js';
 import { parseRenderControls, parseRenderQuality } from './render-options.js';
 
+import { readMixControls } from './mix-options.js';
+
 type VideoCommand =
-  'validate' | 'inspect' | 'render' | 'recipes inspect' | 'recipes validate';
+  | 'validate'
+  | 'inspect'
+  | 'render'
+  | 'mix analyze'
+  | 'recipes inspect'
+  | 'recipes validate';
 
 /** Route console output from trusted TypeScript to stderr during CLI compilation. */
 export function loadVideo(
@@ -50,7 +58,10 @@ export async function runVideoCommand(
   const pictureCacheDirectory = values['picture-cache'];
   if (pictureCacheDirectory !== undefined && !pictureCacheDirectory.trim())
     throw new UsageError('--picture-cache requires a directory.');
-  const controls = command === 'render' ? parseRenderControls(values) : {};
+  const controls =
+    command === 'render' || command === 'mix analyze'
+      ? parseRenderControls(values)
+      : {};
   await withCommandCancellation(async (signal) => {
     const params = await readParams(values.params, signal);
     if (command === 'recipes inspect' || command === 'recipes validate') {
@@ -85,14 +96,26 @@ export async function runVideoCommand(
         );
       }
     };
+    const { audioMixEdit, ...mixControls } = await readMixControls(
+      values,
+      signal,
+    );
     const video = await loadVideo(file, {
       signal,
       params,
       preview: controls.burnSubtitles === false,
       quality: controls.quality,
       processing,
+      audioMixEdit,
     });
-    if (command === 'validate') {
+    if (command === 'mix analyze') {
+      const report = await analyzeVideoMix(video, {
+        ...controls,
+        ...mixControls,
+        signal,
+      });
+      console.log(JSON.stringify(report, null, 2));
+    } else if (command === 'validate') {
       const result = {
         ok: true,
         path: video.path,
@@ -118,6 +141,7 @@ export async function runVideoCommand(
       const result = await renderCompiledVideo(video, output!, {
         ...controls,
         pictureCacheDirectory,
+        ...mixControls,
         signal,
         ...(!values.json && {
           onProgress: (event: RenderProgress) => {
@@ -145,6 +169,12 @@ export async function runVideoCommand(
         for (const { startFrame, endFrame, status } of result.pictureRanges ??
           [])
           console.log(`Picture [${startFrame}, ${endFrame}): ${status}`);
+        if (result.audioMix) {
+          const { integratedLufs, truePeakDbtp } = result.audioMix.output;
+          console.log(
+            `Audio ${integratedLufs ?? 'unmeasurable'} LUFS / ${truePeakDbtp ?? 'unmeasurable'} dBTP`,
+          );
+        }
         console.log(`Saved ${result.frameCount} frames to ${result.path}`);
       }
     }

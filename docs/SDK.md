@@ -207,3 +207,7 @@ to stop on a variant failure. An exception from `onProgress` cancels the batch
 and rejects the call after cleanup. Invalid manifests and duplicate output
 paths reject before the scheduler starts. See the [batch limits and file
 contract](CLI.md#batch-rendering).
+
+## Professional Dialogue Mix
+
+Call `analyzeVideoMix(compiledVideo, options)` to generate dialogue and music curves and verify delivery loudness without rendering picture. Mix-enabled export and clip preview results include `audioMix`. See [definition and SDK examples](AUDIO_MIX.md).

@@ -1,4 +1,5 @@
 export {
+  analyzeVideoMix,
   batchRenderVideo,
   compileVideo,
   defineVideo,
@@ -22,6 +23,15 @@ export {
   writeSubtitleFile,
 } from '@opencut/core/video';
 export type {
+  AudioMixAnalysisOptions,
+  AudioMixReport,
+  AudioRole,
+  DeliveryPreset,
+  DialoguePreset,
+  MixAutomation,
+  MixGainPoint,
+  ProfessionalMix,
+  VideoMixEdit,
   CompiledVideo,
   CompiledVideoRenderOptions,
   OnlineMediaPage,

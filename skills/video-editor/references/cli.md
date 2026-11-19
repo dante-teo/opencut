@@ -65,3 +65,10 @@ after moving it, then render `BUNDLE/opencut.bundle.video.ts`. Keep that
 filename at the bundle root. Verification rejects symlinks at the entry and
 in packaged dependency paths. The new host needs a compatible OpenCut,
 FFmpeg, and any required native models.
+
+For mix-enabled definitions, run `opencut mix analyze <definition.video.ts> --json`
+to inspect loudness and get editable automation. To reuse the curves, copy the
+report’s `automation` into `professionalMix.automation` in the definition or
+`mix.automation` in a settings file passed to `--mix-settings <mix.json>`. Use
+`--mix-comparison before` for a loudness-matched comparison and
+`--mix-cache <directory>` to reuse AI-enhanced stems across runs. See [Professional Dialogue Mix](../../../docs/AUDIO_MIX.md).

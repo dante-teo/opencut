@@ -1,3 +1,5 @@
+import type { VideoMixEdit } from '@opencut/shared';
+import { openAudioMixCache } from './video-audio-mix.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -37,6 +39,9 @@ export interface VideoWatchOptions {
   quality?: RenderQuality | undefined;
   processing?: VideoProcessingOptions;
   signal?: AbortSignal;
+  audioMixEdit?: VideoMixEdit | undefined;
+  audioComparison?: 'before' | 'after' | undefined;
+  audioMixCacheDirectory?: string | undefined;
 }
 
 type Published = {
@@ -61,6 +66,8 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
     maxDimension: options.maxDimension ?? 640,
     quality: options.quality ?? 'fast',
   };
+  let audioMixEdit = options.audioMixEdit;
+  let audioComparison = options.audioComparison;
   const renders = new Map<Promise<unknown>, Set<string>>();
   let published: Published | undefined;
   let active: AbortController | undefined;
@@ -147,6 +154,7 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
     const inputs = new Map<string, VideoInput>();
     const media = new Set<string>();
     const output = join(directory, `revision-${next}.mp4`);
+    const comparison = audioComparison;
     const record = (input: VideoInput) => {
       if (!inputs.has(input.path)) inputs.set(input.path, input);
       if (!watched.has(input.path)) watched.set(input.path, input.identity);
@@ -158,6 +166,7 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
         signal,
         probes,
         processing: options.processing,
+        audioMixEdit,
         scriptWorker: {},
         inputs: {
           record,
@@ -212,7 +221,7 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
       // The bound paths identify immutable media copies. Edits that leave
       // the composition unchanged can publish a new revision with the same MP4.
       const renderKey = createHash('sha256')
-        .update(JSON.stringify([plan, settings]))
+        .update(JSON.stringify([plan, settings, comparison]))
         .digest('hex');
       let playback =
         published?.renderKey === renderKey
@@ -220,11 +229,21 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
           : undefined;
       if (!playback) {
         emit('rendering', next);
+        const audioMixCache =
+          video.project.professionalMix?.ai &&
+          video.project.professionalMix.enabled !== false
+            ? await openAudioMixCache(
+                options.audioMixCacheDirectory ?? directory,
+                signal,
+              )
+            : undefined;
         playback = await withDefaultRenderBudget(signal, () =>
           renderVideoTimeline({
             ...plan,
             sourceMetadata,
             ...settings,
+            audioComparison: comparison,
+            ...(audioMixCache && { audioMixCache }),
             output,
             signal,
           }),
@@ -326,5 +345,14 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
     }
   }
 
-  return { path, close, withCurrent };
+  function setAudioMix(
+    edit: VideoMixEdit | undefined,
+    comparison: 'after' | 'before' = 'after',
+  ) {
+    audioMixEdit = edit;
+    audioComparison = comparison;
+    schedule();
+  }
+
+  return { path, close, withCurrent, setAudioMix };
 }

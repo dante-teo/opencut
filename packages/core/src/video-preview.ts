@@ -14,6 +14,7 @@ import {
 import { frameTime, timeSchema } from './time.js';
 import type { FrameRate, RationalTime } from './time.js';
 import type { CompiledVideo } from './video-compiler.js';
+import { openAudioMixCache } from './video-audio-mix.js';
 import { withRenderSources } from './render-sources.js';
 
 export type PreviewPosition = number | RationalTime;
@@ -150,7 +151,10 @@ export function previewVideo(video: CompiledVideo) {
     async clip(
       selection: Required<VideoPreviewRange>,
       output: string,
-      options: VideoPreviewOptions & Pick<RenderControls, 'onProgress'> = {},
+      options: VideoPreviewOptions &
+        Pick<RenderControls, 'onProgress' | 'audioComparison'> & {
+          audioMixCacheDirectory?: string | undefined;
+        } = {},
     ) {
       const { startFrame, endFrame } = range(
         selection.startFrame,
@@ -166,19 +170,25 @@ export function previewVideo(video: CompiledVideo) {
       const { signal, onProgress } = options;
       const quality = options.quality ?? 'fast';
       const revision = await video.forQuality(quality, true, signal);
-      const { path, width, height, frameCount, durationSeconds } =
+      const audioMixCache = await openAudioMixCache(
+        options.audioMixCacheDirectory,
+        signal,
+      );
+      const { path, width, height, frameCount, durationSeconds, audioMix } =
         await withRenderSources(revision, signal, (plan) =>
           renderVideoTimeline({
             ...plan,
             signal,
             ...(onProgress && { onProgress }),
             maxDimension: options.maxDimension ?? 640,
+            audioComparison: options.audioComparison,
+            ...(audioMixCache && { audioMixCache }),
             quality,
             output,
             range: { startFrame, endFrame },
           }),
         );
-      return previewClipSchema.parse({
+      const result = previewClipSchema.parse({
         ...base,
         path,
         width,
@@ -192,6 +202,7 @@ export function previewVideo(video: CompiledVideo) {
         startTime: frameTime(startFrame, frameRate),
         endTime: frameTime(endFrame, frameRate),
       });
+      return { ...result, ...(audioMix && { audioMix }) };
     },
   };
 }

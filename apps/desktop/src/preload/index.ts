@@ -20,6 +20,14 @@ const api: DesktopAPI = {
     return () =>
       ipcRenderer.removeListener(DEFINITION_CHANNELS.progress, listener);
   },
+  createDialogueMix: () => ipcRenderer.invoke(DEFINITION_CHANNELS.createMix),
+  applyDialogueMix: (generation, edit) =>
+    ipcRenderer.invoke(DEFINITION_CHANNELS.applyMix, generation, edit),
+  compareDialogueMix: (generation, comparison) =>
+    ipcRenderer.invoke(DEFINITION_CHANNELS.compareMix, generation, comparison),
+  loadDialogueMix: () => ipcRenderer.invoke(DEFINITION_CHANNELS.loadMix),
+  saveDialogueMix: (edit) =>
+    ipcRenderer.invoke(DEFINITION_CHANNELS.saveMix, edit),
   openDefinition: () => ipcRenderer.invoke(DEFINITION_CHANNELS.open),
   closeDefinition: () => ipcRenderer.invoke(DEFINITION_CHANNELS.close),
   onDefinitionChanged(callback) {

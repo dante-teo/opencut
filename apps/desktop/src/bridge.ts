@@ -1,9 +1,15 @@
 import type { ApplicationInfo, Project } from '@opencut/core';
+import type { AudioMixReport, VideoMixEdit } from '@opencut/core/video';
 
 export const APP_INFO_CHANNEL = 'app:get-info';
 export const DEFINITION_CHANNELS = {
   open: 'definition:open',
   close: 'definition:close',
+  createMix: 'definition:create-mix',
+  applyMix: 'definition:apply-mix',
+  compareMix: 'definition:compare-mix',
+  saveMix: 'definition:save-mix',
+  loadMix: 'definition:load-mix',
   changed: 'definition:changed',
   export: 'definition:export',
   cancelExport: 'definition:cancel-export',
@@ -20,6 +26,7 @@ export interface DefinitionReview {
     sourceRevision: string;
     project: Project;
     frameCount: number;
+    audioMix?: AudioMixReport;
     url: string;
   } | null;
 }
@@ -51,6 +58,17 @@ export interface DesktopAPI {
   cancelDefinitionExport(): Promise<void>;
   onDefinitionExportProgress(callback: (percent: number) => void): () => void;
   openDefinition(): Promise<void>;
+  createDialogueMix(): Promise<void>;
+  applyDialogueMix(
+    generation: number,
+    edit: VideoMixEdit | null,
+  ): Promise<void>;
+  compareDialogueMix(
+    generation: number,
+    comparison: 'before' | 'after',
+  ): Promise<void>;
+  saveDialogueMix(edit: VideoMixEdit): Promise<string | null>;
+  loadDialogueMix(): Promise<VideoMixEdit | null>;
   closeDefinition(): Promise<void>;
   onDefinitionChanged(
     callback: (state: DefinitionReview | null) => void,
