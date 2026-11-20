@@ -17,7 +17,7 @@ pnpm dlx @dantea/opencut --help
 You can also install the packed archive directly.
 
 ```sh
-pnpm add -g ./opencut-cli-0.2.0-macos-arm64.tgz
+pnpm add -g ./opencut-cli-0.3.0-macos-arm64.tgz
 ```
 
 Run the CLI from any directory. A definition can import `@opencut/sdk` and
