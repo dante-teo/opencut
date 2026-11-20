@@ -96,6 +96,9 @@ export async function cachePicture({
         const { png, x, y, warning } = await rasterize(clip);
         if (warning) warnings.push(`Clip '${clip.clipId}': ${warning}`);
         sourceKey = png && [digest(png), x, y];
+      } else if (clip.graphic) {
+        still = clip.graphic.durationFrames === undefined;
+        sourceKey = clip.graphic.key;
       } else {
         let identity = identities.get(clip.path);
         if (!identity) {
@@ -140,6 +143,12 @@ export async function cachePicture({
           ? [
               offset,
               retiming.speed,
+              ...(clip.graphic
+                ? [
+                    relativeTime(retiming.timelineStart, start, frameRate),
+                    retiming.sourceIn,
+                  ]
+                : []),
               retiming.localSourceOriginNs ?? [
                 retiming.sourceOriginNs,
                 clip.timelineStartFrame,

@@ -3,7 +3,8 @@ import type { BigIntStats } from 'node:fs';
 import { copyFile } from 'node:fs/promises';
 import type { MediaMetadata } from '@opencut/media';
 
-export type VideoInputKind = 'source' | 'media' | 'font';
+export type VideoInputKind =
+  'source' | 'media' | 'font' | 'graphic' | 'graphic-runtime';
 export interface VideoInput {
   path: string;
   kind: VideoInputKind;

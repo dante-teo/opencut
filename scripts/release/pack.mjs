@@ -83,9 +83,20 @@ function stage(name) {
 
 async function packCli() {
   const { manifest, path, dependencies } = stage('cli');
-  const sdk = "export * from '@opencut/sdk';\n";
-  writeFileSync(join(path, 'dist/sdk.js'), sdk);
-  writeFileSync(join(path, 'dist/sdk.d.ts'), sdk);
+  const adapters = ['sdk'];
+  if (dependencies['@opencut/graphics'])
+    adapters.push('graphics/react', 'graphics/templates');
+  const exports = Object.fromEntries(
+    adapters.map((name) => {
+      const base = './dist/' + name.replace('/', '-');
+      const source = "export * from '@opencut/" + name + "';\n";
+      const types = base + '.d.ts';
+      const entry = base + '.js';
+      writeFileSync(join(path, types), source);
+      writeFileSync(join(path, entry), source);
+      return ['./' + name, { types, import: entry }];
+    }),
+  );
   writeFileSync(
     join(path, 'README.md'),
     '# OpenCut\n\n[Installation and requirements](docs/INSTALL.md)\n\n' +
@@ -98,12 +109,17 @@ async function packCli() {
     'CLI',
     'SDK',
     'AUDIO_MIX',
+    'GRAPHICS',
     'VIDEO_DEFINITIONS',
   ]) {
     const file = 'docs/' + name + '.md';
     copyFileSync(join(root, file), join(path, file));
   }
-  for (const directory of ['skills/video-editor', 'examples/video'])
+  for (const directory of [
+    'skills/video-editor',
+    'examples/video',
+    'examples/graphics',
+  ])
     cpSync(join(root, directory), join(path, directory), { recursive: true });
   writeManifest(path, {
     name: '@dantea/opencut',
@@ -121,7 +137,7 @@ async function packCli() {
     os: ['darwin'],
     cpu: ['arm64'],
     bin: manifest.bin,
-    exports: { './sdk': { types: './dist/sdk.d.ts', import: './dist/sdk.js' } },
+    exports,
     files: ['dist', 'docs', 'skills', 'examples'],
     dependencies,
     bundledDependencies: Object.keys(dependencies),

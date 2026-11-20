@@ -92,6 +92,8 @@ try {
 
   const files = [
     'video-definition',
+    'graphics-qualification',
+    'video-graphics',
     'definition-runtime',
     'video-watch',
     'video-recipes',

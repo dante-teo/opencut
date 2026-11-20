@@ -55,7 +55,11 @@ slashes. Inspect the source with `opencut probe` to choose valid source points.
 - Use `durationFrames` for an exact output frame count with trailing gaps.
   Omit it to derive duration from the last clip or subtitle. Set it explicitly
   for audio-only or blank canvases. Visual tracks composite bottom to top.
-  A video track can contain video, image and text clips in one lane.
+  A video track can contain video, image, graphics and text clips in one lane.
+- For graphics, use `version: 2`, `kind: 'graphic'` and `renderer: 'react'`
+  or `'svg'`. React `sourceIn` controls the first sampled component frame.
+  Use ordinary `visual` and `keyframes` outside the component. See
+  [graphics authoring and templates](../../../docs/GRAPHICS.md).
 - Clip `at` is timeline-relative. `sourceIn` and exclusive `sourceOut` use
   the source clock. These fields accept project-frame numbers or rational
   seconds. Use `duration` for a still or title with a zero source in point.

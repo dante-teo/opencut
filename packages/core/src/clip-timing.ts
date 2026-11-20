@@ -2,10 +2,11 @@ import type { z } from 'zod';
 import {
   addTimes,
   compareTimes,
+  frameTime,
   frameRateSchema,
   rationalTime,
 } from './time.js';
-import type { RationalTime } from './time.js';
+import type { FrameRate, RationalTime } from './time.js';
 
 export const clipSpeedSchema = frameRateSchema.refine(
   (speed) =>
@@ -81,6 +82,23 @@ export function clipSourcePosition(
     clip.sourceIn,
     clipSpeed(clip),
   );
+}
+
+/** Sample a source on the project frame grid, including exact speed and trim. */
+export function sampleClipSourceFrame(
+  clip: ClipTiming,
+  timelineFrame: number,
+  rate: FrameRate,
+) {
+  const time = clipSourcePosition(clip, frameTime(timelineFrame, rate));
+  if (time.numerator < 0n)
+    throw new RangeError('Cannot sample before the start of the source.');
+  const frame =
+    (time.numerator * BigInt(rate.numerator)) /
+    (time.denominator * BigInt(rate.denominator));
+  if (frame > BigInt(Number.MAX_SAFE_INTEGER))
+    throw new RangeError('Source frame exceeds the supported frame range.');
+  return Number(frame);
 }
 
 export function clipSourceTime(

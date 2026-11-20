@@ -3,6 +3,7 @@ import {
   assetSchema,
   clipSchema,
   entityIdSchema,
+  graphicPropsSchema,
   markerSchema,
   relativeMediaPathSchema,
   settingsSchema,
@@ -18,6 +19,7 @@ import {
 } from './subtitles.js';
 import { videoRecipeSchema } from './video-recipe-schema.js';
 import { transitionSchema } from './transitions.js';
+import { graphicAssetSchema } from './video-graphics-contract.js';
 
 const frame = z.int().nonnegative();
 const frameCount = z.int().positive();
@@ -57,6 +59,7 @@ const subtitles = subtitleTrackSchema.extend({
 const clip = clipSchema
   .omit({
     assetId: true,
+    graphicProps: true,
     text: true,
     trackId: true,
     timelineStart: true,
@@ -75,6 +78,9 @@ const clip = clipSchema
     fadeOut: fade,
   });
 const mediaClip = clip.extend({ asset: entityIdSchema });
+const visualMediaClip = mediaClip.extend({
+  props: graphicPropsSchema.optional(),
+});
 const textClip = clip.extend({ text });
 const track = trackSchema.omit({ id: true, name: true, type: true }).extend({
   id: entityIdSchema.optional(),
@@ -85,7 +91,7 @@ const visualOnlyTrack = track.omit({
   muted: true,
   audioRole: true,
 });
-const asset = assetSchema
+const mediaAsset = assetSchema
   .pick({ name: true, freezeFrame: true, provenance: true })
   .partial()
   .extend({
@@ -101,18 +107,20 @@ const font = z.union([
 ]);
 
 export const videoDefinitionSchema = z.strictObject({
-  version: z.literal(1).optional(),
+  version: z.union([z.literal(1), z.literal(2)]).optional(),
   ...snapshotSchema.shape.metadata.partial().shape,
   canvas: settingsSchema.extend({
     frameRate: z.union([frameCount, frameRateSchema]),
   }),
-  assets: z.record(entityIdSchema, asset).optional(),
+  assets: z
+    .record(entityIdSchema, z.union([mediaAsset, graphicAssetSchema]))
+    .optional(),
   fonts: z.record(entityIdSchema, font).optional(),
   tracks: z.array(
     z.discriminatedUnion('type', [
       track.extend({
         type: z.literal('video'),
-        clips: z.array(z.union([mediaClip, textClip])),
+        clips: z.array(z.union([visualMediaClip, textClip])),
       }),
       track.extend({
         type: z.literal('audio'),
@@ -257,10 +265,18 @@ export function parseVideoDefinition(value: unknown) {
         .join('\n'),
     );
 
-  return parsed.data;
+  const definition = parsed.data;
+  if (
+    Object.values(definition.assets ?? {}).some(
+      ({ kind }) => kind === 'graphic',
+    )
+  ) {
+    if (definition.version === 1)
+      throw new VideoDefinitionError('version: Graphics require version 2.');
+    return { ...definition, version: 2 as const };
+  }
+  return definition;
 }
 
 export type ParsedVideoDefinition = ReturnType<typeof parseVideoDefinition>;
-export type VideoAssetDefinition = NonNullable<
-  ParsedVideoDefinition['assets']
->[string];
+export type VideoAssetDefinition = z.output<typeof mediaAsset>;

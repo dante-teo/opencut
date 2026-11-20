@@ -26,10 +26,13 @@ try {
   const project = join(work, 'project');
   mkdirSync(project);
   const fixtures = new URL('../../tests/distribution/', import.meta.url);
-  for (const name of ['smoke.video.ts', 'title.ts'])
+  const files = process.env.PLAYWRIGHT_BROWSERS_PATH
+    ? ['graphics.video.ts', 'Graphic.tsx', 'Badge.svg']
+    : ['smoke.video.ts', 'title.ts'];
+  for (const name of files)
     copyFileSync(new URL(name, fixtures), join(project, name));
   writeFileSync(join(project, 'package.json'), '{"type":"module"}\n');
-  const path = join(project, 'smoke.video.ts');
+  const path = join(project, files[0]);
   const output = join(work, 'export.mp4');
   const env = {
     ...process.env,
@@ -67,7 +70,9 @@ try {
   const exportButton = page.getByRole('button', { name: 'Export MP4' });
   await expect(exportButton).toBeEnabled({ timeout: 30000 });
   await exportButton.click();
-  await expect(page.getByLabel('Export result')).toContainText('export.mp4');
+  await expect(page.getByLabel('Export result')).toContainText('export.mp4', {
+    timeout: 30_000,
+  });
   const frames = execFileSync(
     'ffprobe',
     [

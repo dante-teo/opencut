@@ -1,6 +1,10 @@
 /** Node entrypoint for definition workflows. */
 export { defineVideo, videoId, videoParams } from './video-definition.js';
 export type { VideoDefinition, VideoParameters } from './video-definition.js';
+export type {
+  GraphicAssetDefinition,
+  GraphicProps,
+} from './video-graphics-contract.js';
 export { inspectProject, inspectTimeline } from './inspection.js';
 export {
   parseSubtitles,

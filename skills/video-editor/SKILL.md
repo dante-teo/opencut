@@ -64,6 +64,15 @@ Start with the [complete example and visual review loop](references/workflow.md)
 See [definition fields](references/video-definitions.md), the
 [CLI reference](references/cli.md), and [SDK usage](references/sdk.md).
 
+For reusable animated information cards, charts, callouts, and title cards,
+place `kind: 'graphic'` assets on video tracks. React requires the pinned
+Chromium Headless Shell. Static SVG uses the same composition commands
+without a browser and supports text with bundled or declared local fonts.
+For direct built-in templates, `validate` and `package` check asset defaults
+and placement props. React errors carry mapped source locations when
+available. Keep animation source-local and use matching preview/export quality.
+See [React and SVG graphics](../../docs/GRAPHICS.md).
+
 For dialogue cleanup and automatic music ducking, route audio or video tracks
 with `audioRole: 'dialogue'`, `'music'` or `'other'` and enable
 `professionalMix` in the definition. Use `opencut mix analyze <file.video.ts> --json`

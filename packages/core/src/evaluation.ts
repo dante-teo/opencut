@@ -40,7 +40,7 @@ interface ResolvedClipProperties extends TimelineClip {
 export type ResolvedMediaClip = ResolvedClipProperties & {
   assetId: string;
   /** Metadata-free visual assets are conservatively classified as video. */
-  kind: 'video' | 'audio' | 'image';
+  kind: 'video' | 'audio' | 'image' | 'graphic';
 };
 /** Adjacent pieces with the same mapping can share one decoder or tempo filter. */
 export function continuesMediaRun(
@@ -79,8 +79,9 @@ export function resolveTimeline(project: Project) {
         const kind =
           track.type === 'audio'
             ? 'audio'
-            : asset?.metadata?.kind === 'image'
-              ? 'image'
+            : asset?.metadata?.kind === 'image' ||
+                asset?.metadata?.kind === 'graphic'
+              ? asset.metadata.kind
               : 'video';
         return {
           ...clip,

@@ -39,6 +39,7 @@ preview rebuilds at your current timeline position. **Open video** plays a
 local source file.
 
 - [Definition format and examples](VIDEO_DEFINITIONS.md)
+- [React and SVG graphics](GRAPHICS.md)
 - [CLI commands](CLI.md)
 - [Build recovery and portable projects](CLI.md#build-recovery)
 - [TypeScript SDK](SDK.md)

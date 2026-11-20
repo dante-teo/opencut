@@ -64,6 +64,14 @@ The SDK also exposes `probeMedia`, `extractFrame`, `OnlineMediaLibrary`,
 cancellation signals. Frame extraction requires a destination that supports
 hard links to publish the completed PNG atomically.
 
+## React and SVG graphics
+
+`VideoDefinition` accepts `GraphicAssetDefinition` on video tracks. Declare
+React props at the asset and override them at the placement. The SDK exports
+`GraphicAssetDefinition` and `GraphicProps` for typed helpers. `compileVideo`,
+`previewVideo`, `renderCompiledVideo`, `watchVideo` and `packageVideo` share
+pinned graphic sources. See the [graphics runtime and authoring API](GRAPHICS.md).
+
 ## Media recipes
 
 ```ts

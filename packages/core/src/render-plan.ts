@@ -47,6 +47,7 @@ export type VisualRenderClip = VisualRenderProperties &
     | {
         assetId: string;
         freezeFrame?: RationalTime;
+        graphicProps?: NonNullable<TimelineClip['graphicProps']>;
         text?: never;
         subtitle?: never;
       }
@@ -254,7 +255,8 @@ export function planProjectRender(
       : exactFrame(clip.sourceOut, frameRate, `Clip '${clip.id}' source out`) -
         sourceStart;
     const freezeFrame = freezes.get(clip.assetId);
-    if (!freezeFrame) {
+    if (clip.kind === 'graphic') previousMedia = undefined;
+    if (!freezeFrame && clip.kind !== 'graphic') {
       const speed = clipSpeed(clip);
       if (
         !previousMedia ||
@@ -309,6 +311,7 @@ export function planProjectRender(
         clipId: clip.id,
         assetId: clip.assetId,
         ...(freezeFrame && { freezeFrame }),
+        ...(clip.graphicProps && { graphicProps: clip.graphicProps }),
         timelineStartFrame: start,
         sourceStartFrame: sourceStart,
         frameCount: count,

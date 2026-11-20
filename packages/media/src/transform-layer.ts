@@ -1,6 +1,7 @@
 import { rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
+import type { Canvas, Image } from '@napi-rs/canvas';
 import {
   evaluateVisual,
   drawMediaLayer,
@@ -22,6 +23,12 @@ import { indexedSeekArgs } from './video-filter.js';
 
 type TransformSource =
   | { kind: 'text'; rasterize: () => Promise<Buffer>; x: number; y: number }
+  | {
+      kind: 'graphic';
+      still: boolean;
+      aspect: number;
+      rasterize(frame: number, signal: AbortSignal): Promise<Buffer>;
+    }
   | {
       kind: 'media';
       path: string;
@@ -265,6 +272,7 @@ async function writeTransformLayer(
         ? decodedFrames(decoder.child.stdout!, media.pixels.data)
         : null;
     const sourceCtx = media?.canvas.getContext('2d');
+    let graphic: Image | Canvas | undefined;
     for (let i = 0; i < frameCount; i++) {
       signal.throwIfAborted();
       if (media && decoded && (!media.still || i === 0)) {
@@ -274,6 +282,20 @@ async function writeTransformLayer(
           );
         if (options.grade) gradePixels(media.pixels.data, options.grade);
         sourceCtx!.putImageData(media.pixels, 0, 0);
+      }
+      if (source.kind === 'graphic' && (!graphic || !source.still)) {
+        const image = await loadImage(
+          await source.rasterize(startFrame + i, signal),
+        );
+        if (options.grade) {
+          const canvas = createCanvas(image.width, image.height);
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(image, 0, 0);
+          const pixels = ctx.getImageData(0, 0, image.width, image.height);
+          gradePixels(pixels.data, options.grade);
+          ctx.putImageData(pixels, 0, 0);
+          graphic = canvas;
+        } else graphic = image;
       }
       const sampled = evaluateVisual(
         visual,
@@ -290,15 +312,14 @@ async function writeTransformLayer(
         transformTextLayer(ctx, width, height, sampled);
         ctx.drawImage(raster, source.x, source.y);
         ctx.restore();
-      } else if (media) {
-        const geometry = visualGeometry(
-          width,
-          height,
-          media.aspect,
-          1,
-          sampled,
-        );
-        if (geometry.visible) drawMediaLayer(ctx, media.canvas, geometry);
+      } else {
+        const input = media?.canvas ?? graphic;
+        if (input) {
+          const aspect =
+            source.kind === 'graphic' ? source.aspect : media!.aspect;
+          const geometry = visualGeometry(width, height, aspect, 1, sampled);
+          if (geometry.visible) drawMediaLayer(ctx, input, geometry);
+        }
       }
       if (options.ramp) {
         // Multiply while Canvas still holds premultiplied pixels, avoiding an

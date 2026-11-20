@@ -64,6 +64,13 @@ separate Node program, use the local Node package installation above.
 
 Download the signed `OpenCut-Review-<version>-macos-arm64.zip` from the [GitHub release](https://github.com/dante-teo/opencut/releases). Compare its SHA-256 with the entry in `SHA256SUMS`, unzip it and move **OpenCut Review.app** to Applications. The app includes Electron and the SDK. Install FFmpeg separately for rendered previews and export. The packaged app can also find FFmpeg and ffprobe in the standard Apple Silicon Homebrew bin directory when opened from Finder.
 
+## Optional React graphics
+
+The CLI and Review app use the pinned Chromium Headless Shell to render
+React graphics. Follow the [graphics browser setup](GRAPHICS.md#install-the-optional-react-browser)
+on each machine that renders a React composition. Static SVG renders
+without a browser.
+
 ## Optional AI
 
 `opencut doctor --json` reports native worker versions, hardware, VideoToolbox configurations and model status for sample input sizes. Apple manages those models with macOS. Offline interpolation needs macOS 15.4 or later. Low-latency interpolation, super-resolution and denoising require macOS 26 or later. Hardware, input format, dimensions and model readiness also affect support. Selecting an unavailable recipe fails with a diagnostic.
@@ -119,6 +126,9 @@ upgrade test uses the same archive under a simulated older keg version for
 the first release.
 The two CLI installation checks render the bundled opening card and run the
 installed-runtime workflow suite with Python 3.11+, FFmpeg and ffprobe.
+For local release checks, set `PLAYWRIGHT_BROWSERS_PATH` to the cache
+containing the pinned Headless Shell to include graphics package relocation
+and the packaged review app's graphics smoke test.
 Software rendering, Lanczos upscaling, and failure handling run on every host.
 The recovery check uses a software recipe when offline interpolation is
 unavailable. A passing run can include skipped AI cases. Check the

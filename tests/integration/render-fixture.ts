@@ -19,9 +19,9 @@ export async function renderFixture(
     ]),
   );
   return renderVideoTimeline({
-    ...bindRenderSources(planProjectRender(project), (assetId) =>
-      paths.get(assetId)!,
-    ),
+    ...bindRenderSources(planProjectRender(project), (assetId) => ({
+      path: paths.get(assetId)!,
+    })),
     ...controls,
     output,
   });

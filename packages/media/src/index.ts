@@ -38,6 +38,14 @@ export type {
 export { renderQualities, renderQualityProfiles } from '@opencut/shared';
 export type { RenderQuality } from '@opencut/shared';
 export type { PictureCache, PictureRange } from './picture-cache.js';
+export {
+  compileReactGraphic,
+  compileStaticSvg,
+  openGraphicsRenderer,
+  inspectGraphicsRuntime,
+  validateGraphicTemplate,
+} from './graphics.js';
+export type { GraphicLayer, GraphicBundle } from './graphics.js';
 export type { RenderProgress } from './render-progress.js';
 export { renderContactSheet } from './contact-sheet.js';
 export { rasterizeTextLayer, validateEmbeddedFont } from './text.js';
@@ -57,6 +65,7 @@ export {
 export type { InterpolationPlan } from './interpolate.js';
 export {
   accountRenderFile,
+  accountRenderBytes,
   withRenderBudget,
   withDefaultRenderBudget,
 } from './render-budget.js';

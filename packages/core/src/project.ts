@@ -60,7 +60,7 @@ export const mediaReferenceSchema = z.discriminatedUnion('type', [
 
 const mediaType = z.enum(['video', 'audio']);
 const assetMetadataSchema = z.strictObject({
-  kind: z.enum(['video', 'audio', 'image']),
+  kind: z.enum(['video', 'audio', 'image', 'graphic']),
   formatName: z.string().nullable(),
   durationSeconds: z.number().finite().nonnegative().nullable(),
   videoDuration: timeSchema.optional(),
@@ -152,6 +152,7 @@ export const colorGradeSchema = z.strictObject({
       'Curve input points must increase.',
     ),
 });
+export const graphicPropsSchema = z.record(z.string(), z.json());
 export const clipSchema = z.strictObject({
   id: entityIdSchema,
   assetId: entityIdSchema.optional(),
@@ -166,6 +167,7 @@ export const clipSchema = z.strictObject({
   visual: clipVisualSchema.optional(),
   grade: colorGradeSchema.optional(),
   keyframes: visualKeyframesSchema.optional(),
+  graphicProps: graphicPropsSchema.optional(),
 });
 const snapshotClipSchema = clipSchema.refine(
   ({ assetId, text }) => (assetId === undefined) !== (text === undefined),
@@ -412,6 +414,16 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
         'incompatible_media',
         'Detached audio requires a video source on an audio track.',
       );
+    if (
+      clip.graphicProps &&
+      (asset?.metadata?.kind !== 'graphic' ||
+        asset.metadata.formatName !== 'react')
+    )
+      add(
+        location + '/graphicProps',
+        'incompatible_visual',
+        'Only React graphics accept clip props.',
+      );
     if (clip.keyframes && track?.type !== 'video')
       add(
         location + '/keyframes',
@@ -447,7 +459,10 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
       );
     if (
       clip.speed !== undefined &&
-      (clip.text || asset?.metadata?.kind === 'image')
+      (clip.text ||
+        asset?.metadata?.kind === 'image' ||
+        (asset?.metadata?.kind === 'graphic' &&
+          asset.metadata.formatName === 'svg'))
     )
       add(
         location + '/speed',

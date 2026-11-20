@@ -76,7 +76,8 @@ export default defineVideo({
 });
 ```
 
-The optional `version` field defaults to `1`. The optional top-level `name` defaults to
+The optional `version` field defaults to `1` for media-only definitions and `2`
+for definitions using [React or SVG graphics](GRAPHICS.md). The optional top-level `name` defaults to
 `Untitled video`.
 
 - `canvas` requires width, height and an integer or rational frame rate. Set
@@ -86,9 +87,10 @@ The optional `version` field defaults to `1`. The optional top-level `name` defa
   to black.
 - `assets` maps IDs to `{ path, kind }` for video, audio and images. Paths use
   forward slashes and resolve from the definition. An optional asset `name`
-  and `provenance` preserve the display name and license attribution.
+  and `provenance` preserve the display name and license attribution. Use
+  `kind: 'graphic'` for a [React or static SVG surface](GRAPHICS.md).
 - `tracks` lists tracks in bottom-to-top order. A `video` track can contain
-  video, still images and text in the same lane. An `audio` track can use an
+  video, still images, graphics and text in the same lane. An `audio` track can use an
   audio file or a video's audio stream. The `image` and `text` track types
   remain available for single-kind layers. Use `volume` and `muted` on video
   and audio tracks.

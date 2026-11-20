@@ -9,7 +9,11 @@ import {
   validateSubtitleBurnIn,
   renderQualities,
 } from '@opencut/media';
-import type { MediaMetadata, RenderQuality } from '@opencut/media';
+import type {
+  GraphicBundle,
+  MediaMetadata,
+  RenderQuality,
+} from '@opencut/media';
 import { compileVideoAssets, readEmbeddedFont } from './video-assets.js';
 import type { CompiledVideoAsset, VideoAssetOptions } from './video-assets.js';
 import { validateProject } from './project.js';
@@ -20,7 +24,6 @@ import { frameTime, rationalTime } from './time.js';
 import type { FrameRate, RationalTime } from './time.js';
 import {
   definitionLoadError,
-  parseVideoDefinition,
   VideoDefinitionError,
 } from './video-definition.js';
 import type {
@@ -28,7 +31,9 @@ import type {
   VideoDefinition,
 } from './video-definition.js';
 import { identifyVideoInput, videoInputIdentity } from './video-input.js';
-import type { RecordVideoInput } from './video-input.js';
+import type { RecordVideoInput, VideoInput } from './video-input.js';
+import { graphicLayer } from './video-graphics.js';
+import type { CompiledGraphics } from './video-graphics.js';
 import type { VideoBuild } from './video-files.js';
 import { checkpointQualityCompilation } from './video-build.js';
 import type { VideoProcessingProgress } from './video-processing.js';
@@ -87,20 +92,25 @@ export interface CompiledVideo {
   ): Promise<CompiledVideo>;
   /** Media identity recorded before probing, keyed by the bound source path. */
   sourceIdentity(path: string): string | undefined;
+  readonly graphicInputs: readonly VideoInput[];
+  graphicSource(key: string): GraphicBundle | undefined;
   resolveRender(): Promise<
     BoundRenderPlan & { sourceMetadata: ReadonlyMap<string, MediaMetadata> }
   >;
 }
 
+export interface DefinitionSources {
+  path: string;
+  definition: ParsedVideoDefinition;
+  graphics: CompiledGraphics;
+}
+
 export async function compileDefinition(
-  path: string,
-  value: unknown,
-  options: CompilationOptions = {},
-  getBuild?: (
-    definition: ParsedVideoDefinition,
-    steps: VideoBuild['processing']['steps'],
-  ) => VideoBuild,
+  sources: DefinitionSources,
+  options: CompilationOptions,
+  getBuild?: (steps: VideoBuild['processing']['steps']) => VideoBuild,
 ): Promise<CompiledVideo> {
+  const { path, graphics } = sources;
   const {
     signal,
     preview = false,
@@ -111,7 +121,7 @@ export async function compileDefinition(
     throw new VideoDefinitionError(
       'Choose fast, quality, or maximum render quality.',
     );
-  const definition = freeze(parseVideoDefinition(value));
+  const definition = freeze(sources.definition);
   const audioMixEdit =
     options.audioMixEdit === undefined
       ? undefined
@@ -119,9 +129,9 @@ export async function compileDefinition(
   const recipeSteps: VideoBuild['processing']['steps'][number][] = [];
   const { processing, probes = new Map() } = options;
   const authoredFiles = [
-    ...Object.values(definition.assets ?? {}).map(
-      ({ path }) => [path, 'media'] as const,
-    ),
+    ...Object.values(definition.assets ?? {})
+      .filter((asset) => asset.kind !== 'graphic')
+      .map(({ path }) => [path, 'media'] as const),
     ...Object.values(definition.fonts ?? {}).flatMap((font) =>
       'path' in font ? [[font.path, 'font'] as const] : [],
     ),
@@ -141,8 +151,7 @@ export async function compileDefinition(
         );
   };
   const { project, assets, recipes, qualitySensitive } = await buildProject(
-    path,
-    definition,
+    sources,
     {
       ...options,
       quality,
@@ -178,10 +187,15 @@ export async function compileDefinition(
   try {
     const plan = planProjectRender(project);
     if (!preview) validateSubtitleBurnIn(plan.visualClips);
-    renderPlan = bindRenderSources(
-      plan,
-      (assetId) => assets.get(assetId)!.media!.metadata.path,
-    );
+    renderPlan = bindRenderSources(plan, (id, props) => {
+      const source = graphics.get(id);
+      return source
+        ? {
+            path: source.path,
+            graphic: graphicLayer(source, project.settings.frameRate, props),
+          }
+        : { path: assets.get(id)!.media!.metadata.path };
+    });
   } catch (cause) {
     throw new VideoDefinitionError(
       cause instanceof Error ? cause.message : String(cause),
@@ -198,12 +212,18 @@ export async function compileDefinition(
     sourceIdentities.set(metadata.path, identity);
   }
   const build = getBuild?.(
-    definition,
     recipeSteps.sort(
       (a, b) => a.assetId.localeCompare(b.assetId) || a.step - b.step,
     ),
   );
+  const bundles = new Map(
+    [...graphics.values()].map(({ bundle }) => [bundle.key, freeze(bundle)]),
+  );
   const compiled: CompiledVideo = Object.freeze({
+    graphicInputs: freeze(
+      [...graphics.values()].flatMap(({ inputs }) => inputs),
+    ),
+    graphicSource: (key: string) => bundles.get(key),
     path,
     ...(build && { build: freeze(build) }),
     project: freeze(project),
@@ -231,8 +251,7 @@ export async function compileDefinition(
         signal,
         async (recovery) => {
           const rebuilt = await compileDefinition(
-            path,
-            definition,
+            sources,
             {
               quality: next,
               preview,
@@ -262,8 +281,7 @@ export async function compileDefinition(
 }
 
 async function buildProject(
-  path: string,
-  definition: ParsedVideoDefinition,
+  { path, definition, graphics }: DefinitionSources,
   options: CompilationOptions,
 ) {
   const { signal, inputs, audioMixEdit } = options;
@@ -346,6 +364,24 @@ async function buildProject(
           ? assets[clip.asset]
           : undefined;
       if (
+        'props' in clip &&
+        clip.props !== undefined &&
+        (asset?.kind !== 'graphic' || asset.renderer !== 'react')
+      )
+        throw new VideoDefinitionError(
+          `${location}.props: Only React graphics accept props.`,
+        );
+      if (
+        asset?.kind === 'graphic' &&
+        (type !== 'video' ||
+          clip.gainKeys ||
+          clip.effects?.length ||
+          clip.detachedAudio)
+      )
+        throw new VideoDefinitionError(
+          `${location}: Graphics require a video track and have no audio stream.`,
+        );
+      if (
         'asset' in clip &&
         (!asset ||
           (type === 'audio' && asset.kind === 'image') ||
@@ -363,7 +399,9 @@ async function buildProject(
           trackId,
           location,
           resolveFont,
-          'text' in clip || asset?.kind === 'image',
+          'text' in clip ||
+            asset?.kind === 'image' ||
+            (asset?.kind === 'graphic' && asset.renderer === 'svg'),
         ),
       );
     }
@@ -372,15 +410,22 @@ async function buildProject(
   for (const id of Object.keys(audioMixEdit?.roles ?? {}))
     if (!project.tracks.some((track) => track.id === id))
       throw new VideoDefinitionError(`Unknown audio track '${id}'.`);
+  const mediaAssets = Object.fromEntries(
+    Object.entries(assets).flatMap(([id, asset]) =>
+      asset.kind === 'graphic' ? [] : ([[id, asset]] as const),
+    ),
+  );
   const clipAssets = new Set(
     project.clips.flatMap(({ assetId }) => (assetId ? [assetId] : [])),
   );
   const compiled = await compileVideoAssets(
     dirname(path),
-    assets,
+    mediaAssets,
     clipAssets,
     options,
   );
+  for (const [id, graphic] of graphics)
+    compiled.assets.set(id, { asset: graphic.asset });
   project.assets = [...compiled.assets.values()].map(({ asset }) => asset);
 
   const validated = validateProject(project);
@@ -408,8 +453,9 @@ function validateSourceBounds(
   for (const [index, clip] of project.clips.entries()) {
     if (clip.assetId === undefined) continue;
     const { media, asset } = assets.get(clip.assetId)!;
+    if (asset.metadata?.kind === 'image' || asset.metadata?.kind === 'graphic')
+      continue;
     const source = media!.metadata;
-    if (asset.metadata?.kind === 'image') continue;
     const audio = trackTypes.get(clip.trackId) === 'audio';
     if (audio && !source.audio)
       throw new VideoDefinitionError(
@@ -545,6 +591,15 @@ async function compileClip(
   };
   if ('asset' in properties) {
     const { asset, ...media } = properties;
+    if ('props' in media) {
+      const { props, ...visual } = media;
+      return {
+        ...visual,
+        ...timing,
+        assetId: asset,
+        ...(props && { graphicProps: props }),
+      };
+    }
     return { ...media, ...timing, assetId: asset };
   }
   const { text, ...title } = properties;

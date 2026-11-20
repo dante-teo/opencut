@@ -52,6 +52,14 @@ For eligible MP4 and MOV footage, cache misses can seek into the source.
 OpenCut falls back to sequential decoding when a seek cannot preserve frame
 selection.
 
+## React and SVG graphics
+
+Use the regular `validate`, `preview`, `render`, and `package` commands for
+[graphics definitions](GRAPHICS.md). `validate --json` reports the optional
+browser status for React assets. `doctor --json` reports graphics availability
+and the pinned-runtime setup command. `--picture-cache` also retains reusable
+graphic source frames.
+
 ## Check the installation
 
 Run `opencut doctor --json` from the environment that will run the export.

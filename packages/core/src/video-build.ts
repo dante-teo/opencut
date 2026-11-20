@@ -10,10 +10,8 @@ import {
 import { basename, dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import type { RenderQuality } from '@opencut/shared';
-import {
-  parseVideoDefinition,
-  VideoDefinitionError,
-} from './video-definition.js';
+import { VideoDefinitionError } from './video-definition.js';
+import { graphicBundleKeys } from './video-graphics.js';
 import type {
   ParsedVideoDefinition,
   VideoParameters,
@@ -28,7 +26,11 @@ import {
 } from './video-integrity.js';
 import { videoInputIdentity } from './video-input.js';
 import type { VideoInput } from './video-input.js';
-import type { CompilationOptions, CompiledVideo } from './video-compiler.js';
+import type {
+  CompilationOptions,
+  CompiledVideo,
+  DefinitionSources,
+} from './video-compiler.js';
 import { processingSettings } from './video-processing.js';
 import type { RecipeRecovery } from './video-processing.js';
 import { findMediaEntry } from './video-media-cache.js';
@@ -91,13 +93,12 @@ const scratchPrefix = '.opencut-build-render-';
 export async function prepareVideoBuild(
   {
     path,
-    value,
+    definition,
     sources,
     params,
     verified,
-  }: {
-    path: string;
-    value: unknown;
+    graphics,
+  }: DefinitionSources & {
     sources: ReadonlyMap<string, VideoInput>;
     params?: VideoParameters | undefined;
     verified: ReadonlyMap<string, Fingerprint> | undefined;
@@ -106,7 +107,6 @@ export async function prepareVideoBuild(
 ) {
   const { directory: cache } = processingSettings(processing ?? {});
   const preview = previewOption ?? false;
-  const definition = parseVideoDefinition(value);
   const inputs = new Map<string, CompileReceipt['inputs'][number]>();
   const files = new Map<string, Fingerprint>();
   const identities = new Map<string, string>();
@@ -146,11 +146,12 @@ export async function prepareVideoBuild(
   for (const input of sources.values())
     if (input.identity) await add(input.path, input.identity);
   for (const [id, asset] of Object.entries(definition.assets ?? {}))
-    await add(
-      resolve(dirname(path), asset.path),
-      undefined,
-      `assets.${id}.path: Cannot probe`,
-    );
+    if (asset.kind !== 'graphic')
+      await add(
+        resolve(dirname(path), asset.path),
+        undefined,
+        `assets.${id}.path: Cannot probe`,
+      );
   for (const [id, font] of Object.entries(definition.fonts ?? {}))
     if ('path' in font)
       await add(
@@ -165,7 +166,9 @@ export async function prepareVideoBuild(
     {
       cache,
       path,
-      compositionSha256: hashJson(definition),
+      compositionSha256: hashJson(
+        graphics.size ? [definition, graphicBundleKeys(graphics)] : definition,
+      ),
       params,
       preview,
       inputs: orderedInputs,
@@ -189,8 +192,9 @@ function locateBuild(
     build.params,
     build.preview,
     build.inputs,
-    ...(Object.values(definition.assets ?? {}).some(({ recipe }) =>
-      recipe?.some(inheritsRenderQuality),
+    ...(Object.values(definition.assets ?? {}).some(
+      (asset) =>
+        asset.kind !== 'graphic' && asset.recipe?.some(inheritsRenderQuality),
     )
       ? [quality === 'fast' ? 'fast' : 'quality']
       : []),

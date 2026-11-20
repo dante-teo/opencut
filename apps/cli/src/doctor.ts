@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { getApplicationInfo } from '@opencut/core';
 import {
   inspectDialogueModel,
+  inspectGraphicsRuntime,
   inspectRenderMemory,
   inspectVideoToolboxWorkers,
 } from '@opencut/media';
@@ -38,8 +39,27 @@ async function inspectExecutable(tool: 'ffmpeg' | 'ffprobe') {
   return { status: 'missing' as const, hint: installHint };
 }
 
+export async function inspectReactGraphics() {
+  const hint =
+    'Install the matching headless Chromium with pnpm dlx playwright-core@1.64.1 install --only-shell chromium.';
+  try {
+    const { installed, backend, path } = await inspectGraphicsRuntime();
+    return {
+      status: installed ? ('available' as const) : ('missing-browser' as const),
+      backend,
+      path,
+      ...(!installed && { hint }),
+    };
+  } catch {
+    return {
+      status: 'missing-runtime' as const,
+      hint: 'Install an OpenCut build with React graphics support.',
+    };
+  }
+}
+
 export async function doctor() {
-  const [ffmpeg, ffprobe, rssHelper, system, workers, dialogue] =
+  const [ffmpeg, ffprobe, rssHelper, system, workers, dialogue, graphics] =
     await Promise.all([
       inspectExecutable('ffmpeg'),
       inspectExecutable('ffprobe'),
@@ -47,6 +67,7 @@ export async function doctor() {
       inspectSystem(),
       inspectVideoToolboxWorkers(),
       inspectDialogueModel(),
+      inspectReactGraphics(),
     ]);
   const { stdout } =
     ffmpeg.status === 'available'
@@ -73,6 +94,7 @@ export async function doctor() {
     application: getApplicationInfo(),
     node: process.version,
     system,
+    graphics,
     media: {
       ready: !hint,
       ffmpeg,
@@ -113,6 +135,11 @@ export function formatDoctor(result: Awaited<ReturnType<typeof doctor>>) {
     'Default MP4 export: ' + (result.media.ready ? 'ready' : result.media.hint),
     'VideoToolbox: ' + result.system.videoToolbox.status,
     'Bandit v2 dialogue model: ' + result.ai.dialogue.model.status,
+    'React graphics: ' +
+      result.graphics.status +
+      ('hint' in result.graphics && result.graphics.hint
+        ? ' · ' + result.graphics.hint
+        : ''),
     'Run opencut doctor --json for hardware, AI configurations and runtime details.',
   ].join('\n');
 }

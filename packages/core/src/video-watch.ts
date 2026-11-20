@@ -4,7 +4,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { extname, join, resolve } from 'node:path';
-import { renderVideoTimeline, withDefaultRenderBudget } from '@opencut/media';
+import { renderVideoTimeline } from '@opencut/media';
+import { withRenderSources } from './render-sources.js';
 import type { RenderQuality, VideoTimelineResult } from '@opencut/media';
 import { compileVideoInput, isVideoDefinitionPath } from './video-files.js';
 import { VideoDefinitionError } from './video-definition.js';
@@ -215,7 +216,7 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
           hash.update(await readFile(input.path, { signal }));
       }
       const sourceRevision = hash.digest('hex');
-      const { sourceMetadata, ...plan } = await video.resolveRender();
+      const plan = await video.resolveRender();
       if (!isCurrent(next, inputs)) return;
 
       // The bound paths identify immutable media copies. Edits that leave
@@ -237,16 +238,19 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
                 signal,
               )
             : undefined;
-        playback = await withDefaultRenderBudget(signal, () =>
-          renderVideoTimeline({
-            ...plan,
-            sourceMetadata,
-            ...settings,
-            audioComparison: comparison,
-            ...(audioMixCache && { audioMixCache }),
-            output,
-            signal,
-          }),
+        playback = await withRenderSources(
+          video,
+          signal,
+          (bound) =>
+            renderVideoTimeline({
+              ...bound,
+              ...settings,
+              audioComparison: comparison,
+              ...(audioMixCache && { audioMixCache }),
+              output,
+              signal,
+            }),
+          { pinnedPlan: plan },
         );
       }
 

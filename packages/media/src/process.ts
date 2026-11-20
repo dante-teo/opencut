@@ -21,6 +21,7 @@ export function checkRenderSignal(signal?: AbortSignal): void {
 
 export interface MediaToolControl {
   signal?: AbortSignal | undefined;
+  env?: NodeJS.ProcessEnv;
   onStdout?: (chunk: Buffer) => void;
   writesFile?: boolean;
   onDiagnostics?: (diagnostics: string) => void;
@@ -78,6 +79,7 @@ export async function runMediaTool(
         killSignal: 'SIGKILL',
         maxBuffer,
         windowsHide: true,
+        ...(control?.env && { env: control.env }),
       },
       (error, stdout, stderr) => {
         closed = true;

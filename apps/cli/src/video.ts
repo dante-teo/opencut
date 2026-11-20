@@ -116,15 +116,24 @@ export async function runVideoCommand(
       });
       console.log(JSON.stringify(report, null, 2));
     } else if (command === 'validate') {
+      const usesReact = video.project.assets.some(
+        ({ metadata }) =>
+          metadata?.kind === 'graphic' && metadata.formatName === 'react',
+      );
+      const graphics = usesReact
+        ? await (await import('./doctor.js')).inspectReactGraphics()
+        : undefined;
       const result = {
         ok: true,
         path: video.path,
         frameCount: video.frameCount,
+        ...(graphics && { graphics }),
       };
       console.log(
         values.json
           ? JSON.stringify(result, null, 2)
-          : `Valid video definition (${result.frameCount} frames): ${result.path}`,
+          : `Valid video definition (${result.frameCount} frames): ${result.path}` +
+              (graphics?.hint ? `\nReact graphics: ${graphics.hint}` : ''),
       );
     } else if (command === 'inspect') {
       console.log(

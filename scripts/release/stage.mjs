@@ -37,7 +37,12 @@ function copyBuild(from, to, matchSources = true) {
       if (!matchSources) return true;
       // Match emitted modules to current sources so stale output cannot ship.
       const match = /\/dist\/(.+?)(?:\.d\.ts|\.js)$/.exec(path);
-      return !match || existsSync(join(from, 'src', match[1] + '.ts'));
+      return (
+        !match ||
+        ['.ts', '.tsx'].some((suffix) =>
+          existsSync(join(from, 'src', match[1] + suffix)),
+        )
+      );
     },
   });
 }
@@ -109,10 +114,10 @@ export function stageRuntime(root, destination, app, appManifest) {
       if (existsSync(join(path, 'fonts')))
         cpSync(join(path, 'fonts'), join(target, 'fonts'), { recursive: true });
       const pins = Object.fromEntries(
-        [...runtimeDependencies(manifest).keys()].map((key) => [
-          key,
-          packages.get(key).manifest.version,
-        ]),
+        [...runtimeDependencies(manifest).keys()].flatMap((key) => {
+          const dependency = packages.get(key);
+          return dependency ? [[key, dependency.manifest.version]] : [];
+        }),
       );
       writeManifest(target, {
         name,

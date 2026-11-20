@@ -63,6 +63,7 @@ async function protectInputs(
   for (const path of new Set([
     ...boundSources,
     ...authoredInputs(video),
+    ...video.graphicInputs.map(({ path }) => path),
     video.path,
     ...video.project.assets.map(({ file }) =>
       resolve(dirname(video.path), file.path),
@@ -184,7 +185,7 @@ export async function renderCompiledVideo(
             );
           return { ...result, ...(build && { build }) };
         },
-        scratchDirectory,
+        { scratch: scratchDirectory, pictureCacheDirectory },
       ),
   );
 }

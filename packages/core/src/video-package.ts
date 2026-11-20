@@ -32,11 +32,13 @@ import {
   packageRecipes,
   portableRelativePath,
   serializePackageEntry,
+  staticGraphicsBackend,
   verifyPackageContents,
 } from './video-package-format.js';
 import type { VideoPackageManifest } from './video-package-format.js';
 import { scanPackageImports } from './video-package-imports.js';
 import type { ScriptImport } from './video-script.js';
+import { compileVideoGraphics } from './video-graphics.js';
 
 export interface VideoPackageOptions {
   /** Common ancestor of the definition and all local files. Defaults to its directory. */
@@ -174,21 +176,64 @@ export async function packageVideo(
     }
   }
   const definition = parseVideoDefinition(value);
-  for (const item of [
-    ...Object.values(definition.assets ?? {}),
-    ...Object.values(definition.fonts ?? {}),
-  ]) {
-    if ('path' in item)
-      item.path = await add(resolve(dirname(source), item.path));
+  const graphics = await compileVideoGraphics(
+    source,
+    definition,
+    undefined,
+    signal,
+  );
+  const bundleFiles = new Map<string, string>();
+  const graphicBundles: NonNullable<VideoPackageManifest['graphics']> =
+    Object.create(null);
+  const graphicBackends = new Set<string>();
+  const notices = new Map<string, string>();
+  for (const [id, { bundle, inputs }] of graphics) {
+    for (const { path, identity, kind } of inputs)
+      if (kind === 'graphic') await add(path, identity);
+    if (bundle.renderer === 'svg') {
+      graphicBackends.add(staticGraphicsBackend);
+      continue;
+    }
+    for (const [name, text] of Object.entries(bundle.notices ?? {}))
+      notices.set(name, text);
+    const path = `graphics/bundle-${bundleFiles.size}.json`;
+    bundleFiles.set(path, JSON.stringify(bundle) + '\n');
+    graphicBundles[id] = { path, backend: bundle.backend };
+    graphicBackends.add(bundle.backend);
   }
+  if (notices.size)
+    bundleFiles.set(
+      'graphics/notices.txt',
+      [...notices]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([name, text]) => name + '\n' + text.trimEnd() + '\n')
+        .join('\n'),
+    );
+  for (const asset of Object.values(definition.assets ?? {})) {
+    asset.path = await add(resolve(dirname(source), asset.path));
+    if (asset.kind === 'graphic') {
+      const resources =
+        asset.renderer === 'react' ? asset.resources : asset.fonts;
+      for (const [id, path] of Object.entries(resources ?? {}))
+        resources![id] = await add(resolve(dirname(source), path));
+    }
+  }
+  for (const font of Object.values(definition.fonts ?? {}))
+    if ('path' in font)
+      font.path = await add(resolve(dirname(source), font.path));
 
   const entrySource = serializePackageEntry(definition);
   const total =
     Buffer.byteLength(entrySource) +
+    [...bundleFiles.values()].reduce(
+      (sum, text) => sum + Buffer.byteLength(text),
+      0,
+    ) +
     [...dependencies.values()].reduce((sum, item) => sum + item.bytes, 0);
   assertUniquePackagePaths([
     packageManifestName,
     packageEntryName,
+    ...bundleFiles.keys(),
     ...[...dependencies.keys()].map((path) => `project/${path}`),
   ]);
   const { bavail, bsize } = await statfs(parent, { bigint: true });
@@ -221,6 +266,22 @@ export async function packageVideo(
         throw new VideoDefinitionError(
           `Package dependency '${path}' changed during copying.`,
         );
+    if (bundleFiles.size) {
+      const bundleDirectory = join(stage, 'graphics');
+      await mkdir(bundleDirectory, { mode: 0o700 });
+      directories.add(bundleDirectory);
+      for (const [path, payload] of bundleFiles) {
+        const file = join(stage, path);
+        await writeFile(file, payload, {
+          flag: 'wx',
+          mode: 0o600,
+          signal,
+          flush: true,
+        });
+        const { bytes, sha256 } = await fingerprintFile(file, signal);
+        files.push({ path, bytes, sha256 });
+      }
+    }
     const entry = join(stage, packageEntryName);
     await writeFile(entry, entrySource, {
       flag: 'wx',
@@ -233,7 +294,8 @@ export async function packageVideo(
     const { recipes, native } = packageRecipes(definition);
     const manifest: VideoPackageManifest = {
       format: 'opencut-video-package',
-      version: 1,
+      version: graphics.size ? 2 : 1,
+      ...(graphics.size && { graphics: graphicBundles }),
       opencut: getApplicationInfo().version,
       node: process.versions.node,
       entry: packageEntryName,
@@ -250,6 +312,7 @@ export async function packageVideo(
         ffmpeg: 'ffmpeg and ffprobe on PATH',
         native,
         authoringPackages: [...external].sort(),
+        ...(graphics.size && { graphics: [...graphicBackends].sort() }),
       },
       recipes,
     };

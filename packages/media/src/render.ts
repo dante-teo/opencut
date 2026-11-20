@@ -44,6 +44,7 @@ import type { RenderProgress } from './render-progress.js';
 import { fitVisual, indexedSeekArgs } from './video-filter.js';
 import { pictureSeekCheck } from './picture-seek.js';
 import { stageTransformLayer } from './transform-layer.js';
+import type { GraphicLayer } from './graphics.js';
 import type { TransformLayerOptions } from './transform-layer.js';
 import { rasterizeTextLayer } from './text.js';
 import { cachePicture } from './picture-cache.js';
@@ -73,11 +74,18 @@ export type VisualTimelineClip = VisualTimelineProperties &
     | {
         path: string;
         freezeFrame?: Rational;
+        graphic?: GraphicLayer;
         text?: never;
         subtitle?: never;
         subtitleCueId?: never;
       }
-    | { text: TextLayer; path?: never; subtitle?: true; subtitleCueId?: string }
+    | {
+        text: TextLayer;
+        path?: never;
+        graphic?: never;
+        subtitle?: true;
+        subtitleCueId?: string;
+      }
   );
 
 type TransitionLayer = Extract<VisualTimelineClip, { path: string }> & {
@@ -127,6 +135,13 @@ export interface VideoTimelineOptions extends RenderControls {
   snapshotSource?: (sourcePath: string) => Promise<string>;
   /** Allow a desktop host to do text shaping off its main thread. */
   rasterizeText?: typeof rasterizeTextLayer;
+  renderGraphic?: (
+    clip: Extract<VisualTimelineClip, { path: string }> & {
+      graphic: GraphicLayer;
+    },
+    frame: number,
+    signal?: AbortSignal,
+  ) => Promise<Buffer>;
   width: number;
   height: number;
   frameRate: { numerator: number; denominator: number };
@@ -750,7 +765,10 @@ async function prepareTimeline(
       if (!inRange) return;
       encoders.add('ffv1');
       const hold =
-        !clip.animation && (source.kind === 'text' || !source.sampling);
+        !clip.animation &&
+        (source.kind === 'text' ||
+          (source.kind === 'media' && !source.sampling) ||
+          (source.kind === 'graphic' && source.still));
       const layerInput = registerInput(
         `${scratchName}.nut`,
         async (destination) => {
@@ -808,6 +826,23 @@ async function prepareTimeline(
         `[${textInput}:v]format=rgba,settb=1/${numerator},setpts=0[${label}]`,
       );
       return { x, y, sync: holdLastFrame };
+    }
+    const { graphic } = clip;
+    if (graphic) {
+      const { width, height, durationFrames } = graphic;
+      const sourceClip = { ...clip, graphic };
+      return transform({
+        kind: 'graphic',
+        aspect: width / height,
+        still: durationFrames === undefined,
+        rasterize(frame, signal) {
+          if (!options.renderGraphic)
+            throw new MediaError(
+              `Clip '${clip.clipId}' requires an OpenCut graphics renderer.`,
+            );
+          return options.renderGraphic(sourceClip, frame, signal);
+        },
+      });
     }
     const source = await readSource(clip);
     const { video } = source;

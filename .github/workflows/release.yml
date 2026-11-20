@@ -41,6 +41,11 @@ jobs:
           corepack enable pnpm
           pnpm install --frozen-lockfile
           brew install ffmpeg
+      - name: Install pinned graphics browser
+        run: |
+          export PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/opencut-playwright"
+          echo "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" >> "$GITHUB_ENV"
+          pnpm --filter @opencut/graphics exec playwright-core install chromium
       - name: Validate
         run: |
           pnpm typecheck
@@ -50,6 +55,8 @@ jobs:
           pnpm fixtures:generate
           pnpm test:desktop
           pnpm test:media
+          pnpm test:conformance
+          pnpm test:consistency
       - name: Build and test the release artifacts
         run: |
           pnpm release:pack all

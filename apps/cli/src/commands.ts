@@ -256,6 +256,12 @@ export function printHelp(positionals: string[], json: boolean | undefined) {
   const help = [
     'Usage: opencut <command> [options]',
     ...selected.map(({ usage }) => '  ' + usage),
+    ...(!scope ||
+    ['validate', 'render', 'preview', 'package', 'doctor'].includes(scope)
+      ? [
+          '  React and SVG graphics use the standard video commands. Check React browser readiness with opencut doctor.',
+        ]
+      : []),
     ...(['render', 'batch'].includes(scope)
       ? [
           scope === 'batch'

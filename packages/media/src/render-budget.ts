@@ -7,7 +7,7 @@ import { hostRenderResources, sampleMemoryPressure } from './host-resources.js';
 interface RenderBudget {
   remainingBytes: number | undefined;
   maxNativeBytes: number;
-  children: Map<number, (error: Error) => void>;
+  children: Map<number, { stop(error: Error): void; group: boolean }>;
   samplerFailure?: MediaError;
 }
 
@@ -18,7 +18,7 @@ export async function withRenderBudget<T>(
   limits: { maxTemporaryBytes?: number; maxNativeBytes: number },
   render: () => Promise<T>,
 ) {
-  const children = new Map<number, (error: Error) => void>();
+  const children: RenderBudget['children'] = new Map();
   const budget: RenderBudget = {
     remainingBytes: limits.maxTemporaryBytes,
     maxNativeBytes: limits.maxNativeBytes,
@@ -29,21 +29,39 @@ export async function withRenderBudget<T>(
     if (sampling || budget.samplerFailure || !children.size) return;
     sampling = true;
     const active = [...children];
-    sampleProcessMemory(
-      { pids: active.map(([pid]) => pid) },
-      (error, bytes) => {
-        sampling = false;
-        if (error) {
-          budget.samplerFailure = error;
-          for (const stop of children.values()) stop(error);
-          return;
-        }
-        if (bytes > limits.maxNativeBytes)
-          for (const [pid, stop] of active)
-            if (children.has(pid))
-              stop(new MediaError('Render exceeded its native memory budget.'));
-      },
-    );
+    const pids = active.filter(([, child]) => !child.group).map(([pid]) => pid);
+    const selections = [
+      ...(pids.length ? [{ pids }] : []),
+      ...active.flatMap(([pid, child]) =>
+        child.group ? [{ group: pid }] : [],
+      ),
+    ];
+    void Promise.all(
+      selections.map(
+        (selection) =>
+          new Promise<{ error: MediaError | null; bytes: number }>((resolve) =>
+            sampleProcessMemory(selection, (error, bytes) =>
+              resolve({ error, bytes }),
+            ),
+          ),
+      ),
+    ).then((results) => {
+      sampling = false;
+      const error = results.find(({ error }) => error)?.error;
+      if (error) {
+        budget.samplerFailure = error;
+        for (const { stop } of children.values()) stop(error);
+      } else if (
+        results.reduce((total, { bytes }) => total + bytes, 0) >
+        limits.maxNativeBytes
+      ) {
+        const failure = new MediaError(
+          'Render exceeded its native memory budget.',
+        );
+        for (const [pid, { stop }] of active)
+          if (children.has(pid)) stop(failure);
+      }
+    });
   }, 50);
   try {
     return await storage.run(budget, render);
@@ -91,10 +109,11 @@ export async function accountRenderFile(file: string) {
 export function trackRenderProcess(
   pid: number | undefined,
   stop: (error: Error) => void,
+  group = false,
 ) {
   const children = storage.getStore()?.children;
   if (pid === undefined || !children) return () => {};
-  children.set(pid, stop);
+  children.set(pid, { stop, group });
   return () => children.delete(pid);
 }
 

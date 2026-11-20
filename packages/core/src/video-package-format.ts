@@ -2,7 +2,11 @@ import { createHash } from 'node:crypto';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { z } from 'zod';
-import { enhancementBackendId, interpolationBackendId } from '@opencut/media';
+import {
+  enhancementBackendId,
+  inspectGraphicsRuntime,
+  interpolationBackendId,
+} from '@opencut/media';
 import {
   parseVideoDefinition,
   VideoDefinitionError,
@@ -65,10 +69,11 @@ const requirements = z.strictObject({
     }),
   ),
   authoringPackages: z.array(z.string()),
+  graphics: z.array(z.string()).optional(),
 });
 const manifestSchema = z.strictObject({
   format: z.literal('opencut-video-package'),
-  version: z.literal(1),
+  version: z.union([z.literal(1), z.literal(2)]),
   opencut: z.string(),
   node: z.string(),
   entry: z.literal(packageEntryName),
@@ -93,9 +98,32 @@ const manifestSchema = z.strictObject({
   ),
   requirements,
   recipes: assetRecipes,
+  graphics: z
+    .record(
+      z.string(),
+      z.strictObject({ path: packagePath, backend: z.string() }),
+    )
+    .optional(),
 });
 
 export type VideoPackageManifest = z.infer<typeof manifestSchema>;
+
+const reactBundle = z.strictObject({
+  version: z.union([z.literal(1), z.literal(2)]),
+  template: z
+    .enum(['LowerThird', 'StatisticCard', 'BarChart', 'Callout', 'SectionCard'])
+    .optional(),
+  renderer: z.literal('react'),
+  backend: z.string(),
+  key: z.string().regex(/^[a-f0-9]{64}$/),
+  js: z.string().min(1),
+  css: z.string(),
+  sourceMap: z.string().optional(),
+  notices: z.record(z.string(), z.string()).optional(),
+  resources: z.record(z.string(), z.string()),
+});
+const maxGraphicsBytes = 160 * 1024 * 1024;
+export const staticGraphicsBackend = 'svg-sharp-v1';
 
 const nativeContracts = {
   interpolation: interpolationBackendId,
@@ -104,8 +132,8 @@ const nativeContracts = {
 
 export function packageRecipes(definition: ParsedVideoDefinition) {
   const recipes = Object.fromEntries(
-    Object.entries(definition.assets ?? {}).flatMap(([id, { recipe }]) =>
-      recipe ? [[id, recipe]] : [],
+    Object.entries(definition.assets ?? {}).flatMap(([id, asset]) =>
+      asset.kind !== 'graphic' && asset.recipe ? [[id, asset.recipe]] : [],
     ),
   );
   const steps = Object.values(recipes).flat();
@@ -226,6 +254,30 @@ export async function verifyPackageContents(
     Awaited<ReturnType<typeof fingerprintFile>>
   >();
   let valueBytes: string | undefined;
+  const graphics = new Map<string, z.infer<typeof reactBundle>>();
+  const bundles = new Map(
+    Object.entries(manifest.graphics ?? {}).map(([id, entry]) => [
+      entry.path,
+      { ...entry, id },
+    ]),
+  );
+  if (
+    bundles.size !== Object.keys(manifest.graphics ?? {}).length ||
+    [...bundles.keys()].some(
+      (path) => !path.startsWith('graphics/') || !paths.has(path),
+    )
+  )
+    throw new VideoDefinitionError(
+      'Package contains an invalid graphics bundle inventory.',
+    );
+  const graphicsBytes = manifest.files.reduce(
+    (total, item) => total + (bundles.has(item.path) ? item.bytes : 0),
+    0,
+  );
+  if (graphicsBytes > maxGraphicsBytes)
+    throw new VideoDefinitionError(
+      'Package graphics payload exceeds its size limit.',
+    );
   for (const item of manifest.files) {
     const file = await packageFile(root, item.path);
     const digest = await fingerprintFile(file, signal);
@@ -235,15 +287,33 @@ export async function verifyPackageContents(
       throw new VideoDefinitionError(
         `Package integrity check failed for '${item.path}'.`,
       );
-    if (item.path === manifest.entry) {
-      valueBytes = await readFile(file, { encoding: 'utf8', signal });
-      const entryHash = createHash('sha256').update(valueBytes).digest('hex');
+    const bundle = bundles.get(item.path);
+    if (item.path === manifest.entry || bundle) {
+      const content = await readFile(file, { encoding: 'utf8', signal });
+      const entryHash = createHash('sha256').update(content).digest('hex');
       // Read the entry and verify the bytes actually parsed, even if it changed
       // after the streaming inventory check.
       if (entryHash !== item.sha256)
         throw new VideoDefinitionError(
-          'Package build entry changed during verification.',
+          'Package build entry or graphics bundle changed during verification.',
         );
+      if (bundle) {
+        let payload: unknown;
+        try {
+          payload = JSON.parse(content);
+        } catch (cause) {
+          throw new VideoDefinitionError(
+            `Invalid graphics bundle '${item.path}'.`,
+            { cause },
+          );
+        }
+        const parsed = reactBundle.safeParse(payload);
+        if (!parsed.success || parsed.data.backend !== bundle.backend)
+          throw new VideoDefinitionError(
+            `Invalid graphics bundle '${item.path}'.`,
+          );
+        graphics.set(bundle.id, { ...parsed.data, key: entryHash });
+      } else valueBytes = content;
     }
   }
   const definition = parsePackageEntry(valueBytes!);
@@ -259,6 +329,48 @@ export async function verifyPackageContents(
         `Package build entry references an unpackaged file '${item.path}'.`,
       );
   }
+  const graphicAssets = Object.entries(definition.assets ?? {}).flatMap(
+    ([id, asset]) => (asset.kind === 'graphic' ? [[id, asset] as const] : []),
+  );
+  const backends = new Set<string>();
+  let reactCount = 0;
+  for (const [id, asset] of graphicAssets) {
+    if (asset.renderer === 'svg') {
+      if (
+        Object.values(asset.fonts ?? {}).some(
+          (path) => !path.startsWith('project/') || !paths.has(path),
+        )
+      )
+        throw new VideoDefinitionError(
+          `Package is missing a static SVG font for '${id}'.`,
+        );
+      backends.add(staticGraphicsBackend);
+      continue;
+    }
+    const bundle = graphics.get(id);
+    if (
+      !bundle ||
+      Object.values(asset.resources ?? {}).some(
+        (path) => !path.startsWith('project/') || !paths.has(path),
+      )
+    )
+      throw new VideoDefinitionError(
+        `Package is missing a graphics bundle or resource for '${id}'.`,
+      );
+    backends.add(bundle.backend);
+    reactCount++;
+  }
+  if (
+    reactCount !== graphics.size ||
+    (graphicAssets.length
+      ? manifest.version !== 2
+      : manifest.version !== 1 || manifest.graphics !== undefined) ||
+    JSON.stringify([...backends].sort()) !==
+      JSON.stringify(manifest.requirements.graphics ?? [])
+  )
+    throw new VideoDefinitionError(
+      'Package graphics requirements do not match the build entry.',
+    );
   const recorded = packageRecipes(definition);
   if (
     JSON.stringify(recorded.recipes) !== JSON.stringify(manifest.recipes) ||
@@ -275,10 +387,24 @@ export async function verifyPackageContents(
     definition,
     manifestPath: path,
     fingerprints,
+    graphics,
   };
 }
 
-export function checkPackagedBackends({ requirements }: VideoPackageManifest) {
+export async function checkPackagedBackends({
+  requirements,
+}: VideoPackageManifest) {
+  const react = (requirements.graphics ?? []).filter(
+    (backend) => backend !== staticGraphicsBackend,
+  );
+  if (react.length) {
+    const { backend } = await inspectGraphicsRuntime();
+    for (const required of react)
+      if (required !== backend)
+        throw new VideoDefinitionError(
+          `Package requires graphics backend '${required}', but this OpenCut provides '${backend}'. Install a matching OpenCut build.`,
+        );
+  }
   for (const { kind, version } of requirements.native) {
     if (nativeContracts[kind] !== version)
       throw new VideoDefinitionError(

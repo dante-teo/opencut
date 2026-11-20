@@ -34,6 +34,8 @@ export type {
   VideoMixEdit,
   CompiledVideo,
   CompiledVideoRenderOptions,
+  GraphicAssetDefinition,
+  GraphicProps,
   OnlineMediaPage,
   OnlineMediaResult,
   OnlineMediaSearch,
