@@ -39,6 +39,13 @@ includes `pictureRanges` with zero-based project frames in `startFrame`
 and `endFrame` (exclusive) and a `status` of `reused` or `rendered`.
 See [picture cache behavior and storage](CLI.md#reuse-picture-between-exports).
 
+For an audio-only revision, set `pictureVersion: 'save'` on the initial
+render and keep its `pictureVersion.id`. Pass that ID as `pictureVersion`
+on the next render with the same cache directory and video settings. A
+successful reuse reports `pictureVersion.status: 'reused'` and copies the
+encoded video packets. Use `'save'` again after changing the picture or its
+video export settings.
+
 Final renders default to `quality`. Preview frames, clips, contact sheets
 and watches default to `fast`. Pass `quality: 'fast' | 'quality' | 'maximum'`
 to set the profile. You can choose the same profile when calling
@@ -54,6 +61,15 @@ the last good revision on failure, and must be closed when finished. Use
 media available during a render. The callback must finish before the watcher
 can close. Changing the render quality inside that callback uses the
 selected revision's pinned inputs, including sources needed by AI recipes.
+
+For a definition with music candidates, call
+`watcher.selectMusic({ candidate: 'soft-bed', matchLoudness: true })` to
+request a new playback revision. Supply either field to change it
+independently. If an edit removes the auditioned candidate, the watcher
+falls back to the definition's selection. Use the revision's
+`dialogueMixRevision` as the reset key for an editable mix draft. It stays
+stable during music auditions. The `sourceRevision` also reflects the
+active music selection.
 
 The SDK also exposes `probeMedia`, `extractFrame`, `OnlineMediaLibrary`,
 `separateDialogue`, and subtitle parsing and file tools.
@@ -219,3 +235,11 @@ contract](CLI.md#batch-rendering).
 ## Professional Dialogue Mix
 
 Call `analyzeVideoMix(compiledVideo, options)` to generate dialogue and music curves and verify delivery loudness without rendering picture. Mix-enabled export and clip preview results include `audioMix`. See [definition and SDK examples](AUDIO_MIX.md).
+
+Pass `musicSelection: { candidate: 'soft-bed', matchLoudness: true }` to
+`compileVideo` or `renderVideo` to override the definition's
+[music selection](AUDIO_MIX.md#compare-music-candidates). A clip preview or
+`renderCompiledVideo` uses the selection from the compiled revision. Read
+`musicComparison` for the selected track and source provenance, and
+`musicLoudness` for the target and applied gain when loudness matching is
+enabled.

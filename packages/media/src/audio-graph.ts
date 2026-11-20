@@ -6,7 +6,7 @@ import type {
 } from '@opencut/shared';
 import { audioSourceDuration } from './probe.js';
 import type { MediaMetadata } from './probe.js';
-import { MediaError } from './process.js';
+import { MediaError, runMediaTool } from './process.js';
 import type { VideoTimelineOptions } from './render.js';
 
 type Rational = RenderTimeMapping['sourceIn'];
@@ -20,6 +20,8 @@ interface RenderAudioFade {
 export interface AudioRenderClip {
   trackId?: string;
   role?: AudioRole;
+  channelMode?: 'mono-center';
+  musicGainDb?: number;
   clipId: string;
   path: string;
   timelineStartFrame: number;
@@ -39,8 +41,89 @@ export interface AudioRenderClip {
     | { type: 'de-esser'; amount: number }
     | { type: 'reverb'; mix: number }
   >;
+  /** Audio tracks require an audio stream; video clips may provide silence. */
   required: boolean;
   padAudio?: true;
+}
+
+const centeredMono = 'pan=stereo|c0=0.5*c0+0.5*c1|c1=0.5*c0+0.5*c1';
+
+/** Check a bounded source excerpt for sustained loss when summing two channels. */
+export async function centeredChannelWarnings(
+  options: Pick<
+    VideoTimelineOptions,
+    'audioClips' | 'frameRate' | 'signal' | 'snapshotSource'
+  >,
+  readSource: (clip: AudioRenderClip) => Promise<MediaMetadata>,
+) {
+  const warnings: string[] = [];
+  for (const clip of options.audioClips ?? []) {
+    if (clip.channelMode !== 'mono-center' || clip.muted || clip.volume <= 0)
+      continue;
+    const source = await readSource(clip);
+    if (source.audio?.channels !== 2) continue;
+    const path = await (options.snapshotSource?.(source.path) ?? source.path);
+    const { start, end } = audioSourceSamples(clip, options.frameRate);
+    const duration = Math.min(6, (end - start) / 48000);
+    if (duration <= 0) continue;
+    const origin =
+      source.video?.startTimeSeconds ??
+      source.audio.startTimeSeconds ??
+      source.startTimeSeconds ??
+      0;
+    const seek = Math.max(
+      0,
+      start / 48000 + origin - (source.startTimeSeconds ?? origin),
+    );
+    let levels: number[] = [];
+    await runMediaTool(
+      'ffmpeg',
+      [
+        '-hide_banner',
+        '-v',
+        'info',
+        '-nostdin',
+        '-xerror',
+        '-ss',
+        String(seek),
+        '-i',
+        path,
+        '-map',
+        `0:${source.audio.index}`,
+        '-t',
+        String(duration),
+        '-af',
+        'aformat=sample_fmts=fltp:channel_layouts=stereo,pan=3.0|c0=c0|c1=c1|c2=0.5*c0+0.5*c1,astats=metadata=0:measure_perchannel=RMS_level:measure_overall=none',
+        '-f',
+        'null',
+        '-',
+      ],
+      undefined,
+      undefined,
+      {
+        signal: options.signal,
+        stage: `checking mono phase for clip '${clip.clipId}'`,
+        onDiagnostics(output) {
+          levels = Array.from(
+            output.matchAll(/\bRMS level dB: (-inf|-?\d+(?:\.\d+)?)/g),
+            ([, level]) => (level === '-inf' ? -Infinity : Number(level)),
+          );
+        },
+      },
+    );
+    const [left, right, sum] = levels;
+    if (
+      left !== undefined &&
+      right !== undefined &&
+      sum !== undefined &&
+      Math.max(left, right) > -60 &&
+      Math.max(left, right) - sum >= 15
+    )
+      warnings.push(
+        `Clip '${clip.clipId}' loses at least 15 dB when centered in the checked source excerpt. Compare before and after and check the channel polarity.`,
+      );
+  }
+  return warnings;
 }
 
 function seconds(time: Rational): number {
@@ -164,6 +247,8 @@ export function groupAudioRuns(
       clip.path === previous.path &&
       clip.required === previous.required &&
       clip.padAudio === previous.padAudio &&
+      clip.channelMode === previous.channelMode &&
+      clip.musicGainDb === previous.musicGainDb &&
       JSON.stringify(clip.effects ?? []) ===
         JSON.stringify(previous.effects ?? []) &&
       timeDifference(
@@ -181,7 +266,10 @@ export function groupAudioRuns(
 }
 
 export async function buildAudioGraph(
-  options: Pick<VideoTimelineOptions, 'frameRate' | 'audioClips'>,
+  options: Pick<
+    VideoTimelineOptions,
+    'frameRate' | 'audioClips' | 'audioComparison'
+  >,
   {
     filters,
     readSource,
@@ -203,12 +291,16 @@ export async function buildAudioGraph(
     | {
         dialogue?: ReadonlyMap<string, StagedDialogue>;
         music?: MixGainPoint[];
+        bypassChannelMode?: boolean;
       },
 ) {
   const { frameRate } = options;
   const { numerator, denominator } = frameRate;
   const isolate = mode && 'isolate' in mode ? mode.isolate : undefined;
   const mix = mode && !('isolate' in mode) ? mode : undefined;
+  const bypassChannelMode = mode
+    ? mix?.bypassChannelMode
+    : options.audioComparison === 'before';
   const musicKeys = mix?.music;
   const timelineSample = (
     clip: AudioRenderClip,
@@ -302,12 +394,14 @@ export async function buildAudioGraph(
   for (const [index, run] of runs.entries()) {
     const first = run[0]!;
     const last = run.at(-1)!;
+    const center = first.channelMode === 'mono-center' && !bypassChannelMode;
     const staged = mix?.dialogue?.get(first.clipId);
     if (staged) {
       const start = timelineSample(first, 'start');
       const end = timelineSample(first, 'end');
       const input = openInput(first, staged.path);
       const chain = [
+        ...(center ? [centeredMono] : []),
         ...toneMatchFilters(staged.toneDb),
         envelope(first, start, end, staged.pre),
       ];
@@ -394,7 +488,9 @@ export async function buildAudioGraph(
       `apad,atrim=start_sample=${sourceStart}:end_sample=${sourceEnd},asettb=1/48000,asetpts=N,` +
       tempo +
       fitDuration +
-      effectChain(first, count);
+      effectChain(first, count) +
+      (first.musicGainDb ? `volume=${first.musicGainDb}dB,` : '') +
+      (center ? `${centeredMono},` : '');
     if (isolate) {
       filters.push(inputFilter + 'anull[audio]');
       return;

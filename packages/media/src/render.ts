@@ -1,7 +1,11 @@
 import { prepareProfessionalMix } from './professional-mix.js';
 import type { AudioMixCache } from './professional-mix.js';
 import type { AudioMixReport } from './audio-mastering.js';
-import { audioSampleAtFrame, buildAudioGraph } from './audio-graph.js';
+import {
+  audioSampleAtFrame,
+  buildAudioGraph,
+  centeredChannelWarnings,
+} from './audio-graph.js';
 import type { AudioRenderClip } from './audio-graph.js';
 import { decodeStillFrame } from './frame.js';
 import {
@@ -47,8 +51,15 @@ import { stageTransformLayer } from './transform-layer.js';
 import type { GraphicLayer } from './graphics.js';
 import type { TransformLayerOptions } from './transform-layer.js';
 import { rasterizeTextLayer } from './text.js';
-import { cachePicture } from './picture-cache.js';
+import {
+  cachePicture,
+  encodedPictureKey,
+  planPictureRanges,
+  saveEncodedPicture,
+} from './picture-cache.js';
 import type { PictureCache, PictureRange } from './picture-cache.js';
+import { prepareMusicComparison } from './music-comparison.js';
+import type { MusicLoudnessReport } from './music-comparison.js';
 
 interface VisualTimelineProperties {
   crop?: NonNullable<import('@opencut/shared').VisualTransform['crop']>;
@@ -100,6 +111,7 @@ export const renderResolutions = ['project', '720p', '1080p'] as const;
 export const renderCodecs = ['h264', 'hevc'] as const;
 export type RenderCodec = (typeof renderCodecs)[number];
 export type RenderResolution = (typeof renderResolutions)[number];
+const maxDeliveryPixels = 2880 * 3840;
 export interface RenderControls {
   /** Trim the finished composition on the project grid; end is exclusive. */
   range?: { startFrame: number; endFrame: number } | undefined;
@@ -125,6 +137,7 @@ export interface VideoTimelineOptions extends RenderControls {
   /** Serialize build provenance in a custom MP4 format tag. */
   buildMetadata?: string;
   pictureCache?: PictureCache | undefined;
+  pictureVersion?: string | undefined;
   /** Parent for private scratch on the destination filesystem. */
   scratchDirectory?: string;
   /** Record a verified file before publication so a caller can reconcile a crash. */
@@ -162,6 +175,11 @@ export interface VideoTimelineOptions extends RenderControls {
   >;
   audioClips?: AudioRenderClip[];
   professionalMix?: ProfessionalMix;
+  musicComparison?: {
+    candidates: string[];
+    selected: string;
+    matchLoudness: boolean;
+  };
   audioMixCache?: AudioMixCache;
   output: string;
 }
@@ -179,7 +197,14 @@ export interface VideoTimelineResult {
   metadata: MediaMetadata;
   warnings?: string[];
   pictureRanges?: PictureRange[];
+  pictureVersion?: { id: string; status: 'saved' | 'reused' };
   audioMix?: AudioMixReport;
+  musicLoudness?: MusicLoudnessReport;
+  audioChannelRouting?: {
+    centeredTracks: string[];
+    comparison: 'before' | 'after';
+    outputChannels: 1 | 2;
+  };
 }
 
 function validateOptions(options: VideoTimelineOptions): void {
@@ -274,6 +299,8 @@ function validateOptions(options: VideoTimelineOptions): void {
         clip.volume > 1 ||
         typeof clip.muted !== 'boolean' ||
         typeof clip.required !== 'boolean' ||
+        (clip.channelMode !== undefined &&
+          clip.channelMode !== 'mono-center') ||
         !validAudioFades(clip, numerator, denominator),
     )
   )
@@ -430,9 +457,11 @@ async function existingOutput(path: string) {
 async function protectSourceFiles(
   options: VideoTimelineOptions,
   destination: Stats | null,
+  cachedPicture?: string,
 ) {
   if (!options.overwrite || !destination) return;
   const paths = new Set<string>();
+  if (cachedPicture) paths.add(cachedPicture);
   for (const clip of options.visualClips ?? options.segments ?? [])
     if ('path' in clip && clip.path) paths.add(clip.path);
   for (const transition of options.visualTransitions ?? [])
@@ -485,10 +514,10 @@ async function prepareTimeline(
         (side) =>
           Number.isInteger(side) && side >= 2 && side <= 3840 && side % 2 === 0,
       ) ||
-      outputSize.width * outputSize.height > 3840 * 2160)
+      outputSize.width * outputSize.height > maxDeliveryPixels)
   )
     throw new MediaError(
-      'Custom dimensions must be even, 2–3840 per side, within 3840×2160 pixels, and use project resolution mode.',
+      'Custom dimensions must be even, 2–3840 per side, within 2880×3840 total pixels, and use project resolution mode.',
     );
   if (
     videoBitrateKbps !== undefined &&
@@ -626,6 +655,10 @@ async function prepareTimeline(
     'pipe:1',
   ];
   const warnings: string[] = [];
+  if (outputSize && (outputWidth > width || outputHeight > height))
+    warnings.push(
+      `Delivery scales the ${width}×${height} composed picture to ${outputWidth}×${outputHeight} with FFmpeg. AI super-resolution only applies to sources with an explicit recipe.`,
+    );
   const stagedInputs: StagedInput[] = [];
   const encoders = new Set([codec === 'h264' ? 'libx264' : 'libx265', 'aac']);
   const prepared = {
@@ -643,10 +676,17 @@ async function prepareTimeline(
     stagedInputs,
     encoders,
     pictureRanges: undefined as PictureRange[] | undefined,
+    sourcePicture: undefined as
+      | (NonNullable<VideoTimelineResult['pictureVersion']> & { path: string })
+      | undefined,
+    savePicture: undefined as
+      { key: string; cache: NonNullable<PictureCache['encoded']> } | undefined,
     audioMix: undefined as AudioMixReport | undefined,
+    musicLoudness: undefined as MusicLoudnessReport | undefined,
   };
   const filters: string[] = [];
   const sources = new Map(options.sourceMetadata);
+  const reportedSources = new Set<string>();
   const inputPathFor = (path: string) => options.snapshotSource?.(path) ?? path;
   const inputs = new Map<string, number>();
   const readSource = async (clip: { path: string; clipId: string }) => {
@@ -663,6 +703,10 @@ async function prepareTimeline(
         );
       }
       sources.set(clip.path, source);
+    }
+    if (source.diagnostic && !reportedSources.has(clip.path)) {
+      warnings.push(`Media probe for '${clip.path}': ${source.diagnostic}.`);
+      reportedSources.add(clip.path);
     }
     return source;
   };
@@ -688,9 +732,9 @@ async function prepareTimeline(
       transition.layers.some(
         (layer) =>
           !visualClips.some(({ clipId }) => clipId === layer.clipId) ||
-          !layer.retiming ||
-          !validRetiming(layer.retiming) ||
-          !validSourceOrigin(layer.retiming) ||
+          (layer.retiming &&
+            (!validRetiming(layer.retiming) ||
+              !validSourceOrigin(layer.retiming))) ||
           layer.timelineStartFrame !== ramp.startFrame ||
           layer.frameCount !== ramp.endFrame - ramp.startFrame ||
           layer.ramp.startFrame !== ramp.startFrame ||
@@ -723,6 +767,17 @@ async function prepareTimeline(
   validateSubtitleBurnIn(visibleClips);
   const pictureCache =
     mode === 'mp4' && scratch ? options.pictureCache : undefined;
+  const pictureVersion = mode === 'mp4' ? options.pictureVersion : undefined;
+  const encodedCache = options.pictureCache?.encoded;
+  if (
+    pictureVersion !== undefined &&
+    (!encodedCache ||
+      (pictureVersion !== 'save' &&
+        !/^[a-f0-9]{64}\.[a-f0-9]{64}$/.test(pictureVersion)))
+  )
+    throw new MediaError(
+      'Use a picture cache and select `save` or a saved picture version ID.',
+    );
   if (options.pictureCache) encoders.add('ffv1');
   if (!pictureCache)
     filters.push(
@@ -765,6 +820,7 @@ async function prepareTimeline(
       if (!inRange) return;
       encoders.add('ffv1');
       const hold =
+        !ramp &&
         !clip.animation &&
         (source.kind === 'text' ||
           (source.kind === 'media' && !source.sampling) ||
@@ -853,9 +909,9 @@ async function prepareTimeline(
       throw new MediaError(
         `Clip '${clip.clipId}' requires timed video or a still image on the video track.`,
       );
-    if (ramp && still)
+    if (ramp && !still && !clip.retiming)
       throw new MediaError(
-        `Transition clip '${clip.clipId}' requires timed video.`,
+        `Transition clip '${clip.clipId}' requires timed source mapping for video. Re-import the source if a photo has been replaced with a video.`,
       );
     let held: HeldFrame | undefined;
     if (freeze) {
@@ -1094,9 +1150,9 @@ async function prepareTimeline(
     }
   }
   let picture = `[canvas${canvas}]settb=1/${numerator},setpts=N*${denominator},scale=${outputWidth}:${outputHeight}:out_color_matrix=bt709,setsar=1`;
+  let videoMap = '[video]';
   if (pictureCache) {
-    const checkSeek = pictureSeekCheck(options.signal);
-    const { concat, ranges } = await cachePicture({
+    const planned = await planPictureRanges({
       options,
       cache: pictureCache,
       visualClips,
@@ -1107,61 +1163,107 @@ async function prepareTimeline(
       outputHeight,
       warnings,
       rasterize,
-      encode: async (startFrame, endFrame, destination) => {
-        const staging = renderScratch(
-          options.output,
-          '.opencut-picture-',
-          options.scratchDirectory,
-        );
-        try {
-          const segment = await prepareTimeline(
-            {
-              ...options,
-              range: { startFrame, endFrame },
-              outputFrameRate: undefined,
-            },
-            'picture',
-            staging,
-            checkSeek,
-          );
-          await staging.stage(segment, options.signal);
-          await runMediaTool(
-            'ffmpeg',
-            [...segment.args, destination],
-            4 * 1024 * 1024,
-            600_000,
-            {
-              signal: options.signal,
-              writesFile: true,
-            },
-          );
-        } finally {
-          await staging.close();
-        }
-      },
     });
-    prepared.pictureRanges = ranges;
-    args.push('-f', 'concat', '-safe', '0', '-protocol_whitelist', 'file');
-    const pictureInput = registerInput('picture.ffconcat', (destination) =>
-      writeFile(destination, concat, {
-        flag: 'wx',
-        signal: options.signal,
-      }),
-    );
-    // Concat transports pictures in order. Regenerate their timestamps on the
-    // project grid so container time bases and range boundaries cannot accrue drift.
-    picture = `[${pictureInput}:v]settb=1/${numerator},setpts=N*${denominator},setsar=1`;
+    if (pictureVersion && encodedCache) {
+      const key = encodedPictureKey(planned, [
+        codec,
+        quality,
+        videoBitrateKbps,
+        outputRate,
+        options.outputFrameRate !== undefined,
+        outputFrameCount,
+      ]);
+      if (pictureVersion === 'save')
+        prepared.savePicture = { key, cache: encodedCache };
+      else {
+        if (!pictureVersion.startsWith(`${key}.`))
+          throw new MediaError(
+            'Picture or video export settings changed. Rebuild the picture with --picture-version save.',
+          );
+        const cached = await encodedCache.find(pictureVersion);
+        if (!cached)
+          throw new MediaError(
+            'Saved picture is missing or corrupt. Use the original picture cache or rebuild with --picture-version save.',
+          );
+        await protectSourceFiles(options, existing, cached);
+        prepared.sourcePicture = {
+          id: pictureVersion,
+          path: cached,
+          status: 'reused',
+        };
+        prepared.pictureRanges = planned.map(({ startFrame, endFrame }) => ({
+          startFrame,
+          endFrame,
+          status: 'reused',
+        }));
+        args.push('-i', cached);
+        videoMap = `${input++}:v:0`;
+      }
+    }
+    if (!prepared.sourcePicture) {
+      const checkSeek = pictureSeekCheck(options.signal);
+      const { concat, ranges } = await cachePicture(
+        planned,
+        pictureCache,
+        frameRate,
+        options.signal,
+        async (startFrame, endFrame, destination) => {
+          const staging = renderScratch(
+            options.output,
+            '.opencut-picture-',
+            options.scratchDirectory,
+          );
+          try {
+            const segment = await prepareTimeline(
+              {
+                ...options,
+                range: { startFrame, endFrame },
+                outputFrameRate: undefined,
+              },
+              'picture',
+              staging,
+              checkSeek,
+            );
+            await staging.stage(segment, options.signal);
+            await runMediaTool(
+              'ffmpeg',
+              [...segment.args, destination],
+              4 * 1024 * 1024,
+              600_000,
+              {
+                signal: options.signal,
+                writesFile: true,
+              },
+            );
+          } finally {
+            await staging.close();
+          }
+        },
+      );
+      prepared.pictureRanges = ranges;
+      args.push('-f', 'concat', '-safe', '0', '-protocol_whitelist', 'file');
+      const pictureInput = registerInput('picture.ffconcat', (destination) =>
+        writeFile(destination, concat, {
+          flag: 'wx',
+          signal: options.signal,
+        }),
+      );
+      // Concat transports pictures in order. Regenerate their timestamps on the
+      // project grid so container time bases and range boundaries cannot accrue drift.
+      picture = `[${pictureInput}:v]settb=1/${numerator},setpts=N*${denominator},setsar=1`;
+    }
   }
-  filters.push(
-    picture +
-      ',' +
-      (options.outputFrameRate
-        ? `fps=${outputRate.numerator}/${outputRate.denominator}:round=up:eof_action=pass,tpad=stop_mode=clone:stop=1,trim=end_frame=${outputFrameCount},settb=1/${outputRate.numerator},setpts=N*${outputRate.denominator},`
-        : '') +
-      (png
-        ? 'format=rgb24[video]'
-        : 'format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709[video]'),
-  );
+  if (!prepared.sourcePicture)
+    filters.push(
+      picture +
+        ',' +
+        (options.outputFrameRate
+          ? `fps=${outputRate.numerator}/${outputRate.denominator}:round=up:eof_action=pass,tpad=stop_mode=clone:stop=1,trim=end_frame=${outputFrameCount},settb=1/${outputRate.numerator},setpts=N*${outputRate.denominator},`
+          : '') +
+        (png
+          ? 'format=rgb24[video]'
+          : 'format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709[video]'),
+    );
   if (mode !== 'mp4') {
     args.push(
       '-filter_complex_threads',
@@ -1208,10 +1310,19 @@ async function prepareTimeline(
     ? from + audioSampleAtFrame(outputFrameCount, outputRate)
     : audioSampleAtFrame(outputFrameCount, outputRate);
   const mix = options.professionalMix;
+  const music = await prepareMusicComparison(
+    options,
+    readSource,
+    scratch && options.musicComparison?.matchLoudness
+      ? await scratch.open()
+      : undefined,
+  );
+  prepared.musicLoudness = music.musicLoudness;
+  if (music.warnings) warnings.push(...music.warnings);
   let audioMap = '[audio]';
   if (mix && mix.enabled !== false && scratch) {
     const result = await prepareProfessionalMix(
-      options,
+      music.options,
       mix,
       await scratch.open(),
       readSource,
@@ -1226,8 +1337,12 @@ async function prepareTimeline(
     args.push('-i', result.path);
     audioMap = `${input++}:a:0`;
   } else {
+    if (scratch)
+      warnings.push(
+        ...(await centeredChannelWarnings(music.options, readSource)),
+      );
     await buildAudioGraph(
-      options,
+      music.options,
       {
         filters,
         readSource,
@@ -1268,40 +1383,43 @@ async function prepareTimeline(
     });
   }
   args.push(
-    '-filter_complex_threads',
-    '1',
-    '-filter_complex',
-    filters.join(';'),
+    ...(filters.length
+      ? ['-filter_complex_threads', '1', '-filter_complex', filters.join(';')]
+      : []),
     '-map',
-    '[video]',
+    videoMap,
     '-map',
     audioMap,
     '-map_metadata',
     String(metadataInput),
-    '-c:v',
-    codec === 'h264' ? 'libx264' : 'libx265',
-    '-preset',
-    encoding.preset,
-    ...(videoBitrateKbps === undefined
-      ? ['-crf', encoding.crf]
-      : ['-b:v', `${videoBitrateKbps}k`]),
-    ...(codec === 'hevc'
-      ? ['-x265-params', 'pools=2:log-level=error', '-tag:v', 'hvc1']
-      : []),
-    '-pix_fmt',
-    'yuv420p',
-    '-threads',
-    '2',
-    '-fps_mode',
-    'passthrough',
-    '-enc_time_base:v',
-    `1/${outputRate.numerator}`,
-    '-colorspace',
-    'bt709',
-    '-color_primaries',
-    'bt709',
-    '-color_trc',
-    'bt709',
+    ...(prepared.sourcePicture
+      ? ['-c:v', 'copy']
+      : [
+          '-c:v',
+          codec === 'h264' ? 'libx264' : 'libx265',
+          '-preset',
+          encoding.preset,
+          ...(videoBitrateKbps === undefined
+            ? ['-crf', encoding.crf]
+            : ['-b:v', `${videoBitrateKbps}k`]),
+          ...(codec === 'hevc'
+            ? ['-x265-params', 'pools=2:log-level=error', '-tag:v', 'hvc1']
+            : []),
+          '-pix_fmt',
+          'yuv420p',
+          '-threads',
+          '2',
+          '-fps_mode',
+          'passthrough',
+          '-enc_time_base:v',
+          `1/${outputRate.numerator}`,
+          '-colorspace',
+          'bt709',
+          '-color_primaries',
+          'bt709',
+          '-color_trc',
+          'bt709',
+        ]),
     '-video_track_timescale',
     String(outputRate.numerator),
     ...(prepared.audioMix
@@ -1420,6 +1538,16 @@ export async function renderVideoTimeline(
       warnings,
     } = prepared;
     const { numerator, denominator } = frameRate;
+    const centeredTracks = [
+      ...new Set(
+        (options.audioClips ?? [])
+          .filter(
+            ({ channelMode, muted, volume }) =>
+              channelMode === 'mono-center' && !muted && volume > 0,
+          )
+          .map(({ trackId, clipId }) => trackId ?? clipId),
+      ),
+    ];
     const rendered = join(await scratch.open(), 'render.mp4');
     args.push(rendered);
     const progress = renderProgress(frameCount, options.onProgress);
@@ -1429,11 +1557,25 @@ export async function renderVideoTimeline(
       signal: options.signal,
       onStdout: progress.chunk,
       writesFile: true,
+      stage: `encoding ${outputWidth}×${outputHeight} MP4 '${path}' at ${numerator}/${denominator} fps`,
+    }).catch((cause: unknown) => {
+      if (
+        outputWidth * outputHeight > 3840 * 2160 &&
+        cause instanceof MediaError &&
+        /allocat|memory|SIGKILL|no space|disk budget/i.test(cause.message)
+      )
+        throw new MediaError(
+          `${cause.message} Free memory or disk space, or reduce the export size.`,
+          { cause },
+        );
+      throw cause;
     });
     await accountRenderFile(rendered);
     checkRenderSignal(options.signal);
     progress.verifying();
-    const metadata = await probeMedia(rendered, options.signal);
+    const metadata = await probeMedia(rendered, options.signal, {
+      stage: 'verifying encoded MP4',
+    });
     const video = metadata.video;
     // Decode/count output frames, rather than trusting container duration alone.
     const frameProbe = await runMediaTool(
@@ -1452,7 +1594,10 @@ export async function renderVideoTimeline(
       ],
       4 * 1024 * 1024,
       600_000,
-      { signal: options.signal },
+      {
+        signal: options.signal,
+        stage: `counting decoded frames in '${rendered}'`,
+      },
     );
     const counted = JSON.parse(frameProbe.toString('utf8')) as {
       streams?: { nb_read_frames?: string }[];
@@ -1480,6 +1625,20 @@ export async function renderVideoTimeline(
         'Render verification failed: unexpected codec, dimensions, frame rate, duration or decoded frame count. Check source decodability and trim ranges.',
       );
     checkRenderSignal(options.signal);
+    let picture = prepared.sourcePicture;
+    if (prepared.savePicture) {
+      const { key, cache } = prepared.savePicture;
+      picture = {
+        ...(await saveEncodedPicture(
+          cache,
+          key,
+          rendered,
+          numerator,
+          options.signal,
+        )),
+        status: 'saved',
+      };
+    }
     await options.onVerifiedOutput?.(rendered);
     checkRenderSignal(options.signal);
     try {
@@ -1489,7 +1648,7 @@ export async function renderVideoTimeline(
           throw new MediaError(
             `Refusing to overwrite non-regular output '${path}'.`,
           );
-        await protectSourceFiles(options, destination);
+        await protectSourceFiles(options, destination, picture?.path);
         checkRenderSignal(options.signal);
         // Same-filesystem rename replaces a complete file atomically.
         await rename(rendered, path);
@@ -1516,7 +1675,18 @@ export async function renderVideoTimeline(
       metadata: { ...metadata, path },
       ...(warnings.length ? { warnings } : {}),
       ...(prepared.pictureRanges && { pictureRanges: prepared.pictureRanges }),
+      ...(picture && {
+        pictureVersion: { id: picture.id, status: picture.status },
+      }),
       ...(prepared.audioMix && { audioMix: prepared.audioMix }),
+      ...(prepared.musicLoudness && { musicLoudness: prepared.musicLoudness }),
+      ...(centeredTracks.length && {
+        audioChannelRouting: {
+          centeredTracks,
+          comparison: options.audioComparison ?? 'after',
+          outputChannels: options.audioChannels ?? 2,
+        },
+      }),
     };
   } finally {
     await scratch.close();
@@ -1537,20 +1707,26 @@ export async function analyzeTimelineAudioMix(options: VideoTimelineOptions) {
   try {
     const base = audioSampleAtFrame(options.frameCount, options.frameRate);
     const sources = new Map(options.sourceMetadata);
+    const readSource = async ({ path }: AudioRenderClip) => {
+      let metadata = sources.get(path);
+      if (!metadata) {
+        metadata = await probeMedia(path, options.signal, {
+          stage: 'probing audio mix source',
+        });
+        sources.set(path, metadata);
+      }
+      return metadata;
+    };
+    const folder = await scratch.open();
+    const music = await prepareMusicComparison(options, readSource, folder);
     const result = await prepareProfessionalMix(
-      options,
+      music.options,
       mix,
-      await scratch.open(),
-      async ({ path }) => {
-        let metadata = sources.get(path);
-        if (!metadata) {
-          metadata = await probeMedia(path, options.signal);
-          sources.set(path, metadata);
-        }
-        return metadata;
-      },
+      folder,
+      readSource,
       { base, from: 0, to: base },
     );
+    if (music.warnings) result.report.warnings.push(...music.warnings);
     return result.report;
   } finally {
     await scratch.close();
@@ -1571,7 +1747,9 @@ export async function renderTimelineFrame(options: VideoTimelineOptions) {
       600_000,
       { signal: options.signal },
     );
-    const metadata = await probeMedia(rendered, options.signal);
+    const metadata = await probeMedia(rendered, options.signal, {
+      stage: 'verifying rendered PNG',
+    });
     if (
       metadata.video?.codec !== 'png' ||
       metadata.video.width !== prepared.outputWidth ||

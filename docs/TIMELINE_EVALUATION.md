@@ -78,8 +78,9 @@ Negative/invalid times and unsafe arithmetic throw instead of clamping or roundi
 Exact subframe queries are supported. Within a transition window, the
 evaluator samples the participating picture layers at the start of the
 containing project frame. Each sample carries `transitionId` and its weighted
-opacity, including zero-opacity endpoints. A cross-dissolve can sample source
-handles outside nominal clip ranges. Use `audioClips` or `mixingSources` for
+opacity, including zero-opacity endpoints. A cross-dissolve can sample video
+handles outside nominal clip ranges and holds a still image through its ramp.
+Use `audioClips` or `mixingSources` for
 audio. Exact timestamp queries keep subtitle visibility on the cue's stored
 interval even when the project contains transitions.
 

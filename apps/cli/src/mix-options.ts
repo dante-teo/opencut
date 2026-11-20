@@ -15,6 +15,16 @@ export async function readMixControls(
   )
     throw new UsageError('--mix-comparison must be before or after.');
   const audioMixCacheDirectory = values['mix-cache'];
+  const candidate = values['music-candidate'];
+  if (candidate !== undefined && !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(candidate))
+    throw new UsageError('--music-candidate requires a track ID.');
+  const loudness = values['music-loudness'];
+  if (
+    loudness !== undefined &&
+    loudness !== 'matched' &&
+    loudness !== 'authored'
+  )
+    throw new UsageError('--music-loudness must be matched or authored.');
   if (audioMixCacheDirectory !== undefined && !audioMixCacheDirectory.trim())
     throw new UsageError('--mix-cache requires a directory.');
   const path = values['mix-settings'];
@@ -26,6 +36,14 @@ export async function readMixControls(
         );
   return {
     audioMixEdit,
+    musicSelection:
+      candidate === undefined && loudness === undefined
+        ? undefined
+        : {
+            candidate,
+            matchLoudness:
+              loudness === undefined ? undefined : loudness === 'matched',
+          },
     audioComparison: comparison as 'before' | 'after' | undefined,
     audioMixCacheDirectory,
   };

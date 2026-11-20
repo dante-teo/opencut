@@ -30,6 +30,13 @@ ranges after a timeline shift, including ranges with captions that shift
 together with picture. Audio is mixed on the revised timeline. Read
 `pictureRanges` in JSON for the status of each half-open project-frame range.
 See [picture cache options](../../../docs/CLI.md#reuse-picture-between-exports).
+To reuse encoded picture for audio revisions, save the approved export with
+`--picture-version save`. Keep its ID and export the audio revision with the
+same cache and video settings and `--picture-version <id>`.
+Use `--music-candidate <track-id>` and `--music-loudness matched|authored`
+with `render` or `preview clip` to select and compare authored music
+candidates. Before final delivery, confirm the selected track and any
+previous-use notice in the render report.
 
 On macOS, `opencut system inspect --json` reports the VideoToolbox processor
 and tested formats and dimensions. Recipe inspection checks declarations
@@ -72,3 +79,10 @@ report’s `automation` into `professionalMix.automation` in the definition or
 `mix.automation` in a settings file passed to `--mix-settings <mix.json>`. Use
 `--mix-comparison before` for a loudness-matched comparison and
 `--mix-cache <directory>` to reuse AI-enhanced stems across runs. See [Professional Dialogue Mix](../../../docs/AUDIO_MIX.md).
+
+## 3:4 4K60 delivery
+
+Set the definition's 3:4 canvas to 60 fps and render with
+`--width 2880 --height 3840 --fps 60 --codec hevc`. Output scaling applies to
+the composed picture. Use per-source recipes for AI interpolation or
+super-resolution when requested.

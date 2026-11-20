@@ -220,6 +220,8 @@ async function writeTransformLayer(
   } = options;
   const output = createCanvas(width, height);
   const ctx = output.getContext('2d');
+  // The default filter can repeat samples at very small fractional offsets.
+  if (animation && source.kind !== 'text') ctx.imageSmoothingQuality = 'high';
   const raster =
     source.kind === 'text' ? await loadImage(await source.rasterize()) : null;
   const raw = source.kind === 'media' ? rawSource(source, frameCount) : null;
@@ -317,7 +319,14 @@ async function writeTransformLayer(
         if (input) {
           const aspect =
             source.kind === 'graphic' ? source.aspect : media!.aspect;
-          const geometry = visualGeometry(width, height, aspect, 1, sampled);
+          const geometry = visualGeometry(
+            width,
+            height,
+            aspect,
+            1,
+            sampled,
+            animation ? 'subpixel' : 'even',
+          );
           if (geometry.visible) drawMediaLayer(ctx, input, geometry);
         }
       }

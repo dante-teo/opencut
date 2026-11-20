@@ -25,6 +25,8 @@ const api: DesktopAPI = {
     ipcRenderer.invoke(DEFINITION_CHANNELS.applyMix, generation, edit),
   compareDialogueMix: (generation, comparison) =>
     ipcRenderer.invoke(DEFINITION_CHANNELS.compareMix, generation, comparison),
+  selectMusic: (generation, selection) =>
+    ipcRenderer.invoke(DEFINITION_CHANNELS.selectMusic, generation, selection),
   loadDialogueMix: () => ipcRenderer.invoke(DEFINITION_CHANNELS.loadMix),
   saveDialogueMix: (edit) =>
     ipcRenderer.invoke(DEFINITION_CHANNELS.saveMix, edit),

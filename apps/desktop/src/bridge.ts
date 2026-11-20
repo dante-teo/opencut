@@ -1,5 +1,10 @@
 import type { ApplicationInfo, Project } from '@opencut/core';
-import type { AudioMixReport, VideoMixEdit } from '@opencut/core/video';
+import type {
+  AudioMixReport,
+  MusicSelection,
+  VideoMixEdit,
+  describeMusicComparison,
+} from '@opencut/core/video';
 
 export const APP_INFO_CHANNEL = 'app:get-info';
 export const DEFINITION_CHANNELS = {
@@ -8,6 +13,7 @@ export const DEFINITION_CHANNELS = {
   createMix: 'definition:create-mix',
   applyMix: 'definition:apply-mix',
   compareMix: 'definition:compare-mix',
+  selectMusic: 'definition:select-music',
   saveMix: 'definition:save-mix',
   loadMix: 'definition:load-mix',
   changed: 'definition:changed',
@@ -24,9 +30,11 @@ export interface DefinitionReview {
   current: {
     generation: number;
     sourceRevision: string;
+    dialogueMixRevision: string;
     project: Project;
     frameCount: number;
     audioMix?: AudioMixReport;
+    musicComparison?: NonNullable<ReturnType<typeof describeMusicComparison>>;
     url: string;
   } | null;
 }
@@ -67,6 +75,7 @@ export interface DesktopAPI {
     generation: number,
     comparison: 'before' | 'after',
   ): Promise<void>;
+  selectMusic(generation: number, selection: MusicSelection): Promise<void>;
   saveDialogueMix(edit: VideoMixEdit): Promise<string | null>;
   loadDialogueMix(): Promise<VideoMixEdit | null>;
   closeDefinition(): Promise<void>;

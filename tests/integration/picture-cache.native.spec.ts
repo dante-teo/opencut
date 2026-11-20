@@ -45,6 +45,108 @@ const picture = (path: string) =>
     'pipe:1',
   ]);
 
+test('CLI saves verified picture packets and stream copies them into an audio-only revision', async (t) => {
+  const directory = await mkdtemp(join(fixtureDirectory, 'audio-revision-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, 'edit.video.ts');
+  const cache = join(directory, 'cache');
+  const writeEdit = (volume: number, scale: number) =>
+    writeFile(
+      file,
+      'export default ' +
+        JSON.stringify(
+          defineVideo({
+            canvas: {
+              width: 160,
+              height: 90,
+              frameRate: rate,
+              durationFrames: 24,
+            },
+            assets: {
+              shot: { path: '../video-medium.mp4', kind: 'video' },
+              song: { path: '../audio-tone.wav', kind: 'audio' },
+            },
+            tracks: [
+              {
+                type: 'video',
+                muted: true,
+                clips: [
+                  { asset: 'shot', at: 0, sourceOut: 24, visual: { scale } },
+                ],
+              },
+              {
+                type: 'audio',
+                volume,
+                clips: [{ asset: 'song', at: 0, sourceOut: 24 }],
+              },
+            ],
+          }),
+        ),
+    );
+  const run = (version: string, name: string) => {
+    const path = join(directory, `${name}.mp4`);
+    const result = spawnSync(
+      process.execPath,
+      [
+        entry,
+        'render',
+        file,
+        '--output',
+        path,
+        '--picture-cache',
+        cache,
+        '--picture-version',
+        version,
+        '--json',
+      ],
+      { encoding: 'utf8', timeout: 60_000 },
+    );
+    return { path, result };
+  };
+  await writeEdit(1, 1);
+  const saved = run('save', 'saved');
+  assert.equal(saved.result.status, 0, saved.result.stderr);
+  const id = JSON.parse(saved.result.stdout).pictureVersion.id as string;
+  assert.match(id, /^[a-f0-9]{64}\.[a-f0-9]{64}$/);
+  await writeEdit(0.35, 1);
+  const revised = run(id, 'revised');
+  assert.equal(revised.result.status, 0, revised.result.stderr);
+  assert.deepEqual(JSON.parse(revised.result.stdout).pictureVersion, {
+    id,
+    status: 'reused',
+  });
+  const packetHash = (path: string) =>
+    ffmpeg([
+      '-i',
+      path,
+      '-map',
+      '0:v:0',
+      '-c:v',
+      'copy',
+      '-f',
+      'hash',
+      'pipe:1',
+    ]).toString();
+  assert.equal(packetHash(saved.path), packetHash(revised.path));
+  verifyVideoTimestamps(revised.path, rate, 24);
+  assert.notDeepEqual(
+    decodeAudio(saved.path).samples,
+    decodeAudio(revised.path).samples,
+  );
+  await writeEdit(0.35, 0.9);
+  const changed = run(id, 'changed-picture');
+  assert.equal(changed.result.status, 1);
+  assert.match(
+    changed.result.stderr,
+    /Picture or video export settings changed.*Rebuild the picture/,
+  );
+  await writeEdit(0.35, 1);
+  await writeFile(join(cache, 'picture-v1', id, 'media.mp4'), 'invalid cache');
+  const corrupt = run(id, 'corrupt-picture');
+  assert.equal(corrupt.result.status, 1);
+  assert.match(corrupt.result.stderr, /Saved picture is missing or corrupt/);
+});
+
 test('CLI picture cache reuses shifted 60 fps picture and preserves caption and narration timing', async () => {
   const directory = await mkdtemp(join(fixtureDirectory, 'picture-cache-'));
   const file = join(directory, 'edit.video.ts');

@@ -13,7 +13,7 @@ import type {
   VisualTimelineClip,
 } from '@opencut/media';
 import { sampleClipSourceFrame } from './clip-timing.js';
-import type { ProjectRenderPlan } from './render-plan.js';
+import type { AudioRenderClip, ProjectRenderPlan } from './render-plan.js';
 import type { CompiledVideo } from './video-compiler.js';
 import { copyVideoInput } from './video-input.js';
 import { graphicsFrameCache } from './video-graphics-cache.js';
@@ -148,7 +148,7 @@ export function bindRenderSources(
       const { graphicProps, ...layer } = clip;
       return { ...layer, ...resolveSource(clip.assetId, graphicProps) };
     }),
-    audioClips: audioClips.map((clip) => ({
+    audioClips: audioClips.map<AudioRenderClip & { path: string }>((clip) => ({
       ...clip,
       path: resolveSource(clip.assetId).path,
     })),

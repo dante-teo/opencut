@@ -10,9 +10,11 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { createProject, frameTime } from '@opencut/core';
+import { createProject, frameTime, planProjectRender } from '@opencut/core';
 import type { FrameRate, Project } from '@opencut/core';
 import { requireTool, runTool } from '../../scripts/fixture-lib.js';
+import { buildAudioGraph } from '../../packages/media/src/audio-graph.js';
+import { probeMedia } from '../../packages/media/src/probe.js';
 
 const generated = fileURLToPath(
   new URL('../fixtures/generated/', import.meta.url),
@@ -131,6 +133,138 @@ function tone(samples: Float32Array, hz: number, start: number, length = 0.04) {
   }
   return (2 * Math.hypot(real, imaginary)) / window.length;
 }
+
+test('centers both speech channels before AAC while keeping stereo music and auditioning the original', async (t) => {
+  requireTool('ffmpeg');
+  requireTool('ffprobe');
+  const directory = await mkdtemp(join(generated, 'centered-speech-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const sources = {
+    voice: '0.2*sin(2*PI*400*t)|0.2*sin(2*PI*500*t)',
+    mono: '0.2*sin(2*PI*600*t)',
+    music: '0.2*sin(2*PI*1200*t)|0.2*sin(2*PI*1400*t)',
+    phase: '0.2*sin(2*PI*400*t)|-0.2*sin(2*PI*400*t)',
+  };
+  const project = createProject({
+    name: 'Centered speech',
+    settings: { width: 64, height: 48, frameRate: rate, durationFrames: 12 },
+  });
+  for (const [id, expression] of Object.entries(sources)) {
+    const path = `${id}.wav`;
+    runTool('ffmpeg', [
+      '-v',
+      'error',
+      '-nostdin',
+      '-f',
+      'lavfi',
+      '-i',
+      `aevalsrc=${expression}:s=48000:d=0.4`,
+      '-c:a',
+      'pcm_f32le',
+      join(directory, path),
+    ]);
+    project.assets.push({
+      id,
+      name: id,
+      mediaTypes: ['audio'],
+      file: { type: 'relative', path },
+    });
+  }
+  project.tracks = [
+    {
+      id: 'dialogue',
+      name: 'Dialogue',
+      type: 'audio',
+      audioRole: 'dialogue',
+      channelMode: 'mono-center',
+    },
+    { id: 'music-track', name: 'Music', type: 'audio', audioRole: 'music' },
+  ];
+  add(project, 'speech', 'voice', 'dialogue', 0, 0, 6);
+  add(project, 'mono-speech', 'mono', 'dialogue', 6, 0, 6);
+  add(project, 'song', 'music', 'music-track', 0, 0, 12);
+  const clips = planProjectRender(project).audioClips.map(
+    ({ assetId, ...clip }) => ({
+      ...clip,
+      path: join(directory, `${assetId}.wav`),
+    }),
+  );
+  const graphPcm = async (
+    audioClips: typeof clips,
+    audioComparison: 'before' | 'after',
+  ) => {
+    const args: string[] = [];
+    const filters: string[] = [];
+    let input = 0;
+    await buildAudioGraph(
+      { frameRate: rate, audioClips, audioComparison },
+      {
+        filters,
+        readSource: (clip) => probeMedia(clip.path),
+        inputPathFor: (path) => path,
+        openInput: (_clip, path) => {
+          args.push('-i', path);
+          return input++;
+        },
+      },
+      { total: 19200, from: 0, to: 19200 },
+    );
+    const audio = spawnSync('ffmpeg', [
+      '-v',
+      'error',
+      '-nostdin',
+      ...args,
+      '-filter_complex',
+      filters.join(';'),
+      '-map',
+      '[audio]',
+      '-f',
+      'f32le',
+      'pipe:1',
+    ]);
+    assert.equal(audio.status, 0, audio.stderr.toString());
+    assert.equal(audio.stdout.length, 19200 * 8);
+    return [0, 1].map((channel) =>
+      Float32Array.from({ length: 19200 }, (_, sample) =>
+        audio.stdout.readFloatLE(sample * 8 + channel * 4),
+      ),
+    ) as [Float32Array, Float32Array];
+  };
+  const [left, right] = await graphPcm(
+    clips.filter((clip) => clip.role === 'dialogue'),
+    'after',
+  );
+  assert.deepEqual(left, right);
+  assert.ok(tone(left, 400, 0.04) > 0.09);
+  assert.ok(tone(right, 500, 0.04) > 0.09);
+  assert.ok(tone(left, 600, 0.24) > 0.1);
+  const [mixLeft, mixRight] = await graphPcm(clips, 'after');
+  assert.ok(
+    tone(mixLeft, 1200, 0.04) > 0.19 && tone(mixRight, 1200, 0.04) < 0.001,
+  );
+  assert.ok(
+    tone(mixRight, 1400, 0.04) > 0.19 && tone(mixLeft, 1400, 0.04) < 0.001,
+  );
+  const [beforeLeft, beforeRight] = await graphPcm(clips, 'before');
+  assert.ok(
+    tone(beforeLeft, 400, 0.04) > 0.19 && tone(beforeRight, 400, 0.04) < 0.001,
+  );
+  project.clips[0]!.assetId = 'phase';
+  const report = await renderFixture(
+    project,
+    join(directory, 'project.json'),
+    join(directory, 'phase.mp4'),
+  );
+  assert.deepEqual(report.audioChannelRouting, {
+    centeredTracks: ['dialogue'],
+    comparison: 'after',
+    outputChannels: 2,
+  });
+  assert.match(
+    report.warnings?.join('\n') ?? '',
+    /speech.*15 dB.*channel polarity/,
+  );
+});
 
 test('native T11 audio rendering through the media engine', async (t) => {
   requireTool('ffmpeg');

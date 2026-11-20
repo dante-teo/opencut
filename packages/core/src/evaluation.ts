@@ -71,11 +71,17 @@ export type ResolvedTimelineClip = ResolvedMediaClip | ResolvedTextClip;
 export function resolveTimeline(project: Project) {
   const timeline = listTimeline(project);
   const assets = new Map(project.assets.map((asset) => [asset.id, asset]));
+  const inactiveMusic = new Set(
+    project.musicComparison?.candidates
+      .filter(({ trackId }) => trackId !== project.musicComparison?.selected)
+      .map(({ trackId }) => trackId),
+  );
   const clips: ResolvedTimelineClip[] = timeline.tracks.flatMap(
     (track, trackIndex) =>
       track.clips.map((clip): ResolvedTimelineClip => {
         const asset =
           clip.assetId === undefined ? undefined : assets.get(clip.assetId);
+        const trackMuted = inactiveMusic.has(track.id) || track.muted;
         const kind =
           track.type === 'audio'
             ? 'audio'
@@ -101,7 +107,7 @@ export function resolveTimeline(project: Project) {
           volume: clip.volume ?? 1,
           muted: clip.muted ?? false,
           ...(track.volume === undefined ? {} : { trackVolume: track.volume }),
-          ...(track.muted === undefined ? {} : { trackMuted: track.muted }),
+          ...(trackMuted !== undefined && { trackMuted }),
           audioPresence:
             clip.text || kind === 'image' || asset?.metadata?.hasAudio === false
               ? 'absent'
@@ -156,7 +162,9 @@ export function resolveTimeline(project: Project) {
   if (timeline.transitions?.length) {
     const media = new Map(
       clips.flatMap((clip) =>
-        clip.kind === 'video' ? [[clip.id, clip] as const] : [],
+        clip.kind === 'video' || clip.kind === 'image'
+          ? [[clip.id, clip] as const]
+          : [],
       ),
     );
     for (const transition of timeline.transitions)
@@ -307,7 +315,10 @@ export function createTimelineEvaluator(
             transitionOpacity(Number(frame), { ...transition, direction });
           const sample = Object.assign(detached, {
             visual: { ...visual, opacity },
-            sourceTime: sampleClipSourceTime(participant, sampled),
+            sourceTime:
+              participant.kind === 'image'
+                ? { ...participant.sourceIn }
+                : sampleClipSourceTime(participant, sampled),
             transitionId: transition.id,
             visible: opacity > 0,
             effectiveVolume: 0,

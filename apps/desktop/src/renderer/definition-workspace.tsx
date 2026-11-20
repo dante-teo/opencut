@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { frameTime } from '@opencut/core';
 import type { DefinitionReview } from '../bridge.js';
+import type { MusicSelection } from '@opencut/core/video';
 import { ProjectTimeline } from './project-timeline.js';
 import { DialogueMix } from './dialogue-mix.js';
 import { frameIndex } from './timeline-geometry.js';
@@ -126,6 +127,25 @@ export function DefinitionWorkspace({
       setProgress(null);
     }
   }
+
+  async function selectMusic(selection: MusicSelection) {
+    if (!current || progress !== null) return;
+    setFeedback({});
+    try {
+      await window.opencut.selectMusic(current.generation, selection);
+    } catch (error) {
+      setFeedback({
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const music = current?.musicComparison;
+  const selectedMusic = music?.candidates.find(
+    ({ trackId }) => trackId === music.selected,
+  );
+  const musicBusy =
+    progress !== null || status === 'compiling' || status === 'rendering';
   return (
     <div className="workspace" aria-label="Definition review">
       <div className="project-toolbar">
@@ -178,11 +198,58 @@ export function DefinitionWorkspace({
       </div>
       {current && (
         <>
-          <DefinitionPlayback key={state.path} revision={current} />
-          <details className="dialogue-mix" key={state.path}>
+          {music && (
+            <div className="timeline-controls" aria-label="Music comparison">
+              <label>
+                Music candidate{' '}
+                <select
+                  disabled={musicBusy}
+                  value={music.selected}
+                  onChange={(event) =>
+                    void selectMusic({ candidate: event.currentTarget.value })
+                  }
+                >
+                  {music.candidates.map((candidate) => (
+                    <option key={candidate.trackId} value={candidate.trackId}>
+                      {candidate.name}
+                      {(candidate.previouslyUsedIn.length > 0 ||
+                        candidate.sources.some(
+                          ({ reusedInProject }) => reusedInProject,
+                        )) &&
+                        ' (reused)'}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  disabled={musicBusy}
+                  checked={music.matchLoudness}
+                  onChange={(event) =>
+                    void selectMusic({
+                      matchLoudness: event.currentTarget.checked,
+                    })
+                  }
+                />{' '}
+                Match loudness
+              </label>
+              {selectedMusic?.previouslyUsedIn.length ? (
+                <span>
+                  Previously delivered in{' '}
+                  {selectedMusic.previouslyUsedIn.join(', ')}
+                </span>
+              ) : null}
+            </div>
+          )}
+          <DefinitionPlayback
+            key={`${state.path}:playback`}
+            revision={current}
+          />
+          <details className="dialogue-mix" key={`${state.path}:mix`}>
             <summary>Professional Dialogue Mix</summary>
             <DialogueMix
-              key={current.sourceRevision}
+              key={current.dialogueMixRevision}
               revision={current}
               disabled={
                 progress !== null ||

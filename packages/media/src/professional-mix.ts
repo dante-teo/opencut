@@ -10,6 +10,7 @@ import {
   audioClipSample,
   audioSourceSamples,
   buildAudioGraph,
+  centeredChannelWarnings,
   groupAudioRuns,
 } from './audio-graph.js';
 import type { AudioRenderClip, StagedDialogue } from './audio-graph.js';
@@ -67,7 +68,7 @@ function presetSettings(mix: ProfessionalMix) {
   };
 }
 
-async function renderGraph(
+export async function renderAudioGraph(
   path: string,
   script: string,
   options: VideoTimelineOptions,
@@ -408,6 +409,7 @@ async function stageDialogue(
       pre,
       post,
       clip.effects,
+      ...(clip.channelMode ? [clip.channelMode] : []),
       ...(run
         ? [[run.sourceIn, run.sourceOut, run.samples, start - run.start]]
         : []),
@@ -418,7 +420,7 @@ async function stageDialogue(
       count: number,
       handles: { pre: number; post: number },
     ) =>
-      renderGraph(
+      renderAudioGraph(
         output,
         output + '.ffscript',
         {
@@ -603,6 +605,7 @@ export async function prepareProfessionalMix(
     folder,
     base,
   );
+  warnings.push(...(await centeredChannelWarnings(options, readSource)));
   const { path, report } = await masterAudioMix(
     options,
     mix.delivery,
@@ -610,13 +613,13 @@ export async function prepareProfessionalMix(
     { base, from, to },
     warnings,
     (path, kind, rate, channels) =>
-      renderGraph(
+      renderAudioGraph(
         path,
         join(folder, kind + '.ffscript'),
         options,
         readSource,
         base,
-        kind === 'wet' ? { dialogue, music } : {},
+        kind === 'wet' ? { dialogue, music } : { bypassChannelMode: true },
         rate,
         channels,
       ),

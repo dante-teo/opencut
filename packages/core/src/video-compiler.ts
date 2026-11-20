@@ -38,6 +38,8 @@ import type { VideoBuild } from './video-files.js';
 import { checkpointQualityCompilation } from './video-build.js';
 import type { VideoProcessingProgress } from './video-processing.js';
 import type { VideoRecipeInspection } from './video-recipe.js';
+import { musicSelectionSchema } from './music-comparison.js';
+import type { MusicSelection } from './music-comparison.js';
 
 function stableId(kind: string, ...parts: unknown[]) {
   return (
@@ -73,6 +75,7 @@ type FontStyle = {
 export type CompilationOptions = VideoAssetOptions & {
   preview?: boolean;
   audioMixEdit?: VideoMixEdit | undefined;
+  musicSelection?: MusicSelection | undefined;
 };
 
 const epoch = '1970-01-01T00:00:00.000Z';
@@ -260,6 +263,7 @@ export async function compileDefinition(
               probes,
               pinnedSources,
               audioMixEdit,
+              musicSelection: options.musicSelection,
               ...(recovery && { recovery }),
             },
             getBuild,
@@ -299,6 +303,28 @@ async function buildProject(
   const professionalMix = audioMixEdit
     ? audioMixEdit.mix
     : definition.professionalMix;
+  const selection =
+    options.musicSelection &&
+    musicSelectionSchema.parse(options.musicSelection);
+  if (selection && !definition.musicComparison)
+    throw new VideoDefinitionError(
+      'Declare music candidates before selecting one.',
+    );
+  const musicComparison = definition.musicComparison && {
+    ...definition.musicComparison,
+    selected: selection?.candidate ?? definition.musicComparison.selected,
+    matchLoudness:
+      selection?.matchLoudness ?? definition.musicComparison.matchLoudness,
+  };
+  if (
+    musicComparison &&
+    !musicComparison.candidates.some(
+      ({ trackId }) => trackId === musicComparison.selected,
+    )
+  )
+    throw new VideoDefinitionError(
+      `Unknown music candidate '${musicComparison.selected}'.`,
+    );
   const { frameRate: authoredRate, ...settings } = canvas;
   const frameRate =
     typeof authoredRate === 'number'
@@ -313,6 +339,7 @@ async function buildProject(
     transitions,
     markers,
     ...(professionalMix && { professionalMix }),
+    ...(musicComparison && { musicComparison }),
   };
 
   const resolveFont = await loadFonts(

@@ -90,6 +90,7 @@ const visualOnlyTrack = track.omit({
   volume: true,
   muted: true,
   audioRole: true,
+  channelMode: true,
 });
 const mediaAsset = assetSchema
   .pick({ name: true, freezeFrame: true, provenance: true })
@@ -140,6 +141,7 @@ export const videoDefinitionSchema = z.strictObject({
   transitions: z.array(transitionSchema).optional(),
   markers: z.array(markerSchema).optional(),
   professionalMix: snapshotSchema.shape.professionalMix,
+  musicComparison: snapshotSchema.shape.musicComparison,
 });
 
 export type VideoDefinition = z.input<typeof videoDefinitionSchema>;

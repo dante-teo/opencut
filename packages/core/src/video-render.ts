@@ -12,6 +12,7 @@ import { isInterpolationStep } from './video-recipe-schema.js';
 import type { VideoMixEdit } from '@opencut/shared';
 import { openAudioMixCache } from './video-audio-mix.js';
 import { openPictureCache } from './video-picture-cache.js';
+import { describeMusicComparison } from './music-comparison.js';
 
 export type VideoRenderOptions = Omit<
   RenderControls,
@@ -19,22 +20,25 @@ export type VideoRenderOptions = Omit<
 > & {
   burnSubtitles?: boolean;
   pictureCacheDirectory?: string | undefined;
+  pictureVersion?: string | undefined;
   audioMixCacheDirectory?: string | undefined;
   audioMixEdit?: VideoCompileOptions['audioMixEdit'];
   processing?: VideoProcessingOptions | undefined;
   params?: VideoCompileOptions['params'];
+  musicSelection?: VideoCompileOptions['musicSelection'];
 };
 
 export type CompiledVideoRenderOptions = Omit<
   VideoRenderOptions,
-  'processing' | 'params' | 'audioMixEdit'
+  'processing' | 'params' | 'audioMixEdit' | 'musicSelection'
 >;
 export type VideoRenderConfiguration = Omit<
   RenderControls,
   'onProgress' | 'signal' | 'overwrite'
 > &
-  Pick<CompiledVideoRenderOptions, 'burnSubtitles'> & {
+  Pick<CompiledVideoRenderOptions, 'burnSubtitles' | 'pictureVersion'> & {
     audioMixEdit?: VideoMixEdit;
+    musicSelection?: { candidate: string; matchLoudness: boolean };
   };
 export interface VideoRenderBuild extends VideoBuild {
   readonly version: 1;
@@ -90,6 +94,11 @@ export async function renderCompiledVideo(
 ) {
   const { onProgress, signal, overwrite, ...settings } = options;
   video = await video.forQuality(quality, !burnSubtitles, signal);
+  const musicComparison = describeMusicComparison(video.project);
+  const musicSelection = musicComparison && {
+    candidate: musicComparison.selected,
+    matchLoudness: musicComparison.matchLoudness,
+  };
   // Record the controls the shared renderer receives, including runtime callers.
   const { range, maxDimension }: RenderControls = settings;
   const build: VideoRenderBuild | undefined = video.build && {
@@ -114,10 +123,14 @@ export async function renderCompiledVideo(
       audioSampleRate: settings.audioSampleRate ?? 48000,
       audioChannels: settings.audioChannels ?? 2,
       burnSubtitles,
+      ...(settings.pictureVersion && {
+        pictureVersion: settings.pictureVersion,
+      }),
       ...(settings.audioComparison && {
         audioComparison: settings.audioComparison,
       }),
       ...(video.audioMixEdit && { audioMixEdit: video.audioMixEdit }),
+      ...(musicSelection && { musicSelection }),
     },
   };
   const buildMetadata = build && JSON.stringify(build);
@@ -130,6 +143,7 @@ export async function renderCompiledVideo(
       quality,
       burnSubtitles,
       ...(video.audioMixEdit && { audioMixEdit: video.audioMixEdit }),
+      ...(musicSelection && { musicSelection }),
     },
     signal,
     (scratchDirectory, onVerifiedOutput) =>
@@ -183,7 +197,11 @@ export async function renderCompiledVideo(
             (result.warnings ??= []).push(
               'Maximum uses the same AI interpolation and super-resolution settings as quality. Authored recipe overrides still apply.',
             );
-          return { ...result, ...(build && { build }) };
+          return {
+            ...result,
+            ...(build && { build }),
+            ...(musicComparison && { musicComparison }),
+          };
         },
         { scratch: scratchDirectory, pictureCacheDirectory },
       ),
@@ -194,7 +212,13 @@ export async function renderCompiledVideo(
 export async function renderVideo(
   file: string,
   output: string,
-  { params, processing, audioMixEdit, ...options }: VideoRenderOptions = {},
+  {
+    params,
+    processing,
+    audioMixEdit,
+    musicSelection,
+    ...options
+  }: VideoRenderOptions = {},
 ) {
   const video = await compileVideo(file, {
     signal: options.signal,
@@ -203,6 +227,7 @@ export async function renderVideo(
     quality: options.quality ?? 'quality',
     params,
     audioMixEdit,
+    musicSelection,
   });
   return renderCompiledVideo(video, output, options);
 }

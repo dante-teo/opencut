@@ -105,6 +105,90 @@ function close(actual: Buffer, expected: Buffer, label: string): void {
 }
 const fit = `scale=${width}:${height}:force_original_aspect_ratio=decrease:force_divisible_by=2:reset_sar=1,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`;
 
+test('exports a 3:4 4K60 MP4 with the same audio packets as the project-size preview', async (t) => {
+  requireTool('ffmpeg');
+  requireTool('ffprobe');
+  const directory = await mkdtemp(join(generated, 'portrait-4k60-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const name = 'input.mp4';
+  runTool('ffmpeg', [
+    '-v',
+    'error',
+    '-nostdin',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=s=192x256:r=30:d=0.2',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=440:sample_rate=48000:duration=0.2',
+    '-c:v',
+    'libx264',
+    '-c:a',
+    'aac',
+    join(directory, name),
+  ]);
+  const authored = { numerator: 60, denominator: 1 };
+  const project = createProject({
+    name: '3:4 4K60',
+    settings: { width: 192, height: 256, frameRate: authored },
+  });
+  project.assets = [
+    {
+      id: 'input',
+      name,
+      mediaTypes: ['video', 'audio'],
+      file: { type: 'relative', path: name },
+    },
+  ];
+  project.tracks = [{ id: 'video', name: 'Video', type: 'video' }];
+  add(project, 'shot', 'input', 0, 0, 12);
+  const definition = join(directory, 'project.json');
+  const preview = await renderFixture(
+    project,
+    definition,
+    join(directory, 'preview.mp4'),
+    { quality: 'fast' },
+  );
+  const delivery = await renderFixture(
+    project,
+    definition,
+    join(directory, 'delivery.mp4'),
+    {
+      quality: 'fast',
+      codec: 'hevc',
+      outputSize: { width: 2880, height: 3840 },
+      outputFrameRate: authored,
+    },
+  );
+  assert.deepEqual(
+    [
+      delivery.width,
+      delivery.height,
+      delivery.metadata.video?.frameRate,
+      delivery.frameCount,
+    ],
+    [2880, 3840, 60, 12],
+  );
+  const audio = (file: string) =>
+    runTool('ffmpeg', [
+      '-v',
+      'error',
+      '-nostdin',
+      '-i',
+      file,
+      '-map',
+      '0:a:0',
+      '-c',
+      'copy',
+      '-f',
+      'hash',
+      '-',
+    ]);
+  assert.equal(audio(delivery.path), audio(preview.path));
+});
+
 // Independently probe and decode every output.
 test('native T10 saved timeline rendering', async (t) => {
   requireTool('ffmpeg');

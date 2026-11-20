@@ -1,11 +1,11 @@
 import { maximumVisualScale } from '@opencut/shared';
 import type {
-  AudioRole,
   ProfessionalMix,
   RenderTimeMapping,
   TransitionRamp,
   VisualAnimation,
 } from '@opencut/shared';
+import type { VideoTimelineOptions } from '@opencut/media';
 import {
   clipSourcePosition,
   clipSourceTime,
@@ -59,7 +59,10 @@ export type VisualRenderClip = VisualRenderProperties &
       }
   );
 
-export interface ProjectRenderPlan {
+export interface ProjectRenderPlan extends Pick<
+  VideoTimelineOptions,
+  'musicComparison'
+> {
   width: number;
   height: number;
   backgroundColor: string;
@@ -77,25 +80,11 @@ export interface ProjectRenderPlan {
   }>;
 }
 
-export interface AudioRenderClip {
-  trackId?: string;
-  role?: AudioRole;
-  clipId: string;
+export interface AudioRenderClip extends Omit<
+  NonNullable<VideoTimelineOptions['audioClips']>[number],
+  'path' | 'musicGainDb'
+> {
   assetId: string;
-  timelineStartFrame: number;
-  sourceStartFrame: number;
-  frameCount: number;
-  retiming?: RenderTimeMapping;
-  tempoRunId?: string;
-  volume: number;
-  muted: boolean;
-  fadeIn?: ReturnType<typeof resolveAudioFade>;
-  fadeOut?: ReturnType<typeof resolveAudioFade>;
-  gainKeys?: NonNullable<TimelineClip['gainKeys']>;
-  effects?: NonNullable<TimelineClip['effects']>;
-  /** Audio tracks require an audio stream; video clips may provide silence. */
-  required: boolean;
-  padAudio?: true;
 }
 
 function framePosition(time: RationalTime, rate: FrameRate) {
@@ -178,9 +167,7 @@ export function planProjectRender(
     );
   const visualClips: VisualRenderClip[] = [];
   const audioClips: AudioRenderClip[] = [];
-  const roles = new Map(
-    project.tracks.map((track) => [track.id, track.audioRole]),
-  );
+  const audioTracks = new Map(project.tracks.map((track) => [track.id, track]));
   if (compareTimes(timeline.duration, { numerator: 600, denominator: 1 }) > 0)
     throw new RenderError(
       'Rendering supports at most 600 seconds. Shorten the timeline.',
@@ -268,9 +255,14 @@ export function planProjectRender(
             ? undefined
             : clip.id;
       previousMedia = clip;
-      const role = roles.get(clip.trackId);
+      const track = audioTracks.get(clip.trackId);
+      const role = track?.audioRole;
+      const channelMode =
+        track?.channelMode === 'mono-center' ? track.channelMode : undefined;
       audioClips.push({
-        ...(role && { role, trackId: clip.trackId }),
+        ...((role || channelMode) && { trackId: clip.trackId }),
+        ...(role && { role }),
+        ...(channelMode && { channelMode }),
         clipId: clip.id,
         assetId: clip.assetId,
         timelineStartFrame: start,
@@ -289,7 +281,7 @@ export function planProjectRender(
           : {}),
         ...(tempoRunId && { tempoRunId }),
         volume: clip.volume * (clip.trackVolume ?? 1),
-        muted: clip.muted || (clip.trackMuted ?? false),
+        muted: clip.muted || (track?.muted ?? false),
         ...(clip.fadeIn && { fadeIn: resolveAudioFade('fadeIn', clip.fadeIn) }),
         ...(clip.gainKeys && { gainKeys: clip.gainKeys }),
         ...(clip.effects && { effects: clip.effects }),
@@ -338,12 +330,10 @@ export function planProjectRender(
     afterClipId: transition.ownerId,
     layers: transition.layers.map(({ clip, direction }) => {
       const { start, end, startFrame, endFrame } = transition;
-      const sourceIn = clipSourceTime(clip, start);
-      const sourceOut = clipSourceTime(clip, end);
       const visual = visualById.get(clip.id);
       if (!visual?.assetId)
         throw new RenderError(
-          `Transition clip '${clip.id}' requires a video render layer.`,
+          `Transition clip '${clip.id}' requires a photo or video render layer.`,
         );
       return {
         ...visual,
@@ -351,21 +341,27 @@ export function planProjectRender(
         sourceStartFrame: 0,
         frameCount: endFrame - startFrame,
         ramp: { startFrame, endFrame, direction },
-        retiming: {
-          timelineStart: start,
-          timelineEnd: end,
-          sourceIn,
-          sourceOut,
-          speed: clipSpeed(clip),
-          sourceOriginNs: sourceOriginNanoseconds(clip),
-          localSourceOriginNs: sourceOriginNanoseconds(
-            clip,
-            frameTime(startFrame, frameRate),
-          ),
-        },
+        ...(clip.kind !== 'image' && {
+          retiming: {
+            timelineStart: start,
+            timelineEnd: end,
+            sourceIn: clipSourceTime(clip, start),
+            sourceOut: clipSourceTime(clip, end),
+            speed: clipSpeed(clip),
+            sourceOriginNs: sourceOriginNanoseconds(clip),
+            localSourceOriginNs: sourceOriginNanoseconds(
+              clip,
+              frameTime(startFrame, frameRate),
+            ),
+          },
+        }),
       };
     }),
   }));
+  const { musicComparison, professionalMix } = project;
+  const ducking = musicComparison?.candidates.find(
+    ({ trackId }) => trackId === musicComparison.selected,
+  )?.ducking;
   return {
     width,
     height,
@@ -374,8 +370,20 @@ export function planProjectRender(
     backgroundColor: project.settings.backgroundColor ?? '#000000',
     visualClips,
     audioClips,
-    ...(project.professionalMix && {
-      professionalMix: project.professionalMix,
+    ...(professionalMix && {
+      professionalMix: ducking
+        ? {
+            ...professionalMix,
+            ducking: { ...professionalMix.ducking, ...ducking },
+          }
+        : professionalMix,
+    }),
+    ...(musicComparison && {
+      musicComparison: {
+        candidates: musicComparison.candidates.map(({ trackId }) => trackId),
+        selected: musicComparison.selected,
+        matchLoudness: musicComparison.matchLoudness ?? false,
+      },
     }),
     ...(visualTransitions.length && { visualTransitions }),
   };

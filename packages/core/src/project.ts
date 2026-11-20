@@ -6,6 +6,7 @@ import { subtitleTrackSchema, validSubtitleWords } from './subtitles.js';
 import { visualKeyframesSchema, visualValueSchema } from './keyframes.js';
 import { clipDuration, clipSpeedSchema } from './clip-timing.js';
 import { audioRoleSchema, professionalMixSchema } from './professional-mix.js';
+import { musicComparisonSchema } from './music-comparison.js';
 import { clipAudioShape, resolveAudioFade, trackAudioShape } from './audio.js';
 import {
   addTimes,
@@ -104,6 +105,7 @@ export const trackSchema = z.strictObject({
   type: mediaType,
   ...trackAudioShape,
   audioRole: audioRoleSchema.optional(),
+  channelMode: z.enum(['source', 'mono-center']).optional(),
 });
 export const clipVisualSchema = z.strictObject({
   crop: z
@@ -200,6 +202,7 @@ export const snapshotSchema = z.strictObject({
   settings: settingsSchema,
   assets: z.array(assetSchema),
   tracks: z.array(trackSchema),
+  musicComparison: musicComparisonSchema.optional(),
   clips: z.array(snapshotClipSchema),
   subtitles: subtitleTrackSchema.optional(),
   transitions: z.array(transitionSchema).optional(),
@@ -626,6 +629,39 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
         );
       if (!previous || compareTimes(entry.end, previous.end) > 0)
         previous = entry;
+    }
+  }
+  if (project.musicComparison) {
+    const candidates = new Set(
+      project.musicComparison.candidates.map(({ trackId }) => trackId),
+    );
+    let end = declaredEnd ?? { numerator: 0, denominator: 1 };
+    for (const cue of project.subtitles?.cues ?? [])
+      if (compareTimes(cue.end, end) > 0) end = cue.end;
+    for (const [trackId, entries] of intervals)
+      if (!candidates.has(trackId))
+        for (const entry of entries)
+          if (compareTimes(entry.end, end) > 0) end = entry.end;
+    for (const trackId of candidates) {
+      const track = tracks.get(trackId);
+      const clips = intervals.get(trackId);
+      if (
+        track?.type !== 'audio' ||
+        track.audioRole !== 'music' ||
+        !clips?.length
+      )
+        add(
+          '/musicComparison/candidates',
+          'invalid_music_candidate',
+          `Candidate '${trackId}' must be an audio track with music clips and audioRole 'music'.`,
+        );
+      for (const clip of clips ?? [])
+        if (compareTimes(clip.end, end) > 0)
+          add(
+            `/clips/${clip.index}/timelineStart`,
+            'music_candidate_bounds',
+            `Music candidate '${trackId}' extends past the edit. Trim the music to fit the picture and dialogue duration.`,
+          );
     }
   }
   validateTransitions(project, add, ids);

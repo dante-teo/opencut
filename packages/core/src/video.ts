@@ -86,3 +86,8 @@ export type {
   VideoMixEdit,
 } from '@opencut/shared';
 export type { AudioMixReport } from '@opencut/media';
+export {
+  describeMusicComparison,
+  musicSelectionSchema,
+} from './music-comparison.js';
+export type { MusicSelection } from './music-comparison.js';

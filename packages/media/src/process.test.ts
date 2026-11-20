@@ -67,6 +67,32 @@ describe('media subprocesses', () => {
       );
     },
   );
+
+  it('accepts only the known chapter diagnostic on exit zero', async () => {
+    const diagnostic = 'Referenced QT chapter track not found';
+    const stderr = `[mov,mp4,m4a,3gp,3g2,mj2 @ 0x123] ${diagnostic}`;
+    const onNonfatalDiagnostic = vi.fn();
+    const control = {
+      stage: "probing media input 'clip.mov'",
+      onNonfatalDiagnostic,
+    };
+    respond(null, '{}', stderr);
+    expect(
+      await runMediaTool('ffprobe', [], undefined, undefined, control),
+    ).toEqual(Buffer.from('{}'));
+    expect(onNonfatalDiagnostic).toHaveBeenCalledWith(diagnostic);
+    respond(null, '{}', stderr + '\nInvalid data found');
+    await expect(
+      runMediaTool('ffprobe', [], undefined, undefined, control),
+    ).rejects.toThrow(/clip\.mov.*exit status 0.*Invalid data found/s);
+    respond(Object.assign(new Error('failed'), { code: 1 }), '{}', stderr);
+    await expect(
+      runMediaTool('ffprobe', [], undefined, undefined, control),
+    ).rejects.toThrow(
+      /clip\.mov.*exit status 1.*Referenced QT chapter track not found/,
+    );
+    expect(onNonfatalDiagnostic).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('render subprocess lifecycle', () => {

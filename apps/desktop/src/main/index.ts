@@ -17,6 +17,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getApplicationInfo } from '@opencut/core';
 import {
   isVideoDefinitionPath,
+  musicSelectionSchema,
   renderCompiledVideo,
   videoMixEditSchema,
 } from '@opencut/core/video';
@@ -403,6 +404,26 @@ app
         if (selectingDefinition || definitionExport)
           throw new Error('Another review action is in progress.');
         await definitionReview.compareMix(generation, comparison);
+      },
+    );
+    ipcMain.handle(
+      DEFINITION_CHANNELS.selectMusic,
+      async (event, ...args: unknown[]) => {
+        assertSender(event);
+        const [generation, selection] = args;
+        if (
+          args.length !== 2 ||
+          typeof generation !== 'number' ||
+          !Number.isSafeInteger(generation) ||
+          generation < 1
+        )
+          throw new Error('Expected a preview generation and music selection.');
+        if (selectingDefinition || definitionExport)
+          throw new Error('Another review action is in progress.');
+        await definitionReview.selectMusic(
+          generation,
+          musicSelectionSchema.parse(selection),
+        );
       },
     );
     ipcMain.handle(

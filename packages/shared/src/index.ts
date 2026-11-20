@@ -71,7 +71,8 @@ export function fittingBox(width: number, height: number, scale = 1) {
 /**
  * Project pixels, top-left origin, centered fitting rectangle; positive x/y right/down.
  * sourceWidth/Height describe DISPLAY pixels (sample aspect and rotation applied).
- * Match FFmpeg's even scale/crop and yuv420 overlay coordinate quantization.
+ * FFmpeg's static scale/crop uses even pixel dimensions. Canvas motion can
+ * sample continuous geometry so a small change is visible on every frame.
  */
 export function visualGeometry(
   width: number,
@@ -79,39 +80,38 @@ export function visualGeometry(
   sourceWidth: number,
   sourceHeight: number,
   visual: VisualTransform = {},
+  precision: 'even' | 'subpixel' = 'even',
 ) {
-  const box = fittingBox(width, height, visual.scale);
+  const subpixel = precision === 'subpixel';
+  const scale = visual.scale ?? 1;
+  const box = subpixel
+    ? { width: width * scale, height: height * scale }
+    : fittingBox(width, height, scale);
   const fit = visual.fit ?? 'contain';
   const aspect = sourceWidth / sourceHeight;
   const even = (n: number) =>
     Math.max(2, (fit === 'cover' ? Math.ceil(n / 2) : Math.floor(n / 2)) * 2);
+  const conform = (n: number) => (subpixel ? n : even(Math.round(n)));
   const scaledWidth =
     fit === 'stretch'
       ? box.width
-      : even(
-          Math[fit === 'cover' ? 'max' : 'min'](
-            box.width,
-            Math.round(box.height * aspect),
-          ),
+      : conform(
+          Math[fit === 'cover' ? 'max' : 'min'](box.width, box.height * aspect),
         );
   const scaledHeight =
     fit === 'stretch'
       ? box.height
-      : even(
-          Math[fit === 'cover' ? 'max' : 'min'](
-            box.height,
-            Math.round(box.width / aspect),
-          ),
+      : conform(
+          Math[fit === 'cover' ? 'max' : 'min'](box.height, box.width / aspect),
         );
   const layerWidth = fit === 'cover' ? box.width : scaledWidth;
   const layerHeight = fit === 'cover' ? box.height : scaledHeight;
-  const cropX =
-    fit === 'cover' ? Math.floor((scaledWidth - layerWidth) / 4) * 2 : 0;
-  const cropY =
-    fit === 'cover' ? Math.floor((scaledHeight - layerHeight) / 4) * 2 : 0;
   const grid = (n: number) => Math.floor(Math.trunc(n) / 2) * 2;
-  const x = grid((width - layerWidth) / 2 + (visual.x ?? 0));
-  const y = grid((height - layerHeight) / 2 + (visual.y ?? 0));
+  const place = (n: number) => (subpixel ? n : grid(n));
+  const cropX = place((scaledWidth - layerWidth) / 2);
+  const cropY = place((scaledHeight - layerHeight) / 2);
+  const x = place((width - layerWidth) / 2 + (visual.x ?? 0));
+  const y = place((height - layerHeight) / 2 + (visual.y ?? 0));
   const angle = (((visual.rotation ?? 0) % 360) * Math.PI) / 180;
   const centerX = x + layerWidth / 2;
   const centerY = y + layerHeight / 2;

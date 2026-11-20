@@ -76,3 +76,4 @@ export { enhancementBackendId } from './enhance.js';
 
 export type { AudioMixReport, LoudnessMeasurement } from './audio-mastering.js';
 export type { AudioMixCache } from './professional-mix.js';
+export type { MusicLoudnessReport } from './music-comparison.js';

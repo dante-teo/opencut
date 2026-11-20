@@ -152,12 +152,11 @@ export async function runInspectionCommand(
       : undefined;
   const requestedTo = command === 'preview clip' ? integer('to') : undefined;
   await withCommandCancellation(async (signal) => {
-    const { audioMixEdit, ...mixControls } = await readMixControls(
-      values,
-      signal,
-    );
+    const { audioMixEdit, musicSelection, ...mixControls } =
+      await readMixControls(values, signal);
     const video = await loadVideo(file, {
       audioMixEdit,
+      musicSelection,
       signal,
       preview: true,
       quality,

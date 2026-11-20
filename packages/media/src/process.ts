@@ -25,7 +25,13 @@ export interface MediaToolControl {
   onStdout?: (chunk: Buffer) => void;
   writesFile?: boolean;
   onDiagnostics?: (diagnostics: string) => void;
+  onNonfatalDiagnostic?: (diagnostic: string) => void;
+  stage?: string;
 }
+
+const missingChapterTrack = 'Referenced QT chapter track not found';
+const chapterDiagnostic =
+  /^(?:\[[^\]\r\n]+\]\s*)?Referenced QT chapter track not found$/;
 
 export async function localFile(file: string): Promise<string> {
   const path = resolve(file);
@@ -127,16 +133,35 @@ export async function runMediaTool(
           );
           return;
         }
-        if (error || (diagnostics && !control?.onDiagnostics)) {
+        const missingChapters =
+          !!diagnostics &&
+          (tool === 'ffprobe' || tool === 'ffmpeg') &&
+          diagnostics
+            .split(/\r?\n/)
+            .every((line) => chapterDiagnostic.test(line.trim()));
+        if (
+          error ||
+          (diagnostics && !missingChapters && !control?.onDiagnostics)
+        ) {
+          const stage = control?.stage ? ` while ${control.stage}` : '';
+          const status = error?.signal
+            ? `signal ${error.signal}`
+            : typeof error?.code === 'number'
+              ? `exit status ${error.code}`
+              : error
+                ? 'execution error'
+                : 'exit status 0 with unexpected diagnostics';
           reject(
             new MediaError(
-              `${tool} failed: ${diagnostics || error?.message || 'unknown execution failure'}`,
+              `${tool} failed${stage} (${status}): ${diagnostics.slice(-4096) || (typeof error?.code === 'number' ? 'no diagnostic output' : error?.message) || 'unknown execution failure'}`,
               { cause: error },
             ),
           );
           return;
         }
         try {
+          if (missingChapters)
+            control?.onNonfatalDiagnostic?.(missingChapterTrack);
           control?.onDiagnostics?.(diagnostics);
           resolve(stdout);
         } catch (cause) {

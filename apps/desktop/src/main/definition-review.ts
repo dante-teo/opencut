@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { watchVideo } from '@opencut/core/video';
-import type { VideoMixEdit } from '@opencut/core/video';
+import { describeMusicComparison, watchVideo } from '@opencut/core/video';
+import type { MusicSelection, VideoMixEdit } from '@opencut/core/video';
 import type { DefinitionReview } from '../bridge.js';
 
 export class DefinitionReviewSession {
@@ -38,14 +38,19 @@ export class DefinitionReviewSession {
                   ? this.media.url
                   : `opencut://media/${randomUUID()}.mp4`;
               this.media = { url, path: current.playback.path };
+              const musicComparison = describeMusicComparison(
+                current.video.project,
+              );
               ready = {
                 generation: current.generation,
                 sourceRevision: current.sourceRevision,
+                dialogueMixRevision: current.dialogueMixRevision,
                 project: current.video.project,
                 frameCount: current.video.frameCount,
                 ...(current.playback.audioMix && {
                   audioMix: current.playback.audioMix,
                 }),
+                ...(musicComparison && { musicComparison }),
                 url,
               };
             }
@@ -86,6 +91,25 @@ export class DefinitionReviewSession {
     if (!watcher) throw new Error('Open a definition with a valid preview.');
     await watcher.withCurrent(generation, async (video) => {
       watcher.setAudioMix(video.audioMixEdit, comparison);
+    });
+  }
+
+  async selectMusic(generation: number, selection: MusicSelection) {
+    const watcher = this.watcher;
+    if (!watcher) throw new Error('Open a definition with a valid preview.');
+    await watcher.withCurrent(generation, async (video) => {
+      const comparison = video.project.musicComparison;
+      if (
+        !comparison ||
+        (selection.candidate &&
+          !comparison.candidates.some(
+            ({ trackId }) => trackId === selection.candidate,
+          ))
+      )
+        throw new Error(
+          'Select a music candidate declared in the current definition.',
+        );
+      watcher.selectMusic(selection);
     });
   }
 

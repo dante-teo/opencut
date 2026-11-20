@@ -508,7 +508,7 @@ test('T49 30→60 works with portrait VFR timestamps and explicit cuts, and trim
     '-f',
     'lavfi',
     '-i',
-    'testsrc2=s=360x640:r=30:d=0.4',
+    'testsrc2=s=360x480:r=30:d=0.4',
     ...lossless,
     cfr,
   );
@@ -519,7 +519,7 @@ test('T49 30→60 works with portrait VFR timestamps and explicit cuts, and trim
       [{ type: 'interpolateFrames', numerator: 60, quality: 'fast' }],
       60,
       360,
-      640,
+      480,
     ),
   );
   const doubled = await compiledPath(cfrFile, cache);
@@ -533,6 +533,32 @@ test('T49 30→60 works with portrait VFR timestamps and explicit cuts, and trim
   assert.notEqual(cfrFrames[1], cfrInput[0]);
   assert.notEqual(cfrFrames[1], cfrInput[1]);
   assert.equal((await probeMedia(doubled)).video?.frameRate, 60);
+  const compiled = await compileVideo(cfrFile, {
+    processing: { cacheDirectory: cache },
+  });
+  const delivery = await renderCompiledVideo(
+    compiled,
+    join(dir, 'portrait-4k60.mp4'),
+    {
+      quality: 'fast',
+      codec: 'hevc',
+      outputSize: { width: 2880, height: 3840 },
+      outputFrameRate: { numerator: 60, denominator: 1 },
+    },
+  );
+  assert.deepEqual(
+    [
+      delivery.width,
+      delivery.height,
+      delivery.metadata.video?.frameRate,
+      delivery.frameCount,
+    ],
+    [2880, 3840, 60, 8],
+  );
+  assert.match(
+    delivery.warnings?.join('\n') ?? '',
+    /scales the 360×480 composed picture/,
+  );
 
   const source = join(dir, 'portrait.mov');
   await ffmpeg(

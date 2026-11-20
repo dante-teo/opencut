@@ -13,6 +13,9 @@ import { fileURLToPath } from 'node:url';
 import { createProject, frameTime } from '@opencut/core';
 import type { TimelineClip, Project } from '@opencut/core';
 import { requireTool, runTool } from '../../scripts/fixture-lib.js';
+import { stageTransformLayer } from '../../packages/media/src/transform-layer.js';
+import { describeMediaAsset } from '../../packages/core/src/video-assets.js';
+import { probeMedia } from '../../packages/media/src/index.js';
 
 const generated = fileURLToPath(
   new URL('../fixtures/generated/', import.meta.url),
@@ -94,6 +97,178 @@ function add(
     ...(visual ? { visual } : {}),
   });
 }
+
+test('slow still-image zoom and pan move a marker on every 30 and 60 fps frame', async () => {
+  requireTool('ffmpeg');
+  const directory = await mkdtemp(join(generated, 'subpixel-motion-'));
+  try {
+    const path = join(directory, 'marker.png');
+    const width = 160;
+    const height = 120;
+    runTool('ffmpeg', [
+      '-v',
+      'error',
+      '-nostdin',
+      '-f',
+      'lavfi',
+      '-i',
+      `color=c=black:s=${width}x${height},format=rgb24,drawbox=x=120:y=0:w=1:h=${height}:c=white:t=fill`,
+      '-frames:v',
+      '1',
+      path,
+    ]);
+    for (const fps of [30, 60]) {
+      const rate = { numerator: fps, denominator: 1 };
+      const frameCount = Math.floor(3.15 * fps) + 1;
+      const output = join(directory, `motion-${fps}.nut`);
+      const keys = (first: number, last: number) => [
+        { time: frameTime(0, rate), value: first, easing: 'linear' as const },
+        {
+          time: { numerator: 63, denominator: 20 },
+          value: last,
+          easing: 'linear' as const,
+        },
+      ];
+      await stageTransformLayer(
+        {
+          width,
+          height,
+          rate,
+          startFrame: 0,
+          frameCount,
+          visual: { fit: 'cover' },
+          animation: {
+            start: frameTime(0, rate),
+            keyframes: { scale: keys(1.005, 1.045), x: keys(0, 3) },
+          },
+          source: {
+            kind: 'media',
+            path,
+            stream: 0,
+            width,
+            height,
+            aspect: width / height,
+            matrix: 'bt601',
+          },
+        },
+        output,
+      );
+      const pixels = decode(output);
+      assert.equal(pixels.length, frameCount * width * height * 3);
+      let previous = 0;
+      for (let frame = 0; frame < frameCount; frame++) {
+        const row = (frame * width * height + width * (height / 2)) * 3;
+        let position = 0;
+        let brightness = 0;
+        for (let x = 110; x < 135; x++) {
+          const value = pixels[row + x * 3]!;
+          brightness += value;
+          position += x * value;
+        }
+        const center = position / brightness;
+        if (frame > 0) {
+          const delta = center - previous;
+          assert.ok(
+            delta > 0.005 && delta < 0.15,
+            `${fps} fps, frame ${frame}: marker moved ${delta} pixels`,
+          );
+        }
+        previous = center;
+      }
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('photo and video cross-dissolves blend the same frames in preview and export', async () => {
+  requireTool('ffmpeg');
+  requireTool('ffprobe');
+  const directory = await mkdtemp(join(generated, 'still-dissolve-'));
+  const width = 64;
+  const height = 48;
+  try {
+    const assets: Project['assets'] = [];
+    for (const color of ['red', 'blue']) {
+      for (const ext of ['png', 'mp4']) {
+        const name = `${color}.${ext}`;
+        const path = join(directory, name);
+        runTool('ffmpeg', [
+          '-v',
+          'error',
+          '-nostdin',
+          '-f',
+          'lavfi',
+          '-i',
+          `color=c=${color}:s=${width}x${height}:r=30:d=1`,
+          ...(ext === 'png' ? ['-frames:v', '1'] : ['-c:v', 'libx264']),
+          path,
+        ]);
+        assets.push({
+          id: `${color}-${ext}`,
+          name,
+          file: { type: 'relative', path: name },
+          ...describeMediaAsset(await probeMedia(path)),
+        });
+      }
+    }
+    for (const outgoing of ['png', 'mp4']) {
+      for (const incoming of ['png', 'mp4']) {
+        const project = createProject({
+          name: 'Still dissolve',
+          settings: { width, height, frameRate: rate },
+        });
+        project.assets = assets;
+        project.tracks = [{ id: 'video', type: 'video', name: 'Video' }];
+        add(project, 'left', `red-${outgoing}`, 'video', 0, 0, 10);
+        const inPoint = incoming === 'png' ? 0 : 2;
+        add(
+          project,
+          'right',
+          `blue-${incoming}`,
+          'video',
+          10,
+          inPoint,
+          inPoint + 10,
+        );
+        project.transitions = [
+          {
+            id: 'mix',
+            kind: 'cross-dissolve',
+            from: 'left',
+            to: 'right',
+            frames: 5,
+          },
+        ];
+        const label = `${outgoing}-${incoming}`;
+        const projectFile = join(directory, 'project.json');
+        const output = join(directory, `${label}.mp4`);
+        const preview = join(directory, `${label}-preview.mp4`);
+        await renderFixture(project, projectFile, output, { quality: 'fast' });
+        await renderFixture(project, projectFile, preview, {
+          quality: 'fast',
+          range: { startFrame: 9, endFrame: 12 },
+        });
+        const exported = decode(output);
+        const previewed = decode(preview);
+        pixel(exported, width, height, 8, 32, 24, [255, 0, 0]);
+        pixel(exported, width, height, 10, 32, 24, [128, 0, 128]);
+        pixel(exported, width, height, 12, 32, 24, [0, 0, 255]);
+        const bytesPerFrame = width * height * 3;
+        assert.equal(previewed.length, 3 * bytesPerFrame);
+        assert.ok(
+          previewed.every(
+            (value, i) =>
+              Math.abs(value - exported[9 * bytesPerFrame + i]!) < 8,
+          ),
+          label,
+        );
+      }
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test('native T12 visual compositing through the media engine', async (t) => {
   requireTool('ffmpeg');

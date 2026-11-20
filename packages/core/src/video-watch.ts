@@ -18,10 +18,13 @@ import {
 } from './video-input.js';
 import type { VideoInput } from './video-input.js';
 import type { VideoProcessingOptions } from './video-processing.js';
+import { openPictureCache } from './video-picture-cache.js';
+import type { MusicSelection } from './music-comparison.js';
 
 export interface VideoWatchRevision {
   readonly generation: number;
   readonly sourceRevision: string;
+  readonly dialogueMixRevision: string;
   readonly video: CompiledVideo;
   readonly playback: Readonly<VideoTimelineResult>;
 }
@@ -43,6 +46,7 @@ export interface VideoWatchOptions {
   audioMixEdit?: VideoMixEdit | undefined;
   audioComparison?: 'before' | 'after' | undefined;
   audioMixCacheDirectory?: string | undefined;
+  musicSelection?: MusicSelection | undefined;
 }
 
 type Published = {
@@ -50,6 +54,7 @@ type Published = {
   inputs: Map<string, VideoInput>;
   media: Set<string>;
   renderKey: string;
+  pictureKey?: string;
 };
 
 /** Watch only inputs of the selected definition, retaining one playable revision. */
@@ -69,6 +74,7 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
   };
   let audioMixEdit = options.audioMixEdit;
   let audioComparison = options.audioComparison;
+  let interactiveMusicSelection: MusicSelection | undefined;
   const renders = new Map<Promise<unknown>, Set<string>>();
   let published: Published | undefined;
   let active: AbortController | undefined;
@@ -156,6 +162,8 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
     const media = new Set<string>();
     const output = join(directory, `revision-${next}.mp4`);
     const comparison = audioComparison;
+    const override = interactiveMusicSelection;
+    let resolvedOverride = override;
     const record = (input: VideoInput) => {
       if (!inputs.has(input.path)) inputs.set(input.path, input);
       if (!watched.has(input.path)) watched.set(input.path, input.identity);
@@ -168,6 +176,25 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
         probes,
         processing: options.processing,
         audioMixEdit,
+        musicSelection: options.musicSelection,
+        ...(override && {
+          resolveMusicSelection(music) {
+            if (!music) {
+              // Clear the interactive choice without restoring the startup override.
+              resolvedOverride = {};
+              return;
+            }
+            resolvedOverride = {
+              matchLoudness: override.matchLoudness,
+              candidate: music.candidates.some(
+                ({ trackId }) => trackId === override.candidate,
+              )
+                ? override.candidate
+                : undefined,
+            };
+            return resolvedOverride;
+          },
+        }),
         scriptWorker: {},
         inputs: {
           record,
@@ -207,15 +234,26 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
       if (!isCurrent(next, inputs)) return;
 
       const hash = createHash('sha256').update(JSON.stringify(video.project));
+      const { musicComparison, ...mixProject } = video.project;
+      // Music audition controls leave the editable dialogue mix draft in place.
+      const mixHash = musicComparison
+        ? createHash('sha256').update(JSON.stringify(mixProject))
+        : undefined;
       const ordered = [...inputs.values()].sort((a, b) =>
         a.path.localeCompare(b.path),
       );
       for (const input of ordered) {
-        hash.update(JSON.stringify(input));
-        if (input.kind === 'source')
-          hash.update(await readFile(input.path, { signal }));
+        const identity = JSON.stringify(input);
+        hash.update(identity);
+        mixHash?.update(identity);
+        if (input.kind === 'source') {
+          const contents = await readFile(input.path, { signal });
+          hash.update(contents);
+          mixHash?.update(contents);
+        }
       }
       const sourceRevision = hash.digest('hex');
+      const dialogueMixRevision = mixHash?.digest('hex') ?? sourceRevision;
       const plan = await video.resolveRender();
       if (!isCurrent(next, inputs)) return;
 
@@ -224,6 +262,22 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
       const renderKey = createHash('sha256')
         .update(JSON.stringify([plan, settings, comparison]))
         .digest('hex');
+      const pictureKey =
+        plan.musicComparison &&
+        createHash('sha256')
+          .update(
+            JSON.stringify([
+              plan.width,
+              plan.height,
+              plan.backgroundColor,
+              plan.frameRate,
+              plan.frameCount,
+              plan.visualClips,
+              plan.visualTransitions,
+              settings,
+            ]),
+          )
+          .digest('hex');
       let playback =
         published?.renderKey === renderKey
           ? published.revision.playback
@@ -238,6 +292,13 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
                 signal,
               )
             : undefined;
+        const pictureCache = pictureKey
+          ? await openPictureCache(directory, video, signal)
+          : undefined;
+        const previousPicture =
+          pictureKey && pictureKey === published?.pictureKey
+            ? published.revision.playback.pictureVersion?.id
+            : undefined;
         playback = await withRenderSources(
           video,
           signal,
@@ -247,6 +308,10 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
               ...settings,
               audioComparison: comparison,
               ...(audioMixCache && { audioMixCache }),
+              ...(pictureCache && {
+                pictureCache,
+                pictureVersion: previousPicture ?? 'save',
+              }),
               output,
               signal,
             }),
@@ -255,14 +320,22 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
       }
 
       if (!isCurrent(next, inputs)) return;
+      interactiveMusicSelection = resolvedOverride;
       const previous = published?.revision.playback.path;
       const revision = Object.freeze({
         generation: next,
         sourceRevision,
+        dialogueMixRevision,
         video,
         playback: Object.freeze(playback),
       });
-      published = { revision, inputs, media, renderKey };
+      published = {
+        revision,
+        inputs,
+        media,
+        renderKey,
+        ...(pictureKey && { pictureKey }),
+      };
       emit('ready', next);
       if (previous && previous !== playback.path)
         await rm(previous, { force: true });
@@ -358,5 +431,13 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
     schedule();
   }
 
-  return { path, close, withCurrent, setAudioMix };
+  function selectMusic(selection: MusicSelection) {
+    interactiveMusicSelection = {
+      ...(interactiveMusicSelection ?? options.musicSelection),
+      ...selection,
+    };
+    schedule();
+  }
+
+  return { path, close, withCurrent, setAudioMix, selectMusic };
 }

@@ -14,9 +14,12 @@ const optionTypes = {
   ...processingOptionTypes,
   ...renderOptionTypes,
   'picture-cache': { type: 'string' },
+  'picture-version': { type: 'string' },
   'mix-settings': { type: 'string' },
   'mix-comparison': { type: 'string' },
   'mix-cache': { type: 'string' },
+  'music-candidate': { type: 'string' },
+  'music-loudness': { type: 'string' },
   output: { type: 'string', short: 'o' },
   root: { type: 'string' },
   resource: { type: 'string', multiple: true },
@@ -48,9 +51,15 @@ const params = '[--params <params.json>]';
 const position = '(--frame <n> | --timestamp <time>)';
 const previewOptions = ['quality', ...Object.keys(processingOptionTypes)];
 
-const mixOptions = ['mix-settings', 'mix-comparison', 'mix-cache'];
+const mixOptions = [
+  'mix-settings',
+  'mix-comparison',
+  'mix-cache',
+  'music-candidate',
+  'music-loudness',
+];
 const mixUsage =
-  '[--mix-settings <mix.json>] [--mix-comparison <before|after>] [--mix-cache <directory>]';
+  '[--mix-settings <mix.json>] [--mix-comparison <before|after>] [--mix-cache <directory>] [--music-candidate <id>] [--music-loudness <matched|authored>]';
 
 const commands = {
   'mix analyze': {
@@ -94,11 +103,12 @@ const commands = {
     options: ['frame', 'timestamp', 'quality', 'params'],
   },
   render: {
-    args: `${definition} --output <new.mp4> [--picture-cache <directory>] ${qualityOption} ${mixUsage} ${params}`,
+    args: `${definition} --output <new.mp4> [--picture-cache <directory> [--picture-version <save|id>]] ${qualityOption} ${mixUsage} ${params}`,
     options: [
       'output',
       'params',
       'picture-cache',
+      'picture-version',
       ...mixOptions,
       ...Object.keys(renderOptionTypes),
       ...Object.keys(processingOptionTypes),

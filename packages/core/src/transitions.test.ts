@@ -140,6 +140,52 @@ it('preserves exact subtitle timing when an unrelated transition exists', () => 
   ).toBe(false);
 });
 
+it.each([
+  ['video', 'video'],
+  ['video', 'image'],
+  ['image', 'video'],
+  ['image', 'image'],
+] as const)(
+  'plans a %s to %s dissolve without changing audio intervals',
+  (from, to) => {
+    const project = fixture();
+    for (const [index, kind] of [from, to].entries()) {
+      if (kind === 'video') continue;
+      const asset = project.assets[index]!;
+      delete asset.duration;
+      asset.mediaTypes = ['video'];
+      asset.metadata = {
+        kind: 'image',
+        durationSeconds: null,
+        formatName: 'png_pipe',
+        width: 160,
+        height: 90,
+        videoCodec: 'png',
+        audioCodec: null,
+        frameRate: null,
+        frameRateRatio: null,
+        hasAudio: false,
+      };
+      const clip = project.clips[index]!;
+      const duration = index === 0 ? 20 : 40;
+      delete clip.speed;
+      clip.sourceIn = at(0);
+      clip.sourceOut = at(duration);
+    }
+    const baseline = planProjectRender(project);
+    project.transitions = [{ id: 'mix', ...dissolve }];
+    const plan = planProjectRender(project);
+    expect(plan.audioClips).toEqual(baseline.audioClips);
+    expect(plan.frameCount).toBe(baseline.frameCount);
+    const layers = plan.visualTransitions?.[0]?.layers;
+    const samples = evaluateTimelineFrame(project, 16).visualClips;
+    for (const [index, kind] of [from, to].entries()) {
+      expect(layers?.[index]?.retiming !== undefined).toBe(kind === 'video');
+      if (kind === 'image') expect(samples[index]?.sourceTime).toEqual(at(0));
+    }
+  },
+);
+
 it('rejects missing handles, off-grid cuts, conflicts and unknown types', () => {
   const base = fixture();
   const mix = { id: 'mix', ...dissolve };

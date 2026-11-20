@@ -56,8 +56,11 @@ export async function runVideoCommand(
     throw new UsageError(`Usage: ${commandUsage(command)}`);
 
   const pictureCacheDirectory = values['picture-cache'];
+  const pictureVersion = values['picture-version'];
   if (pictureCacheDirectory !== undefined && !pictureCacheDirectory.trim())
     throw new UsageError('--picture-cache requires a directory.');
+  if (pictureVersion !== undefined && !pictureCacheDirectory)
+    throw new UsageError('--picture-version requires --picture-cache.');
   const controls =
     command === 'render' || command === 'mix analyze'
       ? parseRenderControls(values)
@@ -96,10 +99,8 @@ export async function runVideoCommand(
         );
       }
     };
-    const { audioMixEdit, ...mixControls } = await readMixControls(
-      values,
-      signal,
-    );
+    const { audioMixEdit, musicSelection, ...mixControls } =
+      await readMixControls(values, signal);
     const video = await loadVideo(file, {
       signal,
       params,
@@ -107,6 +108,7 @@ export async function runVideoCommand(
       quality: controls.quality,
       processing,
       audioMixEdit,
+      musicSelection,
     });
     if (command === 'mix analyze') {
       const report = await analyzeVideoMix(video, {
@@ -150,6 +152,7 @@ export async function runVideoCommand(
       const result = await renderCompiledVideo(video, output!, {
         ...controls,
         pictureCacheDirectory,
+        pictureVersion,
         ...mixControls,
         signal,
         ...(!values.json && {
@@ -178,6 +181,25 @@ export async function runVideoCommand(
         for (const { startFrame, endFrame, status } of result.pictureRanges ??
           [])
           console.log(`Picture [${startFrame}, ${endFrame}): ${status}`);
+        if (result.pictureVersion)
+          console.log(
+            `Picture version ${result.pictureVersion.id} (${result.pictureVersion.status})`,
+          );
+        const music = result.musicComparison;
+        if (music) {
+          const candidate = music.candidates.find(
+            ({ trackId }) => trackId === music.selected,
+          )!;
+          console.log(`Music: ${candidate.name}`);
+          for (const source of candidate.sources)
+            console.log(
+              `  ${source.path}${source.reusedInProject ? ' (also used in this project)' : ''}`,
+            );
+          if (candidate.previouslyUsedIn.length)
+            console.log(
+              `  Previous deliveries: ${candidate.previouslyUsedIn.join(', ')}`,
+            );
+        }
         if (result.audioMix) {
           const { integratedLufs, truePeakDbtp } = result.audioMix.output;
           console.log(

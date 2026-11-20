@@ -18,6 +18,8 @@ can produce different pictures on the same frame grid. See the
 For a range preview, OpenCut starts the canvas at the requested frame.
 Static image layers reuse their fitted pixels throughout the visible
 interval. These optimizations apply automatically at every quality profile.
+Animated media layers use fractional positions and sizes on the project
+frame grid so a slow pan or zoom can move by less than one pixel per frame.
 
 For eligible 1× clips in MP4 or MOV sources with zero-based timestamps,
 single-frame previews and transformed layers can start at an earlier

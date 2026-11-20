@@ -69,9 +69,17 @@ slashes. Inspect the source with `opencut probe` to choose valid source points.
   `grade` with a curve. Keyframe times use exact clip-local seconds, as do
   audio `gainKeys` and custom fade durations. Use ordered clip `effects`,
   clip and track `volume` and `muted` when mixing audio.
+- Set `channelMode: 'mono-center'` on a dialogue track for centered speech
+  inside a stereo mix. Preview `--mix-comparison before` and `after` to
+  hear the difference and check the report for phase cancellation.
+- Use `musicComparison` with two or more named `audioRole: 'music'` tracks.
+  Author the candidate clips independently, select a `trackId` in `selected`
+  and set `matchLoudness: true` for comparison. Use `previouslyUsedIn` on a
+  candidate for known delivery history. See [music comparison](../../../docs/AUDIO_MIX.md#compare-music-candidates).
 - Use explicit IDs for clips referenced by `transitions`. Use a
-  `cross-dissolve` for adjacent video clips with handles, or `fade-in` and
-  `fade-out` for video opacity at the clip edges.
+  `cross-dissolve` for adjacent photo or video clips on the same video track.
+  Only timed video needs source handles. Use `fade-in` or `fade-out` to fade
+  picture within the clip when the video lacks usable handles.
 - Use `subtitles: { style, cues }` with exact timeline seconds for cue
   bounds, clip-independent per-cue styling and cue-relative word timings.
   Validation enforces the 256-cue full-render limit. A frame

@@ -35,6 +35,83 @@ import { fixtureDirectory, videoExample } from '../fixture-paths.js';
 const cli = resolve('apps/cli/dist/index.js');
 const example = videoExample('review.video.ts');
 
+test('watch falls back to authored music when an auditioned candidate is removed', async (t) => {
+  const directory = await mkdtemp(join(fixtureDirectory, 'watch-music-'));
+  const file = join(directory, 'music.video.ts');
+  const definition = {
+    canvas: { width: 64, height: 64, frameRate: 24, durationFrames: 12 },
+    assets: { tone: { kind: 'audio', path: '../audio-tone.wav' } },
+    tracks: ['first', 'second', 'third'].map((id) => ({
+      id,
+      type: 'audio',
+      audioRole: 'music',
+      clips: [{ asset: 'tone', at: 0, sourceOut: 12 }],
+    })),
+  };
+  const withComparison = {
+    ...definition,
+    musicComparison: {
+      selected: 'first',
+      candidates: ['first', 'second', 'third'].map((trackId) => ({ trackId })),
+    },
+  };
+  const save = (value: unknown) =>
+    writeFile(file, `export default ${JSON.stringify(value)};\n`);
+  await save(withComparison);
+  let latest: VideoWatchStatus | undefined;
+  const watcher = await watchVideo(file, {
+    onStatus: (event) => {
+      latest = event;
+    },
+  });
+  t.after(async () => {
+    await watcher.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+  async function ready(after = 0) {
+    for (let attempt = 0; attempt < 240; attempt++) {
+      const state = latest;
+      if (state && state.generation > after) {
+        if (state.status === 'error') assert.fail(state.error);
+        if (state.status === 'ready' && state.current) return state.current;
+      }
+      await delay(50);
+    }
+    assert.fail(
+      `Expected a ready revision after ${after}, got ${latest?.status}`,
+    );
+  }
+  const initial = await ready();
+  watcher.selectMusic({ candidate: 'second', matchLoudness: true });
+  const audition = await ready(initial.generation);
+  assert.equal(audition.video.project.musicComparison?.selected, 'second');
+
+  await save({
+    ...definition,
+    musicComparison: {
+      selected: 'third',
+      candidates: [{ trackId: 'first' }, { trackId: 'third' }],
+    },
+  });
+  const fallback = await ready(audition.generation);
+  assert.equal(fallback.video.project.musicComparison?.selected, 'third');
+  assert.equal(fallback.video.project.musicComparison?.matchLoudness, true);
+
+  await save(withComparison);
+  const restored = await ready(fallback.generation);
+  assert.equal(restored.video.project.musicComparison?.selected, 'first');
+  await save(definition);
+  const removed = await ready(restored.generation);
+  assert.equal(removed.video.project.musicComparison, undefined);
+  await save(withComparison);
+  const reintroduced = await ready(removed.generation);
+  assert.equal(reintroduced.video.project.musicComparison?.selected, 'first');
+  assert.equal(
+    reintroduced.video.project.musicComparison?.matchLoudness,
+    undefined,
+  );
+});
+
 test('TypeScript watch preserves playback through truncation and follows atomic saves', async (t) => {
   const directory = await mkdtemp(join(fixtureDirectory, 't46-atomic-'));
   t.after(() => rm(directory, { recursive: true, force: true }));

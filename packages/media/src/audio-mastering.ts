@@ -104,6 +104,10 @@ async function measure(path: string, target: Target, signal?: AbortSignal) {
   };
 }
 
+export async function measureAudioLoudness(path: string, signal?: AbortSignal) {
+  return (await measure(path, deliveryTargets.web, signal)).loudness;
+}
+
 async function normalize(
   source: string,
   destination: string,

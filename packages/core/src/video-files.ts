@@ -19,7 +19,10 @@ import {
   validateVideoParameters,
   VideoDefinitionError,
 } from './video-definition.js';
-import type { VideoParameters } from './video-definition.js';
+import type {
+  ParsedVideoDefinition,
+  VideoParameters,
+} from './video-definition.js';
 import type { CompilationOptions, CompiledVideo } from './video-compiler.js';
 import { identifyVideoInput, videoInputIdentity } from './video-input.js';
 import type { VideoInput } from './video-input.js';
@@ -37,7 +40,7 @@ export function isVideoDefinitionPath(file: string) {
 
 export type VideoCompileOptions = Pick<
   CompilationOptions,
-  'signal' | 'preview' | 'processing' | 'quality'
+  'signal' | 'preview' | 'processing' | 'quality' | 'musicSelection'
 > & {
   /** A JSON object validated by the TypeScript definition. */
   params?: unknown;
@@ -49,6 +52,9 @@ type InputOptions = CompilationOptions &
     checkpoint?: boolean;
     scriptWorker?: { maxOldGenerationSizeMb?: number };
     batch?: NonNullable<VideoBuild['batch']>;
+    resolveMusicSelection?: (
+      comparison: ParsedVideoDefinition['musicComparison'],
+    ) => CompilationOptions['musicSelection'];
   };
 
 export interface VideoBuild {
@@ -87,6 +93,13 @@ export async function compileVideoInput(
   options: InputOptions,
 ): Promise<CompiledVideo> {
   const input = await readBuildInput(file, options);
+  if (options.resolveMusicSelection)
+    options = {
+      ...options,
+      musicSelection: options.resolveMusicSelection(
+        input.definition.musicComparison,
+      ),
+    };
   const compile = (controls: InputOptions) =>
     compileResolvedVideo(input, controls);
   if (!options.checkpoint && !options.batch) return compile(options);
@@ -120,7 +133,12 @@ async function compileResolvedVideo(
   options: InputOptions,
 ) {
   const { path, definition, params, sources, graphics } = input;
-  if (!options.batch && params === undefined && !graphics.size)
+  if (
+    !options.batch &&
+    params === undefined &&
+    !graphics.size &&
+    !definition.musicComparison
+  )
     return compileDefinition(input, options);
   const sha256 = await hashDefinition(
     path,

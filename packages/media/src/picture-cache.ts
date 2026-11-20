@@ -6,6 +6,7 @@ import { isStillImage, probeMedia } from './probe.js';
 import type { MediaMetadata } from './probe.js';
 import type { TextRaster } from './text.js';
 import type { VideoTimelineOptions, VisualTimelineClip } from './render.js';
+import { accountRenderFile } from './render-budget.js';
 
 export interface PictureRange {
   startFrame: number;
@@ -20,6 +21,13 @@ export interface PictureCache {
     key: string,
     encode: (path: string) => Promise<MediaMetadata>,
   ): Promise<{ path: string; reused: boolean }>;
+  encoded?: {
+    find(key: string): Promise<string | undefined>;
+    store(
+      key: string,
+      encode: (path: string) => Promise<MediaMetadata>,
+    ): Promise<string>;
+  };
 }
 
 type FrameRate = VideoTimelineOptions['frameRate'];
@@ -41,11 +49,6 @@ interface CachePlan {
   rasterize(
     clip: VisualTimelineClip & { text: TextLayer },
   ): Promise<TextRaster>;
-  encode(
-    startFrame: number,
-    endFrame: number,
-    destination: string,
-  ): Promise<void>;
 }
 
 function digest(value: string | Buffer) {
@@ -64,7 +67,7 @@ function relativeTime(time: Time, frame: number, rate: FrameRate) {
 }
 
 /** Use render inputs and clip-local sample positions as the identity of a range. */
-export async function cachePicture({
+export async function planPictureRanges({
   options,
   cache,
   visualClips,
@@ -75,7 +78,6 @@ export async function cachePicture({
   outputHeight,
   warnings,
   rasterize,
-  encode,
 }: CachePlan) {
   const { width, height, frameRate, signal } = options;
   const boundaries = new Set([startFrame, endFrame]);
@@ -128,6 +130,7 @@ export async function cachePicture({
             clip.crop,
             clip.grade,
             animation?.keyframes,
+            ...(animation && !text ? ['subpixel-transforms'] : []),
           ]),
         ),
       };
@@ -169,8 +172,7 @@ export async function cachePicture({
     }
   }
   const edges = [...boundaries].sort((a, b) => a - b);
-  let concat = '';
-  const ranges: PictureRange[] = [];
+  const ranges: { key: string; startFrame: number; endFrame: number }[] = [];
   const settings = [
     cache.backend,
     width,
@@ -207,6 +209,98 @@ export async function cachePicture({
       }
     }
     const key = digest(JSON.stringify([settings, count, composition]));
+    ranges.push({ key, startFrame: start, endFrame: end });
+  }
+  return ranges;
+}
+
+export function encodedPictureKey(
+  ranges: Awaited<ReturnType<typeof planPictureRanges>>,
+  settings: readonly unknown[],
+) {
+  return digest(JSON.stringify(['opencut-picture-v1', ranges, settings]));
+}
+
+/** Retain only the already verified picture packets, with a content-specific ID. */
+export async function saveEncodedPicture(
+  cache: NonNullable<PictureCache['encoded']>,
+  key: string,
+  path: string,
+  timescale: number,
+  signal?: AbortSignal,
+) {
+  const ffmpeg = [
+    '-hide_banner',
+    '-v',
+    'error',
+    '-nostdin',
+    '-n',
+    '-xerror',
+    '-i',
+    path,
+    '-map',
+    '0:v:0',
+    '-map_metadata',
+    '-1',
+    '-c:v',
+    'copy',
+  ];
+  const fingerprint = await runMediaTool(
+    'ffmpeg',
+    [...ffmpeg, '-f', 'hash', '-hash', 'sha256', 'pipe:1'],
+    undefined,
+    600_000,
+    {
+      signal,
+      stage: `identifying verified picture in '${path}'`,
+    },
+  );
+  const hash = /^SHA256=([a-f0-9]{64})$/.exec(
+    fingerprint.toString().trim(),
+  )?.[1];
+  if (!hash)
+    throw new MediaError('Could not identify the encoded picture packets.');
+  const id = `${key}.${hash}`;
+  const saved = await cache.store(id, async (output) => {
+    await runMediaTool(
+      'ffmpeg',
+      [
+        ...ffmpeg,
+        '-video_track_timescale',
+        String(timescale),
+        '-f',
+        'mp4',
+        output,
+      ],
+      undefined,
+      600_000,
+      {
+        signal,
+        writesFile: true,
+        stage: `saving verified picture '${id}'`,
+      },
+    );
+    await accountRenderFile(output);
+    return probeMedia(output, signal, { stage: 'verifying saved picture' });
+  });
+  return { id, path: saved };
+}
+
+export async function cachePicture(
+  planned: Awaited<ReturnType<typeof planPictureRanges>>,
+  cache: PictureCache,
+  frameRate: FrameRate,
+  signal: AbortSignal | undefined,
+  encode: (
+    startFrame: number,
+    endFrame: number,
+    destination: string,
+  ) => Promise<void>,
+) {
+  let concat = '';
+  const ranges: PictureRange[] = [];
+  for (const { key, startFrame: start, endFrame: end } of planned) {
+    const count = end - start;
     const { path, reused } = await cache.materialize(
       key,
       async (destination) => {
@@ -227,7 +321,10 @@ export async function cachePicture({
           ],
           undefined,
           600_000,
-          { signal },
+          {
+            signal,
+            stage: `verifying picture range [${start}, ${end}) in '${destination}'`,
+          },
         );
         if (Number(packets.toString().trim()) !== count)
           throw new MediaError(

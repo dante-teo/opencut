@@ -153,10 +153,10 @@ export function validateTransitions(
         if (
           !videoTracks.has(clip.trackId) ||
           !asset?.mediaTypes.includes('video') ||
-          (asset.metadata && asset.metadata.kind !== 'video')
+          (asset.metadata && !['video', 'image'].includes(asset.metadata.kind))
         )
           throw new RangeError(
-            'Video transitions require timed video clips on a video track.',
+            'Transitions require photo or video clips on a video track.',
           );
         const videoDuration = asset.metadata?.videoDuration;
         if (
@@ -170,29 +170,33 @@ export function validateTransitions(
       if (layers.length === 2) {
         const from = layers[0]!.clip;
         const to = layers[1]!.clip;
-        const asset = assets.get(from.assetId!);
-        const videoDuration = asset?.metadata?.videoDuration;
-        const limit = videoDuration ?? asset?.duration;
-        if (!limit)
-          throw new RangeError(
-            'Cross-dissolve requires a known duration for the outgoing video.',
-          );
-        const sourceOut = clipSourceTime(from, end);
-        if (
-          videoDuration
-            ? exceedsVideoDuration(sourceOut, videoDuration)
-            : compareTimes(sourceOut, limit) > 0
-        )
-          throw new RangeError(
-            'The outgoing video has insufficient source after its out point.',
-          );
-        try {
-          clipSourceTime(to, start);
-        } catch (error) {
-          if (!(error instanceof RangeError)) throw error;
-          throw new RangeError(
-            'The incoming video needs usable source before its in point.',
-          );
+        const outgoing = assets.get(from.assetId!);
+        if (outgoing?.metadata?.kind !== 'image') {
+          const videoDuration = outgoing?.metadata?.videoDuration;
+          const limit = videoDuration ?? outgoing?.duration;
+          if (!limit)
+            throw new RangeError(
+              `Cross-dissolve requires a known duration for outgoing clip '${from.id}'. Re-import the source to refresh its metadata or use a fade-out.`,
+            );
+          const sourceOut = clipSourceTime(from, end);
+          if (
+            videoDuration
+              ? exceedsVideoDuration(sourceOut, videoDuration)
+              : compareTimes(sourceOut, limit) > 0
+          )
+            throw new RangeError(
+              `Outgoing clip '${from.id}' has insufficient source after its out point. Shorten the dissolve if there is spare footage, adjust the trim or use a fade-out.`,
+            );
+        }
+        if (assets.get(to.assetId!)?.metadata?.kind !== 'image') {
+          try {
+            clipSourceTime(to, start);
+          } catch (error) {
+            if (!(error instanceof RangeError)) throw error;
+            throw new RangeError(
+              `Incoming clip '${to.id}' needs usable source before its in point. Shorten the dissolve if there is spare footage, adjust the trim or use a fade-in.`,
+            );
+          }
         }
       }
       const entries = windows.get(trackId) ?? [];

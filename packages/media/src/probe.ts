@@ -48,6 +48,7 @@ export interface MediaMetadata {
   video: MediaStream | null;
   audio: MediaStream | null;
   streams: MediaStream[];
+  diagnostic?: string;
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -206,12 +207,13 @@ export function recipeInputArguments() {
 export function probeMedia(
   file: string,
   signal?: AbortSignal,
-  options?: { localMediaOnly: boolean },
+  options?: { localMediaOnly?: boolean; stage?: string },
 ): Promise<MediaMetadata> {
   return probe(
     file,
     signal,
     options?.localMediaOnly ? localInputArguments(dialogueFormats) : [],
+    options?.stage,
   );
 }
 
@@ -223,9 +225,12 @@ async function probe(
   file: string,
   signal: AbortSignal | undefined,
   inputArguments: string[],
+  stage = 'probing media input',
 ): Promise<MediaMetadata> {
   checkRenderSignal(signal);
   const path = await localFile(file);
+  const context = `${stage} '${path}'`;
+  let diagnostic: string | undefined;
   const output = await runMediaTool(
     'ffprobe',
     [
@@ -240,18 +245,33 @@ async function probe(
     ],
     undefined,
     undefined,
-    signal ? { signal } : undefined,
+    {
+      signal,
+      stage: context,
+      onNonfatalDiagnostic(message) {
+        diagnostic = message;
+      },
+    },
   );
+  const invalidMetadata = (reason: string, cause?: unknown) =>
+    new MediaError(
+      `Error while ${context}. ffprobe exited with status 0 and returned ${reason}.`,
+      cause === undefined ? undefined : { cause },
+    );
   let data: Record<string, unknown>;
   try {
     data = record(JSON.parse(output.toString('utf8')) as unknown);
   } catch (error) {
-    throw new MediaError('ffprobe returned invalid JSON.', { cause: error });
+    throw invalidMetadata('invalid JSON', error);
   }
-  if (!Array.isArray(data.streams) || data.streams.length === 0) {
-    throw new MediaError(`No media streams found in '${path}'.`);
+  if (!Array.isArray(data.streams) || data.streams.length === 0)
+    throw invalidMetadata('no media streams');
+  let streams: MediaStream[];
+  try {
+    streams = data.streams.map(parseStream);
+  } catch (cause) {
+    throw invalidMetadata('invalid stream information', cause);
   }
-  const streams = data.streams.map(parseStream);
   const videos = streams.filter(
     (item) => item.type === 'video' && !item.isAttachedPicture,
   );
@@ -271,5 +291,6 @@ async function probe(
     video: videos.find((item) => item.isDefault) ?? videos[0] ?? null,
     audio: audios.find((item) => item.isDefault) ?? audios[0] ?? null,
     streams,
+    ...(diagnostic && { diagnostic }),
   };
 }

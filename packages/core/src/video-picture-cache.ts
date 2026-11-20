@@ -4,7 +4,7 @@ import { MediaError, recipeBackendVersion } from '@opencut/media';
 import type { PictureCache } from '@opencut/media';
 import type { CompiledVideo } from './video-compiler.js';
 import { videoInputIdentity } from './video-input.js';
-import { materializeMediaEntry } from './video-media-cache.js';
+import { findMediaEntry, materializeMediaEntry } from './video-media-cache.js';
 
 export async function openPictureCache(
   directory: string,
@@ -20,6 +20,23 @@ export async function openPictureCache(
     throw new MediaError('Picture cache paths cannot contain line breaks.');
   return {
     backend: await recipeBackendVersion(signal),
+    encoded: {
+      async find(key) {
+        const found = await findMediaEntry(cache, key, 'mp4', signal);
+        if (found?.directory === resolve(cache, key))
+          return found.entry.metadata.path;
+      },
+      async store(key, encode) {
+        const { entry } = await materializeMediaEntry(
+          cache,
+          key,
+          'mp4',
+          signal,
+          encode,
+        );
+        return entry.metadata.path;
+      },
+    },
     sourceIdentity(path) {
       signal.throwIfAborted();
       const identity = video.sourceIdentity(path);

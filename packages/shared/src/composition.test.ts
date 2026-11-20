@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import {
   canvasColorPattern,
+  evaluateVisual,
   opaqueCanvasColor,
   visualGeometry,
 } from './index.js';
@@ -40,6 +41,45 @@ it('fits display pixels, centers on the even chroma grid, and applies project-pi
     scaledHeight: 28,
   });
 });
+
+it.each([30, 60])(
+  'samples fractional zoom and pan on every frame at %i fps',
+  (fps) => {
+    const end = { numerator: 63, denominator: 20 };
+    const base = {
+      fit: 'cover' as const,
+      crop: { left: 0.1, top: 0.05, right: 0, bottom: 0.05 },
+    };
+    const keys = (start: number, finish: number) => [
+      {
+        time: { numerator: 0, denominator: 1 },
+        value: start,
+        easing: 'linear' as const,
+      },
+      { time: end, value: finish, easing: 'linear' as const },
+    ];
+    const keyframes = { scale: keys(1.005, 1.045), x: keys(0, 3) };
+    const duration = end.numerator / end.denominator;
+    for (let i = 0; i <= Math.floor(duration * fps); i++) {
+      const time = { numerator: i, denominator: fps };
+      const sample = evaluateVisual(base, keyframes, time);
+      const geometry = visualGeometry(1080, 1440, 2, 3, sample, 'subpixel');
+      const progress = i / (fps * duration);
+      expect(geometry.layerWidth).toBeCloseTo(
+        1080 * (1.005 + 0.04 * progress),
+        9,
+      );
+      expect(geometry.centerX).toBeCloseTo(540 + 3 * progress, 9);
+      expect(geometry.centerY).toBeCloseTo(720, 9);
+      expect(geometry.cropY).toBeCloseTo(
+        (geometry.scaledHeight - geometry.layerHeight) / 2,
+        9,
+      );
+      expect(geometry.crop).toEqual(base.crop);
+      expect(geometry.visible).toBe(true);
+    }
+  },
+);
 
 it('resolves crop and scaled rectangles before preview resampling and rejects offscreen/zero alpha', () => {
   expect(

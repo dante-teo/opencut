@@ -6,6 +6,116 @@ import { launchDesktop } from './helpers.js';
 import { assertSimilarExports } from '../integration/conformance-support.js';
 import { fixtureDirectory, videoExample } from '../fixture-paths.js';
 
+test('switches music at the same frame, preserves the dialogue draft, and exports the selected mix', async () => {
+  test.setTimeout(60_000);
+  const directory = await mkdtemp(join(fixtureDirectory, 'music-review-'));
+  const path = join(directory, 'music.video.ts');
+  const output = join(directory, 'selected.mp4');
+  const source = `export default {
+    canvas: { width: 160, height: 90, frameRate: 30, durationFrames: 30 },
+    assets: { tone: { path: '../audio-tone.wav', kind: 'audio' } },
+    tracks: [
+      { id: 'music-one', name: 'Music One', type: 'audio', audioRole: 'music', clips: [{ asset: 'tone', at: 0, sourceOut: 30, volume: 0.6 }] },
+      { id: 'music-two', name: 'Music Two', type: 'audio', audioRole: 'music', clips: [{ asset: 'tone', at: 8, sourceOut: 22, volume: 0.25 }] },
+    ],
+    musicComparison: { selected: 'music-one', candidates: [{ trackId: 'music-one' }, { trackId: 'music-two', previouslyUsedIn: ['April delivery'] }] },
+  };`;
+  await writeFile(path, source);
+  const { application, page } = await launchDesktop();
+  try {
+    await application.evaluate(
+      ({ dialog }, { path, output }) => {
+        dialog.showOpenDialog = async () => ({
+          canceled: false,
+          filePaths: [path],
+        });
+        dialog.showSaveDialog = async () => ({
+          canceled: false,
+          filePath: output,
+        });
+      },
+      { path, output },
+    );
+    await page.getByRole('button', { name: 'Open definition' }).click();
+    const workspace = page.getByLabel('Definition review');
+    const status = workspace.getByRole('status', {
+      name: 'Compilation status',
+    });
+    const movie = workspace.getByLabel('Compiled timeline preview');
+    await expect(status).toContainText('Preview ready', { timeout: 25_000 });
+    await expect
+      .poll(() => movie.evaluate((video: HTMLVideoElement) => video.readyState))
+      .toBeGreaterThan(1);
+    await movie.evaluate((video: HTMLVideoElement) => {
+      video.currentTime = 0.52;
+    });
+    await expect(workspace.getByLabel('Current frame')).toHaveText(
+      'Frame 15 / 29',
+    );
+    await workspace
+      .getByText('Professional Dialogue Mix', { exact: true })
+      .click();
+    const clarity = workspace.getByRole('slider', { name: 'Voice Clarity' });
+    await clarity.press('End');
+    await expect(clarity).toHaveValue('1');
+    await workspace
+      .getByText('Advanced settings and automation', { exact: true })
+      .click();
+    const advanced = workspace.getByLabel('Advanced mix settings');
+    const draft =
+      '{"preset":"natural-cinematic","enabled":false,"clarity":0.81}';
+    await advanced.fill(draft);
+    const previous = await movie.getAttribute('src');
+    const candidate = workspace.getByLabel('Music candidate');
+    await candidate.selectOption('music-two');
+    await expect(candidate).toHaveValue('music-two', { timeout: 25_000 });
+    await expect(clarity).toHaveValue('1');
+    await expect(advanced).toHaveValue(draft);
+    await expect(
+      workspace.getByText('Previously delivered in April delivery'),
+    ).toBeVisible();
+    await expect(movie).not.toHaveAttribute('src', previous!);
+    await expect
+      .poll(() =>
+        movie.evaluate((video: HTMLVideoElement) => video.currentTime),
+      )
+      .toBeCloseTo(0.52, 4);
+    await workspace.getByLabel('Match loudness').click();
+    await expect(workspace.getByLabel('Match loudness')).toBeChecked({
+      timeout: 25_000,
+    });
+    await expect(status).toContainText('Preview ready');
+    await expect(clarity).toHaveValue('1');
+    await expect(advanced).toHaveValue(draft);
+    await workspace.getByRole('button', { name: 'Export MP4' }).click();
+    await expect(workspace.getByLabel('Export result')).toContainText(
+      'selected.mp4',
+      { timeout: 25_000 },
+    );
+    const direct = join(directory, 'expected.mp4');
+    await renderVideo(path, direct, {
+      musicSelection: { candidate: 'music-two', matchLoudness: true },
+    });
+    await assertSimilarExports(output, direct, {
+      width: 160,
+      height: 90,
+      frameCount: 30,
+      fps: 30,
+    });
+    await writeFile(
+      path,
+      source.replace(
+        'export default {',
+        'export default { professionalMix: { preset: "natural-cinematic", enabled: false, clarity: 0.33 },',
+      ),
+    );
+    await expect(clarity).toHaveValue('0.33', { timeout: 25_000 });
+  } finally {
+    await application.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('reviews consecutive definition builds and keeps the last playable revision on error', async () => {
   test.setTimeout(60_000);
   const directory = await mkdtemp(join(fixtureDirectory, 't46-desktop-'));

@@ -52,6 +52,27 @@ For eligible MP4 and MOV footage, cache misses can seek into the source.
 OpenCut falls back to sequential decoding when a seek cannot preserve frame
 selection.
 
+### Audio-only revisions
+
+Save a verified encoded picture on the initial export.
+
+```sh
+opencut render edit.video.ts -o approved.mp4 --picture-cache ./render-cache --picture-version save --json
+```
+
+After revising music, effects or dialogue, use the reported
+`pictureVersion.id` in place of `PICTURE_VERSION_ID` and keep the same
+cache directory and video export settings.
+
+```sh
+opencut render edit.video.ts -o revised.mp4 --picture-cache ./render-cache --picture-version PICTURE_VERSION_ID --json
+```
+
+OpenCut copies the verified picture packets and mixes the new audio. The
+report shows `pictureVersion.status` as `reused`. Save a new picture version
+after changing the picture or video export settings. Keep the cache
+available for revisions of each saved version.
+
 ## React and SVG graphics
 
 Use the regular `validate`, `preview`, `render`, and `package` commands for

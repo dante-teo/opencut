@@ -83,7 +83,7 @@ describe('media probing', () => {
       ['-v', 'error', '-show_format', '-show_streams', '-of', 'json', file],
       undefined,
       undefined,
-      undefined,
+      expect.objectContaining({ stage: `probing media input '${file}'` }),
     );
   });
 
@@ -158,6 +158,21 @@ describe('media probing', () => {
   it('rejects malformed JSON', async () => {
     vi.mocked(runMediaTool).mockResolvedValue(Buffer.from('{'));
     await expect(probeMedia(file)).rejects.toThrow('invalid JSON');
+  });
+
+  it('keeps the chapter diagnostic alongside validated probe data', async () => {
+    vi.mocked(runMediaTool).mockImplementationOnce(
+      async (_tool, _args, _buffer, _time, control) => {
+        control?.onNonfatalDiagnostic?.(
+          'Referenced QT chapter track not found',
+        );
+        return Buffer.from(JSON.stringify(probe));
+      },
+    );
+    await expect(probeMedia(file)).resolves.toMatchObject({
+      video: { codec: 'h264' },
+      diagnostic: 'Referenced QT chapter track not found',
+    });
   });
 
   it('rejects unreadable paths before launching ffprobe', async () => {

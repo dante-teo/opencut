@@ -135,8 +135,11 @@ for definitions using [React or SVG graphics](GRAPHICS.md). The optional top-lev
   cue start. Cues render above the regular tracks.
 - `transitions` holds records with `id`, `kind` and `frames`.
   A `cross-dissolve` references explicit clip IDs in `from` and `to`
-  and needs adjacent video clips and usable source handles. `fade-in`
-  and `fade-out` reference `clipId` and affect the video layer's alpha.
+  and joins adjacent photos or video clips on the same video track.
+  A timed video needs usable source frames on its side of the cut.
+  Photos and freeze frames can extend through the dissolve. Dialogue and
+  other clip audio retain their original timing. `fade-in` and `fade-out`
+  reference `clipId` and apply within its picture interval without source handles.
 - Freeze an existing image by placing it as a still clip. To hold a source
   video frame directly, declare
   `{ "path": "media/clip.mp4", "kind": "image", "freezeFrame": { "numerator": 3, "denominator": 2 } }`
@@ -536,3 +539,8 @@ OpenCut, FFmpeg and any system AI backends required by the recipes.
 ## Professional Dialogue Mix
 
 `professionalMix` enables dialogue cleanup, editable gain automation, music ducking and output loudness management. Set `audioRole` on audio or video tracks to route them as `dialogue`, `music` or `other`. See [settings and examples](AUDIO_MIX.md).
+
+Set `channelMode: 'mono-center'` on an audio or video track to
+[center its dialogue in a stereo mix](AUDIO_MIX.md#centered-mono-dialogue).
+Use `musicComparison` to choose among
+[independently edited music tracks](AUDIO_MIX.md#compare-music-candidates).

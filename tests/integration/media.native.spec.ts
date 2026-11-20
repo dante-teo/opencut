@@ -12,7 +12,9 @@ import {
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { fixtures, requireTool } from '../../scripts/fixture-lib.js';
+import { fixtures, requireTool, runTool } from '../../scripts/fixture-lib.js';
+import { probeMedia } from '../../packages/media/src/probe.js';
+import { renderVideoTimeline } from '../../packages/media/src/render.js';
 import type { MediaMetadata } from '../../packages/media/src/probe.js';
 import type { FrameResult } from '../../packages/media/src/frame.js';
 
@@ -22,6 +24,71 @@ const entry = fileURLToPath(
 const generated = fileURLToPath(
   new URL('../fixtures/generated/', import.meta.url),
 );
+
+test('exports a decodable QuickTime input with a missing chapter reference and rejects a corrupt input', async (t) => {
+  requireTool('ffmpeg');
+  requireTool('ffprobe');
+  const directory = await mkdtemp(join(generated, 'chapter-probe-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const chapters = join(directory, 'chapters.ffmetadata');
+  const path = join(directory, 'chapter-reference.mov');
+  await writeFile(
+    chapters,
+    ';FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=500\ntitle=Start\n',
+  );
+  runTool('ffmpeg', [
+    '-v',
+    'error',
+    '-nostdin',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=black:s=64x48:r=10:d=1',
+    '-i',
+    chapters,
+    '-map_chapters',
+    '1',
+    '-c:v',
+    'libx264',
+    path,
+  ]);
+  const bytes = await readFile(path);
+  const reference = bytes.indexOf(Buffer.from([0, 0, 0, 12, 99, 104, 97, 112]));
+  assert.ok(reference >= 0, 'QuickTime chapter reference atom');
+  bytes.writeUInt32BE(255, reference + 8);
+  await writeFile(path, bytes);
+  const metadata = await probeMedia(path);
+  assert.equal(metadata.video?.codec, 'h264');
+  assert.equal(metadata.diagnostic, 'Referenced QT chapter track not found');
+  const result = await renderVideoTimeline({
+    width: 64,
+    height: 48,
+    frameRate: { numerator: 10, denominator: 1 },
+    frameCount: 5,
+    visualClips: [
+      {
+        clipId: 'test',
+        path,
+        timelineStartFrame: 0,
+        sourceStartFrame: 0,
+        frameCount: 5,
+      },
+    ],
+    output: join(directory, 'render.mp4'),
+    quality: 'fast',
+  });
+  assert.equal(result.frameCount, 5);
+  assert.match(
+    result.warnings?.join('\n') ?? '',
+    /chapter-reference\.mov.*Referenced QT chapter track not found/,
+  );
+  const corrupt = join(directory, 'truncated.mov');
+  await writeFile(corrupt, bytes.subarray(0, 128));
+  await assert.rejects(
+    probeMedia(corrupt),
+    /probing media input.*truncated\.mov.*exit status 1/,
+  );
+});
 
 test(
   'SIGTERM stops frame decoding without publishing a PNG',

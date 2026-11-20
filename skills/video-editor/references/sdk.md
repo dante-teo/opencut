@@ -14,6 +14,9 @@ For picture reuse, pass the same `pictureCacheDirectory` to `renderVideo`
 or `renderCompiledVideo` on the initial export and revisions. Read
 `pictureRanges` for the status of each range in project frames.
 See [picture cache behavior](../../../docs/CLI.md#reuse-picture-between-exports).
+For audio-only revisions, set `pictureVersion: 'save'` on the initial export
+and reuse the returned `pictureVersion.id` as `pictureVersion` with the same
+cache and video settings.
 
 Use `inspectVideoRecipes(file)` for recipe validation and inspection without
 transcoding. `compileVideo`, `renderVideo`, and `watchVideo` accept `processing`
@@ -44,3 +47,7 @@ for the recorded parameters.
 Use `analyzeVideoMix(compiledVideo)` to obtain editable automation and measured final
 loudness. `compileVideo` and `renderVideo` accept `audioMixEdit`. Mix-enabled exports
 include `audioMix` in the result. See [Professional Dialogue Mix](../../../docs/AUDIO_MIX.md).
+Pass `musicSelection: { candidate: 'track-id', matchLoudness: true }` to
+`compileVideo` or `renderVideo` for a definition with music candidates.
+Use `watcher.selectMusic` during review. See the
+[SDK guide](../../../docs/SDK.md#professional-dialogue-mix).
