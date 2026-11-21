@@ -82,7 +82,6 @@ const epoch = '1970-01-01T00:00:00.000Z';
 
 export interface CompiledVideo {
   readonly path: string;
-  readonly jsonParameters?: import('./video-json.js').JsonVideoParameterSchema;
   readonly build?: VideoBuild;
   /** A deeply frozen project snapshot. */
   readonly project: Project;
@@ -108,8 +107,6 @@ export interface DefinitionSources {
   path: string;
   definition: ParsedVideoDefinition;
   graphics: CompiledGraphics;
-  jsonParameters?:
-    import('./video-json.js').JsonVideoParameterSchema | undefined;
 }
 
 export async function compileDefinition(
@@ -250,9 +247,6 @@ export async function compileDefinition(
     ),
     graphicSource: (key: string) => bundles.get(key),
     path,
-    ...(sources.jsonParameters && {
-      jsonParameters: freeze(sources.jsonParameters),
-    }),
     ...(build && { build: freeze(build) }),
     project: freeze(project),
     ...(audioMixEdit && { audioMixEdit }),

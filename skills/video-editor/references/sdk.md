@@ -58,6 +58,5 @@ Use `watcher.selectMusic` during review. See the
 ## Scenes and sampling
 
 Import `createPresetScene`, `defineGraphicScene`, motion helpers and
-`inspectGraphicFrames` from the SDK. A version 3 scene accepts the same
-graphic tree from TypeScript or JSON. Read
+`inspectGraphicFrames` from the SDK for version 3 scene definitions. Read
 [the scene and adapter reference](../../../docs/GRAPHICS.md).

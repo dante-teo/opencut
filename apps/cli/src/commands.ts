@@ -46,7 +46,7 @@ const optionTypes = {
   version: { type: 'boolean', short: 'v' },
 } as const;
 
-const definition = '<definition.video.ts|definition.video.json>';
+const definition = '<definition.video.ts>';
 const params = '[--params <params.json>]';
 const position = '(--frame <n> | --timestamp <time>)';
 const previewOptions = ['quality', ...Object.keys(processingOptionTypes)];
@@ -73,6 +73,7 @@ const commands = {
       ...Object.keys(processingOptionTypes),
     ],
   },
+  convert: { args: '<definition.video.json>', options: [] },
   package: {
     args: `${definition} --output <new-directory> [--root <directory>] [--resource <path> ...] ${params}`,
     options: ['output', 'root', 'resource', 'params'],

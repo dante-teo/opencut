@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import type { JsonVideoParameterSchema } from './video-json.js';
 import {
   assetSchema,
   clipSchema,
@@ -149,6 +148,14 @@ export const videoDefinitionSchema = z.strictObject({
 
 export type VideoDefinition = z.input<typeof videoDefinitionSchema>;
 
+export const videoDefinitionFormats = {
+  typescript: { suffix: '.video.ts', authoringCode: true },
+} as const;
+
+export function isVideoDefinitionPath(file: string) {
+  return file.endsWith(videoDefinitionFormats.typescript.suffix);
+}
+
 export type VideoParameterValue =
   | string
   | number
@@ -169,7 +176,6 @@ interface ParameterizedVideo {
 export interface ResolvedVideoDefinition {
   value: unknown;
   params?: VideoParameters;
-  jsonParameters?: JsonVideoParameterSchema;
 }
 
 /** Zod builders for the strict parameter shape of a TypeScript definition. */

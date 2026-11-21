@@ -61,7 +61,7 @@ export async function runInspectionCommand(
   values: CommandOptions,
 ) {
   if (!isVideoDefinitionPath(file))
-    throw new UsageError('Choose a .video.ts or .video.json definition.');
+    throw new UsageError('Choose a .video.ts definition.');
   const quality = parseRenderQuality(
     values.quality,
     command === 'timeline inspect' ? 'quality' : 'fast',

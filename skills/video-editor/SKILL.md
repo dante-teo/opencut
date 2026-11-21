@@ -1,6 +1,6 @@
 ---
 name: video-editor
-description: Create, revise, preview and render complete videos headlessly from TypeScript or JSON with the installed OpenCut CLI and SDK.
+description: Create, revise, preview and render complete videos headlessly from TypeScript with the installed OpenCut CLI and SDK.
 ---
 
 On Apple Silicon with macOS 15 or later, see the
@@ -11,11 +11,10 @@ Treat `.video.ts` and its imports as executable local code. Run definitions
 you authored for the task or that the user explicitly authorized. Validation,
 inspection, preview and packaging all execute the definition.
 
-Put the composition object in a `.video.json` file for data-only authoring.
-A JSON definition can still declare trusted executable React graphics. For
-TypeScript, default-export a value from `defineVideo` in a `.video.ts` file. Import
-`defineVideo` from `@opencut/sdk`. Run `opencut --help` to
-discover commands and `opencut render --help` for export controls.
+Default-export a value from `defineVideo` in a `.video.ts` file. Import
+`defineVideo` from `@opencut/sdk`. Use `opencut convert name.video.json` to
+migrate a legacy composition to a `.video.ts` file beside the resolved JSON source.
+Run `opencut --help` to discover commands and `opencut render --help` for export controls.
 
 1. Probe inputs with `opencut probe FILE --json`. Reference media paths
    relative to the definition. Keep original media intact. Use ordered asset
@@ -48,8 +47,7 @@ discover commands and `opencut render --help` for export controls.
    for slower MP4 encoding with the same AI algorithms as `quality`.
    Export an SRT or VTT
    with `opencut subtitles export DEFINITION --output final.srt` if requested.
-6. For variants, declare JSON parameter descriptors and bindings or use
-   `defineVideo(shape, compose)` with `videoParams` and
+6. For variants, use `defineVideo(shape, compose)` with `videoParams` and
    reusable TypeScript helpers. Validate a sample with `--params params.json`.
    Run `opencut batch DEFINITION --variants variants.json --output-dir outputs --json`.
    Read each result and retry corrected entries with `--only id,id`.

@@ -75,7 +75,7 @@ test('updates a React graphic from a watched CSS dependency', async () => {
   }
 });
 
-test('opens a data-only JSON definition through the desktop review picker', async () => {
+test('offers TypeScript definitions and rejects a selected JSON project', async () => {
   const directory = await mkdtemp(join(fixtureDirectory, 'json-desktop-'));
   const path = join(directory, 'review.video.json');
   const { application, page } = await launchDesktop();
@@ -94,19 +94,23 @@ test('opens a data-only JSON definition through the desktop review picker', asyn
       }),
     );
     await application.evaluate(({ dialog }, file) => {
-      dialog.showOpenDialog = async () => ({
-        canceled: false,
-        filePaths: [file],
-      });
+      dialog.showOpenDialog = async (...args: unknown[]) => {
+        const options = args.at(-1) as {
+          filters?: { extensions: string[] }[];
+        };
+        if (
+          options.filters?.flatMap(({ extensions }) => extensions).join() !==
+          'ts'
+        )
+          throw new Error('Expected a TypeScript-only picker.');
+        return { canceled: false, filePaths: [file] };
+      };
     }, path);
     await page.getByRole('button', { name: 'Open definition' }).click();
-    const workspace = page.getByLabel('Definition review');
-    await expect(
-      workspace.getByRole('status', { name: 'Compilation status' }),
-    ).toContainText('Preview ready', { timeout: 25_000 });
-    await expect(workspace.getByLabel('Current frame')).toHaveText(
-      'Frame 0 / 11',
+    await expect(page.getByRole('alert')).toContainText(
+      'Choose a .video.ts file.',
     );
+    await expect(page.getByLabel('Definition review')).toHaveCount(0);
   } finally {
     await application.close();
     await rm(directory, { recursive: true, force: true });

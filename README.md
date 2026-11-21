@@ -40,6 +40,7 @@ details.
 - [Media preprocessing recipes](docs/VIDEO_DEFINITIONS.md#media-preprocessing-recipes)
 - [Architecture and compatibility](docs/ARCHITECTURE.md)
 - [CLI reference](docs/CLI.md)
+- [Convert a legacy JSON project](docs/CLI.md#convert-a-legacy-definition)
 - [TypeScript SDK](docs/SDK.md)
 - [OpenCut Agent Skill](skills/video-editor/SKILL.md)
 

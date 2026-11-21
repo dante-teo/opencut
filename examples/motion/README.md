@@ -1,8 +1,7 @@
 # Motion compositions
 
-`field-notes`, `prism`, `waterline` and `signal` have editable JSON and
-TypeScript entries. The TypeScript examples share the adjacent scene data,
-and define variant schemas where applicable. `relay` and `parallax` use
+Each `.video.ts` file contains an editable composition. `waterline` and
+`signal` define parameterized variants. `relay` and `parallax` use
 the optional Lottie and Three.js adapters. `readiness.video.ts` contains
 a custom React canvas graphic with explicit sample readiness.
 
@@ -13,10 +12,10 @@ Park Service. This command verifies their pinned hashes. Generated media
 goes into `tests/fixtures/generated/reference-motion/assets/`.
 
 ```sh
-opencut validate examples/motion/waterline.video.json --json
-opencut preview frame examples/motion/prism.video.json --frame 27 -o prism.png
-opencut render examples/motion/waterline.video.json --params examples/motion/waterline-alt.params.json -o waterline.mp4
-opencut package examples/motion/relay.video.json --root . -o relay-bundle
+opencut validate examples/motion/waterline.video.ts --json
+opencut preview frame examples/motion/prism.video.ts --frame 27 -o prism.png
+opencut render examples/motion/waterline.video.ts --params examples/motion/waterline-alt.params.json -o waterline.mp4
+opencut package examples/motion/relay.video.ts --root . -o relay-bundle
 ```
 
 Use the [graphics reference](../../docs/GRAPHICS.md) for the authoring

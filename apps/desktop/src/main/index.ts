@@ -274,18 +274,16 @@ app
             {
               title: 'Review a video definition',
               message:
-                'OpenCut executes TypeScript definitions and their imports. JSON definitions can reference executable graphics. Review only trusted sources.',
+                'OpenCut executes TypeScript definitions and their imports. Review only trusted sources.',
               properties: ['openFile'],
-              filters: [
-                { name: 'Video definitions', extensions: ['ts', 'json'] },
-              ],
+              filters: [{ name: 'Video definitions', extensions: ['ts'] }],
             },
           );
           assertSender(event);
           if (canceled) return;
           const [path] = filePaths;
           if (!path || !isVideoDefinitionPath(path))
-            throw new Error('Choose a .video.ts or .video.json file.');
+            throw new Error('Choose a .video.ts file.');
           previewFile = null;
           definitionReview.open(path);
         } finally {

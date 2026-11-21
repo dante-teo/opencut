@@ -1,6 +1,6 @@
 # Video as code
 
-Author a complete video in one `.video.ts` or `.video.json` file. OpenCut
+Author a complete video in one `.video.ts` file. OpenCut
 compiles the definition to an in-memory project and uses the shared timeline
 evaluator, compositor, and audio mixer.
 
@@ -547,52 +547,14 @@ Set `channelMode: 'mono-center'` on an audio or video track to
 Use `musicComparison` to choose among
 [independently edited music tracks](AUDIO_MIX.md#compare-music-candidates).
 
-## JSON authoring
+## Convert a legacy definition
 
-Save a normal composition object as `name.video.json`. JSON uses the same
-version, canvas, asset, track, subtitle and transition properties as
-`defineVideo({...})`. Use it with validate, inspect, preview, watch, render,
-batch and package. Reading this format does not execute a video authoring
-module. A declared custom React asset is still trusted executable content.
-
-For parameterized JSON, wrap the composition in this versioned document.
-
-```json
-{
-  "format": "opencut-video-json",
-  "version": 1,
-  "parameters": {
-    "heading": { "type": "string", "default": "Field notes" }
-  },
-  "bindings": [
-    {
-      "parameter": "heading",
-      "path": ["tracks", 0, "clips", 0, "text", "content"]
-    }
-  ],
-  "composition": {
-    "canvas": { "width": 640, "height": 360, "frameRate": 24 },
-    "tracks": [
-      {
-        "type": "text",
-        "clips": [{ "at": 0, "duration": 72, "text": { "content": "" } }]
-      }
-    ]
-  }
-}
-```
-
-Each parameter is a `string`, `number`, `integer`, `boolean` or `json`.
-Strings may declare `choices`. Numbers and integers may declare `minimum`
-and `maximum`. Omit `default` to require a value. Use string object keys
-and numeric array indices in the binding path. Destinations must already
-exist. A binding replaces the selected value, including an entire array or
-object. Duplicate or overlapping destinations and unknown parameters fail.
-Use `--params params.json` for overrides. Watch uses the parameters read
-at startup. A portable archive freezes the resolved composition.
-
-Use [declarative scene assets](GRAPHICS.md#declarative-scenes) in version 3
-for reusable motion, graphic presets and optional local Lottie and Three.js.
+Run `opencut convert name.video.json` to create a `.video.ts` file beside the
+resolved JSON source. The converter handles plain compositions and version 1
+parameterized documents. It carries over defaults, constraints, and bindings
+into TypeScript. Use the resulting file with normal commands and pass variant
+values through `--params params.json`. See the
+[conversion command](CLI.md#convert-a-legacy-definition).
 
 ## Visual track groups
 

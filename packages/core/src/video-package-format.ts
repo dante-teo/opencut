@@ -8,12 +8,12 @@ import {
   interpolationBackendId,
 } from '@opencut/media';
 import {
+  isVideoDefinitionPath,
   parseVideoDefinition,
   VideoDefinitionError,
 } from './video-definition.js';
 import type { ParsedVideoDefinition } from './video-definition.js';
 import { fingerprintFile } from './video-integrity.js';
-import { isVideoDefinitionPath, videoDefinitionFormats } from './video-json.js';
 import {
   isEnhancementStep,
   isInterpolationStep,
@@ -231,11 +231,14 @@ export async function verifyPackageContents(
   assertUniquePackagePaths([packageManifestName, ...inventory]);
   const paths = new Set(inventory);
   const sourceName = manifest.source;
+  if (!isVideoDefinitionPath(sourceName))
+    throw new VideoDefinitionError(
+      'Package source must be a .video.ts definition.',
+    );
   if (
     !paths.has(manifest.entry) ||
     !paths.has(sourceName) ||
     !sourceName.startsWith('project/') ||
-    !isVideoDefinitionPath(sourceName) ||
     manifest.imports.some(
       ({ from, to, specifier }) =>
         !paths.has(from) || !paths.has(to) || !/^\.{1,2}\//.test(specifier),
@@ -371,12 +374,7 @@ export async function verifyPackageContents(
   if (
     reactCount !== graphics.size ||
     manifest.version !==
-      (definition.version === 3 ||
-      sourceName.endsWith(videoDefinitionFormats.json.suffix)
-        ? 3
-        : graphicAssets.length
-          ? 2
-          : 1) ||
+      (definition.version === 3 ? 3 : graphicAssets.length ? 2 : 1) ||
     (!graphicAssets.length && manifest.graphics !== undefined) ||
     JSON.stringify([...backends].sort()) !==
       JSON.stringify(manifest.requirements.graphics ?? [])

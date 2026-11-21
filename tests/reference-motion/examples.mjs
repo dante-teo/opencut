@@ -1,6 +1,7 @@
 import * as console from 'node:console';
 import { readFile, writeFile } from 'node:fs/promises';
 import { URL, fileURLToPath } from 'node:url';
+import { format, resolveConfig } from 'prettier';
 
 const project = new URL('../../examples/motion/', import.meta.url);
 const source = '../../tests/fixtures/generated/reference-motion/assets/';
@@ -653,47 +654,69 @@ const Parallax = video(
   ],
 );
 
-const chartPath = ['assets', 'chart', 'scene', 'children', 4, 'children'];
-const signalPath = ['assets', 'displays', 'scene', 'children', 3, 'content'];
-const wrapper = (composition, parameters, bindings) => ({
-  format: 'opencut-video-json',
-  version: 1,
-  composition,
-  parameters,
-  bindings,
-});
-const jobs = {
+async function writeDefinition(name, code) {
+  const filepath = fileURLToPath(new URL(name + '.video.ts', project));
+  const config = await resolveConfig(filepath);
+  await writeFile(filepath, await format(code, { ...config, filepath }));
+}
+
+for (const [name, composition] of Object.entries({
   'field-notes': FieldNotes,
   prism: Prism,
-  waterline: wrapper(
-    Waterline,
-    { bars: { type: 'json', default: chart([24, 45, 72, 90]) } },
-    [{ parameter: 'bars', path: chartPath }],
-  ),
-  signal: wrapper(
-    signalScene(220),
-    {
-      audio: {
-        type: 'string',
-        default: source + 'signal-220.wav',
-        choices: [source + 'signal-220.wav', source + 'signal-880.wav'],
-      },
-      description: { type: 'string', default: '220 Hz test tone · 48 kHz PCM' },
-    },
-    [
-      { parameter: 'audio', path: ['assets', 'tone', 'path'] },
-      { parameter: 'description', path: signalPath },
-    ],
-  ),
   relay: Relay,
   parallax: Parallax,
-};
-
-for (const [name, value] of Object.entries(jobs))
-  await writeFile(
-    new URL(name + '.video.json', project),
-    JSON.stringify(value, null, 2) + '\n',
+}))
+  await writeDefinition(
+    name,
+    `
+    import { defineVideo } from '@opencut/sdk';
+    export default defineVideo(${JSON.stringify(composition)});
+  `,
   );
+
+await writeDefinition(
+  'waterline',
+  `
+  import { defineVideo, videoParams, type VideoDefinition } from '@opencut/sdk';
+  const composition = ${JSON.stringify(Waterline)};
+  export default defineVideo(
+    {
+      bars: videoParams
+        .array(videoParams.json())
+        .min(1)
+        .default(${JSON.stringify(chart([24, 45, 72, 90]))}),
+    },
+    ({ bars }) => {
+      const data = structuredClone(composition);
+      Object.assign(data.assets.chart.scene.children[4]!, { children: bars });
+      return data as VideoDefinition;
+    },
+  );
+`,
+);
+
+const lowTone = source + 'signal-220.wav';
+const highTone = source + 'signal-880.wav';
+await writeDefinition(
+  'signal',
+  `
+  import { defineVideo, videoParams, type VideoDefinition } from '@opencut/sdk';
+  const composition = ${JSON.stringify(signalScene(220))};
+  export default defineVideo(
+    {
+      audio: videoParams.enum(${JSON.stringify([lowTone, highTone])}).default(${JSON.stringify(lowTone)}),
+      description: videoParams.string().default('220 Hz test tone · 48 kHz PCM'),
+    },
+    ({ audio, description }) => {
+      const data = structuredClone(composition);
+      data.assets.tone.path = audio;
+      Object.assign(data.assets.displays.scene.children[3]!, { content: description });
+      return data as VideoDefinition;
+    },
+  );
+`,
+);
+
 await writeFile(
   new URL('waterline-alt.params.json', project),
   JSON.stringify({ bars: chart([35, 55, 65, 80]) }, null, 2) + '\n',
@@ -702,7 +725,7 @@ await writeFile(
   new URL('signal-alt.params.json', project),
   JSON.stringify(
     {
-      audio: source + 'signal-880.wav',
+      audio: highTone,
       description: '880 Hz test tone · 48 kHz PCM',
     },
     null,

@@ -404,21 +404,32 @@ for unsuccessful cases and runs the rest of the matrix.
 
 Use `opencut mix analyze <definition.video.ts> --json` to obtain editable automation and measured loudness without rendering picture. `render`, `preview --watch` and `preview clip` use the mix authored in the definition. See [mix settings, overrides and comparison options](AUDIO_MIX.md#delivery-and-inspection).
 
-## JSON and motion definitions
-
-The video commands accept `.video.ts` and `.video.json`. For example:
+## Convert a legacy definition
 
 ```sh
-opencut validate edit.video.json --params variant.json --json
-opencut timeline inspect edit.video.json --frame 45 --json
-opencut preview edit.video.json --watch --params variant.json --json
-opencut render edit.video.json --output final.mp4 --json
-opencut package edit.video.json --output ./bundle --params variant.json
+opencut convert edit.video.json
+opencut validate edit.video.ts
 ```
 
-Use `doctor --json` to discover formats, graphics capabilities and optional
-browser and adapter readiness. `inspect` reports the JSON parameter
-descriptors when present. `validate --json` lists custom executable graphics
-separately from the definition data. OpenCut keeps structured errors on
-stderr. A version 3 portable package still renders from
-`opencut.bundle.video.ts`, which is read as a verified static data entry.
+`convert` accepts UTF-8 `.video.json` files up to 8 MiB. It writes the
+TypeScript file beside the resolved JSON source so relative asset paths work
+through symlinks. `opencut.bundle.video.json` becomes
+`opencut.bundle.converted.video.ts`. The input is preserved and the destination
+must be new. The destination filesystem must support hard links.
+
+Add `--json` when converting to get the absolute output path as
+`{ "path": "…" }`. Use `opencut validate edit.video.ts --params variant.json`
+when the definition has required parameters or to check a specific variant.
+
+To rebuild an older bundle whose editable source is a `.video.json` file,
+convert that file under `project/` and [package the result](#portable-projects)
+into a new directory. Pass the old bundle’s `project/` directory as `--root` to
+keep its layout. If the old manifest records `params`, save those values to a
+parameter file and pass it with `--params` to package the same variant.
+
+## Motion definition diagnostics
+
+Use `doctor --json` to discover graphics capabilities and optional browser and
+adapter readiness. `validate --json` lists custom executable graphics.
+OpenCut keeps structured errors on stderr. Render a portable package from its
+verified `opencut.bundle.video.ts` entry.

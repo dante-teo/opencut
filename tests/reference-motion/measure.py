@@ -131,9 +131,7 @@ def main():
 
     gib = 1024 ** 3
     for scene in args.scenes:
-        clip_path = ROOT / "workloads" / f"{scene}.video.json"
-        if scene == "ordinary":
-            clip_path = clip_path.with_suffix(".ts")
+        clip_path = ROOT / "workloads" / f"{scene}.video.ts"
         picture = output / (scene + "-picture")
         for phase in ("cold", "warm") if args.warm else ("cold",):
             prefix = scene + "-" + phase
@@ -167,7 +165,7 @@ def main():
                 record(result)
     if args.cancellation:
         scene = args.scenes[0]
-        clip_path = ROOT / "workloads" / f"{scene}.video.json"
+        clip_path = ROOT / "workloads" / f"{scene}.video.ts"
         for index in range(3):
             result = run([str(args.cli), "render", str(clip_path), "-o", str(output / f"cancel-{index}.mp4"), "--json"],
                          output, scratch, f"cancel-{index}", args.rss_gib * gib, 8 * gib, 2)

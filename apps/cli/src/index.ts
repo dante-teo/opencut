@@ -20,6 +20,10 @@ async function run(args: string[]) {
 
   const { command, file } = resolveCommand(positionals, values);
   switch (command) {
+    case 'convert': {
+      const { runConvert } = await import('./convert.js');
+      return runConvert(file, json);
+    }
     case 'package':
     case 'package verify':
     case 'build inspect': {

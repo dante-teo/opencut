@@ -90,11 +90,13 @@ Set the definition's 3:4 canvas to 60 fps and render with
 the composed picture. Use per-source recipes for AI interpolation or
 super-resolution when requested.
 
-## Data authoring and graphics discovery
+## Conversion and graphics discovery
 
-Use `.video.json` wherever a video command accepts `.video.ts`.
+Use `opencut convert name.video.json` to write a `.video.ts` file beside the
+resolved JSON source. See [legacy conversion](../../../docs/CLI.md#convert-a-legacy-definition)
+for the output name and `--json` result.
 `opencut doctor --json` reports graphics capabilities and prerequisites.
 `opencut timeline inspect DEFINITION --frame N --json` reports requested
 graphic samples and dependency identity. Use `--params` in watch, preview,
 render or package to apply a declared variant. See the
-[CLI reference](../../../docs/CLI.md#json-and-motion-definitions).
+[CLI reference](../../../docs/CLI.md#motion-definition-diagnostics).

@@ -1,17 +1,222 @@
 import { defineVideo, videoParams, type VideoDefinition } from '@opencut/sdk';
-import signal from './signal.video.json' with { type: 'json' };
-
+const composition = {
+  version: 3,
+  name: 'Signal',
+  canvas: {
+    width: 1920,
+    height: 1080,
+    frameRate: 30,
+    durationFrames: 450,
+    backgroundColor: '#101d2b',
+  },
+  assets: {
+    tone: {
+      kind: 'audio',
+      path: '../../tests/fixtures/generated/reference-motion/assets/signal-220.wav',
+    },
+    displays: {
+      kind: 'graphic',
+      renderer: 'scene',
+      durationFrames: 450,
+      scene: {
+        version: 1,
+        units: 'px',
+        children: [
+          {
+            id: 'signal-background',
+            type: 'rect',
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            fill: '#141425',
+          },
+          {
+            id: 'signal-label',
+            type: 'text',
+            content: 'LAB / AUDIO TELEMETRY',
+            width: 1600,
+            height: 38,
+            x: 132,
+            y: 94,
+            size: 26,
+            color: '#ffbf83',
+            font: 'reference',
+            overflow: 'fit',
+            minSize: 26,
+          },
+          {
+            id: 'signal-title',
+            type: 'text',
+            content: 'Signal',
+            width: 970,
+            height: 124,
+            x: 132,
+            y: 134,
+            size: 92,
+            color: '#eaf5f1',
+            font: 'reference',
+            overflow: 'fit',
+            minSize: 26,
+            weight: 900,
+          },
+          {
+            id: 'signal-tone',
+            type: 'text',
+            content: '220 Hz test tone · 48 kHz PCM',
+            width: 1260,
+            height: 65,
+            x: 132,
+            y: 254,
+            size: 36,
+            color: '#a4adc8',
+            font: 'reference',
+            overflow: 'fit',
+            minSize: 26,
+          },
+          {
+            id: 'wave-panel',
+            type: 'rect',
+            x: 132,
+            y: 363,
+            width: 1656,
+            height: 290,
+            fill: '#23243e',
+            radius: 24,
+          },
+          {
+            id: 'wave',
+            type: 'audio',
+            mode: 'waveform',
+            x: 156,
+            y: 374,
+            width: 1608,
+            height: 264,
+            color: '#54e1cc',
+            gain: 3.2,
+          },
+          {
+            id: 'bins',
+            type: 'audio',
+            mode: 'spectrum',
+            x: 132,
+            y: 719,
+            width: 1656,
+            height: 190,
+            color: '#ffbf83',
+            gain: 5.6,
+            timing: { at: 15 },
+          },
+          {
+            id: 'beat-cell',
+            type: 'audio',
+            mode: 'beat',
+            x: 1694,
+            y: 124,
+            width: 52,
+            height: 52,
+            color: '#ffad73',
+          },
+          {
+            id: 'signal-offset',
+            type: 'text',
+            content: 'TRIM 01.000 S / OFFSET 00.500 S',
+            width: 1600,
+            height: 38,
+            x: 132,
+            y: 953,
+            size: 26,
+            color: '#54e1cc',
+            font: 'reference',
+            overflow: 'fit',
+            minSize: 26,
+          },
+        ],
+      },
+      resources: {
+        reference:
+          '../../tests/fixtures/generated/reference-motion/assets/font.ttf',
+      },
+      audioAnalysis: {
+        version: 1,
+        source: 'mix',
+        window: 2048,
+        hop: 256,
+        waveform: 192,
+        bins: 48,
+        beats: [
+          { numerator: 45, denominator: 30 },
+          { numerator: 46, denominator: 30 },
+          { numerator: 47, denominator: 30 },
+          { numerator: 48, denominator: 30 },
+          { numerator: 49, denominator: 30 },
+          { numerator: 50, denominator: 30 },
+          { numerator: 51, denominator: 30 },
+          { numerator: 52, denominator: 30 },
+          { numerator: 135, denominator: 30 },
+          { numerator: 136, denominator: 30 },
+          { numerator: 137, denominator: 30 },
+          { numerator: 138, denominator: 30 },
+          { numerator: 139, denominator: 30 },
+          { numerator: 140, denominator: 30 },
+          { numerator: 141, denominator: 30 },
+          { numerator: 142, denominator: 30 },
+          { numerator: 255, denominator: 30 },
+          { numerator: 256, denominator: 30 },
+          { numerator: 257, denominator: 30 },
+          { numerator: 258, denominator: 30 },
+          { numerator: 259, denominator: 30 },
+          { numerator: 260, denominator: 30 },
+          { numerator: 261, denominator: 30 },
+          { numerator: 262, denominator: 30 },
+        ],
+      },
+    },
+  },
+  tracks: [
+    {
+      id: 'monitor',
+      type: 'video',
+      clips: [
+        {
+          id: 'signal-graphics',
+          asset: 'displays',
+          at: 0,
+          sourceIn: 0,
+          sourceOut: 450,
+        },
+      ],
+    },
+    {
+      id: 'source',
+      type: 'audio',
+      clips: [
+        {
+          id: 'signal-tone',
+          asset: 'tone',
+          at: 15,
+          sourceIn: 30,
+          sourceOut: 465,
+          volume: 0.7,
+        },
+      ],
+    },
+  ],
+};
 export default defineVideo(
   {
     audio: videoParams
-      .enum(signal.parameters.audio.choices)
-      .default(signal.parameters.audio.default),
-    description: videoParams
-      .string()
-      .default(signal.parameters.description.default),
+      .enum([
+        '../../tests/fixtures/generated/reference-motion/assets/signal-220.wav',
+        '../../tests/fixtures/generated/reference-motion/assets/signal-880.wav',
+      ])
+      .default(
+        '../../tests/fixtures/generated/reference-motion/assets/signal-220.wav',
+      ),
+    description: videoParams.string().default('220 Hz test tone · 48 kHz PCM'),
   },
   ({ audio, description }) => {
-    const data = structuredClone(signal.composition);
+    const data = structuredClone(composition);
     data.assets.tone.path = audio;
     Object.assign(data.assets.displays.scene.children[3]!, {
       content: description,

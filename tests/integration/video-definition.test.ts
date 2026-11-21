@@ -6,6 +6,7 @@ import {
   readdir,
   realpath,
   rm,
+  symlink,
   writeFile,
 } from 'node:fs/promises';
 import { once } from 'node:events';
@@ -14,8 +15,17 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { evaluateTimelineFrame } from '@opencut/core';
-import { compileVideo, defineVideo } from '@opencut/sdk';
+import {
+  batchRenderVideo,
+  compileVideo,
+  defineVideo,
+  packageVideo,
+  verifyVideoPackage,
+  videoDefinitionFormats,
+  watchVideo,
+} from '@opencut/sdk';
 import type { VideoDefinition } from '@opencut/sdk';
+import { fixtureDirectory } from '../fixture-paths.js';
 
 const entry = fileURLToPath(
   new URL('../../apps/cli/dist/index.js', import.meta.url),
@@ -536,24 +546,120 @@ describe('definition validation', () => {
     expect(invalid.stderr).toMatch(/up to 512 visible subtitle cues/);
   });
 
-  it('compiles plain JSON with the same plan and no executable authoring module', async () => {
+  it('accepts legacy JSON only through conversion', async () => {
     const input = definition();
-    const path = join(directory, 'title.video.json');
-    await writeFile(path, JSON.stringify(input));
-    const data = await compileVideo(path);
-    const ts = await compileVideo(await writeDefinition(input));
-    expect((await data.resolveRender()).visualClips).toEqual(
-      (await ts.resolveRender()).visualClips,
+    const path = join(await realpath(directory), 'title.video.json');
+    const original = JSON.stringify(input);
+    await writeFile(path, original);
+
+    expect(videoDefinitionFormats).toEqual({
+      typescript: { suffix: '.video.ts', authoringCode: true },
+    });
+    for (const args of [
+      ['validate', path],
+      ['preview', path, '--watch'],
+      ['render', path, '-o', 'output.mp4'],
+      ['package', path, '-o', 'bundle'],
+    ]) {
+      const result = run(...args);
+      expect(result.status).not.toBe(0);
+      expect(JSON.parse(result.stderr).error.message).toContain('.video.ts');
+    }
+
+    await expect(compileVideo(path)).rejects.toThrow(
+      'Expected a .video.ts file',
     );
-    expect(run('validate', path).status).toBe(0);
-    await writeFile(path, 'export default ' + JSON.stringify(input));
-    expect(JSON.parse(run('validate', path).stderr).error.code).toBe(
-      'INVALID_VIDEO_DEFINITION',
+    await expect(
+      watchVideo(path, { onStatus: () => undefined }),
+    ).rejects.toThrow('Expected a .video.ts file');
+    await expect(
+      batchRenderVideo(path, [], { outputDirectory: directory }),
+    ).rejects.toThrow('Expected a .video.ts file');
+    await expect(packageVideo(path, join(directory, 'bundle'))).rejects.toThrow(
+      'Choose an authored .video.ts definition',
     );
+    const alias = join(directory, 'alias.video.ts');
+    await symlink(path, alias);
+    await expect(compileVideo(alias)).rejects.toThrow(
+      'Expected a .video.ts file',
+    );
+
+    const conversion = run('convert', path);
+    expect(conversion.status, conversion.stderr).toBe(0);
+    const ts = join(await realpath(directory), 'title.video.ts');
+    expect(JSON.parse(conversion.stdout)).toEqual({ path: ts });
+    expect(await readFile(path, 'utf8')).toBe(original);
+    const converted = await compileVideo(ts);
+    const direct = await compileVideo(
+      await writeDefinition(input, 'direct.video.ts'),
+    );
+    expect((await converted.resolveRender()).visualClips).toEqual(
+      (await direct.resolveRender()).visualClips,
+    );
+    const output = await readFile(ts, 'utf8');
+    expect(run('convert', path).status).toBe(1);
+    expect(await readFile(ts, 'utf8')).toBe(output);
   });
 
-  it('validates JSON defaults, overrides and destinations before lowering, and packages the chosen variant', async () => {
+  it('converts a JSON symlink beside its target and retains relative graphics', async ({
+    onTestFinished,
+  }) => {
+    await mkdir(fixtureDirectory, { recursive: true });
+    const targetDirectory = await mkdtemp(join(fixtureDirectory, 'convert-'));
+    onTestFinished(() => rm(targetDirectory, { recursive: true, force: true }));
+    const target = join(targetDirectory, 'title.video.json');
+    const alias = join(directory, 'linked.video.json');
+    await writeFile(
+      join(targetDirectory, 'badge.svg'),
+      '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#336699"/></svg>',
+    );
+    await writeFile(
+      target,
+      JSON.stringify({
+        ...definition(),
+        assets: {
+          badge: { kind: 'graphic', renderer: 'svg', path: 'badge.svg' },
+        },
+        tracks: [
+          { type: 'video', clips: [{ asset: 'badge', at: 0, duration: 60 }] },
+        ],
+      }),
+    );
+    await symlink(target, alias);
+
+    const converted = run('convert', alias);
+    expect(converted.status, converted.stderr).toBe(0);
+    const path = join(targetDirectory, 'title.video.ts');
+    expect(JSON.parse(converted.stdout)).toEqual({ path });
+    expect(await readdir(directory)).toEqual(['linked.video.json']);
+
+    const validated = run('validate', path);
+    expect(validated.status, validated.stderr).toBe(0);
+    expect(JSON.parse(validated.stdout)).toMatchObject({ frameCount: 600 });
+  });
+
+  it('converts a legacy package basename into a standalone definition', async () => {
+    const folder = await realpath(directory);
+    const source = join(folder, 'opencut.bundle.video.json');
+    const reserved = join(folder, 'opencut.bundle.video.ts');
+    const existing = '// existing package entry\n';
+    await writeFile(source, JSON.stringify(definition()));
+    await writeFile(reserved, existing);
+
+    const converted = run('convert', source);
+    expect(converted.status, converted.stderr).toBe(0);
+    const path = join(folder, 'opencut.bundle.converted.video.ts');
+    expect(JSON.parse(converted.stdout)).toEqual({ path });
+    expect(await readFile(reserved, 'utf8')).toBe(existing);
+
+    const validated = run('validate', path);
+    expect(validated.status, validated.stderr).toBe(0);
+    expect(JSON.parse(validated.stdout)).toMatchObject({ frameCount: 600 });
+  });
+
+  it('converts parameter defaults, constraints and bindings into TypeScript', async () => {
     const path = join(await realpath(directory), 'variant.video.json');
+    const ts = join(await realpath(directory), 'variant.video.ts');
     const document = {
       format: 'opencut-video-json',
       version: 1,
@@ -575,33 +681,73 @@ describe('definition validation', () => {
       ],
     };
     await writeFile(path, JSON.stringify(document));
-    expect((await compileVideo(path)).frameCount).toBe(300);
-    expect(
-      (
-        await compileVideo(path, {
-          params: { seconds: 250, caption: 'English' },
-        })
-      ).project.clips[0]?.text?.content,
-    ).toBe('English');
-    await expect(
-      compileVideo(path, { params: { seconds: 100.5 } }),
-    ).rejects.toThrow('params.seconds');
-    await expect(
-      compileVideo(path, { params: { misspelling: 1 } }),
-    ).rejects.toThrow('misspelling');
-    const packed = run('package', path, '-o', 'portable');
+    const convert = run('convert', path);
+    expect(convert.status, convert.stderr).toBe(0);
+    const defaults = run('validate', ts);
+    expect(defaults.status, defaults.stderr).toBe(0);
+    expect(JSON.parse(defaults.stdout)).toMatchObject({ frameCount: 300 });
+
+    const params = join(directory, 'variant.params.json');
+    await writeFile(
+      params,
+      JSON.stringify({ seconds: 250, caption: 'English' }),
+    );
+    const variant = run('inspect', ts, '--params', params);
+    expect(variant.status, variant.stderr).toBe(0);
+    expect(JSON.parse(variant.stdout)).toMatchObject({
+      settings: { durationFrames: 250 },
+      clips: [
+        expect.objectContaining({
+          text: expect.objectContaining({ content: 'English' }),
+        }),
+        expect.anything(),
+      ],
+    });
+    for (const [overrides, diagnostic] of [
+      [{ seconds: 100.5 }, 'params.seconds'],
+      [{ misspelling: 1 }, 'misspelling'],
+      [{ seconds: 99 }, 'params.seconds'],
+      [{ caption: 'Missing' }, 'params.caption'],
+    ] as const) {
+      await writeFile(params, JSON.stringify(overrides));
+      const result = run('validate', ts, '--params', params);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(diagnostic);
+    }
+    const packed = run('package', ts, '-o', 'portable');
     expect(packed.status, packed.stderr).toBe(0);
     const verified = JSON.parse(run('package', 'verify', 'portable').stdout);
     expect(verified.manifest).toMatchObject({
-      version: 3,
-      source: 'project/variant.video.json',
+      version: 1,
+      source: 'project/variant.video.ts',
       params: { seconds: 300, caption: '中文' },
       imports: [],
     });
     expect((await compileVideo(verified.entry)).frameCount).toBe(300);
+    const legacySource = 'project/variant.video.json';
+    await writeFile(
+      join(directory, 'portable', 'opencut-package.json'),
+      JSON.stringify({
+        ...verified.manifest,
+        source: legacySource,
+        files: verified.manifest.files.map((item: { path: string }) =>
+          item.path === verified.manifest.source
+            ? { ...item, path: legacySource }
+            : item,
+        ),
+      }),
+    );
+    await expect(
+      verifyVideoPackage(join(directory, 'portable')),
+    ).rejects.toThrow('Package source must be a .video.ts definition');
+
     document.bindings.push({ parameter: 'seconds', path: ['canvas'] });
-    await writeFile(path, JSON.stringify(document));
-    await expect(compileVideo(path)).rejects.toThrow('Binding targets overlap');
+    const invalid = join(directory, 'invalid.video.json');
+    await writeFile(invalid, JSON.stringify(document));
+    const failed = run('convert', invalid);
+    expect(failed.status).toBe(1);
+    expect(failed.stderr).toContain('Binding targets overlap');
+    expect(await readdir(directory)).not.toContain('invalid.video.ts');
   });
 
   it('rejects a saved snapshot even when named like a definition', async () => {

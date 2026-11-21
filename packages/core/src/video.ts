@@ -1,7 +1,12 @@
 /** Node entrypoint for definition workflows. */
-export { defineVideo, videoId, videoParams } from './video-definition.js';
-export { videoDefinitionFormats } from './video-json.js';
-export type { JsonVideoParameterSchema } from './video-json.js';
+export {
+  defineVideo,
+  isVideoDefinitionPath,
+  videoDefinitionFormats,
+  videoId,
+  videoParams,
+} from './video-definition.js';
+export { convertJsonVideoDefinition } from './convert-json-video.js';
 export type { VideoDefinition, VideoParameters } from './video-definition.js';
 export type {
   GraphicAssetDefinition,
@@ -24,7 +29,6 @@ export {
   compileVideo,
   inspectVideoBuild,
   inspectVideoRecipes,
-  isVideoDefinitionPath,
 } from './video-files.js';
 export { VideoDefinitionError } from './video-definition.js';
 export type { CompiledVideo } from './video-compiler.js';
@@ -69,6 +73,7 @@ export type {
 
 export { packageVideo, verifyVideoPackage } from './video-package.js';
 export type { VideoPackageOptions } from './video-package.js';
+export { packageEntryName } from './video-package-format.js';
 export type { VideoPackageManifest } from './video-package-format.js';
 
 export { analyzeVideoMix } from './video-audio-mix.js';

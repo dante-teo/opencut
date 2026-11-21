@@ -1,6 +1,6 @@
 # OpenCut product scope
 
-TypeScript and JSON video definitions describe a canvas, ordered tracks,
+TypeScript video definitions describe a canvas, ordered tracks,
 media, clip timing, effects, titles, subtitles, and transitions. The CLI and
 TypeScript SDK compile them into the same render plan. Headless commands can
 inspect exact frames, render previews and contact sheets, produce final MP4,

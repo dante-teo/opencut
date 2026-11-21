@@ -67,7 +67,7 @@ to verify cache exhaustion. The 96 high-entropy frames should all reach the
 export even when the 256 MiB graphic sample write budget stops admitting
 new samples.
 
-For installed-runtime verification, package each JSON definition in
+For installed-runtime verification, package each TypeScript definition in
 `examples/motion/` with `opencut package DEFINITION --root . --output
 relocated/SCENE` from the checkout. Transfer the resulting directories to
 a clean host. With the installed CLI and its matching Chromium ready,

@@ -1,6 +1,6 @@
 # OpenCut architecture
 
-The source of truth is a TypeScript or JSON [video definition](VIDEO_DEFINITIONS.md).
+The source of truth is a TypeScript [video definition](VIDEO_DEFINITIONS.md).
 A compile reads the definition and probes the referenced media, validates the
 result against the timeline model, and binds a render plan. The in-memory
 snapshot is immutable. Before decoding media, preview and render verify its
@@ -37,7 +37,7 @@ from the current plan, and encodes the MP4. Export preflight checks the plan
 and required encoders. Render execution materializes the cache entries.
 See [picture reuse between exports](CLI.md#reuse-picture-between-exports).
 
-A batch compiles each TypeScript variant in a fresh worker or resolves a JSON variant as data, then passes its
+A batch compiles each TypeScript variant in a fresh worker and passes the
 immutable composition to the shared renderer. Variants share source probes
 and recipe cache entries. Each slot owns its temporary render files and
 publishes its MP4 independently. The MP4 carries its own resolved parameters

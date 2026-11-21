@@ -31,6 +31,10 @@ before(() => {
   ]);
 });
 
+function writeDefinition(path: string, value: unknown) {
+  return writeFile(path, `export default ${JSON.stringify(value)};\n`);
+}
+
 function run(...args: string[]) {
   const result = spawnSync(process.execPath, [cli, ...args, '--json'], {
     encoding: 'utf8',
@@ -148,8 +152,8 @@ test('an isolated track group applies opacity once and applies a matte and blend
         { id: 'isolated', tracks: ['first', 'second'], opacity: 0.5 },
       ],
     };
-    const path = join(directory, 'groups.video.json');
-    await writeFile(path, JSON.stringify(definition));
+    const path = join(directory, 'groups.video.ts');
+    await writeDefinition(path, definition);
     const opacity = join(directory, 'opacity.png');
     await previewVideo(await compileVideo(path)).frame(0, opacity);
     stable(opacity, 6, 28, [0, 64, 0]);
@@ -180,7 +184,7 @@ test('an isolated track group applies opacity once and applies a matte and blend
         blend: 'multiply',
       },
     ];
-    await writeFile(path, JSON.stringify(definition));
+    await writeDefinition(path, definition);
     const matte = join(directory, 'multiply.png');
     await previewVideo(await compileVideo(path)).frame(0, matte);
     stable(matte, 25, 28, [128, 128, 32]);
@@ -285,8 +289,8 @@ test('Lottie and GLB round-trip through the public CLI with shuffled and repeate
           },
         ],
       };
-      const file = join(directory, `${renderer}.video.json`);
-      await writeFile(file, JSON.stringify(definition));
+      const file = join(directory, `${renderer}.video.ts`);
+      await writeDefinition(file, definition);
       const packagePath = join(directory, `relocatable-${renderer}`);
       const { entry } = run('package', file, '--output', packagePath);
       run('package', 'verify', packagePath);
@@ -335,7 +339,7 @@ test('adapter validation rejects Lottie expressions and unsupported GLB extensio
   glb.writeUInt32LE(glb.length, 8);
   glb.writeUInt32LE(payload.length, 12);
   try {
-    const file = join(directory, 'negative.video.json');
+    const file = join(directory, 'negative.video.ts');
     const lottie = JSON.parse(
       await readFile(join(adapterFixtures, 'relay.json'), 'utf8'),
     );
@@ -349,43 +353,37 @@ test('adapter validation rejects Lottie expressions and unsupported GLB extensio
         { type: 'video', clips: [{ asset: 'bad', at: 0, sourceOut: 120 }] },
       ],
     };
-    await writeFile(
-      file,
-      JSON.stringify({
-        ...base,
-        assets: {
-          bad: {
-            kind: 'graphic',
-            renderer: 'lottie',
-            path: 'negative.json',
-            durationFrames: 120,
-          },
+    await writeDefinition(file, {
+      ...base,
+      assets: {
+        bad: {
+          kind: 'graphic',
+          renderer: 'lottie',
+          path: 'negative.json',
+          durationFrames: 120,
         },
-      }),
-    );
+      },
+    });
     await assert.rejects(
       compileVideo(file),
       /assets\.bad\.lottie.*Lottie expressions/,
     );
-    await writeFile(
-      file,
-      JSON.stringify({
-        ...base,
-        assets: {
-          bad: {
-            kind: 'graphic',
-            renderer: 'three',
-            path: 'negative.glb',
-            durationFrames: 120,
-            scene: {
-              version: 1,
-              camera: { position: [0, 2, 5], target: [0, 0, 0] },
-              lights: [{ type: 'ambient', color: '#ffffff', intensity: 1 }],
-            },
+    await writeDefinition(file, {
+      ...base,
+      assets: {
+        bad: {
+          kind: 'graphic',
+          renderer: 'three',
+          path: 'negative.glb',
+          durationFrames: 120,
+          scene: {
+            version: 1,
+            camera: { position: [0, 2, 5], target: [0, 0, 0] },
+            lights: [{ type: 'ambient', color: '#ffffff', intensity: 1 }],
           },
         },
-      }),
-    );
+      },
+    });
     await assert.rejects(
       compileVideo(file),
       /assets\.bad\.three.*KHR_draco_mesh_compression/,
@@ -427,7 +425,7 @@ test('audio-dependent pixels follow the resolved mix and reject stale encoded-pi
   try {
     await writeFile(join(directory, 'low.wav'), tone(220));
     await writeFile(join(directory, 'high.wav'), tone(880));
-    const file = join(directory, 'signal.video.json');
+    const file = join(directory, 'signal.video.ts');
     const make = (path: string) => ({
       version: 3,
       canvas: {
@@ -483,7 +481,7 @@ test('audio-dependent pixels follow the resolved mix and reject stale encoded-pi
         },
       ],
     });
-    await writeFile(file, JSON.stringify(make('low.wav')));
+    await writeDefinition(file, make('low.wav'));
     const low = join(directory, 'low.png');
     const high = join(directory, 'high.png');
     const cache = join(directory, 'picture-cache');
@@ -505,10 +503,7 @@ test('audio-dependent pixels follow the resolved mix and reject stale encoded-pi
     const record = join(analysisDirectory, analysis);
     const beforeTitleEdit = await stat(record);
     const withTitle = make('low.wav');
-    await writeFile(
-      file,
-      JSON.stringify({ ...withTitle, name: 'Changed title' }),
-    );
+    await writeDefinition(file, { ...withTitle, name: 'Changed title' });
     run(
       'preview',
       'frame',
@@ -522,7 +517,7 @@ test('audio-dependent pixels follow the resolved mix and reject stale encoded-pi
     );
     assert.equal((await stat(record)).mtimeMs, beforeTitleEdit.mtimeMs);
     assert.deepEqual(await readdir(analysisDirectory), [analysis]);
-    await writeFile(file, JSON.stringify(make('low.wav')));
+    await writeDefinition(file, make('low.wav'));
     const first = run(
       'render',
       file,
@@ -564,7 +559,7 @@ test('audio-dependent pixels follow the resolved mix and reject stale encoded-pi
     }
     assert.ok(peak > 0.4);
     assert.ok(Math.abs(at - 1.5) < 0.01, `Peak occurred at ${at}`);
-    await writeFile(file, JSON.stringify(make('high.wav')));
+    await writeDefinition(file, make('high.wav'));
     run('preview', 'frame', file, '--frame', '30', '-o', high);
     function center(path: string) {
       const rgb = frameRgb(path);
@@ -599,25 +594,19 @@ test('audio-dependent pixels follow the resolved mix and reject stale encoded-pi
   }
 });
 
-test('parameterized JSON watch preserves a kinetic preset through an invalid edit', async () => {
+test('parameterized TypeScript watch preserves a kinetic preset through an invalid edit', async () => {
   requireTool('ffmpeg');
-  const directory = await mkdtemp(join(fixtureDirectory, 'json-preset-watch-'));
-  const file = join(directory, 'preset.video.json');
+  const directory = await mkdtemp(join(fixtureDirectory, 'preset-watch-'));
+  const file = join(directory, 'preset.video.ts');
   const events: VideoWatchStatus[] = [];
   const signal = AbortSignal.timeout(45_000);
-  const make = (backgroundColor: string) => ({
-    format: 'opencut-video-json',
-    version: 1,
-    parameters: { title: { type: 'string', default: 'Local title' } },
-    bindings: [
-      {
-        parameter: 'title',
-        path: ['assets', 'title', 'scene', 'preset', 'title'],
-      },
-    ],
-    composition: {
+  const make = (backgroundColor: string) => `
+    import { defineVideo, videoParams } from '@opencut/sdk';
+    export default defineVideo(
+      { title: videoParams.string().default('Local title') },
+      ({ title }) => ({
       version: 3,
-      canvas: { width: 192, height: 108, frameRate: 24, backgroundColor },
+      canvas: { width: 192, height: 108, frameRate: 24, backgroundColor: ${JSON.stringify(backgroundColor)} },
       assets: {
         title: {
           kind: 'graphic',
@@ -628,7 +617,7 @@ test('parameterized JSON watch preserves a kinetic preset through an invalid edi
             units: 'px',
             preset: {
               name: 'title-sequence',
-              title: 'Bound text',
+              title,
               revealFrames: 12,
             },
           },
@@ -637,8 +626,9 @@ test('parameterized JSON watch preserves a kinetic preset through an invalid edi
       tracks: [
         { type: 'video', clips: [{ asset: 'title', at: 0, sourceOut: 24 }] },
       ],
-    },
-  });
+      }),
+    );
+  `;
   async function until(status: VideoWatchStatus['status'], generation: number) {
     for (;;) {
       const event = events.find(
@@ -648,7 +638,7 @@ test('parameterized JSON watch preserves a kinetic preset through an invalid edi
       await delay(40, undefined, { signal });
     }
   }
-  await writeFile(file, JSON.stringify(make('#102435')));
+  await writeFile(file, make('#102435'));
   const watch = await watchVideo(file, {
     onStatus: (event) => events.push(event),
     signal,
@@ -661,7 +651,7 @@ test('parameterized JSON watch preserves a kinetic preset through an invalid edi
     const failed = await until('error', first.generation + 1);
     assert.equal(failed.current?.playback.path, first.current.playback.path);
     await stat(first.current.playback.path);
-    await writeFile(file, JSON.stringify(make('#103447')));
+    await writeFile(file, make('#103447'));
     const next = await until('ready', failed.generation + 1);
     assert.notEqual(next.current?.sourceRevision, first.current.sourceRevision);
   } finally {
@@ -739,8 +729,8 @@ test('media-frame offsets select the frame at an exact rational boundary', async
       blue,
     ],
   ] as const) {
-    const path = join(directory, id + '.video.json');
-    await writeFile(path, JSON.stringify(make(offset)));
+    const path = join(directory, id + '.video.ts');
+    await writeDefinition(path, make(offset));
     const preview = previewVideo(await compileVideo(path));
     const before = join(directory, id + '-before.png');
     const boundary = join(directory, id + '-boundary.png');
@@ -800,16 +790,13 @@ test('dense overlapping stacks preserve ordering and the group backdrop in previ
       },
     ],
   };
-  const dense = join(directory, 'dense.video.json');
-  const sparse = join(directory, 'sparse.video.json');
-  await writeFile(dense, JSON.stringify(definition));
-  await writeFile(
-    sparse,
-    JSON.stringify({
-      ...definition,
-      tracks: tracks.filter((_, i) => [0, 31, 64, 65].includes(i)),
-    }),
-  );
+  const dense = join(directory, 'dense.video.ts');
+  const sparse = join(directory, 'sparse.video.ts');
+  await writeDefinition(dense, definition);
+  await writeDefinition(sparse, {
+    ...definition,
+    tracks: tracks.filter((_, i) => [0, 31, 64, 65].includes(i)),
+  });
   for (const frame of [0, 2]) {
     const actual = join(directory, `dense-${frame}.png`);
     const expected = join(directory, `sparse-${frame}.png`);
@@ -908,8 +895,8 @@ test('professional mix delivery controls invalidate audio-reactive picture and r
       },
     ],
   };
-  const path = join(directory, 'master.video.json');
-  await writeFile(path, JSON.stringify(definition));
+  const path = join(directory, 'master.video.ts');
+  await writeDefinition(path, definition);
   const cache = join(directory, 'picture');
   const render = (name: string, ...settings: string[]) =>
     run(

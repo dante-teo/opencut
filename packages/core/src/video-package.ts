@@ -13,11 +13,11 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getApplicationInfo } from './index.js';
 import {
+  isVideoDefinitionPath,
   parseVideoDefinition,
   VideoDefinitionError,
 } from './video-definition.js';
-import { isVideoDefinitionPath, readVideoInput } from './video-files.js';
-import { videoDefinitionFormats } from './video-json.js';
+import { readVideoInput } from './video-files.js';
 import { copyVideoInput, videoInputIdentity } from './video-input.js';
 import {
   fingerprintFile,
@@ -70,9 +70,7 @@ export async function packageVideo(
 ) {
   const source = resolve(file);
   if (!isVideoDefinitionPath(source) || basename(source) === packageEntryName)
-    throw new VideoDefinitionError(
-      'Choose an authored .video.ts or .video.json definition.',
-    );
+    throw new VideoDefinitionError('Choose an authored .video.ts definition.');
   const project = resolve(root ?? dirname(source));
   if (
     !(await lstat(project)).isDirectory() ||
@@ -300,13 +298,7 @@ export async function packageVideo(
     const { recipes, native } = packageRecipes(definition);
     const manifest: VideoPackageManifest = {
       format: 'opencut-video-package',
-      version:
-        definition.version === 3 ||
-        source.endsWith(videoDefinitionFormats.json.suffix)
-          ? 3
-          : graphics.size
-            ? 2
-            : 1,
+      version: definition.version === 3 ? 3 : graphics.size ? 2 : 1,
       ...(graphics.size && { graphics: graphicBundles }),
       opencut: getApplicationInfo().version,
       node: process.versions.node,

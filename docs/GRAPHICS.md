@@ -227,9 +227,8 @@ from sources you trust.
 ## Declarative scenes
 
 Use a version 3 definition and a graphic asset with `renderer: 'scene'`.
-Set `scene: { version: 1, units: 'px', children: [...] }`. Both
-`.video.json` and `.video.ts` accept the same scene data. TypeScript can
-use `defineGraphicScene` for contextual types.
+Set `scene: { version: 1, units: 'px', children: [...] }`. Use
+`defineGraphicScene` for contextual types.
 
 - Children paint from first to last. Nested groups have their own opacity,
   transforms, clipping and time. Coordinates start at the logical surface's

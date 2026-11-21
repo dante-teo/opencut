@@ -10,9 +10,12 @@ import {
 import type { RenderProgress } from '@opencut/media';
 import { z } from 'zod';
 import type { VideoSourceProbes } from './video-assets.js';
-import { VideoDefinitionError } from './video-definition.js';
+import {
+  isVideoDefinitionPath,
+  VideoDefinitionError,
+} from './video-definition.js';
 import type { VideoParameters } from './video-definition.js';
-import { compileVideoInput, isVideoDefinitionPath } from './video-files.js';
+import { compileVideoInput } from './video-files.js';
 import type {
   VideoProcessingOptions,
   VideoProcessingProgress,
@@ -149,7 +152,7 @@ export async function batchRenderVideo(
   options: VideoBatchOptions,
 ): Promise<VideoBatchResult> {
   if (!isVideoDefinitionPath(file))
-    throw new VideoDefinitionError('Expected a .video.ts or .video.json file.');
+    throw new VideoDefinitionError('Expected a .video.ts file.');
   if (process.platform !== 'darwin' && process.platform !== 'linux')
     throw new MediaError('Bounded batch rendering requires macOS or Linux.');
   const plan = planVariants(variants, options.only);

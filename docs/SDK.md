@@ -246,15 +246,24 @@ Pass `musicSelection: { candidate: 'soft-bed', matchLoudness: true }` to
 `musicLoudness` for the target and applied gain when loudness matching is
 enabled.
 
-## Declarative graphics and JSON
+## Declarative graphics
 
 `compileVideo`, `renderVideo`, `watchVideo`, `batchRenderVideo` and
-`packageVideo` accept both authored suffixes. Pass `params` to use a
-declared JSON or TypeScript variant. Use `videoDefinitionFormats` and
+`packageVideo` accept `.video.ts` definitions. Pass `params` to use a
+declared variant. Use `videoDefinitionFormats` and
 `videoGraphicsCapabilities` for discovery. `inspectGraphicFrames(video, frame)`
 returns source time and backend information for the graphic samples chosen
 by the compiled plan, without launching Chromium.
 
 Use `defineGraphicScene` for a typed node tree or `createPresetScene` for
-a sized preset. The same data can be stored inside a JSON definition.
+a sized preset.
 See [scene contracts, motion and optional adapters](GRAPHICS.md).
+
+## Convert a legacy definition
+
+Import `convertJsonVideoDefinition` from `@opencut/sdk` and pass the JSON text.
+It returns TypeScript source with any parameter schemas and bindings. When
+writing the result yourself, choose a `.video.ts` filename beside the resolved
+JSON source to preserve relative asset paths. OpenCut reserves
+`opencut.bundle.video.ts` for portable packages. See the
+[CLI conversion command](CLI.md#convert-a-legacy-definition) for file-based migration.

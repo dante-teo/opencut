@@ -16,6 +16,7 @@ import { checkGraphicAudio } from './graphic-audio.js';
 import { compileDefinition } from './video-compiler.js';
 import { compileVideoGraphics, graphicBundleKeys } from './video-graphics.js';
 import {
+  isVideoDefinitionPath,
   parseVideoDefinition,
   validateVideoParameters,
   VideoDefinitionError,
@@ -34,15 +35,6 @@ import {
   readDefinitionScript,
   readIsolatedDefinitionScript,
 } from './video-script.js';
-
-import {
-  isVideoDefinitionPath,
-  readJsonVideo,
-  videoDefinitionFormats,
-} from './video-json.js';
-import type { JsonVideoParameterSchema } from './video-json.js';
-
-export { isVideoDefinitionPath };
 
 export type VideoCompileOptions = Pick<
   CompilationOptions,
@@ -121,7 +113,7 @@ async function readBuildInput(file: string, options: InputOptions) {
     if (!sources.has(source.path)) sources.set(source.path, source);
     options.inputs?.record(source);
   };
-  const { path, value, params, jsonParameters, verified, packagedGraphics } =
+  const { path, value, params, verified, packagedGraphics } =
     await readVideoInput(file, options, record);
   const definition = parseVideoDefinition(value);
   checkGraphicAudio(definition);
@@ -136,7 +128,6 @@ async function readBuildInput(file: string, options: InputOptions) {
     path,
     definition,
     params,
-    jsonParameters,
     verified,
     sources,
     graphics,
@@ -261,11 +252,10 @@ export async function readVideoInput(
   trace?: Parameters<typeof readDefinitionScript>[3],
 ) {
   if (!isVideoDefinitionPath(file))
-    throw new VideoDefinitionError('Expected a .video.ts or .video.json file.');
+    throw new VideoDefinitionError('Expected a .video.ts file.');
   options.signal?.throwIfAborted();
   const resolved = resolve(file);
-  const requestedInput = identifyVideoInput(resolved, 'source');
-  record?.(requestedInput);
+  record?.(identifyVideoInput(resolved, 'source'));
   // Let package verification check the reserved entry itself for symlinks.
   const isPackageEntry = basename(resolved) === packageEntryName;
   const physical = await realpath(
@@ -277,9 +267,9 @@ export async function readVideoInput(
     );
   });
   const path = isPackageEntry ? join(physical, packageEntryName) : physical;
-  const input =
-    path === resolved ? requestedInput : identifyVideoInput(path, 'source');
-  if (path !== resolved) record?.(input);
+  if (!isVideoDefinitionPath(path))
+    throw new VideoDefinitionError('Expected a .video.ts file.');
+  if (path !== resolved) record?.(identifyVideoInput(path, 'source'));
   const params =
     options.params === undefined
       ? undefined
@@ -298,14 +288,12 @@ export async function readVideoInput(
       path,
       value: packaged.definition,
       params: undefined,
-      jsonParameters: undefined as JsonVideoParameterSchema | undefined,
       verified: packaged.fingerprints,
       packagedGraphics: packaged.graphics,
     };
   }
-  const result = resolved.endsWith(videoDefinitionFormats.json.suffix)
-    ? await readJsonVideo(path, input.identity, params, options.signal)
-    : trace || options.scriptWorker || params !== undefined
+  const result =
+    trace || options.scriptWorker || params !== undefined
       ? await readIsolatedDefinitionScript(
           path,
           options.signal,

@@ -7,8 +7,11 @@ import { extname, join, resolve } from 'node:path';
 import { renderVideoTimeline } from '@opencut/media';
 import { withRenderSources } from './render-sources.js';
 import type { RenderQuality, VideoTimelineResult } from '@opencut/media';
-import { compileVideoInput, isVideoDefinitionPath } from './video-files.js';
-import { VideoDefinitionError } from './video-definition.js';
+import { compileVideoInput } from './video-files.js';
+import {
+  isVideoDefinitionPath,
+  VideoDefinitionError,
+} from './video-definition.js';
 import type { CompiledVideo } from './video-compiler.js';
 import type { VideoSourceProbes } from './video-assets.js';
 import {
@@ -62,7 +65,7 @@ type Published = {
 export async function watchVideo(file: string, options: VideoWatchOptions) {
   const path = resolve(file);
   if (!isVideoDefinitionPath(path))
-    throw new VideoDefinitionError('Expected a .video.ts or .video.json file.');
+    throw new VideoDefinitionError('Expected a .video.ts file.');
   options.signal?.throwIfAborted();
 
   const directory = await mkdtemp(join(tmpdir(), 'opencut-video-'));

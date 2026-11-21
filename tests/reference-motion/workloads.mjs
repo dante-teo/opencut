@@ -199,15 +199,9 @@ const jobs = {
   'uhd-tall': base({ seconds: 10, width: 2160, height: 3840 }),
   ordinary: base({ seconds: 6 }),
 };
-for (const [name, video] of Object.entries(jobs)) {
+for (const [name, video] of Object.entries(jobs))
   await writeFile(
-    new URL(name + '.video.json', root),
-    JSON.stringify(video, null, 2) + '\n',
+    new URL(name + '.video.ts', root),
+    'export default ' + JSON.stringify(video, null, 2) + ';\n',
   );
-  if (name === 'ordinary')
-    await writeFile(
-      new URL(name + '.video.ts', root),
-      'export default ' + JSON.stringify(video) + ';\n',
-    );
-}
 console.log(fileURLToPath(root));
