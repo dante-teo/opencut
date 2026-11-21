@@ -161,8 +161,28 @@ in `release-signing`. Enable immutable GitHub Releases. The publish option
 signs and notarizes the app, tests the signed app and uploads the validated
 artifacts to a new release. It fails when a release for the tag already exists.
 
-Publish the verified npm tarball separately from an account authorized for the
-`@dantea` scope. Use a narrowly scoped publish credential. Once the release
-URL resolves, add the generated `opencut.rb` to `Formula/opencut.rb` in
-`dante-teo/homebrew-tap` and verify with `brew install dante-teo/tap/opencut`.
-Use a new version to replace published artifacts.
+## Publish the CLI to npm and Homebrew
+
+Once the GitHub release URL resolves, add the generated `opencut.rb` to
+`Formula/opencut.rb` in `dante-teo/homebrew-tap` and verify with
+`brew install dante-teo/tap/opencut`. Use a new version to replace published
+artifacts.
+
+For npm, set up [Trusted Publishing](https://docs.npmjs.com/trusted-publishers/)
+once for `@dantea/opencut`. After `publish-npm.yml` is on `main`, create
+the GitHub environment `npm-publish` with a deployment rule allowing only
+`main`. In the npm package settings, authorize owner `dante-teo`, repository
+`opencut`, workflow `publish-npm.yml`, and environment `npm-publish`. Enable
+direct publishing. The workflow authenticates with OIDC. Run the first
+successful OIDC publish within two days of creating the trust configuration.
+
+Dispatch the workflow with the latest stable GitHub release tag.
+
+```sh
+gh workflow run publish-npm.yml --repo dante-teo/opencut --ref main -f tag=v0.5.0
+```
+
+The workflow checks the CLI archive against the GitHub release checksums
+and Homebrew formula, then publishes it. It waits for npm's automated review
+and verifies the registry's `latest` tag and archive integrity. A successful run
+reports the verified version in its job summary.
