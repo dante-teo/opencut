@@ -37,6 +37,7 @@ const resolvedClip = clipSchema.extend({
   trackMuted: z.boolean().optional(),
   visual: z.strictObject({
     crop: clipVisualSchema.shape.crop,
+    sourceWindow: clipVisualSchema.shape.sourceWindow,
     x: z.number(),
     y: z.number(),
     scale: z.number(),

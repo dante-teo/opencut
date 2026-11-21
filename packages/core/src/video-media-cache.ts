@@ -24,7 +24,7 @@ type MediaEntry = IdentifiedMedia & { sha256: string };
 const stageDirectory = (directory: string, key: string) =>
   join(directory, `.${key}.stage`);
 
-const receipt = z.strictObject({
+export const mediaCacheReceipt = z.strictObject({
   version: z.literal(1),
   key: z.string(),
   bytes: z.int().positive(),
@@ -166,7 +166,7 @@ async function readMediaEntry(
       !(await lstat(path)).isFile()
     )
       return;
-    const parsed = receipt.safeParse(
+    const parsed = mediaCacheReceipt.safeParse(
       JSON.parse(await readFile(manifest, 'utf8')),
     );
     if (

@@ -16,7 +16,13 @@ export type {
   TimelineClip,
   Track,
 } from './project.js';
-export { addTimes, compareTimes, frameTime, subtractTimes } from './time.js';
+export {
+  addTimes,
+  compareTimes,
+  frameTime,
+  rationalTime,
+  subtractTimes,
+} from './time.js';
 export type { FrameRate, RationalTime } from './time.js';
 export {
   clipDuration,
@@ -43,7 +49,11 @@ export function getApplicationInfo(): ApplicationInfo {
 
 export type { TextLayer } from '@opencut/shared';
 
-export { planProjectRender, RenderError } from './render-plan.js';
+export {
+  frameAtOrAfter,
+  planProjectRender,
+  RenderError,
+} from './render-plan.js';
 export type {
   ProjectRenderPlan,
   VisualRenderClip,

@@ -1,5 +1,10 @@
 import type { VideoRenderOptions } from '@opencut/core/video';
-import { renderQualities } from '@opencut/media';
+import {
+  renderCodecs,
+  renderEncoders,
+  renderQualities,
+  renderResolutions,
+} from '@opencut/media';
 import type { RenderQuality } from '@opencut/media';
 import { positiveIntegerOption, UsageError } from './usage.js';
 
@@ -10,6 +15,7 @@ export const renderOptionTypes = {
   height: { type: 'string' },
   fps: { type: 'string' },
   codec: { type: 'string' },
+  encoder: { type: 'string' },
   'video-bitrate': { type: 'string' },
   'audio-bitrate': { type: 'string' },
   'audio-rate': { type: 'string' },
@@ -33,6 +39,7 @@ export function parseRenderQuality(
 
 export const renderOptionHelp = `  --quality <fast|quality|maximum> --resolution <project|720p|1080p>
   --width <pixels> --height <pixels> --fps <n|n/d> --codec <h264|hevc>
+  --encoder <${renderEncoders.join('|')}>
   --video-bitrate <kbps> --audio-bitrate <kbps> --audio-rate <44100|48000>
   --audio-channels <1|2> --no-subtitles --overwrite`;
 
@@ -45,13 +52,14 @@ export function parseRenderControls(values: {
 }): VideoRenderOptions {
   function choice<T extends string | number>(
     key: string,
-    value: T | undefined,
+    value: string | number | undefined,
     allowed: readonly T[],
   ) {
     if (value === undefined) return undefined;
-    if (!allowed.includes(value))
+    const match = allowed.find((option) => option === value);
+    if (match === undefined)
       throw new UsageError(`--${key} must be one of: ${allowed.join(', ')}.`);
-    return value;
+    return match;
   }
   const width = positiveIntegerOption('width', values.width);
   const height = positiveIntegerOption('height', values.height);
@@ -72,15 +80,9 @@ export function parseRenderControls(values: {
   const { quality, resolution, codec } = values;
   return {
     quality: parseRenderQuality(quality, 'quality'),
-    resolution: choice('resolution', resolution, [
-      'project',
-      '720p',
-      '1080p',
-    ]) as VideoRenderOptions['resolution'],
-    codec: choice('codec', codec, [
-      'h264',
-      'hevc',
-    ]) as VideoRenderOptions['codec'],
+    resolution: choice('resolution', resolution, renderResolutions),
+    codec: choice('codec', codec, renderCodecs),
+    encoder: choice('encoder', values.encoder, renderEncoders),
     outputSize:
       width !== undefined && height !== undefined
         ? { width, height }
@@ -99,12 +101,12 @@ export function parseRenderControls(values: {
       'audio-rate',
       positiveIntegerOption('audio-rate', values['audio-rate']),
       [44100, 48000],
-    ) as VideoRenderOptions['audioSampleRate'],
+    ),
     audioChannels: choice(
       'audio-channels',
       positiveIntegerOption('audio-channels', values['audio-channels']),
       [1, 2],
-    ) as VideoRenderOptions['audioChannels'],
+    ),
     overwrite: values.overwrite,
     burnSubtitles: !values['no-subtitles'],
   };

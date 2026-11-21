@@ -25,6 +25,9 @@ export class RenderError extends Error {
 }
 
 interface VisualRenderProperties {
+  sourceWindow?: NonNullable<
+    NonNullable<TimelineClip['visual']>['sourceWindow']
+  >;
   crop?: NonNullable<NonNullable<TimelineClip['visual']>['crop']>;
   grade?: NonNullable<TimelineClip['grade']>;
   clipId: string;
@@ -95,6 +98,11 @@ function framePosition(time: RationalTime, rate: FrameRate) {
     ticks: BigInt(time.numerator) * BigInt(rate.numerator),
     tickSize: BigInt(time.denominator) * BigInt(rate.denominator),
   };
+}
+
+export function frameAtOrAfter(time: RationalTime, rate: FrameRate): number {
+  const { ticks, tickSize } = framePosition(time, rate);
+  return Number((ticks + tickSize - 1n) / tickSize);
 }
 
 function exactFrame(
@@ -179,10 +187,7 @@ export function planProjectRender(
     throw new RenderError(
       'Rendering supports at most 600 seconds. Shorten the timeline.',
     );
-  const sampledFrame = (time: RationalTime) => {
-    const { ticks, tickSize } = framePosition(time, frameRate);
-    return Number((ticks + tickSize - 1n) / tickSize);
-  };
+  const sampledFrame = (time: RationalTime) => frameAtOrAfter(time, frameRate);
   const totalFrames = sampledFrame(timeline.duration);
   if (BigInt(totalFrames) * BigInt(denominator) > 600n * BigInt(numerator))
     throw new RenderError(

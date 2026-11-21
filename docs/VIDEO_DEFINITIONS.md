@@ -103,7 +103,7 @@ for definitions using [React or SVG graphics](GRAPHICS.md). The optional top-lev
   Titles and subtitles are visible on project ticks within their exact
   intervals. Title animation remains relative to the authored start.
 - Visual clips accept `visual` with center-relative `x`, `y`, `scale`,
-  `rotation` and `opacity`. Media accepts `fit` and fractional `crop` insets.
+  `rotation` and `opacity`. Media accepts `fit`, `sourceWindow` in source pixels, and fractional `crop` insets.
   `keyframes` maps x, y, scale, rotation and opacity to arrays of
   `{ time, value, easing }` using the [easing rules](#visual-keyframe-easing).
   Key times are rational seconds from the clip's timeline start. Changing a
@@ -148,6 +148,42 @@ for definitions using [React or SVG graphics](GRAPHICS.md). The optional top-lev
   for the clip's full duration. Clips that hold the same source frame share
   one temporary PNG per preview or export and can apply different styling.
 
+### Frame a source window
+
+Set `visual.sourceWindow` on a video or still-image clip and specify
+`visual.fit` as `contain`, `cover` or `stretch`. For a 1200 × 1600 source,
+this places the left 900 pixels of the full-height image on a 9:16 canvas.
+
+```ts
+{
+  id: 'left-framed',
+  asset: 'two-person-shot',
+  at: 0,
+  sourceOut: 120,
+  visual: {
+    sourceWindow: { x: 0, y: 0, width: 900, height: 1600 },
+    fit: 'cover',
+  },
+}
+```
+
+The window uses integer source pixels with a top-left origin and
+exclusive right and bottom edges. It must fit inside the oriented image
+after media recipes. Sample aspect ratio affects fitting, while the window
+is measured on the source pixel grid. `contain` fits the whole window,
+`cover` fills the fitting box by trimming around the center, and
+`stretch` fills the box independently along both axes.
+
+`opencut timeline inspect edit.video.ts --frame 60 --json` includes a
+`framing` object for active media with known source dimensions. It reports
+the resolved `sourceWindow`, the axis-aligned `destinationBounds` in
+project pixels after the clip transform and before canvas clipping, and
+`visibleSourceRegion.polygon`. The polygon vertices are in oriented
+source-pixel coordinates. A rotated clip cut by the canvas can yield
+more than four vertices. An empty polygon means no geometric intersection
+or zero opacity. This geometry measures the clip against the canvas and
+excludes transition effects, masks, and occlusion by other layers.
+
 ### Visual keyframe easing
 
 Each animated property holds a nonempty array of keys in strictly increasing
@@ -163,10 +199,12 @@ Sampling renormalizes the easing within that subrange.
 
 ### Evaluation order
 
-The compositor selects the source frame, grades its pixels, applies crop,
-fit and clip transforms, and scales alpha by clip opacity. Transitions
-weight the fitted layers before they composite over lower tracks and the
-canvas. The audio renderer maps and retimes each source, applies its
+Media recipes run first on the asset. The compositor selects and orients
+the resulting source frame, crops `sourceWindow` if present, then grades
+and fits the media on the canvas. Legacy `visual.crop` insets mask the fitted
+layer. Rotation uses the fitted layer's center, `x` and `y` position it, and
+opacity scales alpha. Transitions weight the fitted layers before they
+composite over lower tracks and clip to the canvas. The audio renderer maps and retimes each source, applies its
 `effects` array in order, then applies the clip envelope and clip/track
 gain before mixing and limiting the result. The effect types are
 `eq`, `compressor`, `limiter`, `de-esser` and `reverb`. See the [CLI reference](CLI.md) for export controls.
@@ -229,8 +267,9 @@ Clip source positions refer to the final processed media. For example, a
 trim from 8 to 10 seconds makes the selected picture available from source
 position zero on the derived asset. Composition uses the probed duration and
 stream offsets of the derived media.
-Use an asset recipe to share a baked crop across clips. Use a clip’s
-`visual.crop` for a crop specific to that placement.
+Use an asset recipe to share a baked crop across clips. Use
+`visual.sourceWindow` for source-pixel framing on a single placement and
+`visual.crop` for fractional masking of its fitted layer.
 
 Use `opencut recipes inspect DEFINITION --json` for the ordered steps and
 estimated metadata, or `opencut recipes validate DEFINITION` to check the
@@ -422,6 +461,8 @@ A timestamp can be decimal
 seconds, a fraction such as `1001/30000`, or a clock time such as `00:00:01.500`.
 It selects the project frame covering that time. `--frame` selects a frame
 directly. Range ends are exclusive and clips have a 30-second limit.
+Use [frame-targeted contact sheets](CLI.md#frame-targeted-contact-sheets)
+to review the rendered frames around a cut or caption boundary.
 
 In Electron, choose **Open definition** and select the source file. OpenCut
 compiles and renders a playable revision with mixed audio. Use the timeline
@@ -446,9 +487,10 @@ unchanged. The MP4 is temporary. Copy it while it is current to keep it, or
 use a one-shot preview command to write a named output. Press Ctrl-C to stop
 watching and remove the temporary preview files.
 
-Watch mode debounces saves and tracks the entry, relative and absolute ESM
-imports, referenced font files, and local media. It reuses unchanged media
-snapshots and probe results. Changes to the render plan encode a full preview
+Watch mode debounces saves and tracks the entry, local ESM imports,
+including Node `#` aliases that resolve to local files, referenced font
+files, and local media. It reuses unchanged media snapshots and probe
+results. Changes to the render plan encode a full preview
 playback movie with the shared renderer. Larger compositions take longer to
 refresh. Media may need temporary disk space for copies when the filesystem
 cannot clone them.

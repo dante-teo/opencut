@@ -107,6 +107,7 @@ export async function renderCompiledVideo(
     render: {
       quality,
       codec: settings.codec ?? 'h264',
+      ...(settings.encoder && { encoder: settings.encoder }),
       resolution: settings.resolution ?? 'project',
       ...(range !== undefined && { range: structuredClone(range) }),
       ...(maxDimension !== undefined && { maxDimension }),

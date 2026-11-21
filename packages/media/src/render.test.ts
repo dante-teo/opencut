@@ -79,7 +79,14 @@ beforeEach(async () => {
     ],
     output: join(directory, 'out.mp4'),
   };
-  const video = { ...stream, durationSeconds: (12 * 1001) / 30000 };
+  const video = {
+    ...stream,
+    durationSeconds: (12 * 1001) / 30000,
+    colorRange: 'tv',
+    colorSpace: 'bt709',
+    colorPrimaries: 'bt709',
+    colorTransfer: 'bt709',
+  };
   const audio = {
     ...stream,
     index: 1,
@@ -384,7 +391,7 @@ describe('video timeline executor safety', () => {
       'trim=start_frame=3:end_frame=13',
     );
     expect(args[args.indexOf('-filter_complex') + 1]).toContain(
-      'setpts=N*1001,scale=320:180:out_color_matrix=bt709,setsar=1,format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709[video]',
+      'setpts=N*1001,scale=320:180:in_range=pc:out_range=tv:out_color_matrix=bt709,setsar=1,format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709[video]',
     );
   });
 
@@ -623,7 +630,7 @@ describe('video timeline executor safety', () => {
     expect(result).toMatchObject({ width: 720, height: 1280 });
     const args = vi.mocked(runMediaTool).mock.calls[0]![1];
     expect(args[args.indexOf('-filter_complex') + 1]).toContain(
-      'scale=720:1280:out_color_matrix=bt709,setsar=1,format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709[video]',
+      'scale=720:1280:in_range=pc:out_range=tv:out_color_matrix=bt709,setsar=1,format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709[video]',
     );
   });
 

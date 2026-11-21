@@ -16,10 +16,12 @@ import type {
   VisualAnimation,
   VisualTransform,
   ColorGrade,
+  SourceWindow,
   TransitionRamp,
 } from '@opencut/shared';
 import { checkRenderSignal, MediaError } from './process.js';
 import { renderToolCommand, trackRenderProcess } from './render-budget.js';
+import { sourceWindowFilter } from './source-window.js';
 import { indexedSeekArgs } from './video-filter.js';
 
 type TransformSource =
@@ -38,6 +40,7 @@ type TransformSource =
       height: number;
       aspect: number;
       matrix: string;
+      window?: SourceWindow;
       /** Project-frame sampling and range filters. Still images need neither. */
       sampling?: {
         filter: string;
@@ -75,6 +78,7 @@ function rawSource(
   const filters = [
     sampling?.filter,
     sampling?.seek ? 'setpts=PTS-STARTPTS' : undefined,
+    source.window && sourceWindowFilter(source.window, matrix),
     `scale=${decodeWidth}:${decodeHeight}:in_color_matrix=${matrix}`,
     'format=rgba',
   ];

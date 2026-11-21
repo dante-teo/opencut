@@ -367,7 +367,7 @@ test('CLI picture cache reuses shifted 60 fps picture and preserves caption and 
       [118, 150],
     ]);
     await writeFile(
-      join(cache, 'picture-v1', newEntries[0]!, 'media.nut'),
+      join(cache, 'picture-v1', newEntries[0]!, 'media.mkv'),
       'truncated',
     );
     const textOutput = render('text-output', ['--picture-cache', cache]);

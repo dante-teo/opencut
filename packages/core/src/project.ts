@@ -109,6 +109,14 @@ export const trackSchema = z.strictObject({
   channelMode: z.enum(['source', 'mono-center']).optional(),
 });
 export const clipVisualSchema = z.strictObject({
+  sourceWindow: z
+    .strictObject({
+      x: z.int().nonnegative(),
+      y: z.int().nonnegative(),
+      width: z.int().positive(),
+      height: z.int().positive(),
+    })
+    .optional(),
   crop: z
     .strictObject({
       left: z.number().min(0).lt(1),
@@ -434,6 +442,18 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
         location + '/keyframes',
         'incompatible_visual',
         'Keyframes require a video track.',
+      );
+    if (
+      clip.visual?.sourceWindow &&
+      (track?.type !== 'video' ||
+        clip.text ||
+        asset?.metadata?.kind === 'graphic' ||
+        clip.visual.fit === undefined)
+    )
+      add(
+        location + '/visual/sourceWindow',
+        'incompatible_visual',
+        'A sourceWindow requires video or image media and an explicit visual.fit.',
       );
     if (clip.visual?.crop && track?.type !== 'video')
       add(

@@ -3,6 +3,8 @@ import { performance } from 'node:perf_hooks';
 export interface RenderProgress {
   event: 'progress';
   phase: 'rendering' | 'verifying';
+  stage?: 'graphics' | 'composition' | 'encoding' | 'verification';
+  clipId?: string;
   percent: number;
   processedFrames: number;
   totalFrames: number;
@@ -14,6 +16,7 @@ export interface RenderProgress {
 export function renderProgress(
   totalFrames: number,
   onProgress?: (progress: RenderProgress) => void,
+  details?: Pick<RenderProgress, 'stage' | 'clipId'>,
 ) {
   const started = performance.now();
   let pending = '';
@@ -24,6 +27,8 @@ export function renderProgress(
     onProgress?.({
       event: 'progress',
       phase,
+      ...details,
+      ...(details && phase === 'verifying' && { stage: 'verification' }),
       percent: (processedFrames / totalFrames) * 100,
       processedFrames,
       totalFrames,
@@ -36,8 +41,13 @@ export function renderProgress(
           : null,
     });
   };
+  function update(frames: number) {
+    processedFrames = Math.max(processedFrames, Math.min(totalFrames, frames));
+    emit('rendering');
+  }
   return {
     start: () => emit('rendering'),
+    update,
     chunk: (chunk: Buffer) => {
       pending += chunk.toString('utf8');
       let end: number;
@@ -51,13 +61,8 @@ export function renderProgress(
           const n = Number(value);
           if (Number.isSafeInteger(n)) frames = n;
         }
-        if (key === 'progress' && (value === 'continue' || value === 'end')) {
-          processedFrames = Math.max(
-            processedFrames,
-            Math.min(totalFrames, frames),
-          );
-          emit('rendering');
-        }
+        if (key === 'progress' && (value === 'continue' || value === 'end'))
+          update(frames);
       }
     },
     verifying: () => {

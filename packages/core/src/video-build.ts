@@ -18,7 +18,9 @@ import type {
 } from './video-definition.js';
 import {
   fileLease,
+  fileFingerprintSchema,
   fingerprintFile,
+  matchesFingerprint,
   hashJson,
   missing,
   syncPath,
@@ -32,6 +34,7 @@ import type {
   DefinitionSources,
 } from './video-compiler.js';
 import { processingSettings } from './video-processing.js';
+import type { FileFingerprint } from './video-integrity.js';
 import type { RecipeRecovery } from './video-processing.js';
 import { findMediaEntry } from './video-media-cache.js';
 import {
@@ -40,7 +43,6 @@ import {
 } from './video-recipe-schema.js';
 
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
-const fingerprint = z.object({ sha256, bytes: z.int().nonnegative() });
 const stageSchema = z.object({
   assetId: z.string(),
   step: z.int().nonnegative(),
@@ -66,9 +68,9 @@ const renderSchema = z.object({
   state: z.enum(['rendering', 'rendered', 'failed']),
   settings: z.unknown(),
   scratch: z.string().optional(),
-  verified: fingerprint.optional(),
+  verified: fileFingerprintSchema.optional(),
   published: z
-    .object({ settings: z.unknown(), verified: fingerprint })
+    .object({ settings: z.unknown(), verified: fileFingerprintSchema })
     .optional(),
   error: z.string().optional(),
 });
@@ -296,7 +298,7 @@ export async function checkpointCompilation(
   }
 }
 
-export async function checkpointRender<T>(
+export async function checkpointRender<T extends object>(
   video: CompiledVideo,
   output: string,
   settings: unknown,
@@ -305,7 +307,7 @@ export async function checkpointRender<T>(
     scratch?: string,
     onVerified?: (path: string) => Promise<void>,
   ) => Promise<T>,
-): Promise<T> {
+): Promise<T & { outputFingerprint?: FileFingerprint }> {
   const build = checkpoints.get(video);
   if (!build) return render();
   const parent = await realpath(dirname(resolve(output)));
@@ -351,12 +353,16 @@ export async function checkpointRender<T>(
       });
       await syncPath(parent);
       receipt.state = 'rendered';
-      if (receipt.verified)
-        receipt.published = { settings, verified: receipt.verified };
+      const outputFingerprint = receipt.verified;
+      if (outputFingerprint)
+        receipt.published = { settings, verified: outputFingerprint };
       delete receipt.verified;
       delete receipt.scratch;
       await writeCheckpoint(path, receipt);
-      return result;
+      return {
+        ...result,
+        ...(outputFingerprint && { outputFingerprint }),
+      };
     } catch (error) {
       receipt.state = 'failed';
       receipt.error = errorMessage(error);
@@ -370,20 +376,16 @@ export async function checkpointRender<T>(
   }
 }
 
-async function readOutputFingerprint(path: string, signal?: AbortSignal) {
+export async function readOutputFingerprint(
+  path: string,
+  signal?: AbortSignal,
+) {
   try {
     if ((await lstat(path)).isFile())
       return await fingerprintFile(path, signal);
   } catch (error) {
     if (!missing(error)) throw error;
   }
-}
-
-function matchesFingerprint(
-  actual: Fingerprint | undefined,
-  expected: z.infer<typeof fingerprint>,
-) {
-  return actual?.bytes === expected.bytes && actual.sha256 === expected.sha256;
 }
 
 // A crash can happen after the rename but before the publication receipt is saved.
@@ -402,7 +404,7 @@ function reconcilePublication(
   return published;
 }
 
-async function readCheckpoint(path: string): Promise<unknown> {
+export async function readCheckpoint(path: string): Promise<unknown> {
   try {
     if (!(await lstat(path)).isFile()) return null;
     return JSON.parse(await readFile(path, 'utf8')) as unknown;
@@ -545,4 +547,82 @@ export async function inspectBuildCheckpoint(
     ...(compile.frameCount !== undefined && { frameCount: compile.frameCount }),
     ...(compile.error !== undefined && { error: compile.error }),
   };
+}
+
+/** Read historical build and publish receipts for one definition. */
+export async function listDefinitionBuildArtifacts(
+  cache: string,
+  definition: string,
+  signal?: AbortSignal,
+) {
+  const builds = join(cache, '.builds-v1');
+  const names = (
+    await readdir(builds).catch((error: unknown) => {
+      if (!missing(error)) throw error;
+      return [];
+    })
+  ).sort();
+  const files: { path: string; role: string; owner: string }[] = [];
+  const fingerprints = new Map<
+    string,
+    ReturnType<typeof readOutputFingerprint>
+  >();
+  for (const name of names) {
+    signal?.throwIfAborted();
+    if (!sha256.safeParse(name).success) continue;
+    const directory = join(builds, name);
+    const path = join(directory, 'compile.json');
+    const compile = compileSchema.safeParse(await readCheckpoint(path));
+    if (
+      !compile.success ||
+      compile.data.id !== name ||
+      compile.data.definition !== definition
+    )
+      continue;
+    files.push({ path, role: 'cache-manifest', owner: definition });
+    for (const { key, format, assetId } of compile.data.steps) {
+      const media = join(cache, key, 'media.' + format);
+      files.push({
+        path: media,
+        role: 'cache-media',
+        owner: 'assets.' + assetId,
+      });
+      files.push({
+        path: join(cache, key, 'result.json'),
+        role: 'cache-manifest',
+        owner: 'assets.' + assetId,
+      });
+    }
+    for (const name of (await readdir(directory)).sort()) {
+      if (!/^render-[a-f0-9]{64}\.json$/.test(name)) continue;
+      const path = join(directory, name);
+      const render = renderSchema.safeParse(await readCheckpoint(path));
+      if (
+        !render.success ||
+        render.data.output !== resolve(render.data.output) ||
+        name !== `render-${hashJson(render.data.output)}.json`
+      )
+        continue;
+      files.push({ path, role: 'render-report', owner: definition });
+      const { output, published, verified, state } = render.data;
+      if (!published && !verified && state !== 'rendered') continue;
+      let pending = fingerprints.get(output);
+      if (!pending) {
+        pending = readOutputFingerprint(output, signal);
+        fingerprints.set(output, pending);
+      }
+      const actual = await pending;
+      const publication = reconcilePublication(render.data, actual);
+      if (publication || state === 'rendered')
+        files.push({
+          path: output,
+          role:
+            publication && matchesFingerprint(actual, publication.verified)
+              ? 'export'
+              : 'unverified-export',
+          owner: path,
+        });
+    }
+  }
+  return files;
 }

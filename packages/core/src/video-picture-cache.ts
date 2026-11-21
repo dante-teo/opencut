@@ -50,7 +50,7 @@ export async function openPictureCache(
       const { entry, reused } = await materializeMediaEntry(
         cache,
         key,
-        'nut',
+        'mkv',
         signal,
         encode,
       );

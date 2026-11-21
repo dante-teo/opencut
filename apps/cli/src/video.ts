@@ -2,6 +2,7 @@ import { Console } from 'node:console';
 import {
   analyzeVideoMix,
   compileVideo,
+  describeProjectContactTimeline,
   inspectProject,
   inspectVideoRecipes,
   isVideoDefinitionPath,
@@ -91,6 +92,11 @@ export async function runVideoCommand(
       if (values.json) {
         if (event.status === 'completed' || event.status === 'cache-hit')
           recipeProcessing.push(event);
+        if (command === 'render')
+          process.stderr.write(
+            JSON.stringify({ event: 'progress', stage: 'recipe', ...event }) +
+              '\n',
+          );
       } else {
         const time =
           event.seconds === undefined ? '' : ` (${event.seconds.toFixed(2)}s)`;
@@ -161,19 +167,20 @@ export async function runVideoCommand(
         pictureVersion,
         ...mixControls,
         signal,
-        ...(!values.json && {
-          onProgress: (event: RenderProgress) => {
-            process.stderr.write(
-              `${event.phase}: ${event.percent.toFixed(1)}%\n`,
-            );
-          },
-        }),
+        onProgress: (event: RenderProgress) => {
+          process.stderr.write(
+            values.json
+              ? JSON.stringify(event) + '\n'
+              : `${event.phase}: ${event.percent.toFixed(1)}% (${event.stage ?? event.phase})\n`,
+          );
+        },
       });
       if (values.json)
         console.log(
           JSON.stringify(
             {
               definitionPath: video.path,
+              contactTimeline: describeProjectContactTimeline(video.project),
               ...result,
               ...(recipeProcessing.length > 0 && { recipeProcessing }),
             },
@@ -182,6 +189,11 @@ export async function runVideoCommand(
           ),
         );
       else {
+        console.log(`Encoder ${result.encoder.name}`);
+        if (result.encoder.fallbackReason)
+          process.stderr.write(
+            `Encoder fallback: ${result.encoder.fallbackReason}\n`,
+          );
         for (const warning of result.warnings ?? [])
           process.stderr.write(`Warning: ${warning}\n`);
         for (const { startFrame, endFrame, status } of result.pictureRanges ??

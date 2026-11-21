@@ -4,6 +4,8 @@ import { createHash } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import {
   audioSourceDuration,
+  orientedSource,
+  resolveSourceWindow,
   videoSourceDuration,
   validateEmbeddedFont,
   validateSubtitleBurnIn,
@@ -20,6 +22,7 @@ import { validateProject } from './project.js';
 import type { Project, TimelineClip } from './project.js';
 import { bindRenderSources } from './render-sources.js';
 import { planProjectRender } from './render-plan.js';
+import { clipTimelineEnd } from './clip-timing.js';
 import { frameTime, rationalTime } from './time.js';
 import type { FrameRate, RationalTime } from './time.js';
 import {
@@ -190,6 +193,16 @@ export async function compileDefinition(
   let renderPlan: BoundRenderPlan;
   try {
     const plan = planProjectRender(project);
+    for (const clip of plan.visualClips) {
+      if (!clip.sourceWindow || !clip.assetId) continue;
+      const source = assets.get(clip.assetId)?.media?.metadata.video;
+      if (source)
+        resolveSourceWindow(
+          orientedSource(source),
+          clip.clipId,
+          clip.sourceWindow,
+        );
+    }
     if (!preview) validateSubtitleBurnIn(plan.visualClips);
     renderPlan = bindRenderSources(plan, (id, props) => {
       const source = graphics.get(id);
@@ -590,6 +603,40 @@ function generatedTrackId(
   return count === 1 ? key : `${key}-${count}`;
 }
 
+export function describeAuthoredClips(
+  definition: ParsedVideoDefinition,
+  rate: FrameRate,
+) {
+  const occurrences = new Map<string, number>();
+  const time = (value: AuthoredTime) =>
+    typeof value === 'number' ? frameTime(value, rate) : value;
+  return definition.tracks.flatMap((track) => {
+    const trackId = track.id ?? generatedTrackId(track, occurrences);
+    if (track.type === 'audio') return [];
+    return track.clips.map((clip) => {
+      const start = time(clip.at);
+      if (clip.duration === undefined && clip.sourceOut === undefined)
+        throw new VideoDefinitionError(
+          'Clip must specify duration or sourceOut.',
+        );
+      return {
+        id: clip.id ?? clipIdAt(trackId, start),
+        start,
+        end: clipTimelineEnd({
+          timelineStart: start,
+          sourceIn: time(clip.sourceIn ?? 0),
+          sourceOut: time(clip.sourceOut ?? clip.duration!),
+          speed: clip.speed,
+        }),
+      };
+    });
+  });
+}
+
+function clipIdAt(trackId: string, start: RationalTime) {
+  return stableId('clip', trackId, reduce(start));
+}
+
 async function compileClip(
   clip: AuthoredClip,
   frameRate: FrameRate,
@@ -634,7 +681,7 @@ async function compileClip(
   const fade = (value: typeof fadeIn, field: string) =>
     typeof value === 'number' ? { duration: time(value, field) } : value;
   const timing = {
-    id: id ?? stableId('clip', trackId, reduce(timelineStart)),
+    id: id ?? clipIdAt(trackId, timelineStart),
     trackId,
     timelineStart,
     sourceIn: time(sourceIn ?? 0, 'sourceIn'),

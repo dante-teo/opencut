@@ -83,11 +83,28 @@ report’s `automation` into `professionalMix.automation` in the definition or
 `--mix-comparison before` for a loudness-matched comparison and
 `--mix-cache <directory>` to reuse AI-enhanced stems across runs. See [Professional Dialogue Mix](../../../docs/AUDIO_MIX.md).
 
+For frame QA, run `opencut preview contact-sheet DEFINITION --frames 59,60
+--output sheet.png` or use a finished MP4 as the input. Add
+`--around cuts,captions,picture` with `--render-report report.json` for
+boundary sampling. With an MP4, use the fingerprinted `render --json`
+report for that export. OpenCut writes a JSON manifest beside the PNG.
+See [frame-targeted contact sheets](../../../docs/CLI.md#frame-targeted-contact-sheets).
+
+For cleanup planning run `opencut inspect dependencies DEFINITION --json`.
+Supply `--artifact-root` for additional directories and
+`--render-report` for a published export. Use reported roles and owners to
+trace shared inputs before changing files. An `unverified-export` reference
+could point to a missing or replaced output.
+
 ## 3:4 4K60 delivery
 
 Set the definition's 3:4 canvas to 60 fps and render with
 `--width 2880 --height 3840 --fps 60 --codec hevc`. Output scaling applies to
-the composed picture. Use per-source recipes for AI interpolation or
+the composed picture. Use `--encoder auto` to try hardware with a reported
+software fallback or `--encoder videotoolbox` to require hardware. For
+`render --json`, read the final result on stdout and progress lines on
+stderr. See [encoder selection](../../../docs/CLI.md#encoder-selection-and-render-progress).
+Use per-source recipes for AI interpolation or
 super-resolution when requested.
 
 ## Conversion and graphics discovery

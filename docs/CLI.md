@@ -22,6 +22,131 @@ including when picture is cached. Use `--json` for machine output and SIGINT
 or SIGTERM to cancel foreground work. Render runs in the CLI with FFmpeg
 subprocesses.
 
+## Encoder selection and render progress
+
+```sh
+opencut render edit.video.ts --output portrait.mp4 --width 2160 --height 3840 --fps 60 --codec hevc --encoder auto --json > portrait.render.json
+opencut render edit.video.ts --output hardware.mp4 --codec hevc --encoder videotoolbox
+```
+
+Omit `--encoder` to keep the default software encoder. With `auto`,
+OpenCut probes a VideoToolbox session for the requested codec, dimensions
+and frame rate and probes software if the hardware check fails.
+`videotoolbox` requires a successful hardware session. An explicit
+`software` request also checks the exact configuration. A failure during
+the full encode is reported as a render failure. Hardware uses bitrate
+control, either the supplied `--video-bitrate` or a target derived from
+quality, delivery dimensions and frame rate. Software uses the profile's
+preset and CRF unless a bitrate is supplied.
+
+In the render result, `encoder.requested` is the selection policy,
+`encoder.selected` is the backend and `encoder.name` is the FFmpeg encoder.
+`encoder.settings` reports the effective pixel format, rate control and
+backend options. `encoder.fallbackReason` is present when automatic
+selection uses software after a hardware probe failure. The encoder name
+and effective settings participate in encoded picture identity.
+
+The final `render --json` result goes to stdout. Stderr emits JSON lines
+with `event: "progress"`. Recipe events carry `stage: "recipe"` plus the
+asset, step and status. Renderer events carry `stage` values `graphics`,
+`composition`, `encoding` and `verification`, alongside `phase`,
+`processedFrames`, `totalFrames`, `percent`, `elapsedSeconds` and
+`remainingSeconds`. Graphics events include a `clipId`. Frame counters
+apply to the event's stage. Composition and encoding run together for
+direct exports and their events can overlap. Reused encoded picture skips
+the encoding stage. Filter stderr for progress objects if other diagnostics
+are present.
+
+## Frame-targeted contact sheets
+
+```sh
+opencut preview contact-sheet edit.video.ts --frames 59,60 --timestamps 3/2 --output edit-qa.png
+opencut render edit.video.ts --output final.mp4 --picture-cache ./render-cache --json > final.render.json
+opencut preview contact-sheet final.mp4 --render-report final.render.json --around cuts,captions,picture --from 55 --to 75 --output export-qa.png
+opencut preview contact-sheet final.mp4 --definition edit.video.ts --frames 59,60 --output decoded-qa.png
+```
+
+Frames are zero-based. Timestamps accept seconds, fractions or clock
+times. Use `--around` to sample the predecessor and the first frame at or
+after each clip start or end, caption start or end, or reported internal
+picture boundary. The render report's `pictureRanges` supplies the internal
+boundaries for `picture`. Renders with a picture cache report these ranges.
+
+For MP4 cuts and captions, use a report with `contactTimeline` or pass
+`--definition` with the definition revision and parameters used for export.
+`contactTimeline` contains `frameRate`, `clips` and `captions` with their IDs
+and rational start and end times. When both options are supplied, the
+definition supplies clip and caption timing and the report supplies picture
+ranges. OpenCut evaluates the definition for this timing and decodes the
+supplied MP4 directly.
+
+MP4 input with `--render-report` requires the `outputFingerprint.bytes` and
+`outputFingerprint.sha256` fields from `render --json`. A byte-identical copy
+passes the check. For an older report missing those fields, use `--definition`
+for cut and caption timing, or save a fresh report with a new export to
+include picture boundaries.
+
+`--from` and `--to` constrain the half-open range in input frame indices.
+An explicit request outside the range or duration fails. Automatic requests
+outside the range are skipped. Up to 16 unique frames are allowed.
+Requests resolving to the same frame share one tile and retain distinct
+reasons. Without targeted options the command samples evenly, using
+`--count` if supplied. Columns default to at most four and the tile size
+defaults to a 320-pixel long side.
+
+MP4 indexing uses decoded presentation order and each frame's actual PTS.
+Timestamp zero denotes the first video frame. An explicit timestamp selects
+the last frame at or before that time, including for variable-frame-rate
+exports. When timestamps tie, the last frame at that timestamp covers it.
+For MP4s, cut and caption boundaries are first rounded up to the project
+frame grid. Sampling then uses the first decoded frame at or after that
+boundary and its predecessor. The final frame covers its declared duration,
+with an average-frame-step fallback when frame duration is unavailable.
+
+The command writes `<output>.json` and prints the same manifest to stdout.
+`input` identifies the inspected source. Each sample has its actual `frame`
+and rational `time`, its cell `x` and `y`, and a `requests` array. Each request
+records its `reason` and either `requestedFrame` or `requestedTime`.
+Boundary requests preserve the original timeline time and include `side`
+and `adjacentClipIds` when known. With timeline context, each sample has
+`clipIds` for its actual frame. An MP4 manifest also gives the `timeBase`,
+`firstPts` and each sample's original `pts`. Samples are sorted by actual
+frame index.
+
+## Read-only dependency inventory
+
+```sh
+opencut inspect dependencies edit.video.ts --json
+opencut inspect dependencies edit.video.ts --recipe-cache ./recipes --artifact-root ./render-cache --artifact-root ./exports --render-report portrait.render.json --json
+```
+
+The command evaluates the trusted TypeScript definition and its imports.
+It reads declared assets and fonts, local modules reached by evaluation
+(including Node `#` aliases that resolve to local files), and dependencies
+discovered by the React graphics bundler. It creates no
+builds, renders or cache entries. Arbitrary paths computed or read inside
+authoring code cannot be inferred unless the code returns them as
+declared dependencies. Use `--params` to inspect a specific variant.
+
+`files` reports `relativePath` and any alias `paths` relative to the
+definition directory, the physical `resolvedPath`, `bytes` for regular
+files, and a `status` of `present`, `missing` or `not-file`.
+`roles` includes every known role and `references` reports each role,
+its owner and whether it is directly declared or discovered transitively.
+`diagnostics` reports dependency discovery failures with their reference
+owners. A missing local module that prevents evaluation yields a partial
+inventory with `definitionEvaluated: false`.
+
+Build receipts under the default recipe cache or `--recipe-cache` identify
+historical cache payloads and published exports for the definition.
+`--render-report` adds an export reference from a saved render result.
+An `export` role means the current file matched a recorded fingerprint.
+Missing, replaced, or otherwise unverifiable files are marked
+`unverified-export` for that reference.
+Repeat `--artifact-root` to inventory other directories and recognize
+OpenCut cache receipts and their payloads. Files without known provenance
+are `unclassified`. The scan leaves cache and project files untouched.
+
 ## Reuse picture between exports
 
 ```sh
@@ -31,7 +156,7 @@ opencut render edit.video.ts --picture-cache ./render-cache -o revision.mp4
 ```
 
 The picture cache uses the FFV1 encoder in FFmpeg to store lossless composited
-picture on the project frame grid. Shots, overlays, subtitles and transitions
+picture in color-tagged Matroska on the project frame grid. Shots, overlays, subtitles and transitions
 set the range boundaries. A range can move to a different timeline frame and
 reuse its picture if its source samples and visual layers stay the same.
 Edits to visual sources, framing, grades, captions and transitions rebuild
@@ -46,8 +171,9 @@ interpolation.
 
 Render prints `Picture [start, end): reused` or `rendered` for each range.
 With `--json`, `pictureRanges` contains `startFrame`, `endFrame` and `status`.
-Ranges use zero-based project frames with an exclusive end, even when the
-output frame rate differs.
+Reports include `pictureFrameRate` and `pictureStartFrame` whenever ranges
+are present, including bounded rendering without a persistent cache. Ranges
+use zero-based project frames with an exclusive end.
 
 Use a private local cache directory with room for lossless video. Cache files
 are kept under `picture-v1` until removed. Stop active renders before clearing
@@ -273,9 +399,11 @@ in a common ancestor. The package collects declared media and fonts, static
 relative imports (including type imports), and computed imports run for
 the selected composition. Supply `--resource` once per additional local
 authoring file, such as a subtitle file read directly with Node. Resource
-paths are relative to the project root. Files required only by other
-parameter selections or arbitrary filesystem reads are not inferred. Unresolved
-relative imports, escaping paths, symlinks, and destination collisions fail.
+paths are relative to the project root. Use relative imports for project
+modules in a bundle, including modules normally loaded through Node `#`
+aliases. Files required only by other parameter selections or arbitrary
+filesystem reads are not inferred. Unresolved relative imports, escaping
+paths, symlinks, and destination collisions fail.
 
 The `opencut-package.json` manifest records input hashes, payload bytes,
 recipes, toolchain and native backend requirements. `package verify` checks

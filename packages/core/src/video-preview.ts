@@ -16,6 +16,7 @@ import type { FrameRate, RationalTime } from './time.js';
 import type { CompiledVideo } from './video-compiler.js';
 import { openAudioMixCache } from './video-audio-mix.js';
 import { describeMusicComparison } from './music-comparison.js';
+import { inspectTimelineFraming } from './timeline-framing.js';
 import { withRenderSources } from './render-sources.js';
 
 export type PreviewPosition = number | RationalTime;
@@ -32,6 +33,14 @@ function previewFrameIndex(position: PreviewPosition, rate: FrameRate): number {
   return Number(
     (BigInt(numerator) * BigInt(rate.numerator)) /
       (BigInt(denominator) * BigInt(rate.denominator)),
+  );
+}
+
+export function evenlySpacedFrames(start: number, end: number, count: number) {
+  if (count === 1) return [start];
+  return Array.from(
+    { length: count },
+    (_, i) => start + Math.floor(((end - start - 1) * i) / (count - 1)),
   );
 }
 
@@ -63,6 +72,8 @@ export function previewVideo(video: CompiledVideo) {
     inspect: () => inspectProject(project, path),
     inspectFrame: (position: PreviewPosition) =>
       inspectTimeline(project, path, previewFrameIndex(position, frameRate)),
+    inspectFraming: (report: ReturnType<typeof inspectTimeline>) =>
+      inspectTimelineFraming(video, report),
     async frame(
       position: PreviewPosition,
       output: string,
@@ -94,14 +105,18 @@ export function previewVideo(video: CompiledVideo) {
     async contactSheet(
       selection: VideoPreviewRange,
       output: string,
-      options: VideoPreviewOptions & { count?: number; columns?: number } = {},
+      options: VideoPreviewOptions & {
+        count?: number;
+        columns?: number;
+        frames?: number[];
+      } = {},
     ) {
       const { startFrame, endFrame } = range(
         selection.startFrame ?? 0,
         selection.endFrame ?? frameCount,
       );
       const {
-        count = Math.min(8, endFrame - startFrame),
+        count = options.frames?.length ?? Math.min(8, endFrame - startFrame),
         columns = Math.min(4, count),
         signal,
         maxDimension,
@@ -113,19 +128,19 @@ export function previewVideo(video: CompiledVideo) {
         count > Math.min(16, endFrame - startFrame) ||
         !Number.isSafeInteger(columns) ||
         columns < 1 ||
-        columns > count
+        columns > count ||
+        options.frames?.some(
+          (frame) =>
+            !Number.isSafeInteger(frame) ||
+            frame < startFrame ||
+            frame >= endFrame,
+        )
       )
         throw new VideoPreviewRangeError(
           'Contact sheets require 1–16 samples within the range and 1–sample-count columns.',
         );
-      const frames = Array.from(
-        { length: count },
-        (_, i) =>
-          startFrame +
-          (count === 1
-            ? 0
-            : Math.floor(((endFrame - startFrame - 1) * i) / (count - 1))),
-      );
+      const frames =
+        options.frames ?? evenlySpacedFrames(startFrame, endFrame, count);
       const revision = await video.forQuality(quality, true, signal);
       const result = await withRenderSources(revision, signal, (plan) =>
         renderContactSheet(

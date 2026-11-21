@@ -111,6 +111,7 @@ export async function decodeStillFrame(
   timestamp: number | { numerator: bigint; denominator: bigint },
   fullSize: boolean,
   signal?: AbortSignal,
+  preserveSourcePixels = false,
 ): Promise<Buffer> {
   const video = source.video;
   const exact = typeof timestamp === 'number' ? undefined : timestamp;
@@ -216,7 +217,10 @@ export async function decodeStillFrame(
       '-map',
       `0:${video.index}`,
       '-vf',
-      `scale=${fullSize ? "w='min(3840,iw*sar)':h='min(3840,ih)'" : '640:360'}:force_original_aspect_ratio=decrease:force_divisible_by=2:reset_sar=1:in_color_matrix=${sourceColorMatrix(video.colorSpace, video.width ?? 0, video.height ?? 0, video.codec)}`,
+      (preserveSourcePixels
+        ? 'scale='
+        : `scale=${fullSize ? "w='min(3840,iw*sar)':h='min(3840,ih)'" : '640:360'}:force_original_aspect_ratio=decrease:force_divisible_by=2:reset_sar=1:`) +
+        `in_color_matrix=${sourceColorMatrix(video.colorSpace, video.width ?? 0, video.height ?? 0, video.codec)}`,
       '-frames:v',
       '1',
       '-threads',

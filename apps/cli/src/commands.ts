@@ -32,6 +32,12 @@ const optionTypes = {
   'temp-bytes': { type: 'string' },
   'memory-bytes': { type: 'string' },
   timestamp: { type: 'string' },
+  frames: { type: 'string' },
+  timestamps: { type: 'string' },
+  around: { type: 'string' },
+  definition: { type: 'string' },
+  'render-report': { type: 'string' },
+  'artifact-root': { type: 'string', multiple: true },
   frame: { type: 'string' },
   from: { type: 'string' },
   to: { type: 'string' },
@@ -90,6 +96,10 @@ const commands = {
   inspect: {
     args: `${definition} ${params}`,
     options: ['params', ...Object.keys(processingOptionTypes)],
+  },
+  'inspect dependencies': {
+    args: `${definition} [--artifact-root <directory> ...] [--render-report <report.json>] [--recipe-cache <directory>] ${params}`,
+    options: ['artifact-root', 'render-report', 'recipe-cache', 'params'],
   },
   'recipes inspect': {
     args: `${definition} ${qualityOption} ${params}`,
@@ -159,8 +169,13 @@ const commands = {
     ],
   },
   'preview contact-sheet': {
-    args: `${definition} --output <new.png> [--from <n>] [--to <n>] [--count <1..16>] [--columns <1..16>] [--size <64..640>] ${qualityOption} ${params}`,
+    args: `<definition.video.ts|export.mp4> --output <new.png> [--frames <n,n>] [--timestamps <time,time>] [--around <cuts,captions,picture>] [--definition <definition.video.ts>] [--render-report <report.json>] [--from <n>] [--to <n>] [--count <1..16>] [--columns <1..16>] [--size <64..640>] ${qualityOption} ${params}`,
     options: [
+      'frames',
+      'timestamps',
+      'around',
+      'definition',
+      'render-report',
       'from',
       'to',
       'output',

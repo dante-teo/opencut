@@ -30,6 +30,10 @@ async function run(args: string[]) {
       const { runBuildCommand } = await import('./video-build.js');
       return runBuildCommand(command, file, values);
     }
+    case 'inspect dependencies': {
+      const { runDependencies } = await import('./dependencies.js');
+      return runDependencies(file, values);
+    }
     case 'recipes inspect':
     case 'recipes validate':
     case 'validate':
@@ -46,10 +50,13 @@ async function run(args: string[]) {
     case 'preview':
     case 'timeline inspect':
     case 'preview frame':
-    case 'preview clip':
-    case 'preview contact-sheet': {
+    case 'preview clip': {
       const { runInspectionCommand } = await import('./inspection.js');
       return runInspectionCommand(command, file, values);
+    }
+    case 'preview contact-sheet': {
+      const { runContactSheet } = await import('./contact-sheet.js');
+      return runContactSheet(file, values);
     }
     case 'probe':
     case 'extract-frame':

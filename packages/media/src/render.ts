@@ -41,10 +41,17 @@ import { probeMedia, isStillImage, videoSourceDuration } from './probe.js';
 import type { MediaMetadata } from './probe.js';
 import { checkRenderSignal, MediaError, runMediaTool } from './process.js';
 import { accountRenderBytes, accountRenderFile } from './render-budget.js';
-import { renderQualities, renderQualityProfiles } from '@opencut/shared';
+import { renderQualities } from '@opencut/shared';
 import type { RenderQuality } from '@opencut/shared';
 import { renderProgress } from './render-progress.js';
 import type { RenderProgress } from './render-progress.js';
+import { encoderArguments, selectRenderEncoder } from './render-encoder.js';
+import type { RenderEncoder, RenderEncoderReport } from './render-encoder.js';
+import {
+  orientedSource,
+  resolveSourceWindow,
+  sourceWindowFilter,
+} from './source-window.js';
 import { fitVisual, indexedSeekArgs } from './video-filter.js';
 import { pictureSeekCheck } from './picture-seek.js';
 import { stageTransformLayer } from './transform-layer.js';
@@ -73,6 +80,7 @@ import type { VisualGroup } from '@opencut/shared';
 
 interface VisualTimelineProperties {
   trackId?: string;
+  sourceWindow?: import('@opencut/shared').SourceWindow;
   crop?: NonNullable<import('@opencut/shared').VisualTransform['crop']>;
   grade?: import('@opencut/shared').ColorGrade;
   clipId: string;
@@ -123,12 +131,32 @@ export const renderCodecs = ['h264', 'hevc'] as const;
 export type RenderCodec = (typeof renderCodecs)[number];
 export type RenderResolution = (typeof renderResolutions)[number];
 const maxDeliveryPixels = 2880 * 3840;
+const pictureColor = {
+  colorRange: 'tv',
+  colorSpace: 'bt709',
+  colorPrimaries: 'bt709',
+  colorTransfer: 'bt709',
+} as const;
+/** Composition surfaces are full-range RGB. Convert once before caching or delivery. */
+const deliveryColorFilter =
+  'format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709';
+const deliveryColorArgs = [
+  '-color_range',
+  pictureColor.colorRange,
+  '-colorspace',
+  pictureColor.colorSpace,
+  '-color_primaries',
+  pictureColor.colorPrimaries,
+  '-color_trc',
+  pictureColor.colorTransfer,
+];
 export interface RenderControls {
   /** Trim the finished composition on the project grid; end is exclusive. */
   range?: { startFrame: number; endFrame: number } | undefined;
   /** Preview-only downscale of the finished canvas, never individual layers. */
   maxDimension?: number | undefined;
   codec?: RenderCodec | undefined;
+  encoder?: RenderEncoder | undefined;
   /** Resample the finished composition; source selection stays on the project grid. */
   outputFrameRate?: { numerator: number; denominator: number } | undefined;
   quality?: RenderQuality | undefined;
@@ -198,6 +226,7 @@ export interface VideoTimelineOptions extends RenderControls {
 
 export interface VideoTimelineResult {
   codec: RenderCodec;
+  encoder: RenderEncoderReport;
   quality: RenderQuality;
   resolution: RenderResolution;
   path: string;
@@ -209,6 +238,8 @@ export interface VideoTimelineResult {
   metadata: MediaMetadata;
   warnings?: string[];
   pictureRanges?: PictureRange[];
+  pictureFrameRate?: VideoTimelineOptions['frameRate'];
+  pictureStartFrame?: number;
   pictureVersion?: { id: string; status: 'saved' | 'reused' };
   audioMix?: AudioMixReport;
   musicLoudness?: MusicLoudnessReport;
@@ -277,6 +308,8 @@ function validateOptions(options: VideoTimelineOptions): void {
             !Number.isSafeInteger(clip.sourceStartFrame + clip.frameCount) ||
             !Number.isSafeInteger(clip.timelineStartFrame + clip.frameCount) ||
             clip.timelineStartFrame + clip.frameCount > frameCount ||
+            (clip.sourceWindow !== undefined &&
+              (clip.fit === undefined || !!clip.text || !!clip.graphic)) ||
             !Number.isFinite(clip.x ?? 0) ||
             Math.abs(clip.x ?? 0) > 32768 ||
             !Number.isFinite(clip.y ?? 0) ||
@@ -499,6 +532,7 @@ async function prepareTimeline(
   mode: 'mp4' | 'png' | 'picture' = 'mp4',
   scratch?: ReturnType<typeof renderScratch>,
   checkPictureSeek?: ReturnType<typeof pictureSeekCheck>,
+  onPictureRange?: (endFrame: number) => void,
 ) {
   const png = mode === 'png';
   checkRenderSignal(options.signal);
@@ -512,7 +546,6 @@ async function prepareTimeline(
     !renderResolutions.includes(resolution)
   )
     throw new MediaError('Unknown render codec, quality or resolution preset.');
-  const { encoding } = renderQualityProfiles[quality];
   const { width, height, frameRate, frameCount } = options;
   const { outputSize, videoBitrateKbps } = options;
   const audioBitrateKbps = options.audioBitrateKbps ?? 192;
@@ -672,13 +705,29 @@ async function prepareTimeline(
       `Delivery scales the ${width}×${height} composed picture to ${outputWidth}×${outputHeight} with FFmpeg. AI super-resolution only applies to sources with an explicit recipe.`,
     );
   const stagedInputs: StagedInput[] = [];
-  const encoders = new Set([codec === 'h264' ? 'libx264' : 'libx265', 'aac']);
+  const encoder =
+    mode === 'mp4'
+      ? await selectRenderEncoder(
+          options.encoder,
+          {
+            codec,
+            quality,
+            width: outputWidth,
+            height: outputHeight,
+            rate: outputRate,
+            bitrate: videoBitrateKbps,
+          },
+          options.signal,
+        )
+      : undefined;
+  const encoders = new Set(encoder ? [encoder.name, 'aac'] : []);
   const prepared = {
     args,
     path,
     quality,
     resolution,
     codec,
+    encoder,
     outputWidth,
     outputHeight,
     frameRate: outputRate,
@@ -795,7 +844,7 @@ async function prepareTimeline(
           },
           async materialize(_key, encode) {
             const directory = await scratch.open();
-            const path = join(directory, `picture-${segmentId++}.nut`);
+            const path = join(directory, `picture-${segmentId++}.mkv`);
             await encode(path);
             scratchBytes += (await stat(path)).size;
             await accountRenderFile(path);
@@ -872,13 +921,22 @@ async function prepareTimeline(
       const layerInput = registerInput(
         `${scratchName}.nut`,
         async (destination) => {
+          const captureFrames = hold ? 1 : layerFrames;
+          const graphicProgress =
+            source.kind === 'graphic' && options.onProgress
+              ? renderProgress(captureFrames, options.onProgress, {
+                  stage: 'graphics',
+                  clipId: clip.clipId,
+                })
+              : undefined;
+          graphicProgress?.start();
           await stageTransformLayer(
             {
               width,
               height,
               rate: frameRate,
               startFrame: layerStart,
-              frameCount: hold ? 1 : layerFrames,
+              frameCount: captureFrames,
               visual: clip,
               ...(clip.grade && { grade: clip.grade }),
               source,
@@ -888,6 +946,7 @@ async function prepareTimeline(
             },
             destination,
           );
+          graphicProgress?.update(captureFrames);
           await accountRenderFile(destination);
         },
       );
@@ -977,6 +1036,7 @@ async function prepareTimeline(
         await realpath(frozenSource),
         video.index,
         timestamp,
+        !!clip.sourceWindow,
       ]);
       held = heldFrames.get(key);
       if (!held) {
@@ -985,6 +1045,7 @@ async function prepareTimeline(
           timestamp,
           true,
           options.signal,
+          !!clip.sourceWindow,
         );
         // Preflight checks decoding and geometry without creating files.
         const path = scratch
@@ -1002,17 +1063,25 @@ async function prepareTimeline(
         heldFrames.set(key, held);
       }
     }
-    // A held PNG already has square pixels and its display orientation.
-    const rotated = !held && Math.abs(video.rotation ?? 0) % 180 === 90;
-    const pixelWidth = held?.width ?? video.width ?? width;
-    const pixelHeight = held?.height ?? video.height ?? height;
-    const displayWidth =
-      pixelWidth * (held ? 1 : (video.sampleAspectRatio ?? 1));
-    const displayHeight = pixelHeight;
+    const oriented = orientedSource(video);
+    const physical = held
+      ? { ...held, sar: clip.sourceWindow ? oriented.sar : 1 }
+      : {
+          width: oriented.width || width,
+          height: oriented.height || height,
+          sar: oriented.sar,
+        };
+    const region = resolveSourceWindow(
+      physical,
+      clip.clipId,
+      clip.sourceWindow,
+    );
+    const displayWidth = region.width * physical.sar;
+    const displayHeight = region.height;
     const stream = held ? 0 : video.index;
     // Follow the same RGB conversion as the existing media pipeline.
     const matrix = held
-      ? sourceColorMatrix(null, pixelWidth, pixelHeight, 'png')
+      ? sourceColorMatrix(null, physical.width, physical.height, 'png')
       : sourceColorMatrix(
           video.colorSpace,
           video.width ?? 0,
@@ -1088,12 +1157,11 @@ async function prepareTimeline(
         kind: 'media',
         path: inputPath,
         stream,
-        width: rotated ? pixelHeight : pixelWidth,
-        height: rotated ? pixelWidth : pixelHeight,
-        aspect: rotated
-          ? displayHeight / displayWidth
-          : displayWidth / displayHeight,
+        width: region.width,
+        height: region.height,
+        aspect: displayWidth / displayHeight,
         matrix,
+        ...(clip.sourceWindow && { window: clip.sourceWindow }),
         ...(!still && {
           sampling: {
             filter: sampling,
@@ -1110,8 +1178,8 @@ async function prepareTimeline(
     const geometry = visualGeometry(
       width,
       height,
-      rotated ? displayHeight : displayWidth,
-      rotated ? displayWidth : displayHeight,
+      displayWidth,
+      displayHeight,
       clip,
     );
     if (useIndexedSeek && !args.includes('-copyts')) args.push('-copyts');
@@ -1125,6 +1193,9 @@ async function prepareTimeline(
     if (!held) inputs.set(clip.clipId, input);
     filters.push(
       `[${input++}:${stream}]${sampling},` +
+        (clip.sourceWindow
+          ? sourceWindowFilter(clip.sourceWindow, matrix) + ','
+          : '') +
         `${fitVisual(geometry, matrix)},format=rgba,` +
         ((clip.opacity ?? 1) === 1 ? '' : `lut=a=val*${clip.opacity},`) +
         `settb=1/${numerator},setpts=(N+${layerStart})*${denominator}[${label}]`,
@@ -1309,7 +1380,12 @@ async function prepareTimeline(
     }
   }
   completeGroup();
-  let picture = `[${canvas}]settb=1/${numerator},setpts=N*${denominator},scale=${outputWidth}:${outputHeight}:out_color_matrix=bt709,setsar=1`;
+  const scale = `scale=${outputWidth}:${outputHeight}`;
+  let picture =
+    `[${canvas}]settb=1/${numerator},setpts=N*${denominator},` +
+    (png
+      ? `${scale},setsar=1,format=rgb24`
+      : `${scale}:in_range=pc:out_range=tv:out_color_matrix=bt709,setsar=1,${deliveryColorFilter}`);
   let videoMap = '[video]';
   if (pictureCache) {
     const planned = temporaryPictureCache
@@ -1329,8 +1405,8 @@ async function prepareTimeline(
     if (pictureVersion && encodedCache) {
       const key = encodedPictureKey(planned, [
         codec,
-        quality,
-        videoBitrateKbps,
+        encoder!.name,
+        encoder!.settings,
         outputRate,
         options.outputFrameRate !== undefined,
         outputFrameCount,
@@ -1358,6 +1434,7 @@ async function prepareTimeline(
           endFrame,
           status: 'reused',
         }));
+        onPictureRange?.(endFrame);
         args.push('-i', cached);
         videoMap = `${input++}:v:0`;
       }
@@ -1407,8 +1484,9 @@ async function prepareTimeline(
             await staging.close();
           }
         },
+        onPictureRange,
       );
-      if (!temporaryPictureCache) prepared.pictureRanges = ranges;
+      prepared.pictureRanges = ranges;
       args.push('-f', 'concat', '-safe', '0', '-protocol_whitelist', 'file');
       const pictureInput = registerInput('picture.ffconcat', (destination) =>
         writeFile(destination, concat, {
@@ -1416,21 +1494,21 @@ async function prepareTimeline(
           signal: options.signal,
         }),
       );
-      // Concat transports pictures in order. Regenerate their timestamps on the
-      // project grid so container time bases and range boundaries cannot accrue drift.
-      picture = `[${pictureInput}:v]settb=1/${numerator},setpts=N*${denominator},setsar=1`;
+      // Regenerate timestamps and duration on the exact project grid. Matroska
+      // rounds each packet duration to milliseconds, including the last frame.
+      picture =
+        `[${pictureInput}:v]settb=1/${numerator},setpts=N*${denominator},` +
+        `fps=${rate}:round=near:eof_action=pass,setsar=1,` +
+        deliveryColorFilter;
     }
   }
   if (!prepared.sourcePicture)
     filters.push(
       picture +
-        ',' +
         (options.outputFrameRate
-          ? `fps=${outputRate.numerator}/${outputRate.denominator}:round=up:eof_action=pass,tpad=stop_mode=clone:stop=1,trim=end_frame=${outputFrameCount},settb=1/${outputRate.numerator},setpts=N*${outputRate.denominator},`
+          ? `,fps=${outputRate.numerator}/${outputRate.denominator}:round=up:eof_action=pass,tpad=stop_mode=clone:stop=1,trim=end_frame=${outputFrameCount},settb=1/${outputRate.numerator},setpts=N*${outputRate.denominator}`
           : '') +
-        (png
-          ? 'format=rgb24[video]'
-          : 'format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709[video]'),
+        '[video]',
     );
   if (mode !== 'mp4') {
     args.push(
@@ -1468,8 +1546,9 @@ async function prepareTimeline(
         'passthrough',
         '-enc_time_base:v',
         `1/${numerator}`,
+        ...deliveryColorArgs,
         '-f',
-        'nut',
+        'matroska',
       );
     return prepared;
   }
@@ -1563,30 +1642,13 @@ async function prepareTimeline(
     ...(prepared.sourcePicture
       ? ['-c:v', 'copy']
       : [
-          '-c:v',
-          codec === 'h264' ? 'libx264' : 'libx265',
-          '-preset',
-          encoding.preset,
-          ...(videoBitrateKbps === undefined
-            ? ['-crf', encoding.crf]
-            : ['-b:v', `${videoBitrateKbps}k`]),
-          ...(codec === 'hevc'
-            ? ['-x265-params', 'pools=2:log-level=error', '-tag:v', 'hvc1']
-            : []),
-          '-pix_fmt',
-          'yuv420p',
-          '-threads',
-          '2',
+          ...encoderArguments(encoder!),
+          ...(codec === 'hevc' ? ['-tag:v', 'hvc1'] : []),
           '-fps_mode',
           'passthrough',
           '-enc_time_base:v',
           `1/${outputRate.numerator}`,
-          '-colorspace',
-          'bt709',
-          '-color_primaries',
-          'bt709',
-          '-color_trc',
-          'bt709',
+          ...deliveryColorArgs,
         ]),
     '-video_track_timescale',
     String(outputRate.numerator),
@@ -1635,6 +1697,7 @@ export async function validateVideoTimeline(options: VideoTimelineOptions) {
     frameCount: prepared.frameCount,
     durationSeconds: prepared.durationSeconds,
     codec: prepared.codec,
+    encoder: prepared.encoder!,
   };
 }
 
@@ -1690,7 +1753,23 @@ export async function renderVideoTimeline(
     options.scratchDirectory,
   );
   try {
-    const prepared = await prepareTimeline(options, 'mp4', scratch);
+    checkRenderSignal(options.signal);
+    const startFrame = options.range?.startFrame ?? 0;
+    const pictureFrames =
+      (options.range?.endFrame ?? options.frameCount) - startFrame;
+    const composition = renderProgress(
+      Math.max(1, pictureFrames),
+      options.onProgress,
+      { stage: 'composition' },
+    );
+    composition.start();
+    const prepared = await prepareTimeline(
+      options,
+      'mp4',
+      scratch,
+      undefined,
+      (endFrame) => composition.update(endFrame - startFrame),
+    );
     await scratch.stage(prepared, options.signal);
     const {
       args,
@@ -1718,12 +1797,14 @@ export async function renderVideoTimeline(
     ];
     const rendered = join(await scratch.open(), 'render.mp4');
     args.push(rendered);
-    const progress = renderProgress(frameCount, options.onProgress);
-    progress.start();
+    const progress = renderProgress(frameCount, options.onProgress, {
+      stage: 'encoding',
+    });
+    if (!prepared.sourcePicture) progress.start();
     checkRenderSignal(options.signal);
     await runMediaTool('ffmpeg', args, 4 * 1024 * 1024, 600_000, {
       signal: options.signal,
-      onStdout: progress.chunk,
+      ...(prepared.sourcePicture ? {} : { onStdout: progress.chunk }),
       writesFile: true,
       stage: `encoding ${outputWidth}×${outputHeight} MP4 '${path}' at ${numerator}/${denominator} fps`,
     }).catch((cause: unknown) => {
@@ -1740,6 +1821,7 @@ export async function renderVideoTimeline(
     });
     await accountRenderFile(rendered);
     checkRenderSignal(options.signal);
+    if (!prepared.pictureRanges) composition.update(pictureFrames);
     progress.verifying();
     const metadata = await probeMedia(rendered, options.signal, {
       stage: 'verifying encoded MP4',
@@ -1772,6 +1854,10 @@ export async function renderVideoTimeline(
     };
     if (
       video?.codec !== codec ||
+      video.colorRange !== pictureColor.colorRange ||
+      video.colorSpace !== pictureColor.colorSpace ||
+      video.colorPrimaries !== pictureColor.colorPrimaries ||
+      video.colorTransfer !== pictureColor.colorTransfer ||
       metadata.streams.length !== 2 ||
       metadata.audio?.codec !== 'aac' ||
       metadata.audio.sampleRate !== (options.audioSampleRate ?? 48000) ||
@@ -1790,7 +1876,9 @@ export async function renderVideoTimeline(
       Number(counted.streams?.[0]?.nb_read_frames) !== frameCount
     )
       throw new MediaError(
-        'Render verification failed: unexpected codec, dimensions, frame rate, duration or decoded frame count. Check source decodability and trim ranges.',
+        `Render verification failed. Expected ${codec} ${outputWidth}×${outputHeight} BT.709 limited range, ${numerator}/${denominator} fps, ${frameCount} frames and ${durationSeconds}s with AAC ${options.audioSampleRate ?? 48000} Hz /${options.audioChannels ?? 2} channels. ` +
+          `Decoded ${video?.codec} ${video?.width}×${video?.height}, ${video?.colorSpace}/${video?.colorPrimaries}/${video?.colorTransfer}/${video?.colorRange}, ${video?.frameRateRatio} fps, ${counted.streams?.[0]?.nb_read_frames} frames, video ${video?.durationSeconds}s, audio ${metadata.audio?.durationSeconds}s ${metadata.audio?.codec} ${metadata.audio?.sampleRate} Hz /${metadata.audio?.channels} channels, container ${metadata.durationSeconds}s. ` +
+          'Check source decodability and trim ranges.',
       );
     checkRenderSignal(options.signal);
     let picture = prepared.sourcePicture;
@@ -1834,6 +1922,7 @@ export async function renderVideoTimeline(
       path,
       quality,
       codec,
+      encoder: prepared.encoder!,
       resolution,
       width: outputWidth,
       height: outputHeight,
@@ -1842,7 +1931,11 @@ export async function renderVideoTimeline(
       durationSeconds,
       metadata: { ...metadata, path },
       ...(warnings.length ? { warnings } : {}),
-      ...(prepared.pictureRanges && { pictureRanges: prepared.pictureRanges }),
+      ...(prepared.pictureRanges && {
+        pictureRanges: prepared.pictureRanges,
+        pictureFrameRate: options.frameRate,
+        pictureStartFrame: startFrame,
+      }),
       ...(picture && {
         pictureVersion: { id: picture.id, status: picture.status },
       }),

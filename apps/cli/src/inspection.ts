@@ -49,11 +49,7 @@ function printWatchStatus(
 }
 
 type InspectionCommand =
-  | 'preview'
-  | 'timeline inspect'
-  | 'preview frame'
-  | 'preview contact-sheet'
-  | 'preview clip';
+  'preview' | 'timeline inspect' | 'preview frame' | 'preview clip';
 
 export async function runInspectionCommand(
   command: InspectionCommand,
@@ -102,12 +98,8 @@ export async function runInspectionCommand(
     )
   )
     throw new UsageError(`Usage: ${commandUsage(command)}`);
-  const integer = (
-    key: 'frame' | 'from' | 'to' | 'size' | 'count' | 'columns',
-    fallback?: number,
-  ): number => {
+  const integer = (key: 'frame' | 'from' | 'to' | 'size'): number => {
     const value = values[key];
-    if (value === undefined && fallback !== undefined) return fallback;
     if (
       value === undefined ||
       !/^\d+$/.test(value) ||
@@ -133,7 +125,6 @@ export async function runInspectionCommand(
     selectedFrame = integer('frame');
   }
   const preview = command !== 'timeline inspect';
-  const sheet = command === 'preview contact-sheet';
   if (
     preview &&
     (!values.output ||
@@ -143,16 +134,13 @@ export async function runInspectionCommand(
   )
     throw new UsageError(`Usage: ${commandUsage(command)}`);
   const size = values.size === undefined ? undefined : integer('size');
-  if (size !== undefined && (size < 64 || size > (sheet ? 640 : 1920)))
-    throw new UsageError(
-      `--size must be between 64 and ${sheet ? 640 : 1920}.`,
-    );
+  if (size !== undefined && (size < 64 || size > 1920))
+    throw new UsageError('--size must be between 64 and 1920.');
   // Validate required ranges before file access, like other CLI argument errors.
-  const requestedFrom =
-    sheet || command === 'preview clip'
-      ? integer('from', sheet ? 0 : undefined)
+  const range =
+    command === 'preview clip'
+      ? { startFrame: integer('from'), endFrame: integer('to') }
       : undefined;
-  const requestedTo = command === 'preview clip' ? integer('to') : undefined;
   await withCommandCancellation(async (signal) => {
     const { audioMixEdit, musicSelection, ...mixControls } =
       await readMixControls(values, signal);
@@ -167,7 +155,9 @@ export async function runInspectionCommand(
     });
     const tools = previewVideo(video);
     if (command === 'timeline inspect') {
-      const report = tools.inspectFrame(selectedFrame!);
+      const report = await tools.inspectFraming(
+        tools.inspectFrame(selectedFrame!),
+      );
       const graphics = await inspectGraphicFrames(video, report.frame);
       console.log(
         JSON.stringify(
@@ -179,29 +169,19 @@ export async function runInspectionCommand(
       return;
     }
     const options = { signal, maxDimension: size, quality };
-    const startFrame = requestedFrom ?? 0;
-    const endFrame = requestedTo ?? integer('to', tools.frameCount);
     const result =
       command === 'preview frame'
         ? await tools.frame(selectedFrame!, values.output!, options)
-        : sheet
-          ? await tools.contactSheet({ startFrame, endFrame }, values.output!, {
-              ...options,
-              ...(values.count !== undefined && { count: integer('count') }),
-              ...(values.columns !== undefined && {
-                columns: integer('columns'),
-              }),
-            })
-          : await tools.clip({ startFrame, endFrame }, values.output!, {
-              ...options,
-              ...mixControls,
-              onProgress: (progress) =>
-                process.stderr.write(
-                  values.json
-                    ? `${JSON.stringify(progress)}\n`
-                    : `${progress.phase}: ${progress.percent.toFixed(1)}%\n`,
-                ),
-            });
+        : await tools.clip(range!, values.output!, {
+            ...options,
+            ...mixControls,
+            onProgress: (progress) =>
+              process.stderr.write(
+                values.json
+                  ? `${JSON.stringify(progress)}\n`
+                  : `${progress.phase}: ${progress.percent.toFixed(1)}%\n`,
+              ),
+          });
     console.log(JSON.stringify(result, null, 2));
   }).catch((error: unknown) => {
     if (error instanceof VideoPreviewRangeError)

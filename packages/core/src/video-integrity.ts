@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { open, rename, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { z } from 'zod';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileIdentity, videoInputIdentity } from './video-input.js';
 
@@ -10,6 +11,19 @@ export const hashJson = (value: unknown) =>
 
 export function missing(error: unknown) {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
+export const fileFingerprintSchema = z.object({
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  bytes: z.int().nonnegative(),
+});
+export type FileFingerprint = z.infer<typeof fileFingerprintSchema>;
+
+export function matchesFingerprint(
+  actual: FileFingerprint | undefined,
+  expected: FileFingerprint,
+) {
+  return actual?.bytes === expected.bytes && actual.sha256 === expected.sha256;
 }
 
 export async function fingerprintFile(path: string, signal?: AbortSignal) {

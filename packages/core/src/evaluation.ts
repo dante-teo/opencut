@@ -22,11 +22,14 @@ interface ResolvedClipProperties extends TimelineClip {
     [
       Key in Exclude<
         keyof NonNullable<TimelineClip['visual']>,
-        'rotation' | 'crop'
+        'rotation' | 'crop' | 'sourceWindow'
       >
     ]-?: NonNullable<NonNullable<TimelineClip['visual']>[Key]>;
   } & {
     rotation?: number;
+    sourceWindow?: NonNullable<
+      NonNullable<TimelineClip['visual']>['sourceWindow']
+    >;
     crop?: NonNullable<NonNullable<TimelineClip['visual']>['crop']>;
   };
   volume: number;
@@ -99,6 +102,9 @@ export function resolveTimeline(project: Project) {
             scale: clip.visual?.scale ?? visualDefaults.scale,
             opacity: clip.visual?.opacity ?? visualDefaults.opacity,
             fit: clip.visual?.fit ?? 'contain',
+            ...(clip.visual?.sourceWindow && {
+              sourceWindow: clip.visual.sourceWindow,
+            }),
             ...(clip.visual?.crop && { crop: clip.visual.crop }),
             ...(clip.visual?.rotation !== undefined && {
               rotation: clip.visual.rotation,

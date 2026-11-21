@@ -129,6 +129,7 @@ export async function planPictureRanges({
             clip.rotation,
             clip.fit,
             clip.crop,
+            clip.sourceWindow,
             clip.grade,
             animation?.keyframes,
             ...(animation && !text ? ['subpixel-transforms'] : []),
@@ -183,6 +184,7 @@ export async function planPictureRanges({
   const edges = [...boundaries].sort((a, b) => a - b);
   const ranges: { key: string; startFrame: number; endFrame: number }[] = [];
   const settings = [
+    'ffv1-matroska-limited-bt709-v1',
     cache.backend,
     width,
     height,
@@ -307,6 +309,7 @@ export async function cachePicture(
     endFrame: number,
     destination: string,
   ) => Promise<void>,
+  onRange?: (endFrame: number) => void,
 ) {
   let concat = '';
   const ranges: PictureRange[] = [];
@@ -353,6 +356,7 @@ export async function cachePicture(
       endFrame: end,
       status: reused ? 'reused' : 'rendered',
     });
+    onRange?.(end);
   }
   return { concat, ranges };
 }

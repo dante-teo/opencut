@@ -183,7 +183,7 @@ export function graphicLayer(
 const maxFileBytes = 32 * 1024 * 1024;
 const maxGraphBytes = 64 * 1024 * 1024;
 
-async function compileGraphic(
+export async function compileGraphic(
   id: string,
   definition: GraphicAssetDefinition,
   definitionPath: string,

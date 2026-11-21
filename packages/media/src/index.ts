@@ -8,6 +8,7 @@ export {
   videoSourceDuration,
   audioSourceDuration,
 } from './probe.js';
+export { orientedSource, resolveSourceWindow } from './source-window.js';
 export { decodeStillFrame, extractFrame } from './frame.js';
 export {
   inspectDialogueModel,
@@ -52,8 +53,11 @@ export type {
   GraphicLayer,
   GraphicBundle,
 } from './graphics.js';
+export { renderEncoders } from './render-encoder.js';
+export type { RenderEncoder, RenderEncoderReport } from './render-encoder.js';
 export type { RenderProgress } from './render-progress.js';
-export { renderContactSheet } from './contact-sheet.js';
+export { renderContactSheet, renderMp4ContactSheet } from './contact-sheet.js';
+export { readMp4FrameIndex } from './media-frame-index.js';
 export { rasterizeTextLayer, validateEmbeddedFont } from './text.js';
 export type { TextRaster } from './text.js';
 export { runRecipeProcess, recipeBackendVersion } from './recipe-process.js';

@@ -23,7 +23,12 @@ const preview = previewVideo(video);
 await preview.frame(30, 'review.png');
 await renderCompiledVideo(video, 'delivery.mp4', {
   quality: 'maximum',
-  onProgress: ({ percent }) => console.error(percent),
+  encoder: 'auto',
+  onProgress: ({ stage, percent }) => {
+    if (stage === 'encoding' || stage === 'verification') {
+      console.error(percent);
+    }
+  },
 });
 ```
 
@@ -32,6 +37,34 @@ A compiled render checks source identities before decoding or reusing
 picture. It copies media on first decode. If a source has changed, compile
 the definition again.
 Pass an `AbortSignal` to cancel a foreground render.
+
+`onProgress` reports frame counts and percentages within each `stage`.
+For a single encoding progress bar, use the `encoding` and `verification`
+events, as above. Graphic capture can report a separate 0–100% sequence for
+each `clipId`. Direct exports can compose and encode together, and reuse of
+saved picture packets skips encoding.
+
+Set `encoder` to `'auto'`, `'software'` or `'videotoolbox'`. The render
+result reports the selected encoder and its effective settings. OpenCut
+defaults to software and includes `encoder.fallbackReason` when `auto`
+selects software after a hardware probe failure. Checkpointed renders
+include `outputFingerprint` with the published MP4's byte count and SHA-256.
+See [encoder selection](CLI.md#encoder-selection-and-render-progress).
+
+To render an exact set of definition frames, pass `frames` to
+`previewVideo(video).contactSheet()`.
+
+```ts
+const sheet = await preview.contactSheet(
+  { startFrame: 29, endFrame: 32 },
+  'frames.png',
+  { frames: [29, 30, 31] },
+);
+console.log(sheet.samples);
+```
+
+Use the [CLI contact-sheet command](CLI.md#frame-targeted-contact-sheets) to
+sample a finished MP4 and write a JSON sidecar.
 
 Pass the same `pictureCacheDirectory` to `renderVideo` or
 `renderCompiledVideo` on the initial export and revisions. The result

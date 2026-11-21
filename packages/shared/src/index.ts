@@ -15,8 +15,16 @@ export const roomEchoes = [
   { seconds: 0.071, gain: 0.23 },
 ] as const;
 
+export interface SourceWindow {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /** Headless composition rules used by both FFmpeg and the browser preview. */
 export interface VisualTransform {
+  sourceWindow?: SourceWindow | undefined;
   crop?:
     { left: number; top: number; right: number; bottom: number } | undefined;
   x?: number | undefined;

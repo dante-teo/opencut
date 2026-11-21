@@ -12,6 +12,17 @@ export type {
   GraphicAssetDefinition,
   GraphicProps,
 } from './video-graphics-contract.js';
+export {
+  contactTimelineSchema,
+  describeProjectContactTimeline,
+  readDefinitionContactTimeline,
+} from './contact-timeline.js';
+export type { ContactTimeline } from './contact-timeline.js';
+export {
+  fileFingerprintSchema,
+  fingerprintFile,
+  matchesFingerprint,
+} from './video-integrity.js';
 export { inspectProject, inspectTimeline } from './inspection.js';
 export {
   parseSubtitles,
@@ -32,7 +43,11 @@ export {
 } from './video-files.js';
 export { VideoDefinitionError } from './video-definition.js';
 export type { CompiledVideo } from './video-compiler.js';
-export { previewVideo, VideoPreviewRangeError } from './video-preview.js';
+export {
+  evenlySpacedFrames,
+  previewVideo,
+  VideoPreviewRangeError,
+} from './video-preview.js';
 export type {
   PreviewPosition,
   VideoPreviewOptions,
@@ -71,6 +86,7 @@ export type {
   VideoVariantResult,
 } from './video-batch.js';
 
+export { inspectVideoDependencies } from './video-dependencies.js';
 export { packageVideo, verifyVideoPackage } from './video-package.js';
 export type { VideoPackageOptions } from './video-package.js';
 export { packageEntryName } from './video-package-format.js';

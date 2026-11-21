@@ -34,7 +34,9 @@ Run `opencut --help` to discover commands and `opencut render --help` for export
    `opencut timeline inspect DEFINITION --frame N --json`.
 4. Review the composition with `opencut preview DEFINITION --watch`, the
    desktop **Open definition** action, or a deterministic frame, clip, or
-   contact sheet from `opencut preview --help`. Preview defaults to `fast`.
+   contact sheet from `opencut preview --help`. Use exact samples on the
+   definition or exported MP4 to check clip cuts and caption boundaries.
+   Definition previews default to `fast`.
    Use `--quality quality` to review offline AI processing, such as 4×
    super-resolution. A failed watch rebuild leaves the last valid preview
    available. Desktop review keeps the playhead at the same timeline time

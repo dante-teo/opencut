@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { findPackageJSON, isBuiltin, registerHooks } from 'node:module';
+import { dirname, isAbsolute, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import {
@@ -38,6 +39,18 @@ function isSdkAbsent(parentURL: string) {
   } catch (error) {
     return isModuleNotFound(error);
   }
+}
+
+function localPackageTarget(parentURL: string, target: string) {
+  const manifest = findPackageJSON('.', parentURL);
+  if (!manifest) return false;
+  const fromPackage = relative(dirname(manifest), target);
+  const parts = fromPackage.split(sep);
+  return (
+    !isAbsolute(fromPackage) &&
+    parts[0] !== '..' &&
+    !parts.includes('node_modules')
+  );
 }
 
 export async function readDefinitionScript(
@@ -89,16 +102,21 @@ export async function readDefinitionScript(
           throw error;
         }
       }
+      const resolvedPath = resolved.url.startsWith('file:')
+        ? fileURLToPath(resolved.url)
+        : undefined;
+      const isLocalFile =
+        resolvedPath !== undefined &&
+        (local ||
+          (specifier.startsWith('#') &&
+            localPackageTarget(parentURL, resolvedPath)));
       if (trace && !isBuiltin(specifier))
         trace({
           parent: fileURLToPath(parentURL),
           specifier,
-          ...(local &&
-            resolved.url.startsWith('file:') && {
-              path: fileURLToPath(resolved.url),
-            }),
+          ...(isLocalFile && { path: resolvedPath }),
         });
-      if (!local || !resolved.url.startsWith('file:')) return resolved;
+      if (!isLocalFile) return resolved;
       const dependency = new URL(resolved.url);
       dependency.searchParams.set(parameter, build);
       return { ...resolved, url: dependency.href };

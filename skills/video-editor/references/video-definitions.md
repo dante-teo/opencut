@@ -131,7 +131,9 @@ Set `recipe` on an asset to run steps in order. Available types are `trim`,
 Set `kind` to the final result and use processed time for clip source ranges.
 Recipe trims use seconds from the input container start and retain the
 selected audio stream when it overlaps the trim.
-Use `visual.crop` for a crop that belongs to an individual timeline clip.
+Use `visual.sourceWindow: { x, y, width, height }` with an explicit
+`visual.fit` to frame oriented source pixels after recipes. Use `visual.crop`
+to mask the fitted layer by fractions. See [source framing](../../../docs/VIDEO_DEFINITIONS.md#frame-a-source-window).
 The [recipe reference](../../../docs/VIDEO_DEFINITIONS.md#media-preprocessing-recipes)
 includes step parameters and TypeScript examples.
 

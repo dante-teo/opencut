@@ -16,9 +16,15 @@ Each command uses the saved definition. Use new output paths for revisions.
 
 ```sh
 opencut preview contact-sheet edit.video.ts --from 0 --to 48 --count 4 --output revised.png
-opencut render edit.video.ts --output final.mp4 --json
+opencut render edit.video.ts --output final.mp4 --picture-cache ./render-cache --json > final.render.json
+opencut preview contact-sheet final.mp4 --render-report final.render.json --around captions,picture --output final-qa.png
 opencut probe final.mp4 --json
 ```
+
+Review `final-qa.png` with its `final-qa.png.json` manifest. The render report
+ties the requested boundary samples to the bytes of `final.mp4`. Add
+`cuts` to `--around` for edits between clips, and use `--from` and `--to`
+to narrow a range with more than 16 unique samples.
 
 For footage with cuts, declare each source under `assets` and lay clips
 back to back on a video track. Use `sourceIn` and exclusive `sourceOut` to
