@@ -4,15 +4,18 @@ import { z } from 'zod';
 const unit = z.number().min(0).max(1);
 const bezierY = z.number().min(-4).max(4);
 
-export const motionEasingSchema = z.union([
-  z.enum(keyframeEasings),
+export const cubicBezier = (y: z.ZodNumber) =>
   z.strictObject({
     type: z.literal('cubic-bezier'),
     x1: unit,
-    y1: bezierY,
+    y1: y,
     x2: unit,
-    y2: bezierY,
-  }),
+    y2: y,
+  });
+
+export const motionEasingSchema = z.union([
+  z.enum(keyframeEasings),
+  cubicBezier(bezierY),
   z.strictObject({
     type: z.literal('spring'),
     mass: z.number().min(0.05).max(100),

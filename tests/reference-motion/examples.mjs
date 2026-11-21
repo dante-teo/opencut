@@ -357,7 +357,11 @@ const Prism = video(
         from: 'product',
         to: 'water',
         frames: 30,
-        style: { kind: 'wipe', direction: 'left' },
+        style: {
+          kind: 'wipe',
+          direction: 'left',
+          easing: { type: 'cubic-bezier', x1: 0.32, y1: 0, x2: 0.18, y2: 1 },
+        },
       },
     ],
   },

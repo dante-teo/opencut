@@ -18,7 +18,9 @@ from the upper left. Intervals include their start and exclude their end.
 Capture the first and last frame of every placement and transition plus
 interior frames at one-quarter and three-quarter progress. For Prism, inspect
 the widest spring overshoot and confirm blur spans multiple positions during
-motion. Check complete clip durations, frame timestamps, and the mixed audio
+motion. The wipe at frames 315–344 follows cubic Bézier `(0.32, 0, 0.18, 1)`,
+with its 1920 px edge at approximately x=1308, 348 and 48 on frames 322, 330
+and 338. Check complete clip durations, frame timestamps, and the mixed audio
 while watching both outputs. Compare geometry/timing and perceived results
 across engines. Use the tighter decoded tolerances in OpenCut’s conformance
 documentation for repeated and preview-versus-render OpenCut output.
@@ -60,6 +62,10 @@ gate definitions. Run `python3 tests/reference-motion/measure.py /path/to/opencu
 to collect host measurements and verify budgets. The harness counts RSS
 for the process group and its children. It cannot directly attribute
 graphics-driver allocations. Use `--rss-gib 4` on the 16 GiB reference host.
+Run `python3 tests/reference-motion/measure.py /path/to/opencut LABEL cache-limit --picture-cache`
+to verify cache exhaustion. The 96 high-entropy frames should all reach the
+export even when the 256 MiB graphic sample write budget stops admitting
+new samples.
 
 For installed-runtime verification, package each JSON definition in
 `examples/motion/` with `opencut package DEFINITION --root . --output

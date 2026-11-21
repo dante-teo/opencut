@@ -77,12 +77,14 @@ slashes. Inspect the source with `opencut probe` to choose valid source points.
   and set `matchLoudness: true` for comparison. Use `previouslyUsedIn` on a
   candidate for known delivery history. See [music comparison](../../../docs/AUDIO_MIX.md#compare-music-candidates).
 - Use explicit IDs for clips referenced by `transitions`. Use a
-  `cross-dissolve` for adjacent photo or video clips on the same video track.
-  Only timed video needs source handles. Use `fade-in` or `fade-out` to fade
-  picture within the clip when the video lacks usable handles.
+  `cross-dissolve` for adjacent images, footage or graphics on the same video
+  track. Timed video and graphics require source handles. Use `style` for a
+  directional wipe, slide or push, dip-to-color, zoom or blur. Directional
+  styles accept an optional cubic Bézier `easing`. Use `fade-in` or
+  `fade-out` to fade picture within a clip that lacks usable handles.
 - Use `subtitles: { style, cues }` with exact timeline seconds for cue
   bounds, clip-independent per-cue styling and cue-relative word timings.
-  Validation enforces the 256-cue full-render limit. A frame
+  Validation enforces the 512-cue full-render limit. A frame
   preview counts only the cues visible in that frame.
   Use a named `font` on a title or subtitle style with a matching `fonts`
   entry. A font entry takes a definition-relative TTF/OTF path or base64 data.

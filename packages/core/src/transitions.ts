@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { clipTimelineEnd, clipSourceTime } from './clip-timing.js';
+import { cubicBezier } from './motion-schema.js';
 import type { Project, TimelineClip } from './project.js';
 import { compareTimes, frameTime } from './time.js';
 import type { FrameRate, RationalTime } from './time.js';
@@ -11,7 +12,7 @@ const cross = {
   to: id,
   frames: transitionFrames,
 };
-const crossStyle = z.discriminatedUnion('kind', [
+export const transitionStyleSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('dip-to-color'),
     color: z.string().regex(/^#[0-9a-f]{6}$/i),
@@ -19,6 +20,7 @@ const crossStyle = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.enum(['wipe', 'slide', 'push']),
     direction: z.enum(['left', 'right', 'up', 'down']),
+    easing: cubicBezier(z.number().min(0).max(1)).optional(),
   }),
   z.strictObject({
     kind: z.literal('zoom'),
@@ -33,7 +35,7 @@ const transitionKinds = [
   z.strictObject({
     kind: z.literal('cross-dissolve'),
     ...cross,
-    style: crossStyle.optional(),
+    style: transitionStyleSchema.optional(),
   }),
   z.strictObject({
     kind: z.enum(['fade-in', 'fade-out']),

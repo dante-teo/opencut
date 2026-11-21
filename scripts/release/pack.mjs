@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { create as createTar } from 'tar';
 import { fileURLToPath, URL } from 'node:url';
@@ -121,7 +121,10 @@ async function packCli() {
     'examples/graphics',
     'examples/motion',
   ])
-    cpSync(join(root, directory), join(path, directory), { recursive: true });
+    cpSync(join(root, directory), join(path, directory), {
+      recursive: true,
+      filter: (source) => basename(source) !== '.DS_Store',
+    });
   writeManifest(path, {
     name: '@dantea/opencut',
     version,

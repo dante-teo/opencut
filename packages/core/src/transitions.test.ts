@@ -1,3 +1,4 @@
+import { transitionProgress } from '@opencut/shared';
 import { expect, it } from 'vitest';
 import {
   createProject,
@@ -105,6 +106,54 @@ it('shares a project-frame window and speed-adjusted source handles while preser
   expect(evaluateTimelineFrame(project, 24).visualClips[0]?.sourceTime).toEqual(
     at(56),
   );
+});
+
+it('supports a bounded cubic directional wipe while preserving exact endpoints and the linear default', () => {
+  const easing = {
+    type: 'cubic-bezier',
+    x1: 0.32,
+    y1: 0,
+    x2: 0.18,
+    y2: 1,
+  } as const;
+  const style = { kind: 'wipe', direction: 'left', easing } as const;
+  const ramp = {
+    direction: 'in',
+    startFrame: 315,
+    endFrame: 345,
+    style,
+  } as const;
+  expect(
+    [314, 315, 344, 345].map((frame) => transitionProgress(frame, ramp)),
+  ).toEqual([0, 0, 1, 1]);
+  expect(1920 * (1 - transitionProgress(330, ramp))).toBeCloseTo(345.37, 2);
+  expect(
+    transitionProgress(330, {
+      ...ramp,
+      style: { kind: 'wipe', direction: 'left' },
+    }),
+  ).toBe(15 / 29);
+  const project = {
+    ...fixture(),
+    transitions: [{ id: 'mix', ...dissolve, style }],
+  };
+  const [entry] = planProjectRender(project).visualTransitions!;
+  expect(entry?.layers.map(({ ramp: { style } }) => style)).toEqual([
+    style,
+    style,
+  ]);
+  expect(
+    validateProject({
+      ...project,
+      transitions: [
+        {
+          id: 'mix',
+          ...dissolve,
+          style: { ...style, easing: { ...easing, y2: 1.1 } },
+        },
+      ],
+    }).success,
+  ).toBe(false);
 });
 
 it('preserves exact subtitle timing when an unrelated transition exists', () => {

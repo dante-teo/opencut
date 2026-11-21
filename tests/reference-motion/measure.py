@@ -113,16 +113,28 @@ def main():
     args = parser.parse_args()
     if not args.label.replace("-", "").isalnum():
         raise SystemExit("Use an alphanumeric label with optional hyphens.")
+    if "cache-limit" in args.scenes and not args.picture_cache:
+        parser.error("cache-limit requires --picture-cache")
     output = ROOT / "measurements" / args.label
     output.mkdir(parents=True)
     scratch = output / "scratch"
     scratch.mkdir()
     cases = []
+    measurements = output / "measurements.jsonl"
+
+    def record(result):
+        cases.append(result)
+        line = json.dumps(result)
+        with measurements.open("a") as local:
+            local.write(line + "\n")
+        print(line, flush=True)
+
     gib = 1024 ** 3
     for scene in args.scenes:
         clip_path = ROOT / "workloads" / f"{scene}.video.json"
         if scene == "ordinary":
             clip_path = clip_path.with_suffix(".ts")
+        picture = output / (scene + "-picture")
         for phase in ("cold", "warm") if args.warm else ("cold",):
             prefix = scene + "-" + phase
             commands = [
@@ -137,22 +149,32 @@ def main():
             for suffix, command in commands:
                 command.extend(["--recipe-cache", str(scratch / (scene + "-recipes"))])
             if args.picture_cache:
-                commands[-1][1].extend(["--picture-cache", str(output / (scene + "-picture"))])
+                commands[-1][1].extend(["--picture-cache", str(picture)])
             for suffix, command in commands:
                 result = run([str(args.cli), *command, "--json"], output, scratch,
                              prefix + "-" + suffix, args.rss_gib * gib, 8 * gib)
-                cases.append(result)
-                print(json.dumps(result), flush=True)
+                if args.picture_cache and suffix == "render" and result["exitCode"] == 0:
+                    pngs = list((picture / "graphics-v1").glob("*/media.png"))
+                    result["pictureCacheBytes"] = temporary(picture)
+                    result["graphicPngCount"] = len(pngs)
+                    result["graphicPngBytes"] = sum(path.stat().st_size for path in pngs)
+                    if scene == "cache-limit" and phase == "cold":
+                        result["cacheLimitPassed"] = (
+                            result["frames"] == 96
+                            and len(pngs) < result["frames"]
+                            and 220 * 1024**2 <= result["graphicPngBytes"] <= 256 * 1024**2
+                        )
+                record(result)
     if args.cancellation:
         scene = args.scenes[0]
         clip_path = ROOT / "workloads" / f"{scene}.video.json"
         for index in range(3):
             result = run([str(args.cli), "render", str(clip_path), "-o", str(output / f"cancel-{index}.mp4"), "--json"],
                          output, scratch, f"cancel-{index}", args.rss_gib * gib, 8 * gib, 2)
-            cases.append(result)
-            print(json.dumps(result), flush=True)
+            record(result)
     failed = [item for item in cases if item["exitCode"] and item["cancelReason"] != "requested"]
     failed.extend(item for item in cases if item["ownedRssAfterExit"])
+    failed.extend(item for item in cases if item.get("cacheLimitPassed") is False)
     raise SystemExit(bool(failed))
 
 

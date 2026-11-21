@@ -1,4 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import * as console from 'node:console';
+import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { URL, fileURLToPath } from 'node:url';
 
@@ -127,9 +129,72 @@ for (const [i, color] of [
     ],
   });
 }
+const noise = fileURLToPath(new URL('cache-noise.png', root));
+if (!existsSync(noise))
+  execFileSync('ffmpeg', [
+    '-v',
+    'error',
+    '-n',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=gray:s=1920x1080,format=gbrp,noise=alls=100:allf=u',
+    '-frames:v',
+    '1',
+    '-threads',
+    '1',
+    noise,
+  ]);
+const cacheLimit = {
+  ...base({ seconds: 3.2 }),
+  version: 3,
+  assets: {
+    noise: {
+      kind: 'graphic',
+      renderer: 'scene',
+      durationFrames: 96,
+      resources: { sample: 'cache-noise.png' },
+      scene: {
+        version: 1,
+        units: 'px',
+        children: [
+          {
+            type: 'image',
+            id: 'noise',
+            resource: 'sample',
+            width: 1920,
+            height: 1080,
+          },
+          {
+            type: 'rect',
+            id: 'marker',
+            x: {
+              keys: [
+                { at: 0, value: 20 },
+                { at: 95, value: 1800 },
+              ],
+            },
+            y: 50,
+            width: 72,
+            height: 72,
+            fill: '#00ee88',
+          },
+        ],
+      },
+    },
+  },
+  tracks: [
+    {
+      type: 'video',
+      id: 'cache-frames',
+      clips: [{ asset: 'noise', at: 0, sourceOut: 96 }],
+    },
+  ],
+};
 const jobs = {
   editorial,
   sustained,
+  'cache-limit': cacheLimit,
   'uhd-wide': base({ seconds: 10, width: 3840, height: 2160 }),
   'uhd-tall': base({ seconds: 10, width: 2160, height: 3840 }),
   ordinary: base({ seconds: 6 }),

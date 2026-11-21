@@ -2,6 +2,7 @@ import { graphicNodeTime, sampleMotion } from '@opencut/shared';
 import type { AnimatedNumber, GraphicSceneNode } from '@opencut/shared';
 import { clipSourceTime } from './clip-timing.js';
 import { frameTime } from './time.js';
+import { transitionStyleSchema } from './transitions.js';
 import { z } from 'zod';
 import { audioAnalysisSchema } from './graphic-audio-schema.js';
 import { threeSceneSchema } from './graphic-adapter-inputs.js';
@@ -90,6 +91,7 @@ export function videoGraphicsSchemas() {
     three: z.toJSONSchema(threeSceneSchema, options),
     audioAnalysis: z.toJSONSchema(audioAnalysisSchema, options),
     visualGroups: z.toJSONSchema(visualGroupsSchema.unwrap(), options),
+    transitionStyle: z.toJSONSchema(transitionStyleSchema, options),
   };
 }
 

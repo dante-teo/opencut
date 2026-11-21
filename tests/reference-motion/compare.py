@@ -3,6 +3,7 @@
 import argparse
 import json
 import math
+import statistics
 import subprocess
 from pathlib import Path
 from array import array
@@ -90,6 +91,73 @@ def bars(path):
     return {"barTopQuarterSize":tops}
 
 
+def prism_motion(path):
+    indices = [0, 3, 6, 9, 12, 15, 18, 24, 30, 89]
+    trajectory = []
+    for frame in samples(path, indices):
+        trace = []
+        for y in range(165, 211):
+            for x in range(35, 440):
+                start = (y * 480 + x) * 3
+                r, g, b = frame[start:start + 3]
+                if g > 135 and g - r > 40 and b > 124:
+                    trace.append(x)
+        assert len(trace) > 20, (path, "Missing control-card trace")
+        trajectory.append(round(sum(trace) / len(trace), 1))
+    assert trajectory[-1] - trajectory[0] > 48, (path, trajectory)
+    assert max(trajectory) - trajectory[-1] > 6, (path, trajectory)
+    assert abs(trajectory[-1] - trajectory[-2]) < 2, (path, trajectory)
+    return {"traceCentroidQuarterSize": trajectory, **prism_wipe(path)}
+
+
+def prism_wipe(path, start_frame=0):
+    edges = []
+    indices = [frame - start_frame for frame in (315, 322, 330, 338, 344)]
+    for frame in samples(path, indices):
+        def contrast(x):
+            differences = []
+            for y in range(15, 254, 3):
+                start = (y * 480 + x) * 3
+                left = frame[start - 6:start - 3]
+                right = frame[start + 3:start + 6]
+                differences.append(sum(abs(a - b) for a, b in zip(left, right)))
+            return statistics.median(differences)
+        edge = max(range(4, 476), key=contrast)
+        edges.append(edge if contrast(edge) >= 60 else None)
+    assert edges[0] is None and edges[-1] is None, (path, edges)
+    assert all(
+        edge is not None and abs(edge - expected) <= 2
+        for edge, expected in zip(edges[1:4], [327, 87, 12])
+    ), (path, edges)
+    return {"wipeEdgesQuarterSize": edges}
+
+
+def parallax_occlusion(path):
+    def edges(frame, row):
+        teal, gold = [], []
+        for x in range(100, 351):
+            start = (row * 480 + x) * 3
+            r, g, b = frame[start:start + 3]
+            if 55 < r < 133 and g > 138 and 120 < b < 225 and g - r > 48:
+                teal.append(x)
+            if r > 165 and g > 120 and r - g > 25 and g - b > 24:
+                gold.append(x)
+        return teal, gold
+
+    landmarks = []
+    for frame in samples(path, [0, 200, 299]):
+        upper, _ = edges(frame, 90)
+        lower, gold = edges(frame, 135)
+        assert upper and gold, (path, "Missing foreground or background mesh")
+        landmarks.append([upper[-1], lower[-1] if lower else None, gold[0], gold[-1]])
+    initial, crossing, final = landmarks
+    assert initial[2] - initial[1] > 20, (path, landmarks)
+    assert crossing[0] - crossing[1] > 20, (path, landmarks)
+    assert 0 <= crossing[2] - crossing[1] <= 3, (path, landmarks)
+    assert final[1] is None and final[2] < final[0] < final[3], (path, landmarks)
+    return {"occlusionEdgesQuarterSize": landmarks}
+
+
 def sheet(path, target, indices):
     select = "+".join(f"eq(n\\,{i})" for i in indices)
     run("ffmpeg","-v","error","-y","-i",path,"-vf",
@@ -111,7 +179,13 @@ def main():
             frames(path,w,h,count)
             sheet(path,path.with_name(path.stem+"-review.png"),indices)
             finding = {"path":str(path),"frames":count}
-            check = {"signal":signal_sync,"relay":relay_motion,"waterline":bars}.get(key)
+            check = {
+                "signal": signal_sync,
+                "relay": relay_motion,
+                "waterline": bars,
+                "prism": prism_motion,
+                "parallax": parallax_occlusion,
+            }.get(key)
             if check:
                 finding.update(check(path))
             findings.append(finding)

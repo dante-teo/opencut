@@ -5,6 +5,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  rename,
   rm,
   stat,
   writeFile,
@@ -12,8 +13,9 @@ import {
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { before, test } from 'node:test';
-import { compileVideo, previewVideo } from '@opencut/sdk';
-import type { VideoDefinition } from '@opencut/sdk';
+import { setTimeout as delay } from 'node:timers/promises';
+import { compileVideo, previewVideo, watchVideo } from '@opencut/sdk';
+import type { VideoDefinition, VideoWatchStatus } from '@opencut/sdk';
 import { fixtureDirectory } from '../fixture-paths.js';
 import { requireTool, runTool } from '../../scripts/fixture-lib.js';
 
@@ -85,21 +87,23 @@ test('an isolated track group applies opacity once and applies a matte and blend
   const directory = await mkdtemp(join(fixtureDirectory, 'isolated-group-'));
   try {
     const video = join(directory, 'source.mp4');
-    runTool('ffmpeg', [
-      '-v',
-      'error',
-      '-f',
-      'lavfi',
-      '-i',
-      'color=c=0xff8040:s=64x64:r=24:d=1',
-      '-c:v',
-      'libx264',
-      '-threads',
-      '1',
-      '-pix_fmt',
-      'yuv420p',
-      video,
-    ]);
+    const backdrop = (color: string, path: string) =>
+      runTool('ffmpeg', [
+        '-v',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        `color=c=${color}:s=64x64:r=24:d=1`,
+        '-c:v',
+        'libx264',
+        '-threads',
+        '1',
+        '-pix_fmt',
+        'yuv420p',
+        path,
+      ]);
+    backdrop('0xff8040', video);
     const svg = (x: number, width: number, alpha: number) =>
       `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect x="${x}" y="0" width="${width}" height="64" fill="#00ff00" fill-opacity="${alpha}"/></svg>`;
     for (const [id, src] of Object.entries({
@@ -181,6 +185,33 @@ test('an isolated track group applies opacity once and applies a matte and blend
     await previewVideo(await compileVideo(path)).frame(0, matte);
     stable(matte, 25, 28, [128, 128, 32]);
     stable(matte, 51, 28, [255, 128, 64]);
+
+    const cached = (name: string) =>
+      run(
+        'render',
+        path,
+        '-o',
+        join(directory, name + '.mp4'),
+        '--picture-cache',
+        join(directory, 'picture-cache'),
+      ) as { path: string; pictureRanges: { status: string }[] };
+    const statuses = (result: ReturnType<typeof cached>) =>
+      result.pictureRanges.map(({ status }) => status);
+    assert.deepEqual(statuses(cached('cold')), ['rendered']);
+    assert.deepEqual(statuses(cached('warm')), ['reused']);
+    await writeFile(join(directory, 'mask.svg'), svg(32, 32, 1));
+    const newMask = cached('new-mask');
+    assert.deepEqual(statuses(newMask), ['rendered']);
+    stable(newMask.path, 25, 28, [255, 128, 64]);
+    stable(newMask.path, 51, 28, [128, 128, 32]);
+
+    const replacement = join(directory, 'replacement.mp4');
+    backdrop('0x40a0c0', replacement);
+    await rename(replacement, video);
+    const newBackdrop = cached('new-backdrop');
+    assert.deepEqual(statuses(newBackdrop), ['rendered']);
+    stable(newBackdrop.path, 25, 28, [64, 160, 192]);
+    stable(newBackdrop.path, 51, 28, [32, 160, 96]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -470,7 +501,7 @@ test('audio-dependent pixels follow the resolved mix and reject stale encoded-pi
     );
     const analysisDirectory = join(recipeCache, 'graphic-analysis-v1-LE');
     const [analysis] = await readdir(analysisDirectory);
-    assert.ok(analysis?.endsWith('.fft'));
+    assert.ok(typeof analysis === 'string' && analysis.endsWith('.fft'));
     const record = join(analysisDirectory, analysis);
     const beforeTitleEdit = await stat(record);
     const withTitle = make('low.wav');
@@ -564,6 +595,77 @@ test('audio-dependent pixels follow the resolved mix and reject stale encoded-pi
     assert.notEqual(reuse.status, 0);
     assert.match(reuse.stderr, /Picture or video export settings changed/);
   } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('parameterized JSON watch preserves a kinetic preset through an invalid edit', async () => {
+  requireTool('ffmpeg');
+  const directory = await mkdtemp(join(fixtureDirectory, 'json-preset-watch-'));
+  const file = join(directory, 'preset.video.json');
+  const events: VideoWatchStatus[] = [];
+  const signal = AbortSignal.timeout(45_000);
+  const make = (backgroundColor: string) => ({
+    format: 'opencut-video-json',
+    version: 1,
+    parameters: { title: { type: 'string', default: 'Local title' } },
+    bindings: [
+      {
+        parameter: 'title',
+        path: ['assets', 'title', 'scene', 'preset', 'title'],
+      },
+    ],
+    composition: {
+      version: 3,
+      canvas: { width: 192, height: 108, frameRate: 24, backgroundColor },
+      assets: {
+        title: {
+          kind: 'graphic',
+          renderer: 'scene',
+          durationFrames: 24,
+          scene: {
+            version: 1,
+            units: 'px',
+            preset: {
+              name: 'title-sequence',
+              title: 'Bound text',
+              revealFrames: 12,
+            },
+          },
+        },
+      },
+      tracks: [
+        { type: 'video', clips: [{ asset: 'title', at: 0, sourceOut: 24 }] },
+      ],
+    },
+  });
+  async function until(status: VideoWatchStatus['status'], generation: number) {
+    for (;;) {
+      const event = events.find(
+        (item) => item.status === status && item.generation >= generation,
+      );
+      if (event) return event;
+      await delay(40, undefined, { signal });
+    }
+  }
+  await writeFile(file, JSON.stringify(make('#102435')));
+  const watch = await watchVideo(file, {
+    onStatus: (event) => events.push(event),
+    signal,
+    params: { title: 'Watch and recover' },
+  });
+  try {
+    const first = await until('ready', 1);
+    assert.ok(first.current);
+    await writeFile(file, '{');
+    const failed = await until('error', first.generation + 1);
+    assert.equal(failed.current?.playback.path, first.current.playback.path);
+    await stat(first.current.playback.path);
+    await writeFile(file, JSON.stringify(make('#103447')));
+    const next = await until('ready', failed.generation + 1);
+    assert.notEqual(next.current?.sourceRevision, first.current.sourceRevision);
+  } finally {
+    await watch.close();
     await rm(directory, { recursive: true, force: true });
   }
 });

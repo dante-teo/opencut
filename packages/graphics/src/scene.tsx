@@ -214,28 +214,40 @@ function SceneText({
     register(
       (async () => {
         await document.fonts.ready;
-        const fits = () =>
-          box.scrollWidth <= box.clientWidth + 1 &&
-          box.scrollHeight <= box.clientHeight + 1;
-        if (fits()) return;
-        if (node.overflow === 'fit') {
-          let lo = Math.min(node.minSize ?? 12, size);
-          let hi = size;
-          box.style.fontSize = lo + 'px';
-          if (fits()) {
-            for (let i = 0; i < 8; i++) {
-              const mid = (lo + hi) / 2;
-              box.style.fontSize = mid + 'px';
-              if (fits()) lo = mid;
-              else hi = mid;
-            }
-            box.style.fontSize = lo + 'px';
-            return;
-          }
-        }
-        throw new Error(
-          `Scene text '${node.id}' exceeds its ${width}×${height} px box at source frame ${time.toFixed(4)}.`,
+        // Translated glyphs affect scroll extents even though their layout boxes stay put.
+        const animated = [...box.querySelectorAll('span')].flatMap((span) =>
+          span.style.transform
+            ? [{ span, transform: span.style.transform }]
+            : [],
         );
+        for (const { span } of animated) span.style.transform = 'none';
+        try {
+          const fits = () =>
+            box.scrollWidth <= box.clientWidth + 1 &&
+            box.scrollHeight <= box.clientHeight + 1;
+          if (fits()) return;
+          if (node.overflow === 'fit') {
+            let lo = Math.min(node.minSize ?? 12, size);
+            let hi = size;
+            box.style.fontSize = lo + 'px';
+            if (fits()) {
+              for (let i = 0; i < 8; i++) {
+                const mid = (lo + hi) / 2;
+                box.style.fontSize = mid + 'px';
+                if (fits()) lo = mid;
+                else hi = mid;
+              }
+              box.style.fontSize = lo + 'px';
+              return;
+            }
+          }
+          throw new Error(
+            `Scene text '${node.id}' exceeds its ${width}×${height} px box at source frame ${time.toFixed(4)}.`,
+          );
+        } finally {
+          for (const { span, transform } of animated)
+            span.style.transform = transform;
+        }
       })(),
     );
   }, [register, node, time, size, width, height]);

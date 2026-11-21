@@ -74,3 +74,41 @@ test('updates a React graphic from a watched CSS dependency', async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('opens a data-only JSON definition through the desktop review picker', async () => {
+  const directory = await mkdtemp(join(fixtureDirectory, 'json-desktop-'));
+  const path = join(directory, 'review.video.json');
+  const { application, page } = await launchDesktop();
+  try {
+    await writeFile(
+      path,
+      JSON.stringify({
+        canvas: {
+          width: 160,
+          height: 90,
+          frameRate: 12,
+          durationFrames: 12,
+          backgroundColor: '#195a73',
+        },
+        tracks: [],
+      }),
+    );
+    await application.evaluate(({ dialog }, file) => {
+      dialog.showOpenDialog = async () => ({
+        canceled: false,
+        filePaths: [file],
+      });
+    }, path);
+    await page.getByRole('button', { name: 'Open definition' }).click();
+    const workspace = page.getByLabel('Definition review');
+    await expect(
+      workspace.getByRole('status', { name: 'Compilation status' }),
+    ).toContainText('Preview ready', { timeout: 25_000 });
+    await expect(workspace.getByLabel('Current frame')).toHaveText(
+      'Frame 0 / 11',
+    );
+  } finally {
+    await application.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
