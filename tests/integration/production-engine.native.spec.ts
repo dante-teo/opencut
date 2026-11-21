@@ -669,3 +669,318 @@ test('parameterized JSON watch preserves a kinetic preset through an invalid edi
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('media-frame offsets select the frame at an exact rational boundary', async (t) => {
+  const directory = await mkdtemp(
+    join(fixtureDirectory, 'media-frame-offset-'),
+  );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  runTool('ffmpeg', [
+    '-v',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'color=blue:s=64x64:r=30:d=1.5',
+    '-vf',
+    "drawbox=color=red:t=fill:enable='gte(n,24)'",
+    '-c:v',
+    'libx264',
+    '-threads',
+    '1',
+    join(directory, 'input.mp4'),
+  ]);
+  const make = (offset: {
+    numerator: number;
+    denominator: number;
+  }): VideoDefinition => ({
+    version: 3,
+    canvas: { width: 64, height: 64, frameRate: 10 },
+    assets: {
+      input: { kind: 'video', path: 'input.mp4' },
+      sampled: {
+        kind: 'graphic',
+        renderer: 'scene',
+        durationFrames: 3,
+        mediaFrames: {
+          source: { asset: 'input', offset },
+        },
+        scene: {
+          version: 1,
+          units: 'px',
+          children: [
+            {
+              type: 'media-frame',
+              id: 'sample',
+              resource: 'source',
+              width: 64,
+              height: 64,
+            },
+          ],
+        },
+      },
+    },
+    tracks: [
+      { type: 'video', clips: [{ asset: 'sampled', at: 0, sourceOut: 3 }] },
+    ],
+  });
+  const red = [255, 0, 0];
+  const blue = [0, 0, 255];
+  for (const [id, offset, expected] of [
+    ['boundary', { numerator: 7, denominator: 10 }, red],
+    [
+      'just-after',
+      { numerator: 6_300_000_000_000_001, denominator: 9_000_000_000_000_001 },
+      red,
+    ],
+    [
+      'just-before',
+      { numerator: 6_300_000_000_000_002, denominator: 9_000_000_000_000_003 },
+      blue,
+    ],
+  ] as const) {
+    const path = join(directory, id + '.video.json');
+    await writeFile(path, JSON.stringify(make(offset)));
+    const preview = previewVideo(await compileVideo(path));
+    const before = join(directory, id + '-before.png');
+    const boundary = join(directory, id + '-boundary.png');
+    await preview.frame(0, before);
+    await preview.frame(1, boundary);
+    stable(before, 32, 32, blue);
+    stable(boundary, 32, 32, expected);
+  }
+});
+
+test('dense overlapping stacks preserve ordering and the group backdrop in preview and export', async (t) => {
+  const directory = await mkdtemp(join(fixtureDirectory, 'dense-stack-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const colors = { backdrop: '#be8046', overlay: '#3988f0', tint: '#80ff80' };
+  await Promise.all(
+    Object.entries(colors).map(([id, color]) =>
+      writeFile(
+        join(directory, id + '.svg'),
+        `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="${id === 'overlay' ? 32 : 64}" height="64" fill="${color}"/></svg>`,
+      ),
+    ),
+  );
+  const tracks: VideoDefinition['tracks'] = Array.from(
+    { length: 66 },
+    (_, i) => ({
+      type: 'video',
+      id: 'track-' + i,
+      clips: [
+        {
+          asset:
+            i === 0 ? 'backdrop' : i === 31 || i === 64 ? 'overlay' : 'tint',
+          at: i === 31 ? 1 : 0,
+          duration: i === 31 ? 3 : 4,
+          visual: {
+            opacity: i === 0 || i === 65 ? 1 : i === 31 || i === 64 ? 0.5 : 0,
+          },
+        },
+      ],
+    }),
+  );
+  const definition: VideoDefinition = {
+    version: 3,
+    canvas: { width: 64, height: 64, frameRate: 24, durationFrames: 4 },
+    assets: Object.fromEntries(
+      Object.keys(colors).map((id) => [
+        id,
+        { kind: 'graphic', renderer: 'svg', path: id + '.svg' },
+      ]),
+    ),
+    tracks,
+    visualGroups: [
+      {
+        id: 'finish',
+        tracks: ['track-64', 'track-65'],
+        opacity: 0.6,
+        blend: 'multiply',
+      },
+    ],
+  };
+  const dense = join(directory, 'dense.video.json');
+  const sparse = join(directory, 'sparse.video.json');
+  await writeFile(dense, JSON.stringify(definition));
+  await writeFile(
+    sparse,
+    JSON.stringify({
+      ...definition,
+      tracks: tracks.filter((_, i) => [0, 31, 64, 65].includes(i)),
+    }),
+  );
+  for (const frame of [0, 2]) {
+    const actual = join(directory, `dense-${frame}.png`);
+    const expected = join(directory, `sparse-${frame}.png`);
+    await previewVideo(await compileVideo(dense)).frame(frame, actual);
+    await previewVideo(await compileVideo(sparse)).frame(frame, expected);
+    assert.deepEqual(frameRgb(actual), frameRgb(expected));
+  }
+  const actual = run('render', dense, '-o', join(directory, 'dense.mp4'));
+  const expected = run('render', sparse, '-o', join(directory, 'sparse.mp4'));
+  const cached = run(
+    'render',
+    dense,
+    '--picture-cache',
+    join(directory, 'cache'),
+    '-o',
+    join(directory, 'cached.mp4'),
+  );
+  assert.equal(actual.frameCount, 4);
+  function picture(file: string) {
+    const decoded = spawnSync('ffmpeg', [
+      '-v',
+      'error',
+      '-i',
+      file,
+      '-map',
+      '0:v:0',
+      '-pix_fmt',
+      'rgb24',
+      '-threads',
+      '1',
+      '-f',
+      'rawvideo',
+      'pipe:1',
+    ]);
+    assert.equal(decoded.status, 0, decoded.stderr.toString());
+    return decoded.stdout;
+  }
+  assert.deepEqual(picture(actual.path), picture(expected.path));
+  assert.deepEqual(picture(cached.path), picture(expected.path));
+});
+
+test('professional mix delivery controls invalidate audio-reactive picture and reuse identical settings', async (t) => {
+  const directory = await mkdtemp(join(fixtureDirectory, 'reactive-delivery-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  runTool('ffmpeg', [
+    '-v',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'aevalsrc=0.24*sin(2*PI*317*t)|0.07*sin(2*PI*811*t):s=48000:d=1',
+    '-c:a',
+    'pcm_s16le',
+    join(directory, 'dialogue.wav'),
+  ]);
+  const definition: VideoDefinition = {
+    version: 3,
+    canvas: { width: 64, height: 64, frameRate: 12 },
+    professionalMix: { preset: 'natural-cinematic' },
+    assets: {
+      dialogue: { kind: 'audio', path: 'dialogue.wav' },
+      meter: {
+        kind: 'graphic',
+        renderer: 'scene',
+        durationFrames: 12,
+        audioAnalysis: {
+          version: 1,
+          source: 'mix',
+          window: 1024,
+          hop: 256,
+          waveform: 16,
+          bins: 16,
+        },
+        scene: {
+          version: 1,
+          units: 'px',
+          children: [
+            {
+              type: 'audio',
+              id: 'level',
+              mode: 'rms',
+              width: 64,
+              height: 64,
+              color: '#00ff80',
+            },
+          ],
+        },
+      },
+    },
+    tracks: [
+      { type: 'video', clips: [{ asset: 'meter', at: 0, sourceOut: 12 }] },
+      {
+        type: 'audio',
+        audioRole: 'dialogue',
+        clips: [{ asset: 'dialogue', at: 0, sourceOut: 12 }],
+      },
+    ],
+  };
+  const path = join(directory, 'master.video.json');
+  await writeFile(path, JSON.stringify(definition));
+  const cache = join(directory, 'picture');
+  const render = (name: string, ...settings: string[]) =>
+    run(
+      'render',
+      path,
+      '--picture-cache',
+      cache,
+      '--recipe-cache',
+      join(directory, 'recipes'),
+      '-o',
+      join(directory, name + '.mp4'),
+      ...settings,
+    );
+  const statuses = (result: { pictureRanges: { status: string }[] }) =>
+    result.pictureRanges.map(({ status }) => status);
+  const initial = render('initial', '--picture-version', 'save');
+  assert.deepEqual(statuses(initial), ['rendered']);
+  assert.deepEqual(
+    statuses(
+      render(
+        'explicit-defaults',
+        '--audio-channels',
+        '2',
+        '--audio-rate',
+        '48000',
+        '--audio-bitrate',
+        '192',
+      ),
+    ),
+    ['reused'],
+  );
+  assert.deepEqual(statuses(render('mono', '--audio-channels', '1')), [
+    'rendered',
+  ]);
+  assert.deepEqual(statuses(render('other-rate', '--audio-rate', '44100')), [
+    'rendered',
+  ]);
+  assert.deepEqual(statuses(render('other-bitrate', '--audio-bitrate', '64')), [
+    'rendered',
+  ]);
+  const revisedSettings = [
+    '--audio-channels',
+    '1',
+    '--audio-rate',
+    '44100',
+    '--audio-bitrate',
+    '64',
+  ];
+  const revised = render('revised', ...revisedSettings);
+  assert.equal(revised.metadata.audio.channels, 1);
+  assert.equal(revised.metadata.audio.sampleRate, 44100);
+  assert.deepEqual(statuses(revised), ['rendered']);
+  assert.deepEqual(statuses(render('repeat', ...revisedSettings)), ['reused']);
+
+  const stale = spawnSync(
+    process.execPath,
+    [
+      cli,
+      'render',
+      path,
+      '--picture-cache',
+      cache,
+      '--picture-version',
+      initial.pictureVersion.id,
+      '-o',
+      join(directory, 'stale.mp4'),
+      ...revisedSettings,
+      '--json',
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.notEqual(stale.status, 0);
+  assert.match(stale.stderr, /Picture or video export settings changed/);
+});

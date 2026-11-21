@@ -44,7 +44,9 @@ render and keep its `pictureVersion.id`. Pass that ID as `pictureVersion`
 on the next render with the same cache directory and video settings. A
 successful reuse reports `pictureVersion.status: 'reused'` and copies the
 encoded video packets. Use `'save'` again after changing the picture or its
-video export settings.
+video export settings, including audio inputs used by graphics. For mixed-source
+graphics with Professional Dialogue Mix enabled, this includes changes to
+`audioChannels`, `audioSampleRate`, or `audioBitrateKbps`.
 
 Final renders default to `quality`. Preview frames, clips, contact sheets
 and watches default to `fast`. Pass `quality: 'fast' | 'quality' | 'maximum'`

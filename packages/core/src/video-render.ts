@@ -207,6 +207,9 @@ export async function renderCompiledVideo(
           scratch: scratchDirectory,
           pictureCacheDirectory,
           audioComparison: settings.audioComparison,
+          audioChannels: settings.audioChannels,
+          audioSampleRate: settings.audioSampleRate,
+          audioBitrateKbps: settings.audioBitrateKbps,
         },
       ),
   );

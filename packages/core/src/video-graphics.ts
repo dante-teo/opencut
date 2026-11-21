@@ -168,7 +168,7 @@ export function graphicLayer(
       rate,
       props,
       ...(react?.sampling ? [react.sampling, react.motionBlur] : []),
-      ...(mediaFrames ? [mediaFrames] : []),
+      ...(mediaFrames ? ['exact-media-frame-pts', mediaFrames] : []),
     ]),
     bundleKey: bundle.key,
     ...(react && { durationFrames: react.durationFrames }),

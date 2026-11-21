@@ -145,7 +145,7 @@ function exceedsVideoDuration(sourceOut: RationalTime, duration: RationalTime) {
   );
 }
 
-function stillAsset(asset: Project['assets'][number] | undefined) {
+export function stillAsset(asset: Project['assets'][number] | undefined) {
   return (
     asset?.metadata?.kind === 'image' ||
     (asset?.metadata?.kind === 'graphic' && asset.duration === undefined)

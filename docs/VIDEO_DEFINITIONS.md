@@ -176,6 +176,8 @@ canvas duration must cover all clips and subtitles. The current renderer
 takes up to 128 clips and 600 seconds, a frame rate of 1–120 fps, and
 even dimensions up to 3840 pixels per side and 3840×2160 pixels total.
 Transparent canvas areas are flattened over black in MP4 and PNG previews.
+Dense overlapping stacks composite in ordered lossless passes when needed.
+These passes use temporary disk space even when picture caching is disabled.
 
 Asset and timeline IDs use letters, digits, underscores and hyphens and
 start with a letter or digit. Explicit project, asset, track, clip, cue,
@@ -615,8 +617,9 @@ An existing `cross-dissolve` can specify a `style` using
 The same centered, frame-aligned transition window applies between adjacent
 pictures on one track. First and last transition frames match their
 corresponding endpoints. Timed graphics and video require source handles.
-Images and static SVG hold. The nominal cut still controls audio. Directional
-styles progress linearly by default and accept an optional
+Images and static SVGs hold their source frame throughout the transition,
+including before the incoming clip's nominal start. The nominal cut still
+controls audio. Directional styles progress linearly by default and accept an optional
 `easing: { type: 'cubic-bezier', x1, y1, x2, y2 }` with all four controls
 between 0 and 1.
 

@@ -6,7 +6,7 @@ import {
 import type { Project, TimelineClip } from './project.js';
 import { audioFadeGain, baseAudioGain, keyframeGain } from './audio.js';
 import { clipSpeed, sampleClipSourceTime } from './clip-timing.js';
-import { resolveTransition } from './transitions.js';
+import { resolveTransition, stillAsset } from './transitions.js';
 import { listTimeline } from './timeline-view.js';
 import { subtitleTextLayers } from './subtitles.js';
 import { compareTimes, frameTime, subtractTimes, timeSchema } from './time.js';
@@ -229,6 +229,9 @@ export function createTimelineEvaluator(
     entries.push(clip);
     tracks.set(clip.trackId, entries);
   }
+  const stillAssets = new Set(
+    project.assets.filter(stillAsset).map(({ id }) => id),
+  );
   const transitions = new Map<string, typeof timeline.transitions>();
   for (const transition of timeline.transitions) {
     const entries = transitions.get(transition.trackId) ?? [];
@@ -317,10 +320,9 @@ export function createTimelineEvaluator(
             transitionOpacity(Number(frame), { ...transition, direction });
           const sample = Object.assign(detached, {
             visual: { ...visual, opacity },
-            sourceTime:
-              participant.kind === 'image'
-                ? { ...participant.sourceIn }
-                : sampleClipSourceTime(participant, sampled),
+            sourceTime: stillAssets.has(participant.assetId)
+              ? { ...participant.sourceIn }
+              : sampleClipSourceTime(participant, sampled),
             transitionId: transition.id,
             visible: opacity > 0,
             effectiveVolume: 0,

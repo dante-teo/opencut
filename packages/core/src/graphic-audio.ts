@@ -37,6 +37,10 @@ export function checkGraphicAudio({ assets, tracks }: ParsedVideoDefinition) {
 
 type Plan = Awaited<ReturnType<CompiledVideo['resolveRender']>>;
 type Analysis = Awaited<ReturnType<typeof decodeGraphicAudio>>;
+export type GraphicAudioControls = Pick<
+  VideoTimelineOptions,
+  'audioComparison' | 'audioChannels' | 'audioSampleRate' | 'audioBitrateKbps'
+>;
 
 /** The dependency edges run from graphic -> analysis -> resolved audio inputs. */
 export function bindGraphicAudio(
@@ -44,7 +48,7 @@ export function bindGraphicAudio(
   plan: Plan,
   scratch: () => Promise<string>,
   snapshotSource: VideoTimelineOptions['snapshotSource'],
-  audioComparison: VideoTimelineOptions['audioComparison'],
+  controls: GraphicAudioControls,
   signal?: AbortSignal,
 ) {
   const recipes = new Map<
@@ -77,7 +81,7 @@ export function bindGraphicAudio(
       audioClips,
       ...(snapshotSource && { snapshotSource }),
       signal,
-      audioComparison,
+      ...controls,
     };
     if (!mixed) {
       delete options.professionalMix;
@@ -98,6 +102,13 @@ export function bindGraphicAudio(
       plan.frameCount,
       options.audioComparison ?? 'after',
       options.professionalMix,
+      ...(options.professionalMix && options.professionalMix.enabled !== false
+        ? [
+            options.audioChannels ?? 2,
+            options.audioSampleRate ?? 48000,
+            options.audioBitrateKbps ?? 192,
+          ]
+        : []),
       options.musicComparison,
       mixed ? video.audioMixEdit : undefined,
       audioClips.map((clip) => [clip, video.sourceIdentity(clip.path)]),

@@ -78,7 +78,8 @@ slashes. Inspect the source with `opencut probe` to choose valid source points.
   candidate for known delivery history. See [music comparison](../../../docs/AUDIO_MIX.md#compare-music-candidates).
 - Use explicit IDs for clips referenced by `transitions`. Use a
   `cross-dissolve` for adjacent images, footage or graphics on the same video
-  track. Timed video and graphics require source handles. Use `style` for a
+  track. Timed video and graphics require source handles. Images and static
+  SVGs hold their source frame throughout the transition. Use `style` for a
   directional wipe, slide or push, dip-to-color, zoom or blur. Directional
   styles accept an optional cubic Bézier `easing`. Use `fade-in` or
   `fade-out` to fade picture within a clip that lacks usable handles.

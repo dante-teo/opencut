@@ -32,7 +32,10 @@ together with picture. Audio is mixed on the revised timeline. Read
 See [picture cache options](../../../docs/CLI.md#reuse-picture-between-exports).
 To reuse encoded picture for audio revisions, save the approved export with
 `--picture-version save`. Keep its ID and export the audio revision with the
-same cache and video settings and `--picture-version <id>`.
+same cache and video settings and `--picture-version <id>`. Save a new
+version when an edit changes audio used by graphics. For graphics analyzing
+a Professional Dialogue Mix, changes to `--audio-channels`,
+`--audio-rate`, or `--audio-bitrate` also require a new picture version.
 Use `--music-candidate <track-id>` and `--music-loudness matched|authored`
 with `render` or `preview clip` to select and compare authored music
 candidates. Before final delivery, confirm the selected track and any

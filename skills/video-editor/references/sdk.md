@@ -16,7 +16,10 @@ or `renderCompiledVideo` on the initial export and revisions. Read
 See [picture cache behavior](../../../docs/CLI.md#reuse-picture-between-exports).
 For audio-only revisions, set `pictureVersion: 'save'` on the initial export
 and reuse the returned `pictureVersion.id` as `pictureVersion` with the same
-cache and video settings.
+cache and video settings. Save a new version if an audio edit affects
+graphics. For mixed-source graphics with Professional Dialogue Mix enabled,
+changing `audioChannels`, `audioSampleRate`, or `audioBitrateKbps` also
+affects picture reuse.
 
 Use `inspectVideoRecipes(file)` for recipe validation and inspection without
 transcoding. `compileVideo`, `renderVideo`, and `watchVideo` accept `processing`

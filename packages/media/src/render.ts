@@ -61,7 +61,11 @@ import type { PictureCache, PictureRange } from './picture-cache.js';
 import { prepareMusicComparison } from './music-comparison.js';
 import type { MusicLoudnessReport } from './music-comparison.js';
 
-import { boundPictureInputs, selectPictureInputs } from './bounded-picture.js';
+import {
+  boundPictureInputs,
+  maxPictureInputs,
+  selectPictureInputs,
+} from './bounded-picture.js';
 import { maxRenderedSubtitleCues, maxTimelineClips } from '@opencut/shared';
 import { compositeGroup, transparentGroupSurface } from './visual-group.js';
 import type { GroupSurfaces } from './visual-group.js';
@@ -761,6 +765,7 @@ async function prepareTimeline(
     }
   }
   let input = 0;
+  const inputStart = args.length;
   const registerInput = (filename: string, write: StagedInput['write']) => {
     const argumentIndex = args.push('-threads', '1', '-i', filename) - 1;
     stagedInputs.push({ filename, argumentIndex, write });
@@ -1149,10 +1154,10 @@ async function prepareTimeline(
     canvas = compositeGroup(filters, group, width, height, clock);
     group = undefined;
   }
-  function groupSurface(trackId: string | undefined) {
-    const requested = trackId && groups.get(trackId);
-    if (group && (!requested || group.id !== requested.id)) completeGroup();
-    if (!requested) return;
+  function groupSurface(
+    requested: { style: VisualGroup; id: number },
+    trackId: string | undefined,
+  ) {
     if (!group) {
       const { style, id } = requested;
       const content = `group${id}content`;
@@ -1175,8 +1180,89 @@ async function prepareTimeline(
     );
     canvas = next;
   };
+  // Save the fully composited backdrop before bringing in another batch of
+  // sources. RGB FFV1 preserves the canvas through subsequent blends and mattes.
+  function stageBackdrop() {
+    encoders.add('ffv1');
+    const pass = {
+      args: [
+        ...args.slice(0, inputStart),
+        ...args.splice(inputStart),
+        '-filter_complex_threads',
+        '1',
+        '-filter_complex',
+        [...filters.splice(0), `[${canvas}]format=bgr0[backdrop]`].join(';'),
+        '-map',
+        '[backdrop]',
+        '-an',
+        '-c:v',
+        'ffv1',
+        '-threads',
+        '2',
+        '-fps_mode',
+        'passthrough',
+        '-enc_time_base:v',
+        `1/${numerator}`,
+        '-f',
+        'nut',
+      ],
+      stagedInputs: stagedInputs.splice(0),
+    };
+    inputs.clear();
+    input = 0;
+    const backdrop = registerInput('backdrop.nut', async (destination) => {
+      const staging = renderScratch(
+        options.output,
+        '.opencut-stack-',
+        options.scratchDirectory,
+      );
+      try {
+        await staging.stage(pass, options.signal);
+        await runMediaTool(
+          'ffmpeg',
+          [...pass.args, destination],
+          4 * 1024 * 1024,
+          600_000,
+          {
+            signal: options.signal,
+            writesFile: true,
+          },
+        );
+        await accountRenderFile(destination);
+      } finally {
+        await staging.close();
+      }
+    });
+    canvas = `canvas${++canvasId}`;
+    filters.push(
+      `[${backdrop}:v]format=rgba,settb=1/${numerator},setpts=(N+${startFrame})*${denominator}[${canvas}]`,
+    );
+  }
+  const inputsFor = (clip: VisualTimelineClip) =>
+    Number(!options.snapshotSource || overlapsRange(clip)) +
+    (byOwner.get(clip.clipId) ?? []).reduce((count, { layers }) => {
+      const { startFrame: from, endFrame: to } = layers[0]!.ramp;
+      return from < endFrame && startFrame < to ? count + layers.length : count;
+    }, 0);
+  const groupInputs = new Map<number, number>();
+  for (const clip of pictureCache || !groups.size ? [] : visibleClips) {
+    const id = groups.get(clip.trackId ?? '')?.id;
+    if (id !== undefined)
+      groupInputs.set(id, (groupInputs.get(id) ?? 0) + inputsFor(clip));
+  }
   for (const [index, clip] of (pictureCache ? [] : visibleClips).entries()) {
-    groupSurface(clip.trackId);
+    const requested = groups.get(clip.trackId ?? '');
+    if (group && group.id !== requested?.id) completeGroup();
+    if (
+      !group &&
+      input > 1 &&
+      input + (requested ? groupInputs.get(requested.id)! : inputsFor(clip)) >
+        maxPictureInputs
+    ) {
+      if (scratch) stageBackdrop();
+      else encoders.add('ffv1');
+    }
+    if (requested) groupSurface(requested, clip.trackId);
     const label = `layer${index}`;
     // A transition can contribute even when its owner's base clip is off-range.
     const placement =

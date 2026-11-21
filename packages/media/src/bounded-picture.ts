@@ -1,7 +1,6 @@
-import { MediaError } from './process.js';
 import type { VideoTimelineOptions, VisualTimelineClip } from './render.js';
 
-const maxInputs = 32;
+export const maxPictureInputs = 32;
 
 type Transitions = NonNullable<VideoTimelineOptions['visualTransitions']>;
 interface Range {
@@ -61,7 +60,7 @@ export function boundPictureInputs(
       include(`transition:${index}:${clipId}`, ramp.startFrame, ramp.endFrame);
   if (
     [...starts.values()].reduce((total, ids) => total + ids.length, 0) <=
-    maxInputs
+    maxPictureInputs
   )
     return [];
   const edges = [
@@ -74,12 +73,10 @@ export function boundPictureInputs(
   for (const frame of edges.slice(0, -1)) {
     for (const key of ends.get(frame) ?? []) active.delete(key);
     for (const key of starts.get(frame) ?? []) active.add(key);
-    if (active.size > maxInputs)
-      throw new MediaError(
-        `Picture at frame ${frame} exceeds ${maxInputs} simultaneous clip and transition inputs.`,
-      );
     const combined = new Set([...window, ...active]);
-    if (combined.size > maxInputs) {
+    // An overlapping stack is split spatially by the compositor. Do not
+    // keep adding unrelated inputs to its time window.
+    if (frame > boundary && combined.size > maxPictureInputs) {
       ranges.push({ startFrame: boundary, endFrame: frame });
       boundary = frame;
       window = new Set(active);

@@ -15,6 +15,7 @@ import type {
   VisualTimelineClip,
 } from '@opencut/media';
 import { bindGraphicAudio } from './graphic-audio.js';
+import type { GraphicAudioControls } from './graphic-audio.js';
 import { graphicFrameSamples } from './graphic-sampling.js';
 import { compareTimes, frameTime } from './time.js';
 import type { AudioRenderClip, ProjectRenderPlan } from './render-plan.js';
@@ -30,12 +31,11 @@ type RenderSourceBindings = Pick<
 >;
 type RenderGraphic = NonNullable<RenderSourceBindings['renderGraphic']>;
 
-interface RenderSourceOptions {
+interface RenderSourceOptions extends GraphicAudioControls {
   scratch?: string | undefined;
   pictureCacheDirectory?: string | undefined;
   /** A watcher owns these private media copies for the full playback render. */
   pinnedPlan?: BoundPlan;
-  audioComparison?: VideoTimelineOptions['audioComparison'];
 }
 
 /** Keep decoded sources stable for the lifetime of a render or preview. */
@@ -47,7 +47,7 @@ export async function withRenderSources<T>(
     scratch = tmpdir(),
     pictureCacheDirectory,
     pinnedPlan,
-    audioComparison,
+    ...audioControls
   }: RenderSourceOptions = {},
 ) {
   const plan = pinnedPlan ?? (await video.resolveRender());
@@ -95,13 +95,18 @@ export async function withRenderSources<T>(
           throw new MediaError(
             `Missing pinned source for media frame '${id}'.`,
           );
-        const seconds =
-          time.numerator / time.denominator +
-          (offset ? offset.numerator / offset.denominator : 0);
+        const denominator = BigInt(time.denominator);
+        const offsetDenominator = BigInt(offset?.denominator ?? 1);
+        const timestamp = {
+          numerator:
+            BigInt(time.numerator) * offsetDenominator +
+            BigInt(offset?.numerator ?? 0) * denominator,
+          denominator: denominator * offsetDenominator,
+        };
         const snapshot = sourceSnapshot ? await sourceSnapshot(path) : path;
         const png = await decodeStillFrame(
           { ...info, path: snapshot },
-          seconds,
+          timestamp,
           false,
           signal,
         );
@@ -119,7 +124,7 @@ export async function withRenderSources<T>(
             plan,
             open,
             sourceSnapshot,
-            audioComparison,
+            audioControls,
             signal,
           ),
           decodeMedia,

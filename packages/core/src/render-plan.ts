@@ -14,6 +14,7 @@ import {
 } from './clip-timing.js';
 import type { Project, TimelineClip } from './project.js';
 import { continuesMediaRun, resolveTimeline } from './evaluation.js';
+import { stillAsset } from './transitions.js';
 import type { ResolvedMediaClip } from './evaluation.js';
 import { resolveAudioFade } from './audio.js';
 import { compareTimes, frameTime } from './time.js';
@@ -333,6 +334,9 @@ export function planProjectRender(
       });
     }
   }
+  const stillAssets = new Set(
+    project.assets.filter(stillAsset).map(({ id }) => id),
+  );
   const visualById = new Map(visualClips.map((clip) => [clip.clipId, clip]));
   const visualTransitions = timeline.transitions.map((transition) => ({
     afterClipId: transition.ownerId,
@@ -354,22 +358,20 @@ export function planProjectRender(
           direction,
           ...(transition.style && { style: transition.style }),
         },
-        ...(clip.kind !== 'image' &&
-          (clip.kind !== 'graphic' ||
-            project.assets.find(({ id }) => id === clip.assetId)?.duration) && {
-            retiming: {
-              timelineStart: start,
-              timelineEnd: end,
-              sourceIn: clipSourceTime(clip, start),
-              sourceOut: clipSourceTime(clip, end),
-              speed: clipSpeed(clip),
-              sourceOriginNs: sourceOriginNanoseconds(clip),
-              localSourceOriginNs: sourceOriginNanoseconds(
-                clip,
-                frameTime(startFrame, frameRate),
-              ),
-            },
-          }),
+        ...(!stillAssets.has(clip.assetId) && {
+          retiming: {
+            timelineStart: start,
+            timelineEnd: end,
+            sourceIn: clipSourceTime(clip, start),
+            sourceOut: clipSourceTime(clip, end),
+            speed: clipSpeed(clip),
+            sourceOriginNs: sourceOriginNanoseconds(clip),
+            localSourceOriginNs: sourceOriginNanoseconds(
+              clip,
+              frameTime(startFrame, frameRate),
+            ),
+          },
+        }),
       };
     }),
   }));

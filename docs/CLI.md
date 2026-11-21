@@ -35,10 +35,14 @@ picture on the project frame grid. Shots, overlays, subtitles and transitions
 set the range boundaries. A range can move to a different timeline frame and
 reuse its picture if its source samples and visual layers stay the same.
 Edits to visual sources, framing, grades, captions and transitions rebuild
-the ranges they affect. Edits to audio tracks and mix settings reuse
-unchanged picture. Each export mixes audio on the current timeline and
-encodes a new MP4 at the requested output frame rate. The [recipe cache](#media-recipes)
-stores upstream processing such as frame interpolation.
+the ranges they affect. Audio edits reuse picture for ranges that are
+independent of the changed audio. Ranges with [audio-dependent graphics](GRAPHICS.md#audio-dependent-graphics)
+rebuild when their analysis inputs change. With Professional Dialogue Mix
+enabled, mixed-source graphics also depend on `--audio-channels`,
+`--audio-rate`, and `--audio-bitrate`. Each export mixes audio on the
+current timeline and encodes an MP4 at the requested output frame rate.
+The [recipe cache](#media-recipes) stores upstream processing such as frame
+interpolation.
 
 Render prints `Picture [start, end): reused` or `rendered` for each range.
 With `--json`, `pictureRanges` contains `startFrame`, `endFrame` and `status`.
@@ -68,9 +72,11 @@ cache directory and video export settings.
 opencut render edit.video.ts -o revised.mp4 --picture-cache ./render-cache --picture-version PICTURE_VERSION_ID --json
 ```
 
-OpenCut copies the verified picture packets and mixes the new audio. The
-report shows `pictureVersion.status` as `reused`. Save a new picture version
-after changing the picture or video export settings. Keep the cache
+OpenCut copies the verified picture packets and mixes the new audio.
+The report shows `pictureVersion.status` as `reused`. If the revision changes
+an audio dependency of the picture, the saved ID is rejected. Export again
+with `--picture-version save` to create a new version. Do the same after
+changing the visual content or video export settings. Keep the cache
 available for revisions of each saved version.
 
 ## React and SVG graphics

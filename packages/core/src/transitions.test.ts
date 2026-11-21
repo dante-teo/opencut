@@ -235,6 +235,59 @@ it.each([
   },
 );
 
+it('holds static SVG source times throughout the visual transition', () => {
+  const project = fixture();
+  project.transitions = [{ id: 'mix', ...dissolve }];
+  for (const asset of project.assets) {
+    delete asset.duration;
+    asset.file.path = asset.id + '.svg';
+    asset.metadata = {
+      kind: 'graphic',
+      durationSeconds: null,
+      formatName: 'svg',
+      width: 160,
+      height: 90,
+      videoCodec: null,
+      audioCodec: null,
+      frameRate: null,
+      frameRateRatio: null,
+      hasAudio: false,
+    };
+  }
+  for (const clip of project.clips) {
+    delete clip.speed;
+    delete clip.keyframes;
+    clip.sourceIn = at(0);
+    clip.sourceOut = at(20);
+  }
+  expect(validateProject(project).success).toBe(true);
+  expect(
+    planProjectRender(project).visualTransitions?.[0]?.layers.map(
+      ({ sourceStartFrame, retiming }) => [sourceStartFrame, retiming],
+    ),
+  ).toEqual([
+    [0, undefined],
+    [0, undefined],
+  ]);
+  for (const frame of [16, 17, 20, 24]) {
+    expect(
+      evaluateTimelineFrame(project, frame).visualClips.map(
+        ({ id, sourceTime, transitionId }) => ({
+          id,
+          sourceTime,
+          transitionId,
+        }),
+      ),
+    ).toEqual(
+      ['left', 'right'].map((id) => ({
+        id,
+        sourceTime: at(0),
+        transitionId: 'mix',
+      })),
+    );
+  }
+});
+
 it('rejects missing handles, off-grid cuts, conflicts and unknown types', () => {
   const base = fixture();
   const mix = { id: 'mix', ...dissolve };

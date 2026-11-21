@@ -108,27 +108,59 @@ export async function extractFrame(
 /** Decode the frame covering a media timestamp using the same selection as project freeze. */
 export async function decodeStillFrame(
   source: MediaMetadata,
-  timestamp: number,
+  timestamp: number | { numerator: bigint; denominator: bigint },
   fullSize: boolean,
   signal?: AbortSignal,
 ): Promise<Buffer> {
   const video = source.video;
+  const exact = typeof timestamp === 'number' ? undefined : timestamp;
+  const seconds =
+    typeof timestamp === 'number'
+      ? timestamp
+      : Number(timestamp.numerator) / Number(timestamp.denominator);
   if (
     !video ||
-    !Number.isFinite(timestamp) ||
-    timestamp < 0 ||
-    timestamp >= (source.durationSeconds ?? Infinity)
+    (exact && (exact.numerator < 0n || exact.denominator <= 0n)) ||
+    !Number.isFinite(seconds) ||
+    seconds < 0 ||
+    seconds >= (source.durationSeconds ?? Infinity)
   )
     throw new MediaError('Frame is outside source bounds.');
   // Probe from the preceding seek point through the target, retaining VFR PTS.
   // Interval end is absolute: a relative duration would start at the seek point.
   const origin = source.startTimeSeconds ?? 0;
-  const target = origin + timestamp;
+  const target = origin + seconds;
   const [numerator, denominator] = (video.timeBase ?? '')
     .split('/')
     .map(Number);
-  if (!numerator || !denominator || !Number.isFinite(numerator / denominator))
+  if (
+    !numerator ||
+    !denominator ||
+    !Number.isSafeInteger(numerator) ||
+    !Number.isSafeInteger(denominator) ||
+    numerator < 0 ||
+    denominator < 0
+  )
     throw new MediaError('Video time base is unavailable for cached frames.');
+  // ffprobe reports the container start in AV_TIME_BASE (microseconds).
+  // Compare exact project times to integer PTS without rounding either side.
+  let seekFrom = Math.floor(target * 1_000_000);
+  let limit: { left: bigint; right: bigint } | undefined;
+  if (exact) {
+    const targetMicros =
+      exact.numerator * 1_000_000n +
+      BigInt(Math.round(origin * 1_000_000)) * exact.denominator;
+    limit = {
+      left: BigInt(numerator) * exact.denominator * 1_000_000n,
+      right: targetMicros * BigInt(denominator),
+    };
+    // Integer division truncates toward zero. Seek no later than the target.
+    const floor =
+      targetMicros < 0n
+        ? targetMicros - (exact.denominator - 1n)
+        : targetMicros;
+    seekFrom = Number(floor / exact.denominator);
+  }
   const frames = await runMediaTool(
     'ffprobe',
     [
@@ -139,7 +171,7 @@ export async function decodeStillFrame(
       '-select_streams',
       String(video.index),
       '-read_intervals',
-      `${(Math.floor(target * 1_000_000) / 1_000_000).toFixed(6)}%${(target + 1).toFixed(6)}`,
+      `${(seekFrom / 1_000_000).toFixed(6)}%${(target + 1).toFixed(6)}`,
       '-show_frames',
       '-show_entries',
       'frame=best_effort_timestamp',
@@ -151,16 +183,22 @@ export async function decodeStillFrame(
     60000,
     { signal },
   );
-  let presentation = -Infinity;
+  let presentationTicks: number | undefined;
   for (const line of frames.toString().split('\n')) {
     if (!/^-?\d/.test(line)) continue;
     const ticks = Number(line.split(',')[0]);
     if (!Number.isSafeInteger(ticks)) continue;
-    const time = (ticks * numerator) / denominator;
-    if (time <= target && time > presentation) presentation = time;
+    if (
+      (presentationTicks === undefined || ticks > presentationTicks) &&
+      (limit
+        ? BigInt(ticks) * limit.left <= limit.right
+        : (ticks * numerator) / denominator <= target)
+    )
+      presentationTicks = ticks;
   }
-  if (!Number.isFinite(presentation))
+  if (presentationTicks === undefined)
     throw new MediaError('No frame covers the requested source time.');
+  const presentation = (presentationTicks * numerator) / denominator;
   // Seek just before the chosen PTS so microsecond rounding cannot skip it.
   const seek = Math.max(0, presentation - origin - 0.000001);
   const png = await runMediaTool(

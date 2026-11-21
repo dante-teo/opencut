@@ -248,9 +248,10 @@ use `defineGraphicScene` for contextual types.
 - An image or a font refers to a named local file in `resources`. A
   `media-frame` node refers to a name in the graphic's `mediaFrames` map.
   Each entry supplies a video asset ID and optional rational `offset` in
-  seconds. OpenCut samples the frame covering graphic source time plus that
-  offset using the pinned source decoder. Use up to two references per
-  graphic. An out-of-range sample reports a rendering error.
+  seconds. OpenCut adds the offset to the graphic source time exactly and
+  samples the covering frame from the pinned video. A sample exactly on a
+  frame's presentation timestamp selects that frame. Use up to two references
+  per graphic. An out-of-range sample reports a rendering error.
 - Text takes explicit pixel bounds, size, color, alignment and optional
   font and stroke. Newlines break lines. Use `runs` for styled spans with
   separate font, weight and color. Apply motion to the text box or use a
@@ -368,8 +369,9 @@ Declare `audioAnalysis: { version: 1, source: 'mix', window: 2048, hop: 256,
 waveform: 128, bins: 48 }` on a scene or trusted React asset. `source: {
 track: 'music-track' }` selects a single explicit audio or video track
 after its ordinary clip trims, gain, timing and effects. The mixed source
-uses the resolved music selection and Professional Dialogue Mix settings.
-Analysis uses timeline seconds and the same 48 kHz audio graph as export.
+uses the resolved music selection. With Professional Dialogue Mix enabled,
+it also uses the export channel count, sample rate, and AAC bitrate.
+Analysis uses timeline seconds and measures the resolved signal at 48 kHz.
 The renderer samples signed peak waveform buckets, RMS, and linear FFT
 magnitudes from centered Hann windows. FFT bin `i` represents
 `i × 48000 / window` Hz. Nearby hop results interpolate on the timeline.
@@ -381,6 +383,9 @@ Trusted React graphics can read `useGraphicAudio()`. Audio flows from the
 compiled sources to analysis and then to graphics. An analysis references
 an audio track or the mix. Graphic assets supply no audio. The audible mix
 remains in the shared media pipeline. Analysis identity includes resolved
-inputs, routing, timing, processing and analysis settings. Beat markers
-invalidate picture samples while retaining the reusable FFT. OpenCut stores
-verified analysis features in the recipe cache for reuse across CLI runs.
+inputs, routing, timing, processing and analysis settings. For a mixed source
+with Professional Dialogue Mix enabled, changing the export channel count,
+sample rate, or AAC bitrate invalidates the analysis and affected picture
+cache entries. Beat marker changes invalidate picture samples while retaining
+the reusable FFT. OpenCut stores verified analysis features in the recipe
+cache for reuse across CLI runs.
