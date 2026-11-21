@@ -82,6 +82,7 @@ const epoch = '1970-01-01T00:00:00.000Z';
 
 export interface CompiledVideo {
   readonly path: string;
+  readonly jsonParameters?: import('./video-json.js').JsonVideoParameterSchema;
   readonly build?: VideoBuild;
   /** A deeply frozen project snapshot. */
   readonly project: Project;
@@ -97,6 +98,7 @@ export interface CompiledVideo {
   sourceIdentity(path: string): string | undefined;
   readonly graphicInputs: readonly VideoInput[];
   graphicSource(key: string): GraphicBundle | undefined;
+  graphicScene(key: string): import('@opencut/shared').GraphicScene | undefined;
   resolveRender(): Promise<
     BoundRenderPlan & { sourceMetadata: ReadonlyMap<string, MediaMetadata> }
   >;
@@ -106,6 +108,8 @@ export interface DefinitionSources {
   path: string;
   definition: ParsedVideoDefinition;
   graphics: CompiledGraphics;
+  jsonParameters?:
+    import('./video-json.js').JsonVideoParameterSchema | undefined;
 }
 
 export async function compileDefinition(
@@ -195,7 +199,19 @@ export async function compileDefinition(
       return source
         ? {
             path: source.path,
-            graphic: graphicLayer(source, project.settings.frameRate, props),
+            graphic: graphicLayer(
+              source,
+              project.settings.frameRate,
+              props,
+              (assetId) => {
+                const media = assets.get(assetId)?.media;
+                if (!media?.metadata.video)
+                  throw new VideoDefinitionError(
+                    `Graphic '${id}' references '${assetId}', which has no timed video stream.`,
+                  );
+                return { path: media.metadata.path, identity: media.identity };
+              },
+            ),
           }
         : { path: assets.get(id)!.media!.metadata.path };
     });
@@ -222,12 +238,21 @@ export async function compileDefinition(
   const bundles = new Map(
     [...graphics.values()].map(({ bundle }) => [bundle.key, freeze(bundle)]),
   );
+  const scenes = new Map(
+    [...graphics.values()].flatMap(({ bundle, scene }) =>
+      scene ? [[bundle.key, freeze(scene)] as const] : [],
+    ),
+  );
   const compiled: CompiledVideo = Object.freeze({
+    graphicScene: (key: string) => scenes.get(key),
     graphicInputs: freeze(
       [...graphics.values()].flatMap(({ inputs }) => inputs),
     ),
     graphicSource: (key: string) => bundles.get(key),
     path,
+    ...(sources.jsonParameters && {
+      jsonParameters: freeze(sources.jsonParameters),
+    }),
     ...(build && { build: freeze(build) }),
     project: freeze(project),
     ...(audioMixEdit && { audioMixEdit }),
@@ -338,6 +363,7 @@ async function buildProject(
     clips: [],
     transitions,
     markers,
+    ...(definition.visualGroups && { visualGroups: definition.visualGroups }),
     ...(professionalMix && { professionalMix }),
     ...(musicComparison && { musicComparison }),
   };
@@ -393,10 +419,11 @@ async function buildProject(
       if (
         'props' in clip &&
         clip.props !== undefined &&
-        (asset?.kind !== 'graphic' || asset.renderer !== 'react')
+        (asset?.kind !== 'graphic' ||
+          !['react', 'template'].includes(asset.renderer))
       )
         throw new VideoDefinitionError(
-          `${location}.props: Only React graphics accept props.`,
+          `${location}.props: Only React graphics and templates accept placement props.`,
         );
       if (
         asset?.kind === 'graphic' &&
@@ -445,6 +472,14 @@ async function buildProject(
   const clipAssets = new Set(
     project.clips.flatMap(({ assetId }) => (assetId ? [assetId] : [])),
   );
+  for (const [id, graphic] of graphics)
+    for (const { asset } of Object.values(graphic.react?.mediaFrames ?? {})) {
+      if (mediaAssets[asset]?.kind !== 'video')
+        throw new VideoDefinitionError(
+          `Graphic '${id}' requires a non-graphic video asset for media-frame reference '${asset}'.`,
+        );
+      clipAssets.add(asset);
+    }
   const compiled = await compileVideoAssets(
     dirname(path),
     mediaAssets,

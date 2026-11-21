@@ -4,6 +4,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rm,
   writeFile,
 } from 'node:fs/promises';
@@ -518,13 +519,13 @@ describe('definition validation', () => {
 
   it('enforces the full-render subtitle cap during validation', async () => {
     const input = definition();
-    const cues = Array.from({ length: 257 }, (_, i) => ({
+    const cues = Array.from({ length: 513 }, (_, i) => ({
       id: `cue-${i}`,
       text: 'Caption',
-      start: { numerator: i, denominator: 24 },
-      end: { numerator: i + 1, denominator: 24 },
+      start: { numerator: i, denominator: 30 },
+      end: { numerator: i + 1, denominator: 30 },
     }));
-    input.subtitles = { style: {}, cues: cues.slice(0, 256) };
+    input.subtitles = { style: {}, cues: cues.slice(0, 512) };
     const path = await writeDefinition(input);
     const valid = run('validate', path);
     expect(valid.status, valid.stderr).toBe(0);
@@ -532,16 +533,75 @@ describe('definition validation', () => {
     await writeDefinition(input);
     const invalid = run('validate', path);
     expect(invalid.status).toBe(1);
-    expect(invalid.stderr).toMatch(/up to 256 visible subtitle cues/);
+    expect(invalid.stderr).toMatch(/up to 512 visible subtitle cues/);
   });
 
-  it('rejects a valid definition saved as plain JSON', async () => {
+  it('compiles plain JSON with the same plan and no executable authoring module', async () => {
+    const input = definition();
     const path = join(directory, 'title.video.json');
-    await writeFile(path, JSON.stringify(definition()));
-    await expect(compileVideo(path)).rejects.toThrow('.video.ts');
-    const result = run('validate', path);
-    expect(result.status).toBe(2);
-    expect(JSON.parse(result.stderr).error.message).toContain('.video.ts');
+    await writeFile(path, JSON.stringify(input));
+    const data = await compileVideo(path);
+    const ts = await compileVideo(await writeDefinition(input));
+    expect((await data.resolveRender()).visualClips).toEqual(
+      (await ts.resolveRender()).visualClips,
+    );
+    expect(run('validate', path).status).toBe(0);
+    await writeFile(path, 'export default ' + JSON.stringify(input));
+    expect(JSON.parse(run('validate', path).stderr).error.code).toBe(
+      'INVALID_VIDEO_DEFINITION',
+    );
+  });
+
+  it('validates JSON defaults, overrides and destinations before lowering, and packages the chosen variant', async () => {
+    const path = join(await realpath(directory), 'variant.video.json');
+    const document = {
+      format: 'opencut-video-json',
+      version: 1,
+      parameters: {
+        seconds: { type: 'integer', minimum: 100, maximum: 600, default: 300 },
+        caption: {
+          type: 'string',
+          choices: ['English', '中文'],
+          default: '中文',
+        },
+      },
+      composition: definition(),
+      bindings: [
+        { parameter: 'seconds', path: ['canvas', 'durationFrames'] },
+        {
+          parameter: 'caption',
+          path: ['tracks', 0, 'clips', 0, 'text', 'content'],
+        },
+      ],
+    };
+    await writeFile(path, JSON.stringify(document));
+    expect((await compileVideo(path)).frameCount).toBe(300);
+    expect(
+      (
+        await compileVideo(path, {
+          params: { seconds: 250, caption: 'English' },
+        })
+      ).project.clips[0]?.text?.content,
+    ).toBe('English');
+    await expect(
+      compileVideo(path, { params: { seconds: 100.5 } }),
+    ).rejects.toThrow('params.seconds');
+    await expect(
+      compileVideo(path, { params: { misspelling: 1 } }),
+    ).rejects.toThrow('misspelling');
+    const packed = run('package', path, '-o', 'portable');
+    expect(packed.status, packed.stderr).toBe(0);
+    const verified = JSON.parse(run('package', 'verify', 'portable').stdout);
+    expect(verified.manifest).toMatchObject({
+      version: 3,
+      source: 'project/variant.video.json',
+      params: { seconds: 300, caption: '中文' },
+      imports: [],
+    });
+    expect((await compileVideo(verified.entry)).frameCount).toBe(300);
+    document.bindings.push({ parameter: 'seconds', path: ['canvas'] });
+    await writeFile(path, JSON.stringify(document));
+    await expect(compileVideo(path)).rejects.toThrow('Binding targets overlap');
   });
 
   it('rejects a saved snapshot even when named like a definition', async () => {

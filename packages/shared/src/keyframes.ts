@@ -1,4 +1,6 @@
 import type { VisualTransform } from './index.js';
+import { ease, easingBounds, lerp } from './motion.js';
+import type { MotionEasing, NamedEasing } from './motion.js';
 
 export const animatedProperties = [
   'x',
@@ -7,14 +9,8 @@ export const animatedProperties = [
   'rotation',
   'opacity',
 ] as const;
-export const keyframeEasings = [
-  'linear',
-  'ease-in',
-  'ease-out',
-  'ease-in-out',
-] as const;
 export type AnimatedProperty = (typeof animatedProperties)[number];
-export type KeyframeEasing = (typeof keyframeEasings)[number];
+export type KeyframeEasing = MotionEasing;
 export interface KeyframeTime {
   numerator: number;
   denominator: number;
@@ -25,6 +21,8 @@ export interface VisualKeyframe {
   easing: KeyframeEasing;
   /** Subdomain of the outgoing easing curve retained by a split or trim. */
   curve?: [number, number] | undefined;
+  /** Original value delta for trimming a nonmonotonic curve. */
+  curveAmplitude?: number | undefined;
 }
 export type VisualKeyframes = Partial<
   Record<AnimatedProperty, VisualKeyframe[] | undefined>
@@ -50,16 +48,36 @@ export const visualRanges = {
   opacity: [0, 1],
 } as const;
 
-/** The supported easings stay between their endpoints. */
 export function maximumVisualScale(
   visual: VisualTransform,
   keyframes?: VisualKeyframes,
 ) {
-  return (
-    keyframes?.scale?.reduce((max, key) => Math.max(max, key.value), 0) ??
-    visual.scale ??
-    visualDefaults.scale
-  );
+  const keys = keyframes?.scale;
+  if (!keys?.length) return visual.scale ?? visualDefaults.scale;
+  let maximum = keys[0]!.value;
+  for (let i = 1; i < keys.length; i++) {
+    const left = keys[i - 1]!;
+    const right = keys[i]!;
+    maximum = Math.max(maximum, right.value);
+    if (typeof left.easing === 'string') continue;
+    const [start, end] = left.curve ?? [0, 1];
+    const from = ease(start, left.easing);
+    const to = ease(end, left.easing);
+    const [lo, hi] = easingBounds(left.easing);
+    const delta = right.value - left.value;
+    const amplitude =
+      left.curveAmplitude ?? (to === from ? 0 : delta / (to - from));
+    // Bound the eased and affine terms independently. Full-range keys
+    // cancel the affine term so ordinary springs get a tighter bound.
+    const affineStart = left.value - amplitude * from;
+    const affineEnd = right.value - amplitude * to;
+    maximum = Math.max(
+      maximum,
+      Math.max(affineStart, affineEnd) +
+        Math.max(lo * amplitude, hi * amplitude),
+    );
+  }
+  return Math.min(visualRanges.scale[1], maximum);
 }
 
 /** Rotation and keyframes need a transformable layer rather than a baked placement. */
@@ -82,7 +100,7 @@ function difference(a: KeyframeTime, b: KeyframeTime) {
 
 /** Sample a normalized subdomain without cancellation near flat endpoints. */
 function easingProgress(
-  easing: KeyframeEasing,
+  easing: NamedEasing,
   t: number,
   [a, b]: [number, number],
 ): number {
@@ -132,11 +150,29 @@ export function sampleKeyframes(
   if (lo === 0) return keys[0]!.value;
   const left = keys[lo - 1]!;
   const right = keys[lo];
-  if (!right || left.value === right.value) return left.value;
+  if (!right) return left.value;
   const span = difference(right.time, left.time);
   const t =
     Number(relative(left.time) * BigInt(right.time.denominator)) /
     Number(offset.d * span.n);
+  if (typeof left.easing !== 'string') {
+    const [from, to] = left.curve ?? [0, 1];
+    const a = ease(from, left.easing);
+    const b = ease(to, left.easing);
+    const progress = ease(lerp(from, to, t), left.easing);
+    const amplitude = left.curveAmplitude;
+    if (amplitude !== undefined)
+      return (
+        lerp(left.value, right.value, t) +
+        amplitude * (progress - lerp(a, b, t))
+      );
+    return lerp(
+      left.value,
+      right.value,
+      a === b ? t : (progress - a) / (b - a),
+    );
+  }
+  if (left.value === right.value) return left.value;
   const progress = easingProgress(left.easing, t, left.curve ?? [0, 1]);
   const value = left.value + (right.value - left.value) * progress;
   return Math.max(
@@ -156,7 +192,13 @@ export function evaluateVisual<T extends VisualTransform>(
   const result = { ...visual };
   for (const property of animatedProperties) {
     const keys = keyframes[property];
-    if (keys?.length) result[property] = sampleKeyframes(keys, time, start);
+    if (keys?.length) {
+      const [min, max] = visualRanges[property];
+      result[property] = Math.max(
+        min,
+        Math.min(max, sampleKeyframes(keys, time, start)),
+      );
+    }
   }
   return result;
 }

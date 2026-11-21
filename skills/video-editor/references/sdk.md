@@ -51,3 +51,10 @@ Pass `musicSelection: { candidate: 'track-id', matchLoudness: true }` to
 `compileVideo` or `renderVideo` for a definition with music candidates.
 Use `watcher.selectMusic` during review. See the
 [SDK guide](../../../docs/SDK.md#professional-dialogue-mix).
+
+## Scenes and sampling
+
+Import `createPresetScene`, `defineGraphicScene`, motion helpers and
+`inspectGraphicFrames` from the SDK. A version 3 scene accepts the same
+graphic tree from TypeScript or JSON. Read
+[the scene and adapter reference](../../../docs/GRAPHICS.md).

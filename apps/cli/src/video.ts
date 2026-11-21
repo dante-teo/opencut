@@ -50,7 +50,7 @@ export async function runVideoCommand(
   values: CommandOptions,
 ) {
   if (!isVideoDefinitionPath(file))
-    throw new UsageError('Choose a .video.ts definition.');
+    throw new UsageError('Choose a .video.ts or .video.json definition.');
   const { output } = values;
   if (command === 'render' && !output?.toLowerCase().endsWith('.mp4'))
     throw new UsageError(`Usage: ${commandUsage(command)}`);
@@ -118,11 +118,16 @@ export async function runVideoCommand(
       });
       console.log(JSON.stringify(report, null, 2));
     } else if (command === 'validate') {
-      const usesReact = video.project.assets.some(
-        ({ metadata }) =>
-          metadata?.kind === 'graphic' && metadata.formatName === 'react',
+      const executableGraphics = video.project.assets.flatMap(
+        ({ id, file, metadata }) =>
+          metadata?.kind === 'graphic' && metadata.formatName === 'react'
+            ? [{ id, path: file.path }]
+            : [],
       );
-      const graphics = usesReact
+      const graphicKinds = video.project.assets.flatMap(({ metadata }) =>
+        metadata?.kind === 'graphic' ? [metadata.formatName] : [],
+      );
+      const graphics = graphicKinds.some((kind) => kind !== 'svg')
         ? await (await import('./doctor.js')).inspectReactGraphics()
         : undefined;
       const result = {
@@ -130,6 +135,7 @@ export async function runVideoCommand(
         path: video.path,
         frameCount: video.frameCount,
         ...(graphics && { graphics }),
+        ...(executableGraphics.length && { executableGraphics }),
       };
       console.log(
         values.json
@@ -142,6 +148,7 @@ export async function runVideoCommand(
         JSON.stringify(
           {
             ...inspectProject(video.project, video.path),
+            ...(video.jsonParameters && { parameters: video.jsonParameters }),
             ...(video.recipes.length > 0 && { recipes: video.recipes }),
           },
           null,

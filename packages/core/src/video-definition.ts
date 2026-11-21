@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { JsonVideoParameterSchema } from './video-json.js';
 import {
   assetSchema,
   clipSchema,
@@ -19,6 +20,7 @@ import {
 } from './subtitles.js';
 import { videoRecipeSchema } from './video-recipe-schema.js';
 import { transitionSchema } from './transitions.js';
+import { checkGraphicScene } from './graphic-scene-schema.js';
 import { graphicAssetSchema } from './video-graphics-contract.js';
 
 const frame = z.int().nonnegative();
@@ -108,7 +110,7 @@ const font = z.union([
 ]);
 
 export const videoDefinitionSchema = z.strictObject({
-  version: z.union([z.literal(1), z.literal(2)]).optional(),
+  version: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
   ...snapshotSchema.shape.metadata.partial().shape,
   canvas: settingsSchema.extend({
     frameRate: z.union([frameCount, frameRateSchema]),
@@ -139,6 +141,7 @@ export const videoDefinitionSchema = z.strictObject({
   ),
   subtitles: subtitles.optional(),
   transitions: z.array(transitionSchema).optional(),
+  visualGroups: snapshotSchema.shape.visualGroups,
   markers: z.array(markerSchema).optional(),
   professionalMix: snapshotSchema.shape.professionalMix,
   musicComparison: snapshotSchema.shape.musicComparison,
@@ -166,6 +169,7 @@ interface ParameterizedVideo {
 export interface ResolvedVideoDefinition {
   value: unknown;
   params?: VideoParameters;
+  jsonParameters?: JsonVideoParameterSchema;
 }
 
 /** Zod builders for the strict parameter shape of a TypeScript definition. */
@@ -256,6 +260,25 @@ export function definitionLoadError(path: string, cause: unknown) {
 }
 
 export function parseVideoDefinition(value: unknown) {
+  if (
+    value &&
+    typeof value === 'object' &&
+    'assets' in value &&
+    value.assets &&
+    typeof value.assets === 'object'
+  ) {
+    for (const [id, asset] of Object.entries(value.assets)) {
+      if (asset?.renderer !== 'scene') continue;
+      try {
+        checkGraphicScene(asset.scene);
+      } catch (cause) {
+        throw new VideoDefinitionError(
+          `assets.${id}.scene: ${(cause as Error).message}`,
+          { cause },
+        );
+      }
+    }
+  }
   const parsed = videoDefinitionSchema.safeParse(value);
   if (!parsed.success)
     throw new VideoDefinitionError(
@@ -268,15 +291,20 @@ export function parseVideoDefinition(value: unknown) {
     );
 
   const definition = parsed.data;
-  if (
-    Object.values(definition.assets ?? {}).some(
-      ({ kind }) => kind === 'graphic',
-    )
-  ) {
-    if (definition.version === 1)
-      throw new VideoDefinitionError('version: Graphics require version 2.');
-    return { ...definition, version: 2 as const };
+  const graphics = Object.values(definition.assets ?? {}).flatMap((asset) =>
+    asset.kind === 'graphic' ? [asset.renderer] : [],
+  );
+  if (graphics.some((renderer) => renderer !== 'react' && renderer !== 'svg')) {
+    if (definition.version !== undefined && definition.version < 3)
+      throw new VideoDefinitionError(
+        'version: Built-in graphic assets require version 3.',
+      );
+    return { ...definition, version: 3 as const };
   }
+  if (graphics.length && definition.version === 1)
+    throw new VideoDefinitionError('version: Graphics require version 2 or 3.');
+  if (graphics.length && definition.version === undefined)
+    return { ...definition, version: 2 as const };
   return definition;
 }
 

@@ -1,0 +1,646 @@
+{
+  "bars": [
+    {
+      "id": "grid-0",
+      "type": "path",
+      "d": "M212 790 H1700",
+      "stroke": "#ffffff26",
+      "strokeWidth": 2
+    },
+    {
+      "id": "tick-0",
+      "type": "text",
+      "content": "0",
+      "width": 62,
+      "height": 36,
+      "x": 125,
+      "y": 773,
+      "size": 26,
+      "color": "#a2bcc8",
+      "font": "reference",
+      "overflow": "fit",
+      "minSize": 26,
+      "align": "right"
+    },
+    {
+      "id": "grid-25",
+      "type": "path",
+      "d": "M212 670 H1700",
+      "stroke": "#ffffff26",
+      "strokeWidth": 2
+    },
+    {
+      "id": "tick-25",
+      "type": "text",
+      "content": "25",
+      "width": 62,
+      "height": 36,
+      "x": 125,
+      "y": 653,
+      "size": 26,
+      "color": "#a2bcc8",
+      "font": "reference",
+      "overflow": "fit",
+      "minSize": 26,
+      "align": "right"
+    },
+    {
+      "id": "grid-50",
+      "type": "path",
+      "d": "M212 550 H1700",
+      "stroke": "#ffffff26",
+      "strokeWidth": 2
+    },
+    {
+      "id": "tick-50",
+      "type": "text",
+      "content": "50",
+      "width": 62,
+      "height": 36,
+      "x": 125,
+      "y": 533,
+      "size": 26,
+      "color": "#a2bcc8",
+      "font": "reference",
+      "overflow": "fit",
+      "minSize": 26,
+      "align": "right"
+    },
+    {
+      "id": "grid-75",
+      "type": "path",
+      "d": "M212 430 H1700",
+      "stroke": "#ffffff26",
+      "strokeWidth": 2
+    },
+    {
+      "id": "tick-75",
+      "type": "text",
+      "content": "75",
+      "width": 62,
+      "height": 36,
+      "x": 125,
+      "y": 413,
+      "size": 26,
+      "color": "#a2bcc8",
+      "font": "reference",
+      "overflow": "fit",
+      "minSize": 26,
+      "align": "right"
+    },
+    {
+      "id": "grid-100",
+      "type": "path",
+      "d": "M212 310 H1700",
+      "stroke": "#ffffff26",
+      "strokeWidth": 2
+    },
+    {
+      "id": "tick-100",
+      "type": "text",
+      "content": "100",
+      "width": 62,
+      "height": 36,
+      "x": 125,
+      "y": 293,
+      "size": 26,
+      "color": "#a2bcc8",
+      "font": "reference",
+      "overflow": "fit",
+      "minSize": 26,
+      "align": "right"
+    },
+    {
+      "id": "bar-0",
+      "type": "rect",
+      "x": 294,
+      "y": {
+        "keys": [
+          {
+            "at": 38,
+            "value": 790,
+            "easing": {
+              "type": "cubic-bezier",
+              "x1": 0.32,
+              "y1": 0,
+              "x2": 0.18,
+              "y2": 1
+            }
+          },
+          {
+            "at": 160,
+            "value": 622
+          }
+        ]
+      },
+      "width": 136,
+      "height": {
+        "keys": [
+          {
+            "at": 38,
+            "value": 0,
+            "easing": {
+              "type": "cubic-bezier",
+              "x1": 0.32,
+              "y1": 0,
+              "x2": 0.18,
+              "y2": 1
+            }
+          },
+          {
+            "at": 160,
+            "value": 168
+          }
+        ]
+      },
+      "fill": "#258f98",
+      "radius": 9
+    },
+    {
+      "id": "counter-0",
+      "type": "text",
+      "width": 160,
+      "height": 48,
+      "x": 282,
+      "y": {
+        "keys": [
+          {
+            "at": 38,
+            "value": 735,
+            "easing": {
+              "type": "cubic-bezier",
+              "x1": 0.32,
+              "y1": 0,
+              "x2": 0.18,
+              "y2": 1
+            }
+          },
+          {
+            "at": 160,
+            "value": 567
+          }
+        ]
+      },
+      "size": 37,
+      "color": "#eaf5f1",
+      "font": "reference",
+      "overflow": "fit",
+      "minSize": 26,
+      "counter": {
+        "value": {
+          "keys": [
+            {
+              "at": 38,
+              "value": 0,
+              "easing": {
+                "type": "cubic-bezier",
+                "x1": 0.32,
+                "y1": 0,
+                "x2": 0.18,
+                "y2": 1
+              }
+            },
+            {
+              "at": 160,
+              "value": 35
+            }
+          ]
+        }
+      },
+      "align": "center"
+    },
+    {
+      "id": "station-0",
+      "type": "text",
+      "content": "North pass",
+      "width": 290,
+      "height": 91,
+      "x": 217,
+      "y": 829,
+      "size": 31,
+      "color": "#b7d2d7",
+      "font": "reference",
+      "overflow": "fit",
+      "minSize": 26,
+      "align": "center",
+      "weight": 500
+    },
+    {
+      "id": "bar-1",
+      "type": "rect",
+      "x": 624,
+      "y": {
+        "keys": [
+          {
+            "at": 59,
+            "value": 790,
+            "easing": {
+              "type": "cubic-bezier",
+              "x1": 0.32,
+              "y1": 0,
+              "x2": 0.18,
+              "y2": 1
+            }
+          },
+          {
+            "at": 181,
+            "value": 526
+          }
+        ]
+      },
+      "width": 136,
+      "height": {
+        "keys": [
+          {
+            "at": 59,
+            "value": 0,
+            "easing": {
+              "type": "cubic-bezier",
+              "x1": 0.32,
+              "y1": 0,
+              "x2": 0.18,
+              "y2": 1
+            }
+          },
+          {
+            "at": 181,
+            "value": 264
+          }
+        ]
+      },
+      "fill": "#258f98",
+      "radius": 9
+    },
+    {
+      "id": "counter-1",
+      "type": "text",
+      "width": 160,
+      "height": 48,
+      "x": 612,
+      "y": {
+        "keys": [
+          {
+            "at": 59,
+            "value": 735,
+            "easing": {
+              "type": "cubic-bezier",
+              "x1": 0.32,
+              "y1": 0,
+              "x2": 0.18,
+              "y2": 1
+            }
+          },
+          {
+            "at": 181,
+            "value": 471
+          }
+        ]
+      },
+      "size": 37,
+      "color": "#eaf5f1",
+      "font": "reference",
+      "overflow": "fit",
+      "minSize": 26,
+      "counter": {
+        "value": {
+          "keys": [
+            {
+              "at": 59,
+              "value": 0,
+              "easing": {
+                "type": "cubic-bezier",
+                "x1": 0.32,
+                "y1": 0,
+                "x2": 0.18,
+                "y2": 1
+              }
+            },
+            {
+              "at": 181,
+              "value": 55
+            }
+          ]
+        }
+      },
+      "align": "center"
+    },
+    {
+      "id": "station-1",
+      "type": "text",
+      "content": "Estuary",
+      "width": 290,
+      "height": 91,
+      "x": 547,
+      "y": 829,
+      "size": 31,
+      "color": "#b7d2d7",
+      "font": "reference",
+      "overflow": "fit",
+      "minSize": 26,
+      "align": "center",
+      "weight": 500
+    },
+    {
+      "id": "bar-2",
+      "type": "rect",
+      "x": 954,
+      "y": {
+        "keys": [
+          {
+            "at": 80,
+            "value": 790,
+            "easing": {
+              "type": "cubic-bezier",
+              "x1": 0.32,
+              "y1": 0,
+              "x2": 0.18,
+              "y2": 1
+            }
+          },
+          {
+            "at": 202,
+            "value": 478
+          }
+        ]
+      },
+      "width": 136,
+      "height": {
+        "keys": [
+          {
+            "at": 80,
+            "value": 0,
+            "easing": {
+              "type": "cubic-bezier",
+              "x1": 0.32,
+              "y1": 0,
+              "x2": 0.18,
+              "y2": 1
+            }
+          },
+          {
+            "at": 202,
+            "value": 312
+          }
+        ]
+      },
+      "fill": "#258f98",
+      "radius": 9
+    },
+    {
+      "id": "counter-2",
+      "type": "text",
+      "width": 160,
+      "height": 48,
+      "x": 942,
+      "y": {
+        "keys": [
+          {
+            "at": 80,
+            "value": 735,
+            "easing": {
+              "type": "cubic-bezier",
+              "x1": 0.32,
+              "y1": 0,
+              "x2": 0.18,
+              "y2": 1
+            }
+          },
+          {
+            "at": 202,
+            "value": 423
+          }
+        ]
+      },
+      "size": 37,
+      "color": "#eaf5f1",
+      "font": "reference",
+      "overflow": "fit",
+      "minSize": 26,
+      "counter": {
+        "value": {
+          "keys": [
+            {
+              "at": 80,
+              "value": 0,
+              "easing": {
+                "type": "cubic-bezier",
+                "x1": 0.32,
+                "y1": 0,
+                "x2": 0.18,
+                "y2": 1
+              }
+            },
+            {
+              "at": 202,
+              "value": 65
+            }
+          ]
+        }
+      },
+      "align": "center"
+    },
+    {
+      "id": "station-2",
+      "type": "text",
+      "content": "International catchment intake",
+      "width": 290,
+      "height": 91,
+      "x": 877,
+      "y": 829,
+      "size": 31,
+      "color": "#b7d2d7",
+      "font": "reference",
+      "overflow": "fit",
+      "minSize": 26,
+      "align": "center",
+      "weight": 500
+    },
+    {
+      "id": "bar-3",
+      "type": "rect",
+      "x": 1284,
+      "y": {
+        "keys": [
+          {
+            "at": 101,
+            "value": 790,
+            "easing": {
+              "type": "cubic-bezier",
+              "x1": 0.32,
+              "y1": 0,
+              "x2": 0.18,
+              "y2": 1
+            }
+          },
+          {
+            "at": 223,
+            "value": 406
+          }
+        ]
+      },
+      "width": 136,
+      "height": {
+        "keys": [
+          {
+            "at": 101,
+            "value": 0,
+            "easing": {
+              "type": "cubic-bezier",
+              "x1": 0.32,
+              "y1": 0,
+              "x2": 0.18,
+              "y2": 1
+            }
+          },
+          {
+            "at": 223,
+            "value": 384
+          }
+        ]
+      },
+      "fill": "#a4f0d7",
+      "radius": 9
+    },
+    {
+      "id": "counter-3",
+      "type": "text",
+      "width": 160,
+      "height": 48,
+      "x": 1272,
+      "y": {
+        "keys": [
+          {
+            "at": 101,
+            "value": 735,
+            "easing": {
+              "type": "cubic-bezier",
+              "x1": 0.32,
+              "y1": 0,
+              "x2": 0.18,
+              "y2": 1
+            }
+          },
+          {
+            "at": 223,
+            "value": 351
+          }
+        ]
+      },
+      "size": 37,
+      "color": "#eaf5f1",
+      "font": "reference",
+      "overflow": "fit",
+      "minSize": 26,
+      "counter": {
+        "value": {
+          "keys": [
+            {
+              "at": 101,
+              "value": 0,
+              "easing": {
+                "type": "cubic-bezier",
+                "x1": 0.32,
+                "y1": 0,
+                "x2": 0.18,
+                "y2": 1
+              }
+            },
+            {
+              "at": 223,
+              "value": 80
+            }
+          ]
+        }
+      },
+      "align": "center"
+    },
+    {
+      "id": "station-3",
+      "type": "text",
+      "content": "South basin",
+      "width": 290,
+      "height": 91,
+      "x": 1207,
+      "y": 829,
+      "size": 31,
+      "color": "#b7d2d7",
+      "font": "reference",
+      "overflow": "fit",
+      "minSize": 26,
+      "align": "center",
+      "weight": 500
+    },
+    {
+      "id": "trend",
+      "type": "path",
+      "d": "M362 594 L692 498 L1022 450 L1352 378",
+      "stroke": "#ffc984",
+      "strokeWidth": 7,
+      "draw": {
+        "keys": [
+          {
+            "at": 220,
+            "value": 0,
+            "easing": {
+              "type": "cubic-bezier",
+              "x1": 0.32,
+              "y1": 0,
+              "x2": 0.18,
+              "y2": 1
+            }
+          },
+          {
+            "at": 389,
+            "value": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "callout",
+      "type": "group",
+      "children": [
+        {
+          "id": "leader",
+          "type": "path",
+          "d": "M1352 378 l85 -80 h150",
+          "stroke": "#ffcb87",
+          "strokeWidth": 3
+        },
+        {
+          "id": "highest",
+          "type": "text",
+          "content": "Highest intake",
+          "width": 220,
+          "height": 42,
+          "x": 1444,
+          "y": 260,
+          "size": 24,
+          "color": "#ffcb87",
+          "font": "reference",
+          "overflow": "fit",
+          "minSize": 24
+        }
+      ],
+      "opacity": {
+        "keys": [
+          {
+            "at": 356,
+            "value": 0,
+            "easing": {
+              "type": "cubic-bezier",
+              "x1": 0.32,
+              "y1": 0,
+              "x2": 0.18,
+              "y2": 1
+            }
+          },
+          {
+            "at": 395,
+            "value": 1
+          }
+        ]
+      }
+    }
+  ]
+}

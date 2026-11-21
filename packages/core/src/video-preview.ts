@@ -185,18 +185,22 @@ export function previewVideo(video: CompiledVideo) {
         audioChannelRouting,
         warnings,
         musicLoudness,
-      } = await withRenderSources(revision, signal, (plan) =>
-        renderVideoTimeline({
-          ...plan,
-          signal,
-          ...(onProgress && { onProgress }),
-          maxDimension: options.maxDimension ?? 640,
-          audioComparison: options.audioComparison,
-          ...(audioMixCache && { audioMixCache }),
-          quality,
-          output,
-          range: { startFrame, endFrame },
-        }),
+      } = await withRenderSources(
+        revision,
+        signal,
+        (plan) =>
+          renderVideoTimeline({
+            ...plan,
+            signal,
+            ...(onProgress && { onProgress }),
+            maxDimension: options.maxDimension ?? 640,
+            audioComparison: options.audioComparison,
+            ...(audioMixCache && { audioMixCache }),
+            quality,
+            output,
+            range: { startFrame, endFrame },
+          }),
+        { audioComparison: options.audioComparison },
       );
       const result = previewClipSchema.parse({
         ...base,

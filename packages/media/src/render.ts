@@ -61,7 +61,14 @@ import type { PictureCache, PictureRange } from './picture-cache.js';
 import { prepareMusicComparison } from './music-comparison.js';
 import type { MusicLoudnessReport } from './music-comparison.js';
 
+import { boundPictureInputs, selectPictureInputs } from './bounded-picture.js';
+import { maxRenderedSubtitleCues, maxTimelineClips } from '@opencut/shared';
+import { compositeGroup, transparentGroupSurface } from './visual-group.js';
+import type { GroupSurfaces } from './visual-group.js';
+import type { VisualGroup } from '@opencut/shared';
+
 interface VisualTimelineProperties {
+  trackId?: string;
   crop?: NonNullable<import('@opencut/shared').VisualTransform['crop']>;
   grade?: import('@opencut/shared').ColorGrade;
   clipId: string;
@@ -161,6 +168,7 @@ export interface VideoTimelineOptions extends RenderControls {
   frameCount: number;
   backgroundColor?: string;
   visualClips?: VisualTimelineClip[];
+  visualGroups?: readonly VisualGroup[];
   visualTransitions?: VisualTransition[];
   /** Legacy sequential plan; supply either segments or visualClips. */
   segments?: Array<
@@ -249,7 +257,8 @@ function validateOptions(options: VideoTimelineOptions): void {
         ) ||
         segments.reduce((sum, s) => sum + s.frameCount, 0) !== frameCount)) ||
     (options.visualClips !== undefined &&
-      (options.visualClips.filter((clip) => !clip.subtitle).length > 64 ||
+      (options.visualClips.filter((clip) => !clip.subtitle).length >
+        maxTimelineClips ||
         options.visualClips.some(
           (clip) =>
             !Number.isSafeInteger(clip.timelineStartFrame) ||
@@ -282,7 +291,7 @@ function validateOptions(options: VideoTimelineOptions): void {
             (clip.opacity ?? 1) > 1 ||
             !['contain', 'cover', 'stretch'].includes(clip.fit ?? 'contain'),
         ))) ||
-    (options.audioClips?.length ?? 0) > 64 ||
+    (options.audioClips?.length ?? 0) > maxTimelineClips ||
     options.audioClips?.some(
       (clip) =>
         !Number.isSafeInteger(clip.timelineStartFrame) ||
@@ -305,7 +314,7 @@ function validateOptions(options: VideoTimelineOptions): void {
     )
   )
     throw new MediaError(
-      'Invalid video render plan: use positive integer frame counts, even sides up to 3840 (at most 3840x2160 pixels), 1–120 fps, at most 64 non-subtitle visual/audio clips (or 128 legacy segments), valid transforms and #RRGGBB[AA]/transparent background, and 600 seconds.',
+      'Invalid video render plan: use positive integer frame counts, even sides up to 3840 (at most 3840x2160 pixels), 1–120 fps, at most 128 non-subtitle visual or audio clips (or 128 legacy segments), valid transforms and #RRGGBB[AA]/transparent background, and 600 seconds.',
     );
 }
 
@@ -428,7 +437,6 @@ interface StagedInput {
 }
 
 type HeldFrame = { path: string; width: number; height: number };
-const maxBurnedSubtitleCues = 256;
 
 export function validateSubtitleBurnIn(
   clips: readonly Pick<
@@ -439,9 +447,9 @@ export function validateSubtitleBurnIn(
   const ids = new Set<string>();
   for (const clip of clips) {
     if (clip.subtitle) ids.add(clip.subtitleCueId ?? clip.clipId);
-    if (ids.size > maxBurnedSubtitleCues)
+    if (ids.size > maxRenderedSubtitleCues)
       throw new MediaError(
-        `Burn-in supports up to ${maxBurnedSubtitleCues} visible subtitle cues per render. Shorten the render range or export a sidecar.`,
+        `Burn-in supports up to ${maxRenderedSubtitleCues} visible subtitle cues per render. Shorten the render range or export a sidecar.`,
       );
   }
 }
@@ -765,8 +773,39 @@ async function prepareTimeline(
     (clip) => !clip.subtitle || overlapsRange(clip),
   );
   validateSubtitleBurnIn(visibleClips);
+  const bounded = boundPictureInputs(visibleClips, transitions, {
+    startFrame,
+    endFrame,
+  });
+  let scratchBytes = 0;
+  let segmentId = 0;
+  const temporaryPictureCache: PictureCache | undefined =
+    mode === 'mp4' && scratch && bounded.length > 1 && !options.pictureCache
+      ? {
+          backend: 'ffv1-bounded',
+          sourceIdentity() {
+            throw new MediaError(
+              'Temporary picture ranges do not need source hashing.',
+            );
+          },
+          async materialize(_key, encode) {
+            const directory = await scratch.open();
+            const path = join(directory, `picture-${segmentId++}.nut`);
+            await encode(path);
+            scratchBytes += (await stat(path)).size;
+            await accountRenderFile(path);
+            if (scratchBytes > 8 * 1024 * 1024 * 1024)
+              throw new MediaError(
+                'Temporary picture ranges exceeded 8 GiB. Render a shorter range.',
+              );
+            return { path, reused: false };
+          },
+        }
+      : undefined;
   const pictureCache =
-    mode === 'mp4' && scratch ? options.pictureCache : undefined;
+    mode === 'mp4' && scratch
+      ? (options.pictureCache ?? temporaryPictureCache)
+      : undefined;
   const pictureVersion = mode === 'mp4' ? options.pictureVersion : undefined;
   const encodedCache = options.pictureCache?.encoded;
   if (
@@ -1096,18 +1135,48 @@ async function prepareTimeline(
   // Overlay counts from zero while its input timestamps use project time.
   const enabled = (start: number, end: number) =>
     `gte(n,${start - startFrame})*lt(n,${end - startFrame})`;
-  let canvas = 0;
+  let canvas = 'canvas0';
+  let canvasId = 0;
+  const clock = { start: startFrame, end: endFrame, numerator, denominator };
+  const groups = new Map(
+    options.visualGroups?.flatMap((style, id) =>
+      style.tracks.map((track) => [track, { style, id }] as const),
+    ),
+  );
+  let group: GroupSurfaces | undefined;
+  function completeGroup() {
+    if (!group) return;
+    canvas = compositeGroup(filters, group, width, height, clock);
+    group = undefined;
+  }
+  function groupSurface(trackId: string | undefined) {
+    const requested = trackId && groups.get(trackId);
+    if (group && (!requested || group.id !== requested.id)) completeGroup();
+    if (!requested) return;
+    if (!group) {
+      const { style, id } = requested;
+      const content = `group${id}content`;
+      const matte = style.matte ? `group${id}matte` : undefined;
+      filters.push(transparentGroupSurface(content, width, height, clock));
+      if (matte)
+        filters.push(transparentGroupSurface(matte, width, height, clock));
+      group = { style, id, backdrop: canvas, content, matte };
+    }
+    canvas = trackId === group.style.matte ? group.matte! : group.content;
+  }
   const overlay = (
     label: string,
     { x, y, sync }: { x: number; y: number; sync: string },
     gate: string,
   ) => {
+    const next = `canvas${++canvasId}`;
     filters.push(
-      `[canvas${canvas}][${label}]overlay=x=${x}:y=${y}:${sync}:format=rgb:alpha=straight:enable='${gate}'[canvas${canvas + 1}]`,
+      `[${canvas}][${label}]overlay=x=${x}:y=${y}:${sync}:format=rgb:alpha=straight:enable='${gate}'[${next}]`,
     );
-    canvas++;
+    canvas = next;
   };
   for (const [index, clip] of (pictureCache ? [] : visibleClips).entries()) {
+    groupSurface(clip.trackId);
     const label = `layer${index}`;
     // A transition can contribute even when its owner's base clip is off-range.
     const placement =
@@ -1148,22 +1217,29 @@ async function prepareTimeline(
       );
       overlay(group, { x: 0, y: 0, sync: framesync }, gate);
     }
+    if (group) {
+      if (clip.trackId === group.style.matte) group.matte = canvas;
+      else group.content = canvas;
+    }
   }
-  let picture = `[canvas${canvas}]settb=1/${numerator},setpts=N*${denominator},scale=${outputWidth}:${outputHeight}:out_color_matrix=bt709,setsar=1`;
+  completeGroup();
+  let picture = `[${canvas}]settb=1/${numerator},setpts=N*${denominator},scale=${outputWidth}:${outputHeight}:out_color_matrix=bt709,setsar=1`;
   let videoMap = '[video]';
   if (pictureCache) {
-    const planned = await planPictureRanges({
-      options,
-      cache: pictureCache,
-      visualClips,
-      byOwner,
-      startFrame,
-      endFrame,
-      outputWidth,
-      outputHeight,
-      warnings,
-      rasterize,
-    });
+    const planned = temporaryPictureCache
+      ? bounded.map((range, index) => ({ ...range, key: String(index) }))
+      : await planPictureRanges({
+          options,
+          cache: pictureCache,
+          visualClips,
+          byOwner,
+          startFrame,
+          endFrame,
+          outputWidth,
+          outputHeight,
+          warnings,
+          rasterize,
+        });
     if (pictureVersion && encodedCache) {
       const key = encodedPictureKey(planned, [
         codec,
@@ -1201,6 +1277,8 @@ async function prepareTimeline(
       }
     }
     if (!prepared.sourcePicture) {
+      const segmentOptions = { ...options };
+      delete segmentOptions.segments;
       const checkSeek = pictureSeekCheck(options.signal);
       const { concat, ranges } = await cachePicture(
         planned,
@@ -1216,7 +1294,11 @@ async function prepareTimeline(
           try {
             const segment = await prepareTimeline(
               {
-                ...options,
+                ...segmentOptions,
+                ...selectPictureInputs(visualClips, transitions, {
+                  startFrame,
+                  endFrame,
+                }),
                 range: { startFrame, endFrame },
                 outputFrameRate: undefined,
               },
@@ -1240,7 +1322,7 @@ async function prepareTimeline(
           }
         },
       );
-      prepared.pictureRanges = ranges;
+      if (!temporaryPictureCache) prepared.pictureRanges = ranges;
       args.push('-f', 'concat', '-safe', '0', '-protocol_whitelist', 'file');
       const pictureInput = registerInput('picture.ffconcat', (destination) =>
         writeFile(destination, concat, {

@@ -243,3 +243,16 @@ Pass `musicSelection: { candidate: 'soft-bed', matchLoudness: true }` to
 `musicComparison` for the selected track and source provenance, and
 `musicLoudness` for the target and applied gain when loudness matching is
 enabled.
+
+## Declarative graphics and JSON
+
+`compileVideo`, `renderVideo`, `watchVideo`, `batchRenderVideo` and
+`packageVideo` accept both authored suffixes. Pass `params` to use a
+declared JSON or TypeScript variant. Use `videoDefinitionFormats` and
+`videoGraphicsCapabilities` for discovery. `inspectGraphicFrames(video, frame)`
+returns source time and backend information for the graphic samples chosen
+by the compiled plan, without launching Chromium.
+
+Use `defineGraphicScene` for a typed node tree or `createPresetScene` for
+a sized preset. The same data can be stored inside a JSON definition.
+See [scene contracts, motion and optional adapters](GRAPHICS.md).

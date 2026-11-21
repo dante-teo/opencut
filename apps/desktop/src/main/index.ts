@@ -274,16 +274,18 @@ app
             {
               title: 'Review a video definition',
               message:
-                'Only open trusted local TypeScript. OpenCut executes the selected script and its imports on every rebuild.',
+                'OpenCut executes TypeScript definitions and their imports. JSON definitions can reference executable graphics. Review only trusted sources.',
               properties: ['openFile'],
-              filters: [{ name: 'Video definitions', extensions: ['ts'] }],
+              filters: [
+                { name: 'Video definitions', extensions: ['ts', 'json'] },
+              ],
             },
           );
           assertSender(event);
           if (canceled) return;
           const [path] = filePaths;
           if (!path || !isVideoDefinitionPath(path))
-            throw new Error('Choose a .video.ts file.');
+            throw new Error('Choose a .video.ts or .video.json file.');
           previewFile = null;
           definitionReview.open(path);
         } finally {
@@ -352,7 +354,7 @@ app
           });
           assertSender(event);
           if (destination.canceled || !destination.filePath) return;
-          if (!isVideoDefinitionPath(destination.filePath))
+          if (!destination.filePath.endsWith('.video.ts'))
             throw new Error('Choose a new .video.ts filename.');
           await createDialogueMixDefinition(
             destination.filePath,

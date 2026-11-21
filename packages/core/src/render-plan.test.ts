@@ -226,8 +226,8 @@ describe('pure project render planning', () => {
       /600 seconds/,
     );
     let project = example();
-    for (let i = 0; i < 65; i++) project = clip(project, `c${i}`, i, 0, 1);
-    expect(() => planProjectRender(project)).toThrow(/64 clips/);
+    for (let i = 0; i < 129; i++) project = clip(project, `c${i}`, i, 0, 1);
+    expect(() => planProjectRender(project)).toThrow(/128 clips/);
   });
 
   it('reduces equivalent rational frame rates before FFmpeg compilation', () => {

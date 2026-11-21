@@ -162,7 +162,9 @@ export function resolveTimeline(project: Project) {
   if (timeline.transitions?.length) {
     const media = new Map(
       clips.flatMap((clip) =>
-        clip.kind === 'video' || clip.kind === 'image'
+        clip.kind === 'video' ||
+        clip.kind === 'image' ||
+        clip.kind === 'graphic'
           ? [[clip.id, clip] as const]
           : [],
       ),

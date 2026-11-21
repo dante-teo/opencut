@@ -119,6 +119,7 @@ async function packCli() {
     'skills/video-editor',
     'examples/video',
     'examples/graphics',
+    'examples/motion',
   ])
     cpSync(join(root, directory), join(path, directory), { recursive: true });
   writeManifest(path, {

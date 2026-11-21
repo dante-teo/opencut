@@ -1,5 +1,6 @@
 import {
   isVideoDefinitionPath,
+  inspectGraphicFrames,
   parseSubtitleTime,
   previewVideo,
   watchVideo,
@@ -60,7 +61,7 @@ export async function runInspectionCommand(
   values: CommandOptions,
 ) {
   if (!isVideoDefinitionPath(file))
-    throw new UsageError('Choose a .video.ts definition.');
+    throw new UsageError('Choose a .video.ts or .video.json definition.');
   const quality = parseRenderQuality(
     values.quality,
     command === 'timeline inspect' ? 'quality' : 'fast',
@@ -78,6 +79,7 @@ export async function runInspectionCommand(
     return withCommandCancellation(async (signal) => {
       const watcher = await watchVideo(file, {
         ...(await readMixControls(values, signal)),
+        params: await readParams(values.params, signal),
         maxDimension,
         quality,
         processing,
@@ -165,7 +167,15 @@ export async function runInspectionCommand(
     });
     const tools = previewVideo(video);
     if (command === 'timeline inspect') {
-      console.log(JSON.stringify(tools.inspectFrame(selectedFrame!), null, 2));
+      const report = tools.inspectFrame(selectedFrame!);
+      const graphics = await inspectGraphicFrames(video, report.frame);
+      console.log(
+        JSON.stringify(
+          { ...report, ...(graphics.length && { graphics }) },
+          null,
+          2,
+        ),
+      );
       return;
     }
     const options = { signal, maxDimension: size, quality };

@@ -1,13 +1,9 @@
-import {
-  animatedProperties,
-  keyframeEasings,
-  visualRanges,
-} from '@opencut/shared';
+import { animatedProperties, visualRanges } from '@opencut/shared';
 import type { AnimatedProperty } from '@opencut/shared';
 import { z } from 'zod';
 import { timeSchema } from './time.js';
 
-const easingSchema = z.enum(keyframeEasings);
+import { motionEasingSchema } from './motion-schema.js';
 
 export function visualValueSchema(property: AnimatedProperty) {
   const [min, max] = visualRanges[property];
@@ -17,11 +13,12 @@ const unit = z.number().min(0).max(1);
 const visualKeyframeSchema = z.strictObject({
   time: timeSchema,
   value: z.number(),
-  easing: easingSchema,
+  easing: motionEasingSchema,
   curve: z
     .tuple([unit, unit])
     .refine(([a, b]) => a < b, 'Curve bounds must increase.')
     .optional(),
+  curveAmplitude: z.number().min(-72000).max(72000).optional(),
 });
 const channel = (property: AnimatedProperty) =>
   z

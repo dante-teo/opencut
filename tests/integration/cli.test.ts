@@ -21,7 +21,9 @@ describe('standalone built CLI', () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(result.stdout).toContain('Usage: opencut');
-      expect(result.stdout).toContain('render <definition.video.ts>');
+      expect(result.stdout).toContain(
+        'render <definition.video.ts|definition.video.json>',
+      );
       expect(result.stdout).not.toContain('project render');
     },
   );

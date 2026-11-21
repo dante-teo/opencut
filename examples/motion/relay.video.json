@@ -1,0 +1,150 @@
+{
+  "version": 3,
+  "name": "Relay",
+  "canvas": {
+    "width": 1920,
+    "height": 1080,
+    "frameRate": 30,
+    "durationFrames": 300,
+    "backgroundColor": "#101d2b"
+  },
+  "assets": {
+    "scenery": {
+      "kind": "video",
+      "path": "../../tests/fixtures/generated/reference-motion/assets/water.mp4"
+    },
+    "relay": {
+      "kind": "graphic",
+      "renderer": "lottie",
+      "path": "../../tests/fixtures/generated/reference-motion/assets/relay.json",
+      "durationFrames": 360,
+      "outOfRange": "hold"
+    },
+    "titles": {
+      "kind": "graphic",
+      "renderer": "scene",
+      "durationFrames": 300,
+      "scene": {
+        "version": 1,
+        "units": "px",
+        "children": [
+          {
+            "id": "relay-grade",
+            "type": "rect",
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 1080,
+            "fill": "#101d2b59"
+          },
+          {
+            "id": "relay-first",
+            "type": "text",
+            "content": "VECTOR TELEMETRY / 1×",
+            "width": 1600,
+            "height": 38,
+            "x": 132,
+            "y": 860,
+            "size": 26,
+            "color": "#54e1cc",
+            "font": "reference",
+            "overflow": "fit",
+            "minSize": 26,
+            "timing": {
+              "at": 0,
+              "duration": 150
+            }
+          },
+          {
+            "id": "relay-second",
+            "type": "text",
+            "content": "VECTOR TELEMETRY / 1.5×",
+            "width": 1600,
+            "height": 38,
+            "x": 132,
+            "y": 860,
+            "size": 26,
+            "color": "#54e1cc",
+            "font": "reference",
+            "overflow": "fit",
+            "minSize": 26,
+            "timing": {
+              "at": 150,
+              "duration": 150
+            }
+          },
+          {
+            "id": "relay-title",
+            "type": "text",
+            "content": "Relay",
+            "width": 740,
+            "height": 112,
+            "x": 132,
+            "y": 905,
+            "size": 76,
+            "color": "#eaf5f1",
+            "font": "reference",
+            "overflow": "fit",
+            "minSize": 26,
+            "weight": 850
+          }
+        ]
+      },
+      "resources": {
+        "reference": "../../tests/fixtures/generated/reference-motion/assets/font.ttf"
+      }
+    }
+  },
+  "tracks": [
+    {
+      "id": "background",
+      "type": "video",
+      "clips": [
+        {
+          "id": "water",
+          "asset": "scenery",
+          "at": 0,
+          "sourceIn": 90,
+          "sourceOut": 390
+        }
+      ]
+    },
+    {
+      "id": "titles-track",
+      "type": "video",
+      "clips": [
+        {
+          "id": "relay-labels",
+          "asset": "titles",
+          "at": 0,
+          "sourceIn": 0,
+          "sourceOut": 300
+        }
+      ]
+    },
+    {
+      "id": "vector",
+      "type": "video",
+      "clips": [
+        {
+          "id": "first-beacon",
+          "asset": "relay",
+          "at": 0,
+          "sourceIn": 24,
+          "sourceOut": 174
+        },
+        {
+          "id": "second-beacon",
+          "asset": "relay",
+          "at": 150,
+          "sourceIn": 72,
+          "sourceOut": 297,
+          "speed": {
+            "numerator": 3,
+            "denominator": 2
+          }
+        }
+      ]
+    }
+  ]
+}

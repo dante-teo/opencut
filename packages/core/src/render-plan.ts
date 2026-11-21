@@ -1,4 +1,5 @@
-import { maximumVisualScale } from '@opencut/shared';
+import { checkVisualGroups } from './visual-groups.js';
+import { maximumVisualScale, maxTimelineClips } from '@opencut/shared';
 import type {
   ProfessionalMix,
   RenderTimeMapping,
@@ -26,6 +27,7 @@ interface VisualRenderProperties {
   crop?: NonNullable<NonNullable<TimelineClip['visual']>['crop']>;
   grade?: NonNullable<TimelineClip['grade']>;
   clipId: string;
+  trackId?: string;
   timelineStartFrame: number;
   sourceStartFrame: number;
   retiming?: RenderTimeMapping & {
@@ -61,7 +63,7 @@ export type VisualRenderClip = VisualRenderProperties &
 
 export interface ProjectRenderPlan extends Pick<
   VideoTimelineOptions,
-  'musicComparison'
+  'musicComparison' | 'visualGroups'
 > {
   width: number;
   height: number;
@@ -123,7 +125,11 @@ export function planProjectRender(
   project: Project,
   { burnSubtitles = true }: { burnSubtitles?: boolean | undefined } = {},
 ): ProjectRenderPlan {
+  checkVisualGroups(project);
   const timeline = resolveTimeline(project);
+  const groupedTracks = new Set(
+    project.visualGroups?.flatMap(({ tracks }) => tracks),
+  );
   if (
     project.settings.durationFrames === undefined &&
     !timeline.clips.some((clip) => clip.trackType === 'video') &&
@@ -132,9 +138,9 @@ export function planProjectRender(
     throw new RenderError(
       'Video tracks are empty. Add a video, image or text clip before rendering.',
     );
-  if (project.clips.length > 64)
+  if (project.clips.length > maxTimelineClips)
     throw new RenderError(
-      'Rendering supports at most 64 clips across all tracks. Render a smaller project.',
+      `Rendering supports at most ${maxTimelineClips} clips across all tracks. Render a smaller project.`,
     );
   const { width, height } = project.settings;
   if (
@@ -196,6 +202,7 @@ export function planProjectRender(
       if (end > start)
         visualClips.push({
           clipId: clip.id,
+          ...(groupedTracks.has(clip.trackId) && { trackId: clip.trackId }),
           text: clip.text,
           ...(clip.subtitle && { subtitle: true }),
           ...(clip.subtitleCueId && { subtitleCueId: clip.subtitleCueId }),
@@ -301,6 +308,7 @@ export function planProjectRender(
         );
       visualClips.push({
         clipId: clip.id,
+        ...(groupedTracks.has(clip.trackId) && { trackId: clip.trackId }),
         assetId: clip.assetId,
         ...(freezeFrame && { freezeFrame }),
         ...(clip.graphicProps && { graphicProps: clip.graphicProps }),
@@ -333,28 +341,35 @@ export function planProjectRender(
       const visual = visualById.get(clip.id);
       if (!visual?.assetId)
         throw new RenderError(
-          `Transition clip '${clip.id}' requires a photo or video render layer.`,
+          `Transition clip '${clip.id}' requires a media or graphic render layer.`,
         );
       return {
         ...visual,
         timelineStartFrame: startFrame,
         sourceStartFrame: 0,
         frameCount: endFrame - startFrame,
-        ramp: { startFrame, endFrame, direction },
-        ...(clip.kind !== 'image' && {
-          retiming: {
-            timelineStart: start,
-            timelineEnd: end,
-            sourceIn: clipSourceTime(clip, start),
-            sourceOut: clipSourceTime(clip, end),
-            speed: clipSpeed(clip),
-            sourceOriginNs: sourceOriginNanoseconds(clip),
-            localSourceOriginNs: sourceOriginNanoseconds(
-              clip,
-              frameTime(startFrame, frameRate),
-            ),
-          },
-        }),
+        ramp: {
+          startFrame,
+          endFrame,
+          direction,
+          ...(transition.style && { style: transition.style }),
+        },
+        ...(clip.kind !== 'image' &&
+          (clip.kind !== 'graphic' ||
+            project.assets.find(({ id }) => id === clip.assetId)?.duration) && {
+            retiming: {
+              timelineStart: start,
+              timelineEnd: end,
+              sourceIn: clipSourceTime(clip, start),
+              sourceOut: clipSourceTime(clip, end),
+              speed: clipSpeed(clip),
+              sourceOriginNs: sourceOriginNanoseconds(clip),
+              localSourceOriginNs: sourceOriginNanoseconds(
+                clip,
+                frameTime(startFrame, frameRate),
+              ),
+            },
+          }),
       };
     }),
   }));
@@ -369,6 +384,7 @@ export function planProjectRender(
     frameCount: totalFrames,
     backgroundColor: project.settings.backgroundColor ?? '#000000',
     visualClips,
+    ...(project.visualGroups?.length && { visualGroups: project.visualGroups }),
     audioClips,
     ...(professionalMix && {
       professionalMix: ducking

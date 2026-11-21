@@ -1,11 +1,12 @@
 import { spawnSync } from 'node:child_process';
 import { warn } from 'node:console';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import process from 'node:process';
 
 const workers = ['video-interpolate', 'video-enhance'];
-for (const worker of [...workers, 'process-memory'])
-  rmSync(`dist/${worker}`, { force: true });
+const removeUnavailable = (names) => {
+  for (const name of names) rmSync(`dist/${name}`, { force: true });
+};
 if (process.platform === 'darwin') {
   const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
   const sdk =
@@ -29,21 +30,34 @@ if (process.platform === 'darwin') {
     sdk,
   ];
   function compile(sources, output, flags = []) {
-    const { status, error } = spawnSync(
-      '/usr/bin/clang',
-      [...compilerFlags, ...flags, ...sources, '-o', output],
-      { stdio: 'inherit' },
-    );
-    if (error) throw error;
-    if (status !== 0) process.exit(status ?? 1);
+    const stage = `${output}.${process.pid}.build`;
+    try {
+      const { status, error, signal } = spawnSync(
+        '/usr/bin/clang',
+        [...compilerFlags, ...flags, ...sources, '-o', stage],
+        { stdio: 'inherit' },
+      );
+      if (error) throw error;
+      if (status !== 0)
+        throw new Error(
+          `clang could not build ${output} (${signal ?? status}).`,
+        );
+      renameSync(stage, output);
+    } finally {
+      rmSync(stage, { force: true });
+    }
   }
   compile(['native/process-memory.c'], 'dist/process-memory');
-  if (process.arch !== 'arm64') process.exit(0);
+  if (process.arch !== 'arm64') {
+    removeUnavailable(workers);
+    process.exit(0);
+  }
   if (
     !existsSync(
       `${sdk}/System/Library/Frameworks/VideoToolbox.framework/Headers/VTFrameProcessor_LowLatencyFrameInterpolation.h`,
     )
   ) {
+    removeUnavailable(workers);
     warn('OpenCut: VideoToolbox AI recipes require a macOS 26+ SDK to build.');
   } else {
     for (const worker of workers) {
@@ -63,4 +77,4 @@ if (process.platform === 'darwin') {
       );
     }
   }
-}
+} else removeUnavailable([...workers, 'process-memory']);

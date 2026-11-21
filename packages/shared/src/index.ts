@@ -1,4 +1,12 @@
 export * from './keyframes.js';
+export * from './motion.js';
+export const maxTimelineClips = 128;
+export const maxRenderedSubtitleCues = 512;
+export type { VisualGroup } from './visual-group.js';
+export type * from './graphic-scene.js';
+export { graphicNodeTime } from './graphic-scene.js';
+export type * from './three-scene.js';
+export type * from './reactive-audio.js';
 export * from './color-grade.js';
 
 export const roomEchoes = [
@@ -27,6 +35,8 @@ export interface TextLayer {
   canvasFill?: string | undefined;
   emphasis?: string[] | undefined;
   activeWord?: { from: number; to: number; phase: number } | undefined;
+  activeWordStyle?:
+    { color: string; background?: string | undefined } | undefined;
   embeddedFont?: string | null | undefined;
   fontFamily?: string | undefined;
   fontSize?: number | undefined;
@@ -247,8 +257,8 @@ export function transformTextLayer(
   ctx.translate(-width / 2, -height / 2);
 }
 
-export { transitionOpacity } from './transition.js';
-export type { TransitionRamp } from './transition.js';
+export { transitionOpacity, transitionProgress } from './transition.js';
+export type { TransitionRamp, TransitionStyle } from './transition.js';
 export { renderQualities, renderQualityProfiles } from './render-quality.js';
 export type { RenderQuality } from './render-quality.js';
 

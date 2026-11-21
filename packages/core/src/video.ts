@@ -1,5 +1,7 @@
 /** Node entrypoint for definition workflows. */
 export { defineVideo, videoId, videoParams } from './video-definition.js';
+export { videoDefinitionFormats } from './video-json.js';
+export type { JsonVideoParameterSchema } from './video-json.js';
 export type { VideoDefinition, VideoParameters } from './video-definition.js';
 export type {
   GraphicAssetDefinition,
@@ -91,3 +93,49 @@ export {
   musicSelectionSchema,
 } from './music-comparison.js';
 export type { MusicSelection } from './music-comparison.js';
+
+export {
+  cycleTime,
+  ease,
+  interpolate,
+  interpolateColor,
+  sampleMotion,
+  seededVariation,
+  sequenceTime,
+  staggerTime,
+} from '@opencut/shared';
+export type {
+  Extrapolation,
+  MotionChannel,
+  MotionCycle,
+  MotionEasing,
+  MotionKeyframe,
+} from '@opencut/shared';
+
+export { defineGraphicScene, sceneLimits } from './graphic-scene-schema.js';
+export type {
+  AnimatedNumber,
+  GraphicScene,
+  GraphicSceneNode,
+  SceneColor,
+  SceneMask,
+  ScenePaint,
+} from '@opencut/shared';
+
+export type { AnimatedVector, ThreeScene } from '@opencut/shared';
+export { graphicTemplates } from './video-graphics-contract.js';
+
+export { createPresetScene, graphicScenePresets } from './scene-presets.js';
+export type { ScenePreset } from './scene-presets.js';
+export type {
+  GraphicAudioAnalysis,
+  GraphicAudioSample,
+  VisualGroup,
+  TransitionStyle,
+} from '@opencut/shared';
+
+export {
+  inspectGraphicFrames,
+  videoGraphicsCapabilities,
+  videoGraphicsSchemas,
+} from './graphics-inspection.js';

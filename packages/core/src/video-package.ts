@@ -17,6 +17,7 @@ import {
   VideoDefinitionError,
 } from './video-definition.js';
 import { isVideoDefinitionPath, readVideoInput } from './video-files.js';
+import { videoDefinitionFormats } from './video-json.js';
 import { copyVideoInput, videoInputIdentity } from './video-input.js';
 import {
   fingerprintFile,
@@ -38,6 +39,7 @@ import {
 import type { VideoPackageManifest } from './video-package-format.js';
 import { scanPackageImports } from './video-package-imports.js';
 import type { ScriptImport } from './video-script.js';
+import { checkGraphicAudio } from './graphic-audio.js';
 import { compileVideoGraphics } from './video-graphics.js';
 
 export interface VideoPackageOptions {
@@ -68,7 +70,9 @@ export async function packageVideo(
 ) {
   const source = resolve(file);
   if (!isVideoDefinitionPath(source) || basename(source) === packageEntryName)
-    throw new VideoDefinitionError('Choose an authored .video.ts definition.');
+    throw new VideoDefinitionError(
+      'Choose an authored .video.ts or .video.json definition.',
+    );
   const project = resolve(root ?? dirname(source));
   if (
     !(await lstat(project)).isDirectory() ||
@@ -176,6 +180,7 @@ export async function packageVideo(
     }
   }
   const definition = parseVideoDefinition(value);
+  checkGraphicAudio(definition);
   const graphics = await compileVideoGraphics(
     source,
     definition,
@@ -210,10 +215,11 @@ export async function packageVideo(
         .join('\n'),
     );
   for (const asset of Object.values(definition.assets ?? {})) {
-    asset.path = await add(resolve(dirname(source), asset.path));
+    if (asset.path !== undefined)
+      asset.path = await add(resolve(dirname(source), asset.path));
     if (asset.kind === 'graphic') {
       const resources =
-        asset.renderer === 'react' ? asset.resources : asset.fonts;
+        asset.renderer === 'svg' ? asset.fonts : asset.resources;
       for (const [id, path] of Object.entries(resources ?? {}))
         resources![id] = await add(resolve(dirname(source), path));
     }
@@ -294,7 +300,13 @@ export async function packageVideo(
     const { recipes, native } = packageRecipes(definition);
     const manifest: VideoPackageManifest = {
       format: 'opencut-video-package',
-      version: graphics.size ? 2 : 1,
+      version:
+        definition.version === 3 ||
+        source.endsWith(videoDefinitionFormats.json.suffix)
+          ? 3
+          : graphics.size
+            ? 2
+            : 1,
       ...(graphics.size && { graphics: graphicBundles }),
       opencut: getApplicationInfo().version,
       node: process.versions.node,

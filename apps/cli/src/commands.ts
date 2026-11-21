@@ -46,7 +46,7 @@ const optionTypes = {
   version: { type: 'boolean', short: 'v' },
 } as const;
 
-const definition = '<definition.video.ts>';
+const definition = '<definition.video.ts|definition.video.json>';
 const params = '[--params <params.json>]';
 const position = '(--frame <n> | --timestamp <time>)';
 const previewOptions = ['quality', ...Object.keys(processingOptionTypes)];
@@ -131,8 +131,8 @@ const commands = {
     ],
   },
   preview: {
-    args: `${definition} --watch [--size <64..1920>] ${qualityOption} ${mixUsage}`,
-    options: ['watch', 'size', ...previewOptions, ...mixOptions],
+    args: `${definition} --watch [--size <64..1920>] ${qualityOption} ${mixUsage} ${params}`,
+    options: ['watch', 'size', 'params', ...previewOptions, ...mixOptions],
   },
   'preview frame': {
     args: `${definition} ${position} --output <new.png> [--size <64..1920>] ${qualityOption} ${params}`,
@@ -269,7 +269,7 @@ export function printHelp(positionals: string[], json: boolean | undefined) {
     ...(!scope ||
     ['validate', 'render', 'preview', 'package', 'doctor'].includes(scope)
       ? [
-          '  React and SVG graphics use the standard video commands. Check React browser readiness with opencut doctor.',
+          '  Use opencut doctor --json to discover graphic scenes, adapters and prerequisites.',
         ]
       : []),
     ...(['render', 'batch'].includes(scope)

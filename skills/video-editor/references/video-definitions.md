@@ -180,3 +180,12 @@ subtitles, effects, and transitions with normal TypeScript functions.
 Pass a stable placement scope to reusable helpers and use
 `videoId(scope, localId)` for clip IDs referenced by transitions. See the
 [three-variant example](../../../examples/video/short-batch.video.ts).
+
+## Data-only motion definitions
+
+A `.video.json` file accepts the same composition data as `defineVideo`.
+Use the [JSON parameter and visual group reference](../../../docs/VIDEO_DEFINITIONS.md#json-authoring)
+for typed overrides, contiguous visual track groups, mattes and transitions.
+For motion graphics, set version 3 and choose a [graphic scene preset or
+primitive scene](../../../docs/GRAPHICS.md#declarative-scenes). A JSON
+definition can declare an executable custom React graphic.

@@ -122,6 +122,7 @@ export async function planPictureRanges({
           JSON.stringify([
             sourceKey,
             clip.x,
+            ...(clip.trackId ? [clip.trackId] : []),
             clip.y,
             clip.scale,
             clip.opacity,
@@ -139,7 +140,15 @@ export async function planPictureRanges({
     const offset = start - clip.timelineStartFrame;
     return [
       layer.key,
+      ...(clip.graphic?.audioAnalysis ? [start] : []),
       animation && relativeTime(animation.start, start, frameRate),
+      ...(clip.graphic?.motionBlur
+        ? [
+            offset,
+            clip.frameCount - offset,
+            retiming && relativeTime(retiming.timelineEnd, start, frameRate),
+          ]
+        : []),
       layer.still
         ? null
         : retiming
@@ -181,6 +190,7 @@ export async function planPictureRanges({
     outputWidth,
     outputHeight,
     opaqueCanvasColor(options.backgroundColor ?? '#000000'),
+    ...(options.visualGroups?.length ? [options.visualGroups] : []),
   ];
   for (let i = 1; i < edges.length; i++) {
     checkRenderSignal(signal);
@@ -202,6 +212,7 @@ export async function planPictureRanges({
             await Promise.all(
               layers.map(async (layer) => [
                 layer.ramp.direction,
+                ...(layer.ramp.style ? [layer.ramp.style] : []),
                 await layerKey(layer, start),
               ]),
             ),

@@ -86,3 +86,12 @@ Set the definition's 3:4 canvas to 60 fps and render with
 `--width 2880 --height 3840 --fps 60 --codec hevc`. Output scaling applies to
 the composed picture. Use per-source recipes for AI interpolation or
 super-resolution when requested.
+
+## Data authoring and graphics discovery
+
+Use `.video.json` wherever a video command accepts `.video.ts`.
+`opencut doctor --json` reports graphics capabilities and prerequisites.
+`opencut timeline inspect DEFINITION --frame N --json` reports requested
+graphic samples and dependency identity. Use `--params` in watch, preview,
+render or package to apply a declared variant. See the
+[CLI reference](../../../docs/CLI.md#json-and-motion-definitions).

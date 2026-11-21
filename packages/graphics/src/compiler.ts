@@ -5,12 +5,18 @@ import { createHash } from 'node:crypto';
 import { context, version } from 'esbuild';
 import type { Loader } from 'esbuild';
 import { templateEntry } from './template-entry.js';
+import type { GraphicScene, ThreeScene } from '@opencut/shared';
+import type { IntrinsicRange } from './intrinsic-time.js';
+import type { LottieClock } from './lottie-adapter.js';
 import { bundleDependencyNotices } from './bundle-dependencies.js';
 import type { GraphicTemplate } from './template-props.js';
 
 const resolveRuntime = createRequire(import.meta.url).resolve;
 const browserRuntime = fileURLToPath(new URL('./browser.js', import.meta.url));
 const reactHooks = fileURLToPath(new URL('./react.js', import.meta.url));
+const sharedRuntime = fileURLToPath(import.meta.resolve('@opencut/shared'));
+const runtimeFile = (name: string) =>
+  JSON.stringify(fileURLToPath(new URL(name, import.meta.url)));
 const templates = fileURLToPath(new URL('./templates.js', import.meta.url));
 const runtime = createRequire(import.meta.url)(
   'playwright-core/package.json',
@@ -30,6 +36,7 @@ const mime: Record<string, string> = {
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
   '.json': 'application/json',
+  '.glb': 'model/gltf-binary',
 };
 
 const loaders: Record<string, Loader> = {
@@ -49,6 +56,7 @@ const loaders: Record<string, Loader> = {
 export interface ReactGraphicBundle {
   version: 1 | 2;
   template?: GraphicTemplate | undefined;
+  adapter?: 'scene' | 'lottie' | 'three' | undefined;
   backend: string;
   key: string;
   js: string;
@@ -58,12 +66,45 @@ export interface ReactGraphicBundle {
   resources: Record<string, string>;
 }
 
+export type BuiltinGraphic =
+  | { kind: 'template'; name: GraphicTemplate }
+  | { kind: 'scene'; scene: GraphicScene }
+  | { kind: 'lottie'; clock: LottieClock; range: IntrinsicRange }
+  | { kind: 'three'; scene: ThreeScene };
+
+function builtinEntry(graphic: BuiltinGraphic) {
+  if (graphic.kind === 'template')
+    return `import { ${graphic.name} as Component } from ${JSON.stringify(templates)};
+      installGraphic(Component);`;
+  if (graphic.kind === 'scene')
+    return `import {createElement} from 'react';
+      import {SceneGraphic} from ${runtimeFile('./scene.js')};
+      import {useGraphicResources} from ${JSON.stringify(reactHooks)};
+      installGraphic(() => createElement(SceneGraphic, { scene: ${JSON.stringify(graphic.scene)}, resources: useGraphicResources() }), true);`;
+  const source =
+    graphic.kind === 'lottie'
+      ? {
+          entry: './lottie-adapter.js',
+          factory: 'lottieFrameAdapter',
+          args: [graphic.clock, graphic.range],
+        }
+      : {
+          entry: './three-adapter.js',
+          factory: 'threeFrameAdapter',
+          args: [graphic.scene],
+        };
+  return `import { installFrameAdapter } from ${runtimeFile('./frame-adapter.js')};
+    import { ${source.factory} as makeAdapter } from ${runtimeFile(source.entry)};
+    installFrameAdapter(makeAdapter(${source.args.map((item) => JSON.stringify(item)).join(',')}));`;
+}
+
 export async function compileReactGraphic(
   path: string,
   resources: Record<string, string>,
   read: (file: string, runtime?: boolean) => Promise<Buffer>,
   signal?: AbortSignal,
   missing?: (path: string) => void,
+  builtin?: BuiltinGraphic,
 ): Promise<ReactGraphicBundle> {
   signal?.throwIfAborted();
   const inputs = new Map<string, string>();
@@ -83,15 +124,27 @@ export async function compileReactGraphic(
       }),
     ),
   );
-  const template = templateEntry(path, (await snapshot(path)).toString('utf8'));
+  const template =
+    builtin?.kind === 'template'
+      ? builtin.name
+      : builtin
+        ? undefined
+        : templateEntry(path, (await snapshot(path)).toString('utf8'));
+  const adapter =
+    builtin && builtin.kind !== 'template' ? builtin.kind : undefined;
+  if (adapter === 'three' || adapter === 'lottie')
+    assertAdapterInstalled(adapter);
   const directory = dirname(path);
   const outdir = join(directory, '.opencut-graphic');
   const compile = await context({
     absWorkingDir: directory,
     stdin: {
-      contents: `import Component from ${JSON.stringify(path)};
-        import { installGraphic } from ${JSON.stringify(browserRuntime)};
-        installGraphic(Component);`,
+      contents: `import { installGraphic } from ${JSON.stringify(browserRuntime)};
+        ${
+          builtin
+            ? builtinEntry(builtin)
+            : `import Component from ${JSON.stringify(path)}; installGraphic(Component);`
+        }`,
       sourcefile: 'opencut-graphic-entry.js',
       resolveDir: directory,
     },
@@ -154,6 +207,9 @@ export async function compileReactGraphic(
               path: path.endsWith('/react') ? reactHooks : templates,
             }),
           );
+          plugin.onResolve({ filter: /^@opencut\/shared$/ }, () => ({
+            path: sharedRuntime,
+          }));
           plugin.onResolve(
             { filter: /^(react|react-dom)(\/|$)/ },
             ({ path }) => ({
@@ -170,6 +226,7 @@ export async function compileReactGraphic(
                 contents: await snapshot(
                   path,
                   dirname(path) === dirname(browserRuntime) ||
+                    dirname(path) === dirname(sharedRuntime) ||
                     path.split(/[\\/]/).includes('node_modules'),
                 ),
                 loader,
@@ -226,6 +283,7 @@ export async function compileReactGraphic(
         css,
         sourceMap,
         template,
+        adapter,
         captured,
       ]),
     )
@@ -233,6 +291,7 @@ export async function compileReactGraphic(
   return {
     version: 2,
     ...(template && { template }),
+    ...(adapter && { adapter }),
     backend: reactGraphicsBackend,
     key,
     js,
@@ -241,4 +300,41 @@ export async function compileReactGraphic(
     resources: captured,
     notices,
   };
+}
+
+const adapters = {
+  lottie: ['lottie-web', '5.13.0'],
+  three: ['three', '0.184.0'],
+} as const;
+
+export function adapterVersions() {
+  return Object.fromEntries(
+    Object.entries(adapters).map(([id, [name, version]]) => {
+      try {
+        resolveRuntime(name);
+        return [id, { version, status: 'available' }];
+      } catch {
+        return [
+          id,
+          {
+            version,
+            status: 'missing',
+            hint: `Install OpenCut with optional ${name}@${version}.`,
+          },
+        ];
+      }
+    }),
+  );
+}
+
+function assertAdapterInstalled(adapter: keyof typeof adapters) {
+  const [name, version] = adapters[adapter];
+  try {
+    resolveRuntime(name);
+  } catch (cause) {
+    throw new Error(
+      `Install OpenCut with the optional ${name}@${version} adapter dependency.`,
+      { cause },
+    );
+  }
 }

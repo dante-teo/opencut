@@ -1,6 +1,6 @@
 # Video as code
 
-Author a complete video in one `.video.ts` file. OpenCut
+Author a complete video in one `.video.ts` or `.video.json` file. OpenCut
 compiles the definition to an in-memory project and uses the shared timeline
 evaluator, compositor, and audio mixer.
 
@@ -460,7 +460,7 @@ The frame count is available for both declared and inferred durations.
 Both commands use ffprobe for declared media and can run without
 media tools for asset-free definitions.
 
-Full renders support up to 256 distinct subtitle cues that appear on the
+Full renders support up to 512 distinct subtitle cues that appear on the
 output frame grid. `validate` and `inspect` check this limit before
 any render. `preview frame --frame N --output FRAME.png` counts only the cues
 visible in the selected frame, so a long subtitle track can still be reviewed
@@ -544,3 +544,78 @@ Set `channelMode: 'mono-center'` on an audio or video track to
 [center its dialogue in a stereo mix](AUDIO_MIX.md#centered-mono-dialogue).
 Use `musicComparison` to choose among
 [independently edited music tracks](AUDIO_MIX.md#compare-music-candidates).
+
+## JSON authoring
+
+Save a normal composition object as `name.video.json`. JSON uses the same
+version, canvas, asset, track, subtitle and transition properties as
+`defineVideo({...})`. Use it with validate, inspect, preview, watch, render,
+batch and package. Reading this format does not execute a video authoring
+module. A declared custom React asset is still trusted executable content.
+
+For parameterized JSON, wrap the composition in this versioned document.
+
+```json
+{
+  "format": "opencut-video-json",
+  "version": 1,
+  "parameters": {
+    "heading": { "type": "string", "default": "Field notes" }
+  },
+  "bindings": [
+    {
+      "parameter": "heading",
+      "path": ["tracks", 0, "clips", 0, "text", "content"]
+    }
+  ],
+  "composition": {
+    "canvas": { "width": 640, "height": 360, "frameRate": 24 },
+    "tracks": [
+      {
+        "type": "text",
+        "clips": [{ "at": 0, "duration": 72, "text": { "content": "" } }]
+      }
+    ]
+  }
+}
+```
+
+Each parameter is a `string`, `number`, `integer`, `boolean` or `json`.
+Strings may declare `choices`. Numbers and integers may declare `minimum`
+and `maximum`. Omit `default` to require a value. Use string object keys
+and numeric array indices in the binding path. Destinations must already
+exist. A binding replaces the selected value, including an entire array or
+object. Duplicate or overlapping destinations and unknown parameters fail.
+Use `--params params.json` for overrides. Watch uses the parameters read
+at startup. A portable archive freezes the resolved composition.
+
+Use [declarative scene assets](GRAPHICS.md#declarative-scenes) in version 3
+for reusable motion, graphic presets and optional local Lottie and Three.js.
+
+## Visual track groups
+
+`visualGroups` isolates a contiguous set of visual tracks, identified by
+explicit track IDs in bottom-to-top order. Each track belongs to at most
+one group. A group can assign a separate member track as its alpha
+`matte`. That track defines visibility of the group's other tracks.
+An empty matte is transparent. Supply a group `clip` rectangle in logical
+pixels. The group can apply `blur`, then static `scale` and `rotation`
+about the canvas center, `x` and `y` offsets, and `opacity` once after
+the children combine. Group and effect output is clipped at the project
+canvas. `backdropBlur` blurs the actual lower-track picture within the
+transformed group alpha. Blend a group with that backdrop using
+`normal`, `multiply`, `screen` or `overlay`. The compositor uses
+straight-alpha SDR surfaces and premultiplies for spatial blur.
+Audio routing follows the original tracks.
+
+An existing `cross-dissolve` can specify a `style` using
+`{ kind: 'dip-to-color', color: '#102030' }`,
+`{ kind: 'wipe' | 'slide' | 'push', direction: 'left' | 'right' | 'up' | 'down' }`,
+`{ kind: 'zoom', amount: 0.18 }` or `{ kind: 'blur', radius: 18 }`.
+The same centered, frame-aligned transition window applies between adjacent
+pictures on one track. First and last transition frames match their
+corresponding endpoints. Timed graphics and video require source handles.
+Images and static SVG hold. The nominal cut still controls audio.
+
+Native subtitle styling accepts `activeWordStyle: { color, background? }`
+for timed emphasis. Omitting it preserves existing word-highlight colors.

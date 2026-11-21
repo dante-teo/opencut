@@ -1,12 +1,17 @@
+import type { GraphicScene } from '@opencut/shared';
 import { constants } from 'node:fs';
 import { open, realpath } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import {
   compileReactGraphic,
   compileStaticSvg,
   validateGraphicTemplate,
 } from '@opencut/media';
-import type { GraphicBundle, GraphicLayer } from '@opencut/media';
+import type {
+  BuiltinGraphic,
+  GraphicBundle,
+  GraphicLayer,
+} from '@opencut/media';
 import {
   graphicSurface,
   resolveGraphicProps,
@@ -22,6 +27,13 @@ import {
 } from './video-input.js';
 import type { VideoInput, RecordVideoInput } from './video-input.js';
 import { frameTime } from './time.js';
+import { createPresetScene } from './scene-presets.js';
+import { validateSceneResources, walkScene } from './graphic-scene-schema.js';
+import {
+  readLottieClock,
+  validateGlb,
+  validateThreeResources,
+} from './graphic-adapter-inputs.js';
 import type { FrameRate } from './time.js';
 import { hashJson } from './video-integrity.js';
 import type { MediaAsset, ProjectSettings } from './project.js';
@@ -51,7 +63,7 @@ export async function compileVideoGraphics(
     const compiled = await compileGraphic(
       id,
       asset,
-      dirname(path),
+      path,
       { ...settings, frameRate: rate },
       record,
       signal,
@@ -109,7 +121,17 @@ export interface CompiledGraphic {
   path: string;
   asset: MediaAsset;
   surface: { width: number; height: number };
-  react?: { durationFrames: number; props: GraphicProps | undefined };
+  scene?: GraphicScene;
+  react?: {
+    durationFrames: number;
+    props: GraphicProps | undefined;
+    sampling?: 'exact';
+    motionBlur?: NonNullable<GraphicLayer['motionBlur']>;
+    audioAnalysis?: NonNullable<GraphicLayer['audioAnalysis']>;
+    mediaFrames?: Readonly<
+      Record<string, { asset: string; offset?: FrameRate | undefined }>
+    >;
+  };
   bundle: GraphicBundle;
   inputs: readonly VideoInput[];
 }
@@ -124,8 +146,18 @@ export function graphicLayer(
   { bundle, surface, react }: CompiledGraphic,
   rate: FrameRate,
   overrides?: GraphicProps,
+  mapMedia?: (asset: string) => { path: string; identity: string },
 ): GraphicLayer {
   const props = react && resolveGraphicProps(react.props, overrides);
+  const mediaFrames =
+    react?.mediaFrames &&
+    mapMedia &&
+    Object.fromEntries(
+      Object.entries(react.mediaFrames).map(([name, { asset, offset }]) => [
+        name,
+        { ...mapMedia(asset), offset },
+      ]),
+    );
   return {
     ...surface,
     key: hashJson([
@@ -135,10 +167,16 @@ export function graphicLayer(
       react?.durationFrames,
       rate,
       props,
+      ...(react?.sampling ? [react.sampling, react.motionBlur] : []),
+      ...(mediaFrames ? [mediaFrames] : []),
     ]),
     bundleKey: bundle.key,
     ...(react && { durationFrames: react.durationFrames }),
     ...(props && { props }),
+    ...(mediaFrames && { mediaFrames }),
+    ...(react?.sampling && { sampling: react.sampling }),
+    ...(react?.motionBlur && { motionBlur: react.motionBlur }),
+    ...(react?.audioAnalysis && { audioAnalysis: react.audioAnalysis }),
   };
 }
 
@@ -148,13 +186,16 @@ const maxGraphBytes = 64 * 1024 * 1024;
 async function compileGraphic(
   id: string,
   definition: GraphicAssetDefinition,
-  directory: string,
+  definitionPath: string,
   canvas: ProjectSettings,
   record?: RecordVideoInput,
   signal?: AbortSignal,
   packaged?: Extract<GraphicBundle, { renderer: 'react' }>,
 ): Promise<CompiledGraphic> {
-  const path = resolve(directory, definition.path);
+  const directory = dirname(definitionPath);
+  const path = definition.path
+    ? resolve(directory, definition.path)
+    : definitionPath;
   const inputs = new Map<string, VideoInput>();
   const pending = new Map<string, Promise<Buffer>>();
   let totalBytes = 0;
@@ -231,10 +272,10 @@ async function compileGraphic(
   async function compileBundle(
     width: number,
     height: number,
+    scene: GraphicScene | undefined,
   ): Promise<GraphicBundle> {
-    // Capture the entry first so a missing file is also recorded for watch recovery.
-    const entry = await read(path);
     if (definition.renderer === 'svg') {
+      const entry = await read(path);
       const fonts = Object.fromEntries(
         await Promise.all(
           Object.entries(definition.fonts ?? {}).map(async ([name, file]) => [
@@ -254,36 +295,115 @@ async function compileGraphic(
         resolve(directory, file),
       ]),
     );
+    let builtin: BuiltinGraphic | undefined;
+    const declared = definition.resources ?? {};
+    switch (definition.renderer) {
+      case 'scene': {
+        if (!scene) throw new Error('Missing normalized graphic scene.');
+        validateSceneResources(scene, declared, definition.mediaFrames);
+        if (
+          Object.keys(definition.mediaFrames ?? {}).some((id) =>
+            Object.hasOwn(declared, id),
+          )
+        )
+          throw new Error(
+            'Static resources and media-frame aliases must use distinct IDs.',
+          );
+        for (const node of walkScene(scene.children))
+          if (node.type === 'audio' && !definition.audioAnalysis)
+            throw new Error(
+              `Scene node '${node.id}' requires audioAnalysis on its graphic asset.`,
+            );
+        builtin = { kind: 'scene', scene };
+        break;
+      }
+      case 'template':
+        builtin = { kind: 'template', name: definition.template };
+        break;
+      case 'lottie': {
+        if (Object.hasOwn(resources, '__opencut_asset'))
+          throw new Error('Reserved resource ID __opencut_asset.');
+        resources.__opencut_asset = path;
+        builtin = {
+          kind: 'lottie',
+          clock: readLottieClock(await read(path)),
+          range: definition.outOfRange ?? 'hold',
+        };
+        break;
+      }
+      case 'three':
+        validateThreeResources(definition.scene, !!definition.path, declared);
+        if (definition.path) {
+          if (Object.hasOwn(resources, '__opencut_asset'))
+            throw new Error('Reserved resource ID __opencut_asset.');
+          resources.__opencut_asset = path;
+          validateGlb(
+            await read(path),
+            definition.scene.model?.animation?.name,
+          );
+        }
+        builtin = { kind: 'three', scene: definition.scene };
+        break;
+    }
     const bundle = await compileReactGraphic(
       path,
       resources,
       read,
       signal,
       record && ((file) => record(identifyVideoInput(file, 'graphic'))),
+      builtin,
     );
     return { ...bundle, renderer: 'react' };
   }
 
   try {
     const { width, height } = graphicSurface(definition, canvas);
-    const bundle = packaged ?? (await compileBundle(width, height));
+    const exact =
+      definition.renderer === 'scene' ||
+      definition.renderer === 'three' ||
+      definition.renderer === 'lottie' ||
+      (definition.renderer === 'react' && definition.sampling === 'exact');
+    const motionBlur =
+      'motionBlur' in definition ? definition.motionBlur : undefined;
+    if (definition.renderer === 'three' && width * height > 1920 * 1080)
+      throw new Error('Three.js surfaces are limited to 2,073,600 pixels.');
+    if (motionBlur && (!exact || width * height > 1920 * 1080))
+      throw new Error(
+        'Motion blur requires exact sampling on a surface of at most 2,073,600 pixels.',
+      );
+    const scene =
+      definition.renderer !== 'scene'
+        ? undefined
+        : 'preset' in definition.scene
+          ? createPresetScene(definition.scene.preset, { width, height })
+          : definition.scene;
+    const bundle = packaged ?? (await compileBundle(width, height, scene));
     for (const { path, identity } of inputs.values())
       if (videoInputIdentity(path) !== identity)
         throw new Error(
           `Graphics dependency '${path}' changed during compilation.`,
         );
     const duration =
-      definition.renderer === 'react'
+      definition.renderer !== 'svg'
         ? frameTime(definition.durationFrames, canvas.frameRate)
         : undefined;
     return {
       path,
       bundle,
       surface: { width, height },
-      ...(definition.renderer === 'react' && {
+      ...(scene && { scene }),
+      ...(definition.renderer !== 'svg' && {
         react: {
           durationFrames: definition.durationFrames,
-          props: definition.props,
+          props: 'props' in definition ? definition.props : undefined,
+          ...(exact && { sampling: 'exact' as const }),
+          ...(motionBlur && { motionBlur }),
+          ...(definition.renderer === 'scene' &&
+            definition.mediaFrames && { mediaFrames: definition.mediaFrames }),
+          ...('audioAnalysis' in definition &&
+            definition.audioAnalysis && {
+              audioAnalysis: definition.audioAnalysis,
+            }),
         },
       }),
       inputs: [...inputs.values()],
@@ -291,7 +411,10 @@ async function compileGraphic(
         id,
         name: definition.name ?? id,
         ...(duration && { duration }),
-        file: { type: 'relative', path: definition.path },
+        file: {
+          type: 'relative',
+          path: definition.path ?? basename(definitionPath),
+        },
         mediaTypes: ['video'],
         metadata: {
           kind: 'graphic',
@@ -315,6 +438,9 @@ async function compileGraphic(
     };
   } catch (cause) {
     signal?.throwIfAborted();
-    throw definitionLoadError(`assets.${id}.path (${definition.path})`, cause);
+    throw definitionLoadError(
+      `assets.${id}.${definition.renderer} (${path})`,
+      cause,
+    );
   }
 }

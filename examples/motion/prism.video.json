@@ -1,0 +1,809 @@
+{
+  "version": 3,
+  "name": "Prism",
+  "canvas": {
+    "width": 1920,
+    "height": 1080,
+    "frameRate": 30,
+    "durationFrames": 600,
+    "backgroundColor": "#101d2b"
+  },
+  "assets": {
+    "prismMotion": {
+      "kind": "graphic",
+      "renderer": "scene",
+      "durationFrames": 90,
+      "scene": {
+        "version": 1,
+        "units": "px",
+        "children": [
+          {
+            "id": "backing",
+            "type": "rect",
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 1080,
+            "fill": {
+              "angle": 130,
+              "stops": [
+                {
+                  "color": "#35436d",
+                  "offset": 0
+                },
+                {
+                  "color": "#1b2347",
+                  "offset": 0.5
+                },
+                {
+                  "color": "#121128",
+                  "offset": 1
+                }
+              ]
+            }
+          },
+          {
+            "id": "gradient-lens",
+            "type": "rect",
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 1080,
+            "fill": {
+              "angle": 120,
+              "stops": [
+                {
+                  "color": "#44cabc44",
+                  "offset": 0
+                },
+                {
+                  "color": "#b752df65",
+                  "offset": 1
+                }
+              ]
+            },
+            "mask": {
+              "type": "ellipse",
+              "x": 1075,
+              "y": 691,
+              "radiusX": {
+                "keys": [
+                  {
+                    "at": 0,
+                    "value": 0,
+                    "easing": {
+                      "type": "cubic-bezier",
+                      "x1": 0.32,
+                      "y1": 0,
+                      "x2": 0.18,
+                      "y2": 1
+                    }
+                  },
+                  {
+                    "at": 54,
+                    "value": 864
+                  }
+                ]
+              },
+              "radiusY": 616
+            }
+          },
+          {
+            "id": "product-label",
+            "type": "text",
+            "content": "PRISM SYSTEMS / PRODUCT STUDY",
+            "width": 1920,
+            "height": 38,
+            "x": 0,
+            "y": 101,
+            "size": 26,
+            "color": "#54e1cc",
+            "font": "reference",
+            "overflow": "fit",
+            "minSize": 26,
+            "align": "center"
+          },
+          {
+            "id": "product-title",
+            "type": "text",
+            "content": "See the current.",
+            "width": 1920,
+            "height": 155,
+            "x": 0,
+            "y": 142,
+            "size": 109,
+            "color": "#eaf5f1",
+            "font": "reference",
+            "overflow": "fit",
+            "minSize": 26,
+            "align": "center",
+            "weight": 900,
+            "kinetic": {
+              "unit": "grapheme",
+              "stagger": 2,
+              "duration": 18,
+              "offsetY": 45
+            }
+          },
+          {
+            "id": "side",
+            "type": "group",
+            "children": [
+              {
+                "id": "side-shell",
+                "type": "rect",
+                "x": 0,
+                "y": 0,
+                "width": 580,
+                "height": 340,
+                "fill": {
+                  "angle": 160,
+                  "stops": [
+                    {
+                      "color": "#a39ffc70",
+                      "offset": 0
+                    },
+                    {
+                      "color": "#18254a",
+                      "offset": 0.5
+                    },
+                    {
+                      "color": "#09152b",
+                      "offset": 1
+                    }
+                  ]
+                },
+                "radius": 28
+              },
+              {
+                "id": "side-edge",
+                "type": "rect",
+                "x": 0,
+                "y": 0,
+                "width": 580,
+                "height": 3,
+                "fill": "#a39ffc",
+                "radius": 3
+              },
+              {
+                "id": "side-label",
+                "type": "text",
+                "content": "02 / MONITOR",
+                "width": 492,
+                "height": 38,
+                "x": 44,
+                "y": 38,
+                "size": 26,
+                "color": "#a39ffc",
+                "font": "reference",
+                "overflow": "fit",
+                "minSize": 26
+              },
+              {
+                "id": "side-name",
+                "type": "text",
+                "content": "Flow",
+                "width": 492,
+                "height": 108,
+                "x": 44,
+                "y": 108,
+                "size": 83,
+                "color": "#eaf5f1",
+                "font": "reference",
+                "overflow": "fit",
+                "minSize": 26,
+                "weight": 900
+              },
+              {
+                "id": "side-trace",
+                "type": "path",
+                "d": "M44 281 C138 302 156 218 245 255 S394 287 534 219",
+                "stroke": "#a39ffc",
+                "strokeWidth": 5
+              }
+            ],
+            "x": 990,
+            "y": 410,
+            "perspective": 950,
+            "rotateY": -22,
+            "rotateX": 6,
+            "origin": [290, 170],
+            "effects": {
+              "shadow": {
+                "x": 0,
+                "y": 58,
+                "blur": 45,
+                "color": "#03061bba"
+              }
+            }
+          },
+          {
+            "id": "lead",
+            "type": "group",
+            "children": [
+              {
+                "id": "lead-shell",
+                "type": "rect",
+                "x": 0,
+                "y": 0,
+                "width": 700,
+                "height": 340,
+                "fill": {
+                  "angle": 160,
+                  "stops": [
+                    {
+                      "color": "#72ffe570",
+                      "offset": 0
+                    },
+                    {
+                      "color": "#18254a",
+                      "offset": 0.5
+                    },
+                    {
+                      "color": "#09152b",
+                      "offset": 1
+                    }
+                  ]
+                },
+                "radius": 28
+              },
+              {
+                "id": "lead-edge",
+                "type": "rect",
+                "x": 0,
+                "y": 0,
+                "width": 700,
+                "height": 3,
+                "fill": "#72ffe5",
+                "radius": 3
+              },
+              {
+                "id": "lead-label",
+                "type": "text",
+                "content": "01 / CONTROL",
+                "width": 612,
+                "height": 38,
+                "x": 44,
+                "y": 38,
+                "size": 26,
+                "color": "#72ffe5",
+                "font": "reference",
+                "overflow": "fit",
+                "minSize": 26
+              },
+              {
+                "id": "lead-name",
+                "type": "text",
+                "content": "Prism",
+                "width": 612,
+                "height": 108,
+                "x": 44,
+                "y": 108,
+                "size": 83,
+                "color": "#eaf5f1",
+                "font": "reference",
+                "overflow": "fit",
+                "minSize": 26,
+                "weight": 900
+              },
+              {
+                "id": "lead-trace",
+                "type": "path",
+                "d": "M44 281 C138 302 156 218 245 255 S394 287 534 219",
+                "stroke": "#72ffe5",
+                "strokeWidth": 5
+              }
+            ],
+            "x": {
+              "keys": [
+                {
+                  "at": 0,
+                  "value": 320,
+                  "easing": {
+                    "type": "spring",
+                    "mass": 1,
+                    "stiffness": 175,
+                    "damping": 13,
+                    "duration": 3
+                  }
+                },
+                {
+                  "at": 90,
+                  "value": 610
+                }
+              ]
+            },
+            "y": 460,
+            "perspective": 950,
+            "rotateY": 18,
+            "rotateX": 6,
+            "origin": [350, 170],
+            "effects": {
+              "shadow": {
+                "x": 0,
+                "y": 58,
+                "blur": 45,
+                "color": "#03061bba"
+              }
+            }
+          }
+        ]
+      },
+      "resources": {
+        "reference": "../../tests/fixtures/generated/reference-motion/assets/font.ttf"
+      },
+      "motionBlur": {
+        "samples": 8,
+        "shutterAngle": 180
+      }
+    },
+    "prism": {
+      "kind": "graphic",
+      "renderer": "scene",
+      "durationFrames": 345,
+      "scene": {
+        "version": 1,
+        "units": "px",
+        "children": [
+          {
+            "id": "backing",
+            "type": "rect",
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 1080,
+            "fill": {
+              "angle": 130,
+              "stops": [
+                {
+                  "color": "#35436d",
+                  "offset": 0
+                },
+                {
+                  "color": "#1b2347",
+                  "offset": 0.5
+                },
+                {
+                  "color": "#121128",
+                  "offset": 1
+                }
+              ]
+            }
+          },
+          {
+            "id": "gradient-lens",
+            "type": "rect",
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 1080,
+            "fill": {
+              "angle": 120,
+              "stops": [
+                {
+                  "color": "#44cabc44",
+                  "offset": 0
+                },
+                {
+                  "color": "#b752df65",
+                  "offset": 1
+                }
+              ]
+            },
+            "mask": {
+              "type": "ellipse",
+              "x": 1075,
+              "y": 691,
+              "radiusX": {
+                "keys": [
+                  {
+                    "at": 0,
+                    "value": 0,
+                    "easing": {
+                      "type": "cubic-bezier",
+                      "x1": 0.32,
+                      "y1": 0,
+                      "x2": 0.18,
+                      "y2": 1
+                    }
+                  },
+                  {
+                    "at": 54,
+                    "value": 864
+                  }
+                ]
+              },
+              "radiusY": 616
+            }
+          },
+          {
+            "id": "product-label",
+            "type": "text",
+            "content": "PRISM SYSTEMS / PRODUCT STUDY",
+            "width": 1920,
+            "height": 38,
+            "x": 0,
+            "y": 101,
+            "size": 26,
+            "color": "#54e1cc",
+            "font": "reference",
+            "overflow": "fit",
+            "minSize": 26,
+            "align": "center"
+          },
+          {
+            "id": "product-title",
+            "type": "text",
+            "content": "See the current.",
+            "width": 1920,
+            "height": 155,
+            "x": 0,
+            "y": 142,
+            "size": 109,
+            "color": "#eaf5f1",
+            "font": "reference",
+            "overflow": "fit",
+            "minSize": 26,
+            "align": "center",
+            "weight": 900,
+            "kinetic": {
+              "unit": "grapheme",
+              "stagger": 2,
+              "duration": 18,
+              "offsetY": 45
+            }
+          },
+          {
+            "id": "side",
+            "type": "group",
+            "children": [
+              {
+                "id": "side-shell",
+                "type": "rect",
+                "x": 0,
+                "y": 0,
+                "width": 580,
+                "height": 340,
+                "fill": {
+                  "angle": 160,
+                  "stops": [
+                    {
+                      "color": "#a39ffc70",
+                      "offset": 0
+                    },
+                    {
+                      "color": "#18254a",
+                      "offset": 0.5
+                    },
+                    {
+                      "color": "#09152b",
+                      "offset": 1
+                    }
+                  ]
+                },
+                "radius": 28
+              },
+              {
+                "id": "side-edge",
+                "type": "rect",
+                "x": 0,
+                "y": 0,
+                "width": 580,
+                "height": 3,
+                "fill": "#a39ffc",
+                "radius": 3
+              },
+              {
+                "id": "side-label",
+                "type": "text",
+                "content": "02 / MONITOR",
+                "width": 492,
+                "height": 38,
+                "x": 44,
+                "y": 38,
+                "size": 26,
+                "color": "#a39ffc",
+                "font": "reference",
+                "overflow": "fit",
+                "minSize": 26
+              },
+              {
+                "id": "side-name",
+                "type": "text",
+                "content": "Flow",
+                "width": 492,
+                "height": 108,
+                "x": 44,
+                "y": 108,
+                "size": 83,
+                "color": "#eaf5f1",
+                "font": "reference",
+                "overflow": "fit",
+                "minSize": 26,
+                "weight": 900
+              },
+              {
+                "id": "side-trace",
+                "type": "path",
+                "d": "M44 281 C138 302 156 218 245 255 S394 287 534 219",
+                "stroke": "#a39ffc",
+                "strokeWidth": 5
+              }
+            ],
+            "x": 990,
+            "y": 410,
+            "perspective": 950,
+            "rotateY": -22,
+            "rotateX": 6,
+            "origin": [290, 170],
+            "effects": {
+              "shadow": {
+                "x": 0,
+                "y": 58,
+                "blur": 45,
+                "color": "#03061bba"
+              }
+            }
+          },
+          {
+            "id": "lead",
+            "type": "group",
+            "children": [
+              {
+                "id": "lead-shell",
+                "type": "rect",
+                "x": 0,
+                "y": 0,
+                "width": 700,
+                "height": 340,
+                "fill": {
+                  "angle": 160,
+                  "stops": [
+                    {
+                      "color": "#72ffe570",
+                      "offset": 0
+                    },
+                    {
+                      "color": "#18254a",
+                      "offset": 0.5
+                    },
+                    {
+                      "color": "#09152b",
+                      "offset": 1
+                    }
+                  ]
+                },
+                "radius": 28
+              },
+              {
+                "id": "lead-edge",
+                "type": "rect",
+                "x": 0,
+                "y": 0,
+                "width": 700,
+                "height": 3,
+                "fill": "#72ffe5",
+                "radius": 3
+              },
+              {
+                "id": "lead-label",
+                "type": "text",
+                "content": "01 / CONTROL",
+                "width": 612,
+                "height": 38,
+                "x": 44,
+                "y": 38,
+                "size": 26,
+                "color": "#72ffe5",
+                "font": "reference",
+                "overflow": "fit",
+                "minSize": 26
+              },
+              {
+                "id": "lead-name",
+                "type": "text",
+                "content": "Prism",
+                "width": 612,
+                "height": 108,
+                "x": 44,
+                "y": 108,
+                "size": 83,
+                "color": "#eaf5f1",
+                "font": "reference",
+                "overflow": "fit",
+                "minSize": 26,
+                "weight": 900
+              },
+              {
+                "id": "lead-trace",
+                "type": "path",
+                "d": "M44 281 C138 302 156 218 245 255 S394 287 534 219",
+                "stroke": "#72ffe5",
+                "strokeWidth": 5
+              }
+            ],
+            "x": {
+              "keys": [
+                {
+                  "at": 0,
+                  "value": 320,
+                  "easing": {
+                    "type": "spring",
+                    "mass": 1,
+                    "stiffness": 175,
+                    "damping": 13,
+                    "duration": 3
+                  }
+                },
+                {
+                  "at": 90,
+                  "value": 610
+                }
+              ]
+            },
+            "y": 460,
+            "perspective": 950,
+            "rotateY": 18,
+            "rotateX": 6,
+            "origin": [350, 170],
+            "effects": {
+              "shadow": {
+                "x": 0,
+                "y": 58,
+                "blur": 45,
+                "color": "#03061bba"
+              }
+            }
+          }
+        ]
+      },
+      "resources": {
+        "reference": "../../tests/fixtures/generated/reference-motion/assets/font.ttf"
+      }
+    },
+    "scenery": {
+      "kind": "video",
+      "path": "../../tests/fixtures/generated/reference-motion/assets/water.mp4"
+    },
+    "outro": {
+      "kind": "graphic",
+      "renderer": "scene",
+      "durationFrames": 276,
+      "scene": {
+        "version": 1,
+        "units": "px",
+        "children": [
+          {
+            "id": "grade",
+            "type": "rect",
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 1080,
+            "fill": "#13122c52"
+          },
+          {
+            "id": "outro-title",
+            "type": "group",
+            "children": [
+              {
+                "id": "outro-tag",
+                "type": "text",
+                "content": "PRISM / 2026",
+                "width": 1600,
+                "height": 38,
+                "x": 132,
+                "y": 819,
+                "size": 26,
+                "color": "#54e1cc",
+                "font": "reference",
+                "overflow": "fit",
+                "minSize": 26
+              },
+              {
+                "id": "outro-copy",
+                "type": "text",
+                "content": "Find the flow.",
+                "width": 910,
+                "height": 115,
+                "x": 132,
+                "y": 861,
+                "size": 76,
+                "color": "#eaf5f1",
+                "font": "reference",
+                "overflow": "fit",
+                "minSize": 26,
+                "weight": 850
+              }
+            ],
+            "opacity": {
+              "keys": [
+                {
+                  "at": 0,
+                  "value": 0,
+                  "easing": {
+                    "type": "cubic-bezier",
+                    "x1": 0.32,
+                    "y1": 0,
+                    "x2": 0.18,
+                    "y2": 1
+                  }
+                },
+                {
+                  "at": 41,
+                  "value": 1
+                }
+              ]
+            },
+            "effects": {
+              "shadow": {
+                "x": 0,
+                "y": 4,
+                "blur": 12,
+                "color": "#020b1a"
+              }
+            }
+          }
+        ]
+      },
+      "resources": {
+        "reference": "../../tests/fixtures/generated/reference-motion/assets/font.ttf"
+      }
+    }
+  },
+  "tracks": [
+    {
+      "id": "product-cut",
+      "type": "video",
+      "clips": [
+        {
+          "id": "product-motion",
+          "asset": "prismMotion",
+          "at": 0,
+          "sourceIn": 0,
+          "sourceOut": 90
+        },
+        {
+          "id": "product",
+          "asset": "prism",
+          "at": 90,
+          "sourceIn": 90,
+          "sourceOut": 330
+        },
+        {
+          "id": "water",
+          "asset": "scenery",
+          "at": 330,
+          "sourceIn": 15,
+          "sourceOut": 285
+        }
+      ]
+    },
+    {
+      "id": "end-card",
+      "type": "video",
+      "clips": [
+        {
+          "id": "outro-placement",
+          "asset": "outro",
+          "at": 324,
+          "sourceIn": 0,
+          "sourceOut": 276
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "id": "product-to-water",
+      "kind": "cross-dissolve",
+      "from": "product",
+      "to": "water",
+      "frames": 30,
+      "style": {
+        "kind": "wipe",
+        "direction": "left"
+      }
+    }
+  ]
+}

@@ -3,6 +3,11 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { getApplicationInfo } from '@opencut/core';
 import {
+  videoDefinitionFormats,
+  videoGraphicsCapabilities,
+  videoGraphicsSchemas,
+} from '@opencut/core/video';
+import {
   inspectDialogueModel,
   inspectGraphicsRuntime,
   inspectRenderMemory,
@@ -43,11 +48,13 @@ export async function inspectReactGraphics() {
   const hint =
     'Install the matching headless Chromium with pnpm dlx playwright-core@1.64.1 install --only-shell chromium.';
   try {
-    const { installed, backend, path } = await inspectGraphicsRuntime();
+    const { installed, backend, path, adapters } =
+      await inspectGraphicsRuntime();
     return {
       status: installed ? ('available' as const) : ('missing-browser' as const),
       backend,
       path,
+      adapters,
       ...(!installed && { hint }),
     };
   } catch {
@@ -95,6 +102,9 @@ export async function doctor() {
     node: process.version,
     system,
     graphics,
+    videoDefinitions: videoDefinitionFormats,
+    graphicsCapabilities: videoGraphicsCapabilities,
+    graphicsSchemas: videoGraphicsSchemas(),
     media: {
       ready: !hint,
       ffmpeg,

@@ -12,7 +12,7 @@ export function graphicsFrameCache(directory: string) {
   let created: Promise<unknown> | undefined;
   return async (
     source: string,
-    frame: number,
+    frame: number | string,
     render: () => Promise<Buffer>,
     signal: AbortSignal = new AbortController().signal,
   ) => {

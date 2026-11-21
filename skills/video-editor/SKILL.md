@@ -1,6 +1,6 @@
 ---
 name: video-editor
-description: Create, revise, preview and render complete videos headlessly with the installed OpenCut CLI and TypeScript SDK.
+description: Create, revise, preview and render complete videos headlessly from TypeScript or JSON with the installed OpenCut CLI and SDK.
 ---
 
 On Apple Silicon with macOS 15 or later, see the
@@ -11,7 +11,9 @@ Treat `.video.ts` and its imports as executable local code. Run definitions
 you authored for the task or that the user explicitly authorized. Validation,
 inspection, preview and packaging all execute the definition.
 
-Default-export a value from `defineVideo` in a `.video.ts` file. Import
+Put the composition object in a `.video.json` file for data-only authoring.
+A JSON definition can still declare trusted executable React graphics. For
+TypeScript, default-export a value from `defineVideo` in a `.video.ts` file. Import
 `defineVideo` from `@opencut/sdk`. Run `opencut --help` to
 discover commands and `opencut render --help` for export controls.
 
@@ -46,7 +48,8 @@ discover commands and `opencut render --help` for export controls.
    for slower MP4 encoding with the same AI algorithms as `quality`.
    Export an SRT or VTT
    with `opencut subtitles export DEFINITION --output final.srt` if requested.
-6. For variants, use `defineVideo(shape, compose)` with `videoParams` and
+6. For variants, declare JSON parameter descriptors and bindings or use
+   `defineVideo(shape, compose)` with `videoParams` and
    reusable TypeScript helpers. Validate a sample with `--params params.json`.
    Run `opencut batch DEFINITION --variants variants.json --output-dir outputs --json`.
    Read each result and retry corrected entries with `--only id,id`.
@@ -78,3 +81,13 @@ with `audioRole: 'dialogue'`, `'music'` or `'other'` and enable
 `professionalMix` in the definition. Use `opencut mix analyze <file.video.ts> --json`
 for editable curves and a loudness report before encoding picture. See the
 [mix definition, delivery presets and offline AI options](../../docs/AUDIO_MIX.md).
+
+For a new motion graphic, declare a version 3 scene directly in the
+definition. Choose a preset or add primitives with stable node IDs. Give
+text explicit pixel bounds and an overflow policy. Set motion in local
+source frames. Use the timeline inspector to check the resolved sample,
+then preview a frame before the motion, one in flight and one at rest.
+Use `audioAnalysis` and an audio node when visual movement depends on
+actual sound. A missing resource error names its asset or node. Check the
+file path relative to the authored definition. See the
+[declarative scene reference](../../docs/GRAPHICS.md#declarative-scenes).

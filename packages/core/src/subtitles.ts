@@ -16,6 +16,7 @@ export const subtitleStyleSchema = textLayerSchema
     stroke: true,
     shadow: true,
     background: true,
+    activeWordStyle: true,
   })
   .extend({
     x: z.number().min(-32768).max(32768).optional(),
@@ -101,6 +102,7 @@ export function effectiveSubtitleStyle(
         ? { color: '#000000', width: 2 }
         : style.stroke,
     background: style.background ?? null,
+    ...(style.activeWordStyle && { activeWordStyle: style.activeWordStyle }),
     shadow: style.shadow ?? null,
     x: style.x ?? 0,
     y: style.y ?? Math.round(height * 0.35),

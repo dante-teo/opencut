@@ -13,6 +13,7 @@ import {
 } from './video-definition.js';
 import type { ParsedVideoDefinition } from './video-definition.js';
 import { fingerprintFile } from './video-integrity.js';
+import { isVideoDefinitionPath, videoDefinitionFormats } from './video-json.js';
 import {
   isEnhancementStep,
   isInterpolationStep,
@@ -73,7 +74,7 @@ const requirements = z.strictObject({
 });
 const manifestSchema = z.strictObject({
   format: z.literal('opencut-video-package'),
-  version: z.union([z.literal(1), z.literal(2)]),
+  version: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   opencut: z.string(),
   node: z.string(),
   entry: z.literal(packageEntryName),
@@ -113,6 +114,7 @@ const reactBundle = z.strictObject({
   template: z
     .enum(['LowerThird', 'StatisticCard', 'BarChart', 'Callout', 'SectionCard'])
     .optional(),
+  adapter: z.enum(['scene', 'lottie', 'three']).optional(),
   renderer: z.literal('react'),
   backend: z.string(),
   key: z.string().regex(/^[a-f0-9]{64}$/),
@@ -233,7 +235,7 @@ export async function verifyPackageContents(
     !paths.has(manifest.entry) ||
     !paths.has(sourceName) ||
     !sourceName.startsWith('project/') ||
-    !sourceName.endsWith('.video.ts') ||
+    !isVideoDefinitionPath(sourceName) ||
     manifest.imports.some(
       ({ from, to, specifier }) =>
         !paths.has(from) || !paths.has(to) || !/^\.{1,2}\//.test(specifier),
@@ -323,6 +325,7 @@ export async function verifyPackageContents(
   ]) {
     if (
       'path' in item &&
+      item.path !== undefined &&
       (!item.path.startsWith('project/') || !paths.has(item.path))
     )
       throw new VideoDefinitionError(
@@ -350,6 +353,11 @@ export async function verifyPackageContents(
     const bundle = graphics.get(id);
     if (
       !bundle ||
+      bundle.adapter !==
+        (asset.renderer === 'react' || asset.renderer === 'template'
+          ? undefined
+          : asset.renderer) ||
+      (asset.renderer === 'template' && bundle.template !== asset.template) ||
       Object.values(asset.resources ?? {}).some(
         (path) => !path.startsWith('project/') || !paths.has(path),
       )
@@ -362,9 +370,14 @@ export async function verifyPackageContents(
   }
   if (
     reactCount !== graphics.size ||
-    (graphicAssets.length
-      ? manifest.version !== 2
-      : manifest.version !== 1 || manifest.graphics !== undefined) ||
+    manifest.version !==
+      (definition.version === 3 ||
+      sourceName.endsWith(videoDefinitionFormats.json.suffix)
+        ? 3
+        : graphicAssets.length
+          ? 2
+          : 1) ||
+    (!graphicAssets.length && manifest.graphics !== undefined) ||
     JSON.stringify([...backends].sort()) !==
       JSON.stringify(manifest.requirements.graphics ?? [])
   )

@@ -4,10 +4,13 @@ import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { graphicContext } from './react.js';
 import type { GraphicTiming } from './react.js';
+import type { GraphicAudioSample } from '@opencut/shared';
 
 export interface GraphicFrame {
   timing: GraphicTiming;
   props: Record<string, unknown>;
+  audio?: GraphicAudioSample;
+  mediaFrames?: Record<string, string>;
 }
 
 declare global {
@@ -16,21 +19,48 @@ declare global {
       frame: GraphicFrame,
       requestId: number,
     ): Promise<number>;
-    setOpenCutGraphicResources(resources: Record<string, string>): void;
+    setOpenCutGraphicResources(
+      resources: Record<string, string>,
+    ): Promise<void> | void;
+    disposeOpenCutGraphic?(): Promise<void> | void;
   }
 }
 
-export function installGraphic(component: ComponentType) {
+export function installGraphic(component: ComponentType, fontAliases = false) {
   if (!component)
     throw new Error('Export a React component as the default export.');
   const host = document.getElementById('graphic')!;
   let root: ReturnType<typeof createRoot> | undefined;
   let resources: Record<string, string> = {};
   const decodedImages = new Map<string, Promise<void>>();
-  window.setOpenCutGraphicResources = (captured) => {
-    resources = captured;
+  window.setOpenCutGraphicResources = async (captured) => {
+    resources = Object.freeze(captured);
+    if (!fontAliases) return;
+    await Promise.all(
+      Object.entries(resources).flatMap(([name, url]) => {
+        if (!url.startsWith('data:font/')) return [];
+        const font = new FontFace(`OpenCut Resource ${name}`, `url("${url}")`, {
+          weight: '100 900',
+        });
+        return [
+          font.load().then(
+            (loaded) => document.fonts.add(loaded),
+            (cause: unknown) => {
+              throw new Error(`Could not load declared font '${name}'.`, {
+                cause,
+              });
+            },
+          ),
+        ];
+      }),
+    );
   };
-  window.renderOpenCutGraphic = async ({ timing, props }, requestId) => {
+  window.disposeOpenCutGraphic = () => root?.unmount();
+  window.renderOpenCutGraphic = async (
+    { timing, props, audio, mediaFrames },
+    requestId,
+  ) => {
+    const readiness: Promise<unknown>[] = [];
     root?.unmount();
     const errors: unknown[] = [];
     root = createRoot(host, {
@@ -41,7 +71,16 @@ export function installGraphic(component: ComponentType) {
       root!.render(
         createElement(
           graphicContext.Provider,
-          { value: { timing, resources } },
+          {
+            value: {
+              timing,
+              resources: mediaFrames
+                ? Object.freeze({ ...resources, ...mediaFrames })
+                : resources,
+              readiness,
+              audio,
+            },
+          },
           createElement(component, props),
         ),
       );
@@ -83,7 +122,7 @@ export function installGraphic(component: ComponentType) {
       }
       images.push(decoding);
     }
-    await Promise.all([document.fonts.ready, ...images]);
+    await Promise.all([document.fonts.ready, ...images, ...readiness]);
     for (const font of document.fonts)
       if (font.status === 'error')
         throw new Error(`Could not load font '${font.family}'.`);

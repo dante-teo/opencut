@@ -124,7 +124,7 @@ test('T44 public CLI renders and previews a 20-second TypeScript definition', as
     const { default: showcase } = await import(pathToFileURL(example).href);
     const tooLong = structuredClone(showcase) as VideoDefinition;
     for (const asset of Object.values(tooLong.assets!))
-      asset.path = join('..', asset.path.split('/').at(-1)!);
+      if (asset.path) asset.path = join('..', asset.path.split('/').at(-1)!);
     const footage = tooLong.tracks[0];
     assert.equal(footage?.type, 'video');
     const clip = footage.clips[1];

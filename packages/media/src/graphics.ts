@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import type { GraphicAudioAnalysis, GraphicAudioSample } from '@opencut/shared';
 import type {
   GraphicTemplate,
   ReactGraphicBundle,
@@ -7,6 +8,8 @@ import { MediaError } from './process.js';
 import type { StaticSvgBundle } from './static-svg.js';
 import { LRUCache } from 'lru-cache';
 import { trackRenderProcess } from './render-budget.js';
+
+export type { BuiltinGraphic } from '@opencut/graphics/renderer';
 
 export type GraphicBundle =
   | (ReactGraphicBundle & { renderer: 'react' })
@@ -55,6 +58,19 @@ export interface GraphicLayer {
   height: number;
   durationFrames?: number;
   props?: Record<string, unknown>;
+  sampling?: 'exact';
+  audioAnalysis?: GraphicAudioAnalysis;
+  mediaFrames?: Readonly<
+    Record<
+      string,
+      {
+        path: string;
+        identity: string;
+        offset?: { numerator: number; denominator: number } | undefined;
+      }
+    >
+  >;
+  motionBlur?: { samples: number; shutterAngle: number };
 }
 
 const frames = new LRUCache<string, Buffer>({
@@ -75,12 +91,25 @@ export function openGraphicsRenderer() {
     async frame(
       bundle: GraphicBundle,
       graphic: GraphicLayer,
-      frame: number,
+      sample: number | { numerator: number; denominator: number },
       frameRate: { numerator: number; denominator: number },
       signal?: AbortSignal,
+      audio?: { key: number; sample: GraphicAudioSample },
+      readMedia?: () => Promise<Record<string, string>>,
     ) {
       signal?.throwIfAborted();
-      const cacheKey = `${graphic.key}:${frame}`;
+      const exact = typeof sample === 'number' ? undefined : sample;
+      const frame =
+        typeof sample === 'number'
+          ? sample
+          : Number(
+              (BigInt(sample.numerator) * BigInt(frameRate.numerator)) /
+                (BigInt(sample.denominator) * BigInt(frameRate.denominator)),
+            );
+      const sourceId = exact
+        ? `${exact.numerator}/${exact.denominator}`
+        : frame;
+      const cacheKey = `${graphic.key}:${sourceId}:${audio?.key ?? ''}`;
       const cached = frames.get(cacheKey);
       if (cached) return cached;
       const { durationFrames, width, height, props } = graphic;
@@ -109,10 +138,13 @@ export function openGraphicsRenderer() {
               height,
               frame,
               durationFrames,
+              ...(exact && { exactSourceTime: exact }),
               frameRate,
               seconds: (frame * frameRate.denominator) / frameRate.numerator,
             },
             props: props ?? {},
+            ...(audio && { audio: audio.sample }),
+            ...(readMedia && { mediaFrames: await readMedia() }),
           },
           signal,
         );

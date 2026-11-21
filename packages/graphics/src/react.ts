@@ -1,10 +1,13 @@
 import { createContext, useContext } from 'react';
+import type { GraphicAudioSample } from '@opencut/shared';
 
 export interface GraphicTiming {
   frame: number;
   durationFrames: number;
   frameRate: { numerator: number; denominator: number };
   seconds: number;
+  /** Runtime samples this exact source time only for opt-in graphics. */
+  exactSourceTime?: { numerator: number; denominator: number } | undefined;
   width: number;
   height: number;
 }
@@ -12,6 +15,8 @@ export interface GraphicTiming {
 export const graphicContext = createContext<{
   timing: GraphicTiming;
   resources: Record<string, string>;
+  readiness: Promise<unknown>[];
+  audio?: GraphicAudioSample | undefined;
 } | null>(null);
 
 function useGraphicContext() {
@@ -25,8 +30,33 @@ export function useGraphicTiming(): GraphicTiming {
   return useGraphicContext().timing;
 }
 
+/** An exact source clock in seconds, independent of requested output FPS. */
+export function useGraphicExactTiming() {
+  const { exactSourceTime } = useGraphicTiming();
+  if (!exactSourceTime)
+    throw new Error('This graphic must opt into exact sampling.');
+  return exactSourceTime;
+}
+
+export function useGraphicAudio(): GraphicAudioSample | undefined {
+  return useGraphicContext().audio;
+}
+
 export function useGraphicFrame() {
   return useGraphicTiming().frame;
+}
+
+/** Register capture work synchronously from a layout effect for this request. */
+export function useGraphicReadiness() {
+  const { readiness } = useGraphicContext();
+  return (ready: Promise<unknown>) => {
+    readiness.push(ready);
+  };
+}
+
+/** Immutable local resource mapping for the current asset. */
+export function useGraphicResources() {
+  return useGraphicContext().resources as Readonly<Record<string, string>>;
 }
 
 /** Return the captured data URL of a declared image, font, or JSON file. */

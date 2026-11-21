@@ -1,13 +1,14 @@
 import { rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
-import type { Canvas, Image } from '@napi-rs/canvas';
+import type { Canvas, Image, SKRSContext2D } from '@napi-rs/canvas';
 import {
   evaluateVisual,
   drawMediaLayer,
   gradePixels,
   transformTextLayer,
   transitionOpacity,
+  transitionProgress,
   visualGeometry,
 } from '@opencut/shared';
 import type {
@@ -201,6 +202,112 @@ export async function stageTransformLayer(
   }
 }
 
+function transitionTransform(
+  ctx: SKRSContext2D,
+  ramp: TransitionRamp,
+  progress: number,
+  width: number,
+  height: number,
+) {
+  const style = ramp.style;
+  if (!style) return;
+  const incoming = ramp.direction === 'in';
+  if (style.kind === 'push' || (style.kind === 'slide' && incoming)) {
+    const position = incoming ? progress - 1 : progress;
+    const [x, y] = transitionVector(style.direction, width, height);
+    ctx.translate(x * position, y * position);
+  }
+  if (style.kind === 'zoom') {
+    const scale = 1 + style.amount * (incoming ? 1 - progress : progress);
+    ctx.translate(width / 2, height / 2);
+    ctx.scale(scale, scale);
+    ctx.translate(-width / 2, -height / 2);
+  }
+  if (style.kind === 'blur') {
+    const radius = style.radius * (incoming ? 1 - progress : progress);
+    if (radius > 0) ctx.filter = `blur(${radius}px)`;
+  }
+}
+
+function transitionVector(
+  direction: 'left' | 'right' | 'up' | 'down',
+  width: number,
+  height: number,
+) {
+  switch (direction) {
+    case 'left':
+      return [-width, 0] as const;
+    case 'right':
+      return [width, 0] as const;
+    case 'up':
+      return [0, -height] as const;
+    case 'down':
+      return [0, height] as const;
+  }
+}
+
+function finishTransition(
+  ctx: SKRSContext2D,
+  frame: number,
+  ramp: TransitionRamp,
+  width: number,
+  height: number,
+) {
+  const { style } = ramp;
+  if (
+    style?.kind === 'push' ||
+    (style?.kind === 'slide' && ramp.direction === 'in')
+  )
+    return;
+  const progress = transitionProgress(frame, ramp);
+  let alpha = transitionOpacity(frame, ramp);
+  let region: [number, number, number, number] = [0, 0, width, height];
+  if (style?.kind === 'dip-to-color') alpha = Math.max(0, 2 * alpha - 1);
+  if (style?.kind === 'wipe' || style?.kind === 'slide') {
+    const [x] = transitionVector(style.direction, width, height);
+    const extent = Math.round((x ? width : height) * progress);
+    const incoming = ramp.direction === 'in';
+    const first = style.direction === 'right' || style.direction === 'down';
+    const boundary = first ? extent : (x ? width : height) - extent;
+    const takeFirst = first === incoming;
+    region = x
+      ? [
+          takeFirst ? 0 : boundary,
+          0,
+          takeFirst ? boundary : width - boundary,
+          height,
+        ]
+      : [
+          0,
+          takeFirst ? 0 : boundary,
+          width,
+          takeFirst ? boundary : height - boundary,
+        ];
+    alpha = region[2] && region[3] ? 1 : 0;
+  }
+  ctx.save();
+  if (alpha === 0) ctx.clearRect(0, 0, width, height);
+  else {
+    if (region[0]) ctx.clearRect(0, 0, region[0], height);
+    if (region[1]) ctx.clearRect(0, 0, width, region[1]);
+    ctx.clearRect(region[0] + region[2], 0, width, height);
+    ctx.clearRect(0, region[1] + region[3], width, height);
+    if (alpha !== 1) {
+      ctx.globalCompositeOperation = 'destination-in';
+      ctx.fillStyle = '#fff';
+      ctx.globalAlpha = alpha;
+      ctx.fillRect(0, 0, width, height);
+    }
+  }
+  if (style?.kind === 'dip-to-color' && ramp.direction === 'out') {
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 1 - Math.abs(2 * progress - 1);
+    ctx.fillStyle = style.color;
+    ctx.fillRect(0, 0, width, height);
+  }
+  ctx.restore();
+}
+
 async function writeTransformLayer(
   options: TransformLayerOptions,
   destination: string,
@@ -309,6 +416,15 @@ async function writeTransformLayer(
         animation?.start,
       );
       ctx.clearRect(0, 0, width, height);
+      ctx.save();
+      if (options.ramp)
+        transitionTransform(
+          ctx,
+          options.ramp,
+          transitionProgress(startFrame + i, options.ramp),
+          width,
+          height,
+        );
       if (raster && source.kind === 'text') {
         ctx.save();
         transformTextLayer(ctx, width, height, sampled);
@@ -330,16 +446,9 @@ async function writeTransformLayer(
           if (geometry.visible) drawMediaLayer(ctx, input, geometry);
         }
       }
-      if (options.ramp) {
-        // Multiply while Canvas still holds premultiplied pixels, avoiding an
-        // extra low-alpha conversion before FFmpeg adds the transition layers.
-        ctx.globalCompositeOperation = 'destination-in';
-        ctx.fillStyle = '#fff';
-        ctx.globalAlpha = transitionOpacity(startFrame + i, options.ramp);
-        ctx.fillRect(0, 0, width, height);
-        ctx.globalAlpha = 1;
-        ctx.globalCompositeOperation = 'source-over';
-      }
+      ctx.restore();
+      if (options.ramp)
+        finishTransition(ctx, startFrame + i, options.ramp, width, height);
       const pixels = ctx.getImageData(0, 0, width, height).data;
       yield Buffer.from(pixels.buffer, pixels.byteOffset, pixels.byteLength);
     }
@@ -357,8 +466,17 @@ async function writeTransformLayer(
     await Promise.all(tasks);
   } catch (error) {
     controller.abort();
-    await Promise.allSettled(tasks);
+    const outcomes = await Promise.allSettled(tasks);
     checkRenderSignal(options.signal);
+    if (error instanceof Error && 'code' in error && error.code === 'EPIPE') {
+      const root = outcomes.find(
+        (result) =>
+          result.status === 'rejected' &&
+          result.reason instanceof Error &&
+          result.reason.name === 'MediaError',
+      );
+      if (root?.status === 'rejected') throw root.reason;
+    }
     if (timeout.aborted)
       throw new MediaError('FFmpeg transform layer timed out.');
     throw error;

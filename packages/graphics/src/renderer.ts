@@ -12,11 +12,11 @@ import type { GraphicFrame } from './browser.js';
 import type { ReactGraphicBundle } from './compiler.js';
 import { graphicsDiagnostics } from './diagnostics.js';
 
-import { reactGraphicsBackend } from './compiler.js';
+import { adapterVersions, reactGraphicsBackend } from './compiler.js';
 export { compileReactGraphic } from './compiler.js';
 export { parseTemplateProps } from './template-props.js';
 export type { GraphicTemplate } from './template-props.js';
-export type { ReactGraphicBundle } from './compiler.js';
+export type { BuiltinGraphic, ReactGraphicBundle } from './compiler.js';
 
 const browserChannel = 'chromium-headless-shell';
 // Use the pinned Playwright registry so launch and readiness resolve the same binary.
@@ -45,7 +45,12 @@ export async function graphicsRuntime() {
     () => true,
     () => false,
   );
-  return { installed, path, backend: reactGraphicsBackend };
+  return {
+    installed,
+    path,
+    backend: reactGraphicsBackend,
+    adapters: adapterVersions(),
+  };
 }
 
 interface Surface {
@@ -62,6 +67,7 @@ export function openReactGraphics(
   let worker:
     Promise<{ server: BrowserServer; browser: Promise<Browser> }> | undefined;
   let view: Surface | undefined;
+  let webgl = false;
   let closePromise: Promise<void> | undefined;
   let budgetError: Error | undefined;
   let active = false;
@@ -70,11 +76,37 @@ export function openReactGraphics(
   const close = () =>
     (closePromise ??= (async () => {
       const running = await worker?.catch(() => undefined);
-      if (running) await running.server.kill();
+      if (!running) return;
+      try {
+        if (!active && view) await disposeSurface(view);
+      } finally {
+        await running.server.kill();
+      }
     })());
 
-  async function browser() {
+  async function disposeSurface(surface: Surface) {
+    // Use a bounded Playwright operation. The context still closes if a
+    // component's disposal throws or misses its deadline.
+    const disposal = surface.page
+      .evaluate(async () => window.disposeOpenCutGraphic?.())
+      .catch(() => {});
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(resolve, 1000);
+      void disposal.then(() => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
+  }
+
+  async function browser(needsWebgl: boolean) {
     if (closePromise) throw new Error('The graphics renderer is closed.');
+    if (worker && needsWebgl && !webgl) {
+      const previous = await worker;
+      await previous.server.kill();
+      worker = undefined;
+    }
+    webgl = webgl || needsWebgl;
     const running = await (worker ??= chromium
       .launchServer({
         host: '127.0.0.1',
@@ -86,7 +118,17 @@ export function openReactGraphics(
         channel: browserChannel,
         headless: true,
         timeout: startTimeout,
-        args: ['--force-color-profile=srgb', '--disable-background-networking'],
+        args: [
+          '--force-color-profile=srgb',
+          '--disable-background-networking',
+          ...(webgl
+            ? [
+                '--use-gl=angle',
+                '--use-angle=swiftshader',
+                '--enable-unsafe-swiftshader',
+              ]
+            : []),
+        ],
       })
       .then((server) => {
         const untrack = track(server.process().pid, (error) => {
@@ -116,9 +158,14 @@ export function openReactGraphics(
     if (view?.key === key) return view;
     const previous = view;
     view = undefined;
-    await previous?.context.close();
+    try {
+      if (previous) await disposeSurface(previous);
+    } finally {
+      // Let a close issued in the same turn win before opening a browser.
+      await previous?.context.close();
+    }
     const context = await (
-      await browser()
+      await browser(bundle.adapter === 'three')
     ).newContext({
       viewport: { width, height },
       deviceScaleFactor: 1,

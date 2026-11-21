@@ -329,14 +329,31 @@ export async function rasterizeTextLayer(
     from: number,
     to: number,
     onset = false,
+    activeWord = false,
   ) => {
     const left = ctx.measureText(line.slice(0, from)).width;
     const right = ctx.measureText(line.slice(0, to)).width;
     ctx.save();
+    const style = activeWord ? text.activeWordStyle : undefined;
+    const top = y - ascent - 2;
+    const height = ascent + descent + 4;
+    if (style?.background && right > left) {
+      ctx.shadowColor = 'transparent';
+      ctx.fillStyle = style.background;
+      ctx.beginPath();
+      ctx.roundRect(
+        x + left,
+        top,
+        right - left,
+        height,
+        Math.min(6, size * 0.12),
+      );
+      ctx.fill();
+    }
     ctx.beginPath();
-    ctx.rect(x + left, y - ascent - 2, right - left, ascent + descent + 4);
+    ctx.rect(x + left, top, right - left, height);
     ctx.clip();
-    ctx.fillStyle = onset ? '#fff5ad' : '#ffe45c';
+    ctx.fillStyle = style?.color ?? (onset ? '#fff5ad' : '#ffe45c');
     ctx.fillText(line, x, y - (onset ? size * 0.06 : 0));
     ctx.restore();
   };
@@ -379,6 +396,7 @@ export async function rasterizeTextLayer(
           Math.max(0, active.from - lineStart),
           active.to - lineStart,
           active.phase === 0,
+          true,
         );
     }
   }

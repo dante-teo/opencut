@@ -397,3 +397,22 @@ for unsuccessful cases and runs the rest of the matrix.
 ## Professional Dialogue Mix
 
 Use `opencut mix analyze <definition.video.ts> --json` to obtain editable automation and measured loudness without rendering picture. `render`, `preview --watch` and `preview clip` use the mix authored in the definition. See [mix settings, overrides and comparison options](AUDIO_MIX.md#delivery-and-inspection).
+
+## JSON and motion definitions
+
+The video commands accept `.video.ts` and `.video.json`. For example:
+
+```sh
+opencut validate edit.video.json --params variant.json --json
+opencut timeline inspect edit.video.json --frame 45 --json
+opencut preview edit.video.json --watch --params variant.json --json
+opencut render edit.video.json --output final.mp4 --json
+opencut package edit.video.json --output ./bundle --params variant.json
+```
+
+Use `doctor --json` to discover formats, graphics capabilities and optional
+browser and adapter readiness. `inspect` reports the JSON parameter
+descriptors when present. `validate --json` lists custom executable graphics
+separately from the definition data. OpenCut keeps structured errors on
+stderr. A version 3 portable package still renders from
+`opencut.bundle.video.ts`, which is read as a verified static data entry.

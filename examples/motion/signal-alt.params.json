@@ -1,0 +1,4 @@
+{
+  "audio": "../../tests/fixtures/generated/reference-motion/assets/signal-880.wav",
+  "description": "880 Hz test tone · 48 kHz PCM"
+}

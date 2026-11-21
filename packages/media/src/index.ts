@@ -1,3 +1,5 @@
+export { decodeGraphicAudio, sampleGraphicAudio } from './reactive-audio.js';
+export { exposeGraphic } from './graphic-exposure.js';
 export {
   probeMedia,
   probeRecipeMedia,
@@ -45,7 +47,11 @@ export {
   inspectGraphicsRuntime,
   validateGraphicTemplate,
 } from './graphics.js';
-export type { GraphicLayer, GraphicBundle } from './graphics.js';
+export type {
+  BuiltinGraphic,
+  GraphicLayer,
+  GraphicBundle,
+} from './graphics.js';
 export type { RenderProgress } from './render-progress.js';
 export { renderContactSheet } from './contact-sheet.js';
 export { rasterizeTextLayer, validateEmbeddedFont } from './text.js';

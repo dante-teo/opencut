@@ -43,6 +43,7 @@ export interface VideoWatchOptions {
   quality?: RenderQuality | undefined;
   processing?: VideoProcessingOptions;
   signal?: AbortSignal;
+  params?: unknown;
   audioMixEdit?: VideoMixEdit | undefined;
   audioComparison?: 'before' | 'after' | undefined;
   audioMixCacheDirectory?: string | undefined;
@@ -61,7 +62,7 @@ type Published = {
 export async function watchVideo(file: string, options: VideoWatchOptions) {
   const path = resolve(file);
   if (!isVideoDefinitionPath(path))
-    throw new VideoDefinitionError('Expected a .video.ts file.');
+    throw new VideoDefinitionError('Expected a .video.ts or .video.json file.');
   options.signal?.throwIfAborted();
 
   const directory = await mkdtemp(join(tmpdir(), 'opencut-video-'));
@@ -72,6 +73,7 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
     maxDimension: options.maxDimension ?? 640,
     quality: options.quality ?? 'fast',
   };
+  const params = structuredClone(options.params);
   let audioMixEdit = options.audioMixEdit;
   let audioComparison = options.audioComparison;
   let interactiveMusicSelection: MusicSelection | undefined;
@@ -174,6 +176,7 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
         quality: settings.quality,
         signal,
         probes,
+        params,
         processing: options.processing,
         audioMixEdit,
         musicSelection: options.musicSelection,
@@ -264,6 +267,7 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
         .digest('hex');
       const pictureKey =
         plan.musicComparison &&
+        !plan.visualClips.some(({ graphic }) => graphic?.audioAnalysis) &&
         createHash('sha256')
           .update(
             JSON.stringify([
@@ -274,6 +278,7 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
               plan.frameCount,
               plan.visualClips,
               plan.visualTransitions,
+              plan.visualGroups,
               settings,
             ]),
           )
@@ -315,7 +320,7 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
               output,
               signal,
             }),
-          { pinnedPlan: plan },
+          { audioComparison: comparison, pinnedPlan: plan },
         );
       }
 

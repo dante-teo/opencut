@@ -6,22 +6,48 @@ import type { FrameRate, RationalTime } from './time.js';
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/);
 export const transitionFrames = z.int().min(2);
-export const transitionInputSchema = z.discriminatedUnion('kind', [
+const cross = {
+  from: id,
+  to: id,
+  frames: transitionFrames,
+};
+const crossStyle = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('dip-to-color'),
+    color: z.string().regex(/^#[0-9a-f]{6}$/i),
+  }),
+  z.strictObject({
+    kind: z.enum(['wipe', 'slide', 'push']),
+    direction: z.enum(['left', 'right', 'up', 'down']),
+  }),
+  z.strictObject({
+    kind: z.literal('zoom'),
+    amount: z.number().min(0.01).max(0.5),
+  }),
+  z.strictObject({
+    kind: z.literal('blur'),
+    radius: z.number().min(1).max(64),
+  }),
+]);
+const transitionKinds = [
   z.strictObject({
     kind: z.literal('cross-dissolve'),
-    from: id,
-    to: id,
-    frames: transitionFrames,
+    ...cross,
+    style: crossStyle.optional(),
   }),
   z.strictObject({
     kind: z.enum(['fade-in', 'fade-out']),
     clipId: id,
     frames: transitionFrames,
   }),
-]);
+] as const;
+export const transitionInputSchema = z.discriminatedUnion(
+  'kind',
+  transitionKinds,
+);
 export const transitionSchema = z.discriminatedUnion('kind', [
-  transitionInputSchema.options[0].extend({ id }),
-  transitionInputSchema.options[1].extend({ id }),
+  transitionKinds[0].extend({ id }),
+  transitionKinds[1].extend({ id }),
 ]);
 export type Transition = z.infer<typeof transitionSchema>;
 export type TransitionInput = z.infer<typeof transitionInputSchema>;
@@ -93,6 +119,8 @@ export function resolveTransition<Clip extends TimelineClip>(
       'The transition extends past a participating clip boundary.',
     );
   return {
+    ...(transition.kind === 'cross-dissolve' &&
+      transition.style && { style: transition.style }),
     id: transition.id,
     ownerId: owner.id,
     trackId: owner.trackId,
@@ -112,6 +140,13 @@ function exceedsVideoDuration(sourceOut: RationalTime, duration: RationalTime) {
   return (
     sourceOut.numerator / sourceOut.denominator >
     duration.numerator / duration.denominator + 0.000001
+  );
+}
+
+function stillAsset(asset: Project['assets'][number] | undefined) {
+  return (
+    asset?.metadata?.kind === 'image' ||
+    (asset?.metadata?.kind === 'graphic' && asset.duration === undefined)
   );
 }
 
@@ -153,10 +188,11 @@ export function validateTransitions(
         if (
           !videoTracks.has(clip.trackId) ||
           !asset?.mediaTypes.includes('video') ||
-          (asset.metadata && !['video', 'image'].includes(asset.metadata.kind))
+          (asset.metadata &&
+            !['video', 'image', 'graphic'].includes(asset.metadata.kind))
         )
           throw new RangeError(
-            'Transitions require photo or video clips on a video track.',
+            'Transitions require photo, video, or graphic clips on a video track.',
           );
         const videoDuration = asset.metadata?.videoDuration;
         if (
@@ -171,7 +207,7 @@ export function validateTransitions(
         const from = layers[0]!.clip;
         const to = layers[1]!.clip;
         const outgoing = assets.get(from.assetId!);
-        if (outgoing?.metadata?.kind !== 'image') {
+        if (!stillAsset(outgoing)) {
           const videoDuration = outgoing?.metadata?.videoDuration;
           const limit = videoDuration ?? outgoing?.duration;
           if (!limit)
@@ -188,7 +224,7 @@ export function validateTransitions(
               `Outgoing clip '${from.id}' has insufficient source after its out point. Shorten the dissolve if there is spare footage, adjust the trim or use a fade-out.`,
             );
         }
-        if (assets.get(to.assetId!)?.metadata?.kind !== 'image') {
+        if (!stillAsset(assets.get(to.assetId!))) {
           try {
             clipSourceTime(to, start);
           } catch (error) {

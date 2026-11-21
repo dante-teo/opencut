@@ -203,7 +203,11 @@ export async function renderCompiledVideo(
             ...(musicComparison && { musicComparison }),
           };
         },
-        { scratch: scratchDirectory, pictureCacheDirectory },
+        {
+          scratch: scratchDirectory,
+          pictureCacheDirectory,
+          audioComparison: settings.audioComparison,
+        },
       ),
   );
 }

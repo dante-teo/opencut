@@ -1,3 +1,4 @@
+import { visualGroupsSchema } from './visual-groups.js';
 import { z } from 'zod';
 import { transitionSchema, validateTransitions } from './transitions.js';
 import { canvasColorPattern } from '@opencut/shared';
@@ -193,6 +194,7 @@ export const markerSchema = z.strictObject({
   name: entityNameSchema,
 });
 export const snapshotSchema = z.strictObject({
+  visualGroups: visualGroupsSchema,
   metadata: z.strictObject({
     id: entityIdSchema,
     name: entityNameSchema,
@@ -420,12 +422,12 @@ function collectSemanticIssues(project: Project): ProjectIssue[] {
     if (
       clip.graphicProps &&
       (asset?.metadata?.kind !== 'graphic' ||
-        asset.metadata.formatName !== 'react')
+        !['react', 'template'].includes(asset.metadata.formatName ?? ''))
     )
       add(
         location + '/graphicProps',
         'incompatible_visual',
-        'Only React graphics accept clip props.',
+        'Only React graphics and templates accept clip props.',
       );
     if (clip.keyframes && track?.type !== 'video')
       add(
