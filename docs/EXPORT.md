@@ -45,6 +45,15 @@ sidecar. See the [definition format](VIDEO_DEFINITIONS.md) for supported
 effects and the [preview comparison](PREVIEW_EXPORT_CONSISTENCY.md) for
 sampling and playback limits.
 
+## Preflight and delivery checks
+
+Use [layout assertions](VIDEO_DEFINITIONS.md#layout-assertions) to check
+placement before encoding. Run [`render plan`](CLI.md#read-only-render-plan)
+with the intended export options to check cache reuse, required encoders and
+available scratch space. After export, [`verify export`](CLI.md#post-export-verification)
+can compare an approved MP4 preview on the same frame grid and check that
+encoded audio packets match an approved master.
+
 ## SDR color across picture ranges
 
 The compositor converts its full-range RGB surface to limited-range

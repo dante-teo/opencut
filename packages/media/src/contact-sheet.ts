@@ -82,48 +82,59 @@ export async function renderMp4ContactSheet(
     columns,
     size,
     signal,
-    async (directory) => {
-      const select = frames.map((frame) => `eq(n,${frame})`).join('+');
-      await index.checkSource();
-      await runMediaTool(
-        'ffmpeg',
-        [
-          '-v',
-          'error',
-          '-nostdin',
-          '-n',
-          '-threads',
-          '2',
-          '-i',
-          index.path,
-          '-map',
-          `0:${index.stream}`,
-          '-vf',
-          `select='${select}',scale=${width}:${height}:reset_sar=1`,
-          '-frames:v',
-          String(frames.length),
-          '-fps_mode',
-          'passthrough',
-          '-c:v',
-          'png',
-          '-threads',
-          '1',
-          '-start_number',
-          '0',
-          join(directory, 'tile-%d.png'),
-        ],
-        undefined,
-        600_000,
-        { signal, writesFile: true, stage: 'decoding selected MP4 frames' },
-      );
-      await index.checkSource();
-      return {
-        paths: frames.map((_, i) => join(directory, `tile-${i}.png`)),
-        width,
-        height,
-      };
-    },
+    (directory) =>
+      decodeMp4Tiles(index, frames, directory, width, height, signal),
   );
+}
+
+/** Decode exact presentation-order indices with the contact-sheet sampling path. */
+export async function decodeMp4Tiles(
+  index: Mp4FrameIndex,
+  frames: readonly number[],
+  directory: string,
+  width: number,
+  height: number,
+  signal?: AbortSignal,
+) {
+  const select = frames.map((frame) => `eq(n,${frame})`).join('+');
+  await index.checkSource();
+  await runMediaTool(
+    'ffmpeg',
+    [
+      '-v',
+      'error',
+      '-nostdin',
+      '-n',
+      '-threads',
+      '2',
+      '-i',
+      index.path,
+      '-map',
+      `0:${index.stream}`,
+      '-vf',
+      `select='${select}',scale=${width}:${height}:reset_sar=1`,
+      '-frames:v',
+      String(frames.length),
+      '-fps_mode',
+      'passthrough',
+      '-c:v',
+      'png',
+      '-threads',
+      '1',
+      '-start_number',
+      '0',
+      join(directory, 'tile-%d.png'),
+    ],
+    undefined,
+    600_000,
+    { signal, writesFile: true, stage: 'decoding selected MP4 frames' },
+  );
+  await index.checkSource();
+  return {
+    paths: frames.map((_, i) => join(directory, `tile-${i}.png`)),
+    width,
+    height,
+  };
 }
 
 async function assembleContactSheet(

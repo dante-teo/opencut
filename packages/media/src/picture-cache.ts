@@ -38,7 +38,8 @@ type Time = NonNullable<VisualTimelineClip['animation']>['start'];
 
 interface CachePlan {
   options: VideoTimelineOptions;
-  cache: PictureCache;
+  cache: Pick<PictureCache, 'backend' | 'sourceIdentity'>;
+  pendingSources?: ReadonlyMap<string, string>;
   visualClips: VisualTimelineClip[];
   byOwner: ReadonlyMap<string, Transition[]>;
   startFrame: number;
@@ -70,6 +71,7 @@ function relativeTime(time: Time, frame: number, rate: FrameRate) {
 export async function planPictureRanges({
   options,
   cache,
+  pendingSources,
   visualClips,
   byOwner,
   startFrame,
@@ -182,7 +184,12 @@ export async function planPictureRanges({
     }
   }
   const edges = [...boundaries].sort((a, b) => a - b);
-  const ranges: { key: string; startFrame: number; endFrame: number }[] = [];
+  const ranges: {
+    key: string;
+    startFrame: number;
+    endFrame: number;
+    pending?: string[];
+  }[] = [];
   const settings = [
     'ffv1-matroska-limited-bt709-v1',
     cache.backend,
@@ -200,10 +207,23 @@ export async function planPictureRanges({
     const end = edges[i]!;
     const count = end - start;
     const composition = [];
+    const pending = new Set<string>();
+    const activeKey = (clip: VisualTimelineClip) => {
+      const paths = [
+        clip.path,
+        ...Object.values(clip.graphic?.mediaFrames ?? {}).map(
+          ({ path }) => path,
+        ),
+      ];
+      for (const path of paths)
+        if (path && pendingSources?.has(path))
+          pending.add(pendingSources.get(path)!);
+      return layerKey(clip, start);
+    };
     for (const clip of visualClips) {
       const at = clip.timelineStartFrame;
       if (active(at, at + clip.frameCount, start))
-        composition.push(['layer', await layerKey(clip, start)]);
+        composition.push(['layer', await activeKey(clip)]);
       for (const { layers } of byOwner.get(clip.clipId) ?? []) {
         const { startFrame, endFrame } = layers[0]!.ramp;
         if (active(startFrame, endFrame, start))
@@ -215,14 +235,19 @@ export async function planPictureRanges({
               layers.map(async (layer) => [
                 layer.ramp.direction,
                 ...(layer.ramp.style ? [layer.ramp.style] : []),
-                await layerKey(layer, start),
+                await activeKey(layer),
               ]),
             ),
           ]);
       }
     }
     const key = digest(JSON.stringify([settings, count, composition]));
-    ranges.push({ key, startFrame: start, endFrame: end });
+    ranges.push({
+      key,
+      startFrame: start,
+      endFrame: end,
+      ...(pending.size && { pending: [...pending].sort() }),
+    });
   }
   return ranges;
 }

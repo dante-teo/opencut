@@ -92,9 +92,21 @@ See [frame-targeted contact sheets](../../../docs/CLI.md#frame-targeted-contact-
 
 For cleanup planning run `opencut inspect dependencies DEFINITION --json`.
 Supply `--artifact-root` for additional directories and
-`--render-report` for a published export. Use reported roles and owners to
-trace shared inputs before changing files. An `unverified-export` reference
-could point to a missing or replaced output.
+`--render-report` for a published export. Use `classification`, `byteTotals`
+and the recorded owners to distinguish regenerable artifacts, deliveries and
+unclassified files. An `unverified-export` reference could point to a
+missing or replaced output.
+
+Run `opencut render plan DEFINITION --output final.mp4 --json` with the
+intended cache and render options to check recipe and picture range reuse
+and current free space before rendering. The plan checks overwrite safety
+and required encoders. Scratch usage is estimated.
+After export, use `opencut verify export final.mp4 --against approved.mp4
+--render-report final.render.json --output verification` to save paired
+samples, timing results and luma checks. Use an approved MP4 on the same
+frame grid as the export. Add `--audio-master master.mp4` to require exact
+encoded audio packets for a picture-only revision. See the
+[CLI verification reference](../../../docs/CLI.md#post-export-verification).
 
 ## 3:4 4K60 delivery
 

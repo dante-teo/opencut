@@ -8,17 +8,16 @@ import type { ScriptImport } from './video-script.js';
 import { scanPackageImports } from './video-package-imports.js';
 import {
   fileFingerprintSchema,
-  hashJson,
   matchesFingerprint,
   missing,
 } from './video-integrity.js';
 import { processingSettings } from './video-processing.js';
 import {
   listDefinitionBuildArtifacts,
-  readCheckpoint,
   readOutputFingerprint,
 } from './video-build.js';
-import { mediaCacheReceipt } from './video-media-cache.js';
+import { readMediaEntry } from './video-media-cache.js';
+import { videoInputIdentity } from './video-input.js';
 
 interface Reference {
   role: string;
@@ -65,6 +64,7 @@ export async function inspectVideoDependencies(
 ) {
   const { signal } = options;
   const entries = new Map<string, Reference[]>();
+  const cacheIdentities = new Map<string, string>();
   const diagnostics: { owner: string; message: string }[] = [];
   function add(path: string, role: string, owner: string, direct: boolean) {
     const refs = entries.get(path) ?? [];
@@ -233,8 +233,12 @@ export async function inspectVideoDependencies(
     cache,
     path,
     signal,
-  ))
-    add(artifact.path, artifact.role, artifact.owner, false);
+  )) {
+    if (!entries.has(artifact.path)) entries.set(artifact.path, []);
+    if (artifact.role) add(artifact.path, artifact.role, artifact.owner, false);
+    if (artifact.cacheIdentity)
+      cacheIdentities.set(artifact.path, artifact.cacheIdentity);
+  }
   if (options.renderReport) {
     const reportPath = resolve(options.renderReport);
     const report = JSON.parse(
@@ -276,19 +280,29 @@ export async function inspectVideoDependencies(
     for await (const { path, info } of artifacts(root, signal)) {
       if (!entries.has(path)) entries.set(path, []);
       if (basename(path) !== 'result.json' || !info.isFile()) continue;
-      const receipt = mediaCacheReceipt.safeParse(await readCheckpoint(path));
-      if (
-        !receipt.success ||
-        receipt.data.key !== basename(dirname(path)) ||
-        hashJson(receipt.data.metadata) !== receipt.data.metadataSha256
-      )
-        continue;
       const directory = dirname(path);
+      const key = basename(directory);
+      if (!/^[a-f0-9]{64}(?:\.[a-f0-9]{64})?$/.test(key)) continue;
+      const matches = [];
       for (const name of (await readdir(directory)).sort()) {
-        if (!/^media\.(?:mkv|nut|mov|mp4|png|wav|flac)$/.test(name)) continue;
+        const format = /^media\.(mkv|nut|mov|mp4|png|wav|flac)$/.exec(
+          name,
+        )?.[1];
+        if (!format) continue;
         const media = join(directory, name);
-        const info = await optional(lstat(media));
-        if (!info?.isFile() || info.size !== receipt.data.bytes) continue;
+        const identity = cacheIdentities.get(media);
+        if (identity && videoInputIdentity(media) === identity) {
+          matches.push({ media, identity });
+          continue;
+        }
+        const entry = await readMediaEntry(directory, key, format, signal);
+        if (entry) matches.push({ media, identity: entry.identity });
+      }
+      // A generic receipt does not name its format. An ambiguous payload is
+      // only classified if it was independently identified by build history.
+      if (matches.length === 1) {
+        const { media, identity } = matches[0]!;
+        cacheIdentities.set(media, identity);
         add(path, 'cache-manifest', ownerPath(root), false);
         add(media, 'cache-media', ownerPath(path), false);
       }
@@ -321,8 +335,57 @@ export async function inspectVideoDependencies(
       references: [],
     };
     record.paths.push(ownerPath(path));
-    record.references.push(...entries.get(path)!);
+    record.references.push(
+      ...entries
+        .get(path)!
+        .filter(
+          ({ role }) =>
+            role !== 'cache-media' ||
+            cacheIdentities.get(path) === videoInputIdentity(path),
+        ),
+    );
     files.set(resolvedPath, record);
+  }
+  const inventory = [...files.values()].map((item) => {
+    const roles = item.references.length
+      ? [...new Set(item.references.map(({ role }) => role))].sort()
+      : ['unclassified'];
+    const classification =
+      roles.includes('export') || roles.includes('unverified-export')
+        ? 'delivery'
+        : roles.every(
+              (role) => role === 'cache-manifest' || role === 'cache-media',
+            )
+          ? 'regenerable-cache'
+          : roles.includes('unclassified')
+            ? 'unclassified'
+            : 'dependency';
+    return {
+      ...item,
+      relativePath: item.paths[0]!,
+      roles,
+      classification,
+      regenerable: classification === 'regenerable-cache',
+      references: [
+        ...new Map(
+          item.references.map((ref) => [JSON.stringify(ref), ref]),
+        ).values(),
+      ],
+    };
+  });
+  const byteTotals = {
+    regenerableCache: 0,
+    deliveries: 0,
+    unclassified: 0,
+    dependencies: 0,
+  };
+  for (const { classification, bytes = 0 } of inventory) {
+    if (classification === 'regenerable-cache')
+      byteTotals.regenerableCache += bytes;
+    else if (classification === 'delivery') byteTotals.deliveries += bytes;
+    else if (classification === 'unclassified')
+      byteTotals.unclassified += bytes;
+    else byteTotals.dependencies += bytes;
   }
   return {
     inspectionVersion: 1,
@@ -330,18 +393,8 @@ export async function inspectVideoDependencies(
     definitionEvaluated: value !== undefined,
     projectRoot: root,
     artifactRoots: roots,
-    files: [...files.values()].map((item) => ({
-      ...item,
-      relativePath: item.paths[0]!,
-      roles: item.references.length
-        ? [...new Set(item.references.map(({ role }) => role))].sort()
-        : ['unclassified'],
-      references: [
-        ...new Map(
-          item.references.map((ref) => [JSON.stringify(ref), ref]),
-        ).values(),
-      ],
-    })),
+    files: inventory,
+    byteTotals,
     diagnostics,
   };
 }

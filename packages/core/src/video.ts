@@ -8,6 +8,8 @@ export {
 } from './video-definition.js';
 export { convertJsonVideoDefinition } from './convert-json-video.js';
 export type { VideoDefinition, VideoParameters } from './video-definition.js';
+export { inspectVideoLayout, VideoLayoutError } from './video-layout.js';
+export type { LayoutAssertion } from './layout-assertion-schema.js';
 export type {
   GraphicAssetDefinition,
   GraphicProps,
@@ -54,6 +56,7 @@ export type {
   VideoPreviewRange,
 } from './video-preview.js';
 export { renderVideo, renderCompiledVideo } from './video-render.js';
+export { planVideoRender } from './video-render-plan.js';
 export type {
   CompiledVideoRenderOptions,
   VideoRenderBuild,

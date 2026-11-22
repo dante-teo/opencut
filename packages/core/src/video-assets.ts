@@ -23,6 +23,7 @@ import type {
 import { processVideoRecipes } from './video-processing.js';
 import type {
   RecipeRecovery,
+  RecipeCachePlan,
   VideoProcessingOptions,
 } from './video-processing.js';
 
@@ -41,6 +42,7 @@ export interface VideoAssetOptions {
   probes?: VideoSourceProbes;
   processing?: VideoProcessingOptions | undefined;
   recovery?: RecipeRecovery;
+  recipePlan?: RecipeCachePlan;
   pinnedSources?: ReadonlyMap<string, string> | undefined;
   inputs?: {
     record: RecordVideoInput;
@@ -72,6 +74,7 @@ export async function compileVideoAssets(
     inputs,
     processing,
     recovery,
+    recipePlan,
     pinnedSources,
     quality = 'quality',
   }: VideoAssetOptions,
@@ -110,6 +113,7 @@ export async function compileVideoAssets(
     processing,
     signal,
     recovery,
+    recipePlan,
   );
   const assets = new Map<string, CompiledVideoAsset>();
   const recipes: VideoRecipeInspection[] = [];
@@ -124,7 +128,11 @@ export async function compileVideoAssets(
       throw new VideoDefinitionError(
         `assets.${id}.path: Media changed during compilation.`,
       );
-    const media = processed.get(id);
+    const media =
+      processed.get(id) ??
+      (recipePlan && referenced.has(id)
+        ? predictRecipeOutput(recipe, recipePlan)
+        : undefined);
     if (media) {
       const pinned = inputs
         ? await pinDerivedAsset(id, media, inputs.snapshotMedia)
@@ -144,6 +152,52 @@ export async function compileVideoAssets(
     definitions[assetId]?.recipe?.some(inheritsRenderQuality),
   );
   return { assets, recipes, qualitySensitive };
+}
+
+/** Estimated streams for planning only. The renderer always requires probed artifacts. */
+function predictRecipeOutput(
+  { input, inspection }: RecipeInput,
+  plan: RecipeCachePlan,
+) {
+  const { assetId } = inspection;
+  const { media, format } = inspection.steps.at(-1)!;
+  const path = `opencut-pending:${assetId}`;
+  plan.pendingSources.set(path, assetId);
+  const { metadata } = input;
+  const video =
+    media.kind !== 'audio' && metadata.video
+      ? {
+          ...metadata.video,
+          width: media.width,
+          height: media.height,
+          rotation: 0,
+          sampleAspectRatio: 1,
+          frameRate: media.frameRate,
+          durationSeconds: media.durationSeconds,
+          startTimeSeconds: media.videoStartSeconds,
+        }
+      : null;
+  const audio =
+    media.hasAudio && metadata.audio
+      ? {
+          ...metadata.audio,
+          durationSeconds: media.audioDurationSeconds,
+          startTimeSeconds: media.audioStartSeconds,
+        }
+      : null;
+  return {
+    identity: path,
+    metadata: {
+      path,
+      formatName: format === 'png' ? 'png_pipe' : format,
+      startTimeSeconds: 0,
+      durationSeconds: media.durationSeconds,
+      hasAudio: !!audio,
+      video,
+      audio,
+      streams: [...(video ? [video] : []), ...(audio ? [audio] : [])],
+    },
+  };
 }
 
 export async function inspectAssetRecipes(

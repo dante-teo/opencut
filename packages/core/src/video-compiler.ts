@@ -89,6 +89,7 @@ export interface CompiledVideo {
   /** A deeply frozen project snapshot. */
   readonly project: Project;
   readonly frameCount: number;
+  readonly layoutAssertions?: ParsedVideoDefinition['layoutAssertions'];
   readonly recipes: readonly VideoRecipeInspection[];
   readonly audioMixEdit?: VideoMixEdit;
   forQuality(
@@ -264,6 +265,9 @@ export async function compileDefinition(
     project: freeze(project),
     ...(audioMixEdit && { audioMixEdit }),
     frameCount: renderPlan.frameCount,
+    ...(definition.layoutAssertions?.length && {
+      layoutAssertions: definition.layoutAssertions,
+    }),
     recipes: freeze(recipes),
     async forQuality(
       next: RenderQuality,

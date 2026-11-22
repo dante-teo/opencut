@@ -265,7 +265,11 @@ export function transformTextLayer(
   ctx.translate(-width / 2, -height / 2);
 }
 
-export { transitionOpacity, transitionProgress } from './transition.js';
+export {
+  transitionLayerGeometry,
+  transitionOpacity,
+  transitionProgress,
+} from './transition.js';
 export type { TransitionRamp, TransitionStyle } from './transition.js';
 export { renderQualities, renderQualityProfiles } from './render-quality.js';
 export type { RenderQuality } from './render-quality.js';

@@ -36,7 +36,7 @@ import type {
 import { processingSettings } from './video-processing.js';
 import type { FileFingerprint } from './video-integrity.js';
 import type { RecipeRecovery } from './video-processing.js';
-import { findMediaEntry } from './video-media-cache.js';
+import { findMediaEntry, readMediaEntry } from './video-media-cache.js';
 import {
   inheritsRenderQuality,
   recipeFormatSchema,
@@ -562,7 +562,13 @@ export async function listDefinitionBuildArtifacts(
       return [];
     })
   ).sort();
-  const files: { path: string; role: string; owner: string }[] = [];
+  const files: {
+    path: string;
+    role?: string;
+    owner: string;
+    cacheIdentity?: string;
+  }[] = [];
+  const cacheEntries = new Map<string, ReturnType<typeof readMediaEntry>>();
   const fingerprints = new Map<
     string,
     ReturnType<typeof readOutputFingerprint>
@@ -572,6 +578,19 @@ export async function listDefinitionBuildArtifacts(
     if (!sha256.safeParse(name).success) continue;
     const directory = join(builds, name);
     const path = join(directory, 'compile.json');
+    if (
+      !(
+        await lstat(directory).catch((error: unknown) => {
+          if (!missing(error)) throw error;
+        })
+      )?.isDirectory() ||
+      !(
+        await lstat(path).catch((error: unknown) => {
+          if (!missing(error)) throw error;
+        })
+      )?.isFile()
+    )
+      continue;
     const compile = compileSchema.safeParse(await readCheckpoint(path));
     if (
       !compile.success ||
@@ -582,14 +601,20 @@ export async function listDefinitionBuildArtifacts(
     files.push({ path, role: 'cache-manifest', owner: definition });
     for (const { key, format, assetId } of compile.data.steps) {
       const media = join(cache, key, 'media.' + format);
+      let verified = cacheEntries.get(media);
+      if (!verified) {
+        verified = readMediaEntry(join(cache, key), key, format, signal);
+        cacheEntries.set(media, verified);
+      }
+      const entry = await verified;
       files.push({
         path: media,
-        role: 'cache-media',
+        ...(entry && { role: 'cache-media', cacheIdentity: entry.identity }),
         owner: 'assets.' + assetId,
       });
       files.push({
         path: join(cache, key, 'result.json'),
-        role: 'cache-manifest',
+        ...(entry && { role: 'cache-manifest' }),
         owner: 'assets.' + assetId,
       });
     }

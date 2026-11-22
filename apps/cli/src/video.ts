@@ -5,7 +5,9 @@ import {
   describeProjectContactTimeline,
   inspectProject,
   inspectVideoRecipes,
+  inspectVideoLayout,
   isVideoDefinitionPath,
+  planVideoRender,
   renderCompiledVideo,
 } from '@opencut/core/video';
 import type { VideoProcessingProgress } from '@opencut/core/video';
@@ -23,6 +25,7 @@ type VideoCommand =
   | 'validate'
   | 'inspect'
   | 'render'
+  | 'render plan'
   | 'mix analyze'
   | 'recipes inspect'
   | 'recipes validate';
@@ -53,7 +56,10 @@ export async function runVideoCommand(
   if (!isVideoDefinitionPath(file))
     throw new UsageError('Choose a .video.ts definition.');
   const { output } = values;
-  if (command === 'render' && !output?.toLowerCase().endsWith('.mp4'))
+  if (
+    (command === 'render' || command === 'render plan') &&
+    !output?.toLowerCase().endsWith('.mp4')
+  )
     throw new UsageError(`Usage: ${commandUsage(command)}`);
 
   const pictureCacheDirectory = values['picture-cache'];
@@ -63,7 +69,9 @@ export async function runVideoCommand(
   if (pictureVersion !== undefined && !pictureCacheDirectory)
     throw new UsageError('--picture-version requires --picture-cache.');
   const controls =
-    command === 'render' || command === 'mix analyze'
+    command === 'render' ||
+    command === 'render plan' ||
+    command === 'mix analyze'
       ? parseRenderControls(values)
       : {};
   await withCommandCancellation(async (signal) => {
@@ -107,6 +115,24 @@ export async function runVideoCommand(
     };
     const { audioMixEdit, musicSelection, ...mixControls } =
       await readMixControls(values, signal);
+    if (command === 'render plan') {
+      const plan = await withDefinitionConsole(() =>
+        planVideoRender(file, output!, {
+          ...controls,
+          ...mixControls,
+          processing,
+          audioMixEdit,
+          musicSelection,
+          params,
+          signal,
+          pictureCacheDirectory,
+          pictureVersion,
+        }),
+      );
+      console.log(JSON.stringify(plan, null, 2));
+      if (!plan.ok) process.exitCode = 1;
+      return;
+    }
     const video = await loadVideo(file, {
       signal,
       params,
@@ -124,6 +150,9 @@ export async function runVideoCommand(
       });
       console.log(JSON.stringify(report, null, 2));
     } else if (command === 'validate') {
+      const layout = video.layoutAssertions?.length
+        ? await inspectVideoLayout(video, { signal })
+        : undefined;
       const executableGraphics = video.project.assets.flatMap(
         ({ id, file, metadata }) =>
           metadata?.kind === 'graphic' && metadata.formatName === 'react'
@@ -137,18 +166,27 @@ export async function runVideoCommand(
         ? await (await import('./doctor.js')).inspectReactGraphics()
         : undefined;
       const result = {
-        ok: true,
+        ok: layout?.ok ?? true,
         path: video.path,
         frameCount: video.frameCount,
         ...(graphics && { graphics }),
         ...(executableGraphics.length && { executableGraphics }),
+        ...(layout && { layout }),
       };
       console.log(
         values.json
           ? JSON.stringify(result, null, 2)
-          : `Valid video definition (${result.frameCount} frames): ${result.path}` +
+          : `${result.ok ? 'Valid' : 'Layout assertions failed for'} video definition (${result.frameCount} frames): ${result.path}` +
+              (layout?.checks
+                .filter(({ passed }) => !passed)
+                .map(
+                  ({ assertionId, objectId, frame, deviationPixels, reason }) =>
+                    `\n  ${assertionId} / ${objectId ?? '(no object)'} at frame ${frame ?? 'n/a'}: ${reason ?? `${deviationPixels?.toFixed(2)} px deviation`}`,
+                )
+                .join('') ?? '') +
               (graphics?.hint ? `\nReact graphics: ${graphics.hint}` : ''),
       );
+      if (!result.ok) process.exitCode = 1;
     } else if (command === 'inspect') {
       console.log(
         JSON.stringify(

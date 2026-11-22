@@ -13,6 +13,7 @@ import type { VideoMixEdit } from '@opencut/shared';
 import { openAudioMixCache } from './video-audio-mix.js';
 import { openPictureCache } from './video-picture-cache.js';
 import { describeMusicComparison } from './music-comparison.js';
+import { inspectVideoLayout, VideoLayoutError } from './video-layout.js';
 
 export type VideoRenderOptions = Omit<
   RenderControls,
@@ -56,7 +57,7 @@ async function statIfPresent(path: string) {
 }
 
 /** Protect the definition and every declared source, including unused assets. */
-async function protectInputs(
+export async function protectRenderInputs(
   video: CompiledVideo,
   output: string,
   boundSources: Iterable<string>,
@@ -94,6 +95,10 @@ export async function renderCompiledVideo(
 ) {
   const { onProgress, signal, overwrite, ...settings } = options;
   video = await video.forQuality(quality, !burnSubtitles, signal);
+  const layout = video.layoutAssertions?.length
+    ? await inspectVideoLayout(video, { burnSubtitles, signal })
+    : undefined;
+  if (layout && !layout.ok) throw new VideoLayoutError(layout);
   const musicComparison = describeMusicComparison(video.project);
   const musicSelection = musicComparison && {
     candidate: musicComparison.selected,
@@ -153,7 +158,7 @@ export async function renderCompiledVideo(
         signal,
         async (plan) => {
           if (overwrite)
-            await protectInputs(
+            await protectRenderInputs(
               video,
               output,
               plan.sourceMetadata.keys(),
@@ -200,6 +205,7 @@ export async function renderCompiledVideo(
             );
           return {
             ...result,
+            ...(layout && { layout }),
             ...(build && { build }),
             ...(musicComparison && { musicComparison }),
           };

@@ -122,6 +122,16 @@ frames at meaningful boundaries and verify duration,
 frame rate, dimensions and audio after rendering. For complete 20-second
 definitions and fixture setup, see [Video as code](../../../docs/VIDEO_DEFINITIONS.md).
 
+## Layout assertions
+
+Declare `layoutAssertions` for repeatable geometry checks. For example,
+`{ id: 'dialogue-position', kind: 'bottom-center', target: { subtitles: true }, bottom: 120, tolerance: 2 }`
+checks the rendered subtitle anchor. Use `glyphs-centered` to check native
+glyph bounds against a caption panel, `upper-left` for watermark placement,
+and `covers-canvas` for a named shot. Validation and render both enforce
+required checks. Review source transparency and face placement visually.
+See [the assertion schema and examples](../../../docs/VIDEO_DEFINITIONS.md#layout-assertions).
+
 ## Media recipes
 
 Set `recipe` on an asset to run steps in order. Available types are `trim`,

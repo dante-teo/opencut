@@ -526,6 +526,28 @@ async function protectSourceFiles(
   }
 }
 
+export interface TimelinePlan {
+  ranges: {
+    startFrame: number;
+    endFrame: number;
+    key?: string;
+    pending?: string[];
+  }[];
+  savedKey: string | undefined;
+  requiresFfv1: boolean;
+  encoder: RenderEncoderReport;
+  outputWidth: number;
+  outputHeight: number;
+  outputFrameCount: number;
+  durationSeconds: number;
+  warnings: string[];
+}
+
+interface TimelineInspection {
+  cache?: Pick<PictureCache, 'backend' | 'sourceIdentity'> | undefined;
+  pendingSources: ReadonlyMap<string, string>;
+}
+
 /** Prepare filters and stage unique held frames when executing a render. */
 async function prepareTimeline(
   options: VideoTimelineOptions,
@@ -533,6 +555,7 @@ async function prepareTimeline(
   scratch?: ReturnType<typeof renderScratch>,
   checkPictureSeek?: ReturnType<typeof pictureSeekCheck>,
   onPictureRange?: (endFrame: number) => void,
+  inspect?: TimelineInspection,
 ) {
   const png = mode === 'png';
   checkRenderSignal(options.signal);
@@ -736,6 +759,7 @@ async function prepareTimeline(
     warnings,
     stagedInputs,
     encoders,
+    timelinePlan: undefined as TimelinePlan | undefined,
     pictureRanges: undefined as PictureRange[] | undefined,
     sourcePicture: undefined as
       | (NonNullable<VideoTimelineResult['pictureVersion']> & { path: string })
@@ -864,7 +888,7 @@ async function prepareTimeline(
   const encodedCache = options.pictureCache?.encoded;
   if (
     pictureVersion !== undefined &&
-    (!encodedCache ||
+    (!(encodedCache || inspect?.cache) ||
       (pictureVersion !== 'save' &&
         !/^[a-f0-9]{64}\.[a-f0-9]{64}$/.test(pictureVersion)))
   )
@@ -895,6 +919,72 @@ async function prepareTimeline(
       options.signal,
       transformed,
     );
+  const planCachedPicture = (
+    cache: Pick<PictureCache, 'backend' | 'sourceIdentity'>,
+  ) =>
+    planPictureRanges({
+      options,
+      cache,
+      visualClips: visibleClips,
+      byOwner,
+      startFrame,
+      endFrame,
+      outputWidth,
+      outputHeight,
+      warnings,
+      rasterize,
+      ...(inspect && { pendingSources: inspect.pendingSources }),
+    });
+  const pictureVersionKey = (
+    planned: Awaited<ReturnType<typeof planPictureRanges>>,
+  ) =>
+    encodedPictureKey(planned, [
+      codec,
+      encoder!.name,
+      encoder!.settings,
+      outputRate,
+      options.outputFrameRate !== undefined,
+      outputFrameCount,
+    ]);
+  if (inspect) {
+    const cached = inspect.cache
+      ? await planCachedPicture(inspect.cache)
+      : undefined;
+    const ranges =
+      cached ?? (bounded.length > 1 ? bounded : [{ startFrame, endFrame }]);
+    const savedKey =
+      cached && pictureVersion && !cached.some((range) => range.pending)
+        ? pictureVersionKey(cached)
+        : undefined;
+    // A configured cache needs FFV1 only for misses, which core resolves.
+    // Uncached renders use it for staging layer transforms and bounded stacks.
+    let requiresFfv1 = false;
+    if (!cached) {
+      requiresFfv1 =
+        bounded.length > 0 ||
+        transitions.some(({ layers }) => overlapsRange(layers[0]!));
+      for (const clip of visibleClips) {
+        if (requiresFfv1) break;
+        if (!overlapsRange(clip)) continue;
+        requiresFfv1 =
+          !!clip.graphic ||
+          (transformsLayer(clip) &&
+            (!clip.text || !!(await rasterize(clip)).png));
+      }
+    }
+    prepared.timelinePlan = {
+      ranges,
+      savedKey,
+      requiresFfv1,
+      encoder: encoder!,
+      outputWidth,
+      outputHeight,
+      outputFrameCount,
+      durationSeconds,
+      warnings,
+    };
+    return prepared;
+  }
   const prepareLayer = async (
     clip: VisualTimelineClip,
     label: string,
@@ -1390,27 +1480,9 @@ async function prepareTimeline(
   if (pictureCache) {
     const planned = temporaryPictureCache
       ? bounded.map((range, index) => ({ ...range, key: String(index) }))
-      : await planPictureRanges({
-          options,
-          cache: pictureCache,
-          visualClips,
-          byOwner,
-          startFrame,
-          endFrame,
-          outputWidth,
-          outputHeight,
-          warnings,
-          rasterize,
-        });
+      : await planCachedPicture(pictureCache);
     if (pictureVersion && encodedCache) {
-      const key = encodedPictureKey(planned, [
-        codec,
-        encoder!.name,
-        encoder!.settings,
-        outputRate,
-        options.outputFrameRate !== undefined,
-        outputFrameCount,
-      ]);
+      const key = pictureVersionKey(planned);
       if (pictureVersion === 'save')
         prepared.savePicture = { key, cache: encodedCache };
       else {
@@ -1672,24 +1744,52 @@ async function prepareTimeline(
   return prepared;
 }
 
-/** Validate the composition and required encoders without populating the picture cache. */
-export async function validateVideoTimeline(options: VideoTimelineOptions) {
-  const prepared = await prepareTimeline(options);
-  const encoders = (
+/** Compute the same range keys and encoder settings without staging any media. */
+export async function inspectTimelineRender(
+  options: VideoTimelineOptions,
+  inspection: TimelineInspection,
+): Promise<TimelinePlan> {
+  const prepared = await prepareTimeline(
+    options,
+    'mp4',
+    undefined,
+    undefined,
+    undefined,
+    inspection,
+  );
+  return prepared.timelinePlan!;
+}
+
+export async function checkRenderEncoders(
+  required: Iterable<string>,
+  signal?: AbortSignal,
+) {
+  const listing = (
     await runMediaTool(
       'ffmpeg',
       ['-hide_banner', '-v', 'error', '-encoders'],
       4 * 1024 * 1024,
       60_000,
-      { signal: options.signal },
+      { signal },
     )
   ).toString('utf8');
-  for (const encoder of prepared.encoders) {
-    if (!new RegExp(`\\b${encoder}\\b`).test(encoders))
+  const encoders = new Set(
+    [...listing.matchAll(/^\s*[VAS][A-Z.]{5}\s+(\S+)/gm)].map(
+      (match) => match[1],
+    ),
+  );
+  for (const encoder of required) {
+    if (!encoders.has(encoder))
       throw new MediaError(
         `Required encoder '${encoder}' is unavailable in this FFmpeg installation.`,
       );
   }
+}
+
+/** Validate the composition and required encoders without populating the picture cache. */
+export async function validateVideoTimeline(options: VideoTimelineOptions) {
+  const prepared = await prepareTimeline(options);
+  await checkRenderEncoders(prepared.encoders, options.signal);
   return {
     width: prepared.outputWidth,
     height: prepared.outputHeight,

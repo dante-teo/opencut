@@ -31,6 +31,7 @@ import {
 } from '@opencut/core/video';
 import type { ContactTimeline } from '@opencut/core/video';
 import { readMp4FrameIndex, renderMp4ContactSheet } from '@opencut/media';
+import type { Mp4FrameIndex } from '@opencut/media';
 import { withCommandCancellation } from './cancellation.js';
 import { readJsonArgument, readParams } from './json-argument.js';
 import { parseProcessingControls } from './recipe-options.js';
@@ -42,11 +43,35 @@ import type { CommandOptions } from './commands.js';
 const isIndex = (n: unknown): n is number =>
   typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
 
-function integer(flag: string, input: string) {
+export function parseFrameIndex(flag: string, input: string) {
   if (!/^\d+$/.test(input) || !isIndex(Number(input)))
     throw new UsageError(`--${flag} requires nonnegative safe integers.`);
   return Number(input);
 }
+export function mp4PresentationTime(media: Mp4FrameIndex, ticks: number) {
+  return rationalTime(
+    BigInt(ticks) * BigInt(media.timeBase.numerator),
+    BigInt(media.timeBase.denominator),
+  );
+}
+
+export function findFrameBoundary(
+  time: RationalTime,
+  length: number,
+  at: (frame: number) => RationalTime,
+  after = false,
+) {
+  let low = 0;
+  let high = length;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    const relation = compareTimes(at(mid), time);
+    if (relation < 0 || (after && relation === 0)) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
 function timestamp(value: string) {
   try {
     return parseSubtitleTime(value);
@@ -62,7 +87,33 @@ function object(value: unknown): Record<string, unknown> {
     throw new UsageError('Expected an OpenCut render report object.');
   return value as Record<string, unknown>;
 }
-function fileExists(path: string) {
+
+export async function readContactRenderReport(
+  file: string | undefined,
+  media: Mp4FrameIndex | undefined,
+  signal: AbortSignal,
+) {
+  if (file === undefined) return;
+  const report = object(await readJsonArgument('render-report', file, signal));
+  if (media) {
+    const expected = fileFingerprintSchema.safeParse(report.outputFingerprint);
+    if (!expected.success)
+      throw new UsageError(
+        'Render report has no valid output fingerprint. Use the JSON from a new render or supply --definition for timeline context.',
+      );
+    const actual = await fingerprintFile(await realpath(media.path), signal);
+    await media.checkSource();
+    if (
+      !matchesFingerprint(actual, expected.data) ||
+      report.frameCount !== media.ticks.length
+    )
+      throw new UsageError(
+        'Render report does not match this MP4. Supply the report for this export.',
+      );
+  }
+  return report;
+}
+export function statIfPresent(path: string) {
   return lstat(path).catch((error: unknown) => {
     if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT'))
       throw error;
@@ -124,8 +175,9 @@ export async function runContactSheet(file: string, values: CommandOptions) {
   if (mp4 && values.params !== undefined && values.definition === undefined)
     throw new UsageError('--params with an MP4 requires --definition.');
   const frameRequests =
-    values.frames?.split(',').map((item) => integer('frames', item.trim())) ??
-    [];
+    values.frames
+      ?.split(',')
+      .map((item) => parseFrameIndex('frames', item.trim())) ?? [];
   const timeRequests = values.timestamps?.split(',').map(timestamp) ?? [];
   const around = new Set(
     values.around?.split(',').map((item) => item.trim()) ?? [],
@@ -138,14 +190,14 @@ export async function runContactSheet(file: string, values: CommandOptions) {
     frameRequests.length > 0 || timeRequests.length > 0 || around.size > 0;
   if (targeted && values.count !== undefined)
     throw new UsageError('--count applies only to evenly spaced samples.');
-  const size = integer('size', values.size ?? '320');
+  const size = parseFrameIndex('size', values.size ?? '320');
   if (size < 64 || size > 640)
     throw new UsageError('--size must be between 64 and 640.');
   const quality = parseRenderQuality(values.quality, 'fast');
   const output = resolve(values.output!);
   const manifestPath = output + '.json';
   await withCommandCancellation(async (signal) => {
-    if ((await fileExists(output)) || (await fileExists(manifestPath)))
+    if ((await statIfPresent(output)) || (await statIfPresent(manifestPath)))
       throw new UsageError(
         'Contact sheet and manifest require new output paths.',
       );
@@ -160,34 +212,11 @@ export async function runContactSheet(file: string, values: CommandOptions) {
           processing: parseProcessingControls(values),
         });
     const media = mp4 ? await readMp4FrameIndex(file, signal) : undefined;
-    const report =
-      values['render-report'] === undefined
-        ? undefined
-        : object(
-            await readJsonArgument(
-              'render-report',
-              values['render-report'],
-              signal,
-            ),
-          );
-    if (media && report) {
-      const expected = fileFingerprintSchema.safeParse(
-        report.outputFingerprint,
-      );
-      if (!expected.success)
-        throw new UsageError(
-          'Render report has no valid output fingerprint. Use the JSON from a new render or supply --definition for timeline context.',
-        );
-      const actual = await fingerprintFile(await realpath(media.path), signal);
-      await media.checkSource();
-      if (
-        !matchesFingerprint(actual, expected.data) ||
-        report.frameCount !== media.ticks.length
-      )
-        throw new UsageError(
-          'Render report does not match this MP4. Supply the report for this export.',
-        );
-    }
+    const report = await readContactRenderReport(
+      values['render-report'],
+      media,
+      signal,
+    );
     const timeline = video
       ? describeProjectContactTimeline(video.project)
       : values.definition
@@ -222,23 +251,18 @@ export async function runContactSheet(file: string, values: CommandOptions) {
     if (around.has('picture') && !report)
       throw new UsageError('--around picture requires --render-report.');
     const length = media?.ticks.length ?? video!.frameCount;
-    const startFrame = integer('from', values.from ?? '0');
-    const endFrame = integer('to', values.to ?? String(length));
+    const startFrame = parseFrameIndex('from', values.from ?? '0');
+    const endFrame = parseFrameIndex('to', values.to ?? String(length));
     if (startFrame >= endFrame || endFrame > length)
       throw new UsageError(
         `Select a range with 0 <= from < to <= ${length} frames.`,
       );
-    const mediaTime = (ticks: number) =>
-      rationalTime(
-        BigInt(ticks) * BigInt(media!.timeBase.numerator),
-        BigInt(media!.timeBase.denominator),
-      );
     const at = (frame: number) =>
       media
-        ? mediaTime(media.ticks[frame]!)
+        ? mp4PresentationTime(media, media.ticks[frame]!)
         : frameTime(frame, timeline!.frameRate);
     const end = media
-      ? mediaTime(media.end)
+      ? mp4PresentationTime(media, media.end)
       : frameTime(length, timeline!.frameRate);
     const pictureRate =
       report?.pictureFrameRate ?? timeline?.frameRate ?? report?.frameRate;
@@ -251,17 +275,6 @@ export async function runContactSheet(file: string, values: CommandOptions) {
         : { numerator: 0, denominator: 1 };
     const localBoundary = (time: RationalTime) =>
       compareTimes(time, offset) < 0 ? undefined : subtractTimes(time, offset);
-    function lowerBound(time: RationalTime, after = false) {
-      let low = 0;
-      let high = length;
-      while (low < high) {
-        const mid = Math.floor((low + high) / 2);
-        const relation = compareTimes(at(mid), time);
-        if (relation < 0 || (after && relation === 0)) low = mid + 1;
-        else high = mid;
-      }
-      return low;
-    }
     const selected = new Map<number, Map<string, Request>>();
     function add(frame: number, request: Request, required = true) {
       if (frame < startFrame || frame >= endFrame) {
@@ -282,7 +295,7 @@ export async function runContactSheet(file: string, values: CommandOptions) {
         throw new UsageError(
           'Requested timestamp is outside the input duration.',
         );
-      add(lowerBound(time, true) - 1, {
+      add(findFrameBoundary(time, length, at, true) - 1, {
         reason: 'timestamp',
         requestedTime: time,
       });
@@ -326,7 +339,7 @@ export async function runContactSheet(file: string, values: CommandOptions) {
         media && kind !== 'picture-boundary' ? projectTime(time) : time;
       const local = localBoundary(boundary);
       if (!local || compareTimes(local, end) > 0) continue;
-      const next = lowerBound(local);
+      const next = findFrameBoundary(local, length, at);
       const adjacentClipIds = visibleTimeline && {
         before: clipIds(visibleTimeline, boundary, true),
         at: clipIds(visibleTimeline, boundary),
@@ -348,7 +361,7 @@ export async function runContactSheet(file: string, values: CommandOptions) {
         );
     }
     if (!targeted) {
-      const count = integer(
+      const count = parseFrameIndex(
         'count',
         values.count ?? String(Math.min(8, endFrame - startFrame)),
       );
@@ -360,7 +373,7 @@ export async function runContactSheet(file: string, values: CommandOptions) {
         add(frame, { reason: 'even', requestedFrame: frame });
     }
     const frames = [...selected.keys()].sort((a, b) => a - b);
-    const columns = integer(
+    const columns = parseFrameIndex(
       'columns',
       values.columns ?? String(Math.min(4, frames.length)),
     );
@@ -438,7 +451,7 @@ export async function runContactSheet(file: string, values: CommandOptions) {
         await link(image, output);
       } catch (error) {
         const expected = await lstat(sidecar);
-        const published = await fileExists(manifestPath);
+        const published = await statIfPresent(manifestPath);
         if (published?.dev === expected.dev && published.ino === expected.ino)
           await unlink(manifestPath);
         throw error;

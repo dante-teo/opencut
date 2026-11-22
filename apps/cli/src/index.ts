@@ -39,6 +39,7 @@ async function run(args: string[]) {
     case 'validate':
     case 'inspect':
     case 'mix analyze':
+    case 'render plan':
     case 'render': {
       const { runVideoCommand } = await import('./video.js');
       return runVideoCommand(command, file, values);
@@ -57,6 +58,11 @@ async function run(args: string[]) {
     case 'preview contact-sheet': {
       const { runContactSheet } = await import('./contact-sheet.js');
       return runContactSheet(file, values);
+    }
+    case 'verify export': {
+      const { runExportVerification } =
+        await import('./export-verification.js');
+      return runExportVerification(file, values);
     }
     case 'probe':
     case 'extract-frame':
@@ -131,6 +137,9 @@ try {
     json
       ? JSON.stringify({
           ok: false,
+          ...(code === 'LAYOUT_ASSERTION_FAILED' &&
+            error instanceof Error &&
+            'layout' in error && { layout: error.layout }),
           error: {
             code: errorCode,
             message,

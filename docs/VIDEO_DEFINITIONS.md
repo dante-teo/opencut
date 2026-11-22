@@ -443,6 +443,76 @@ comparison, use `resize` with `"method": "lanczos"` at the same target
 dimensions. Review several consecutive frames with fine text, faces,
 texture, and motion. UHD dimensions alone do not establish recovered detail.
 
+## Layout assertions
+
+Use `layoutAssertions` to record placement requirements in project pixels.
+Give each assertion a unique `id` and select a clip or subtitle cue by ID
+with `target: { clip: 'id' }`, a visual track with `target: { track: 'id' }`,
+or all burned-in subtitle cues with `target: { subtitles: true }`.
+
+```ts
+layoutAssertions: [
+  {
+    id: 'dialogue-anchor',
+    kind: 'bottom-center',
+    target: { subtitles: true },
+    bottom: 120,
+    tolerance: 2,
+  },
+  {
+    id: 'dialogue-ink',
+    kind: 'glyphs-centered',
+    target: { subtitles: true },
+    tolerance: 6,
+  },
+  {
+    id: 'watermark-anchor',
+    kind: 'upper-left',
+    target: { clip: 'watermark' },
+    top: 28,
+    left: 28,
+    tolerance: 2,
+  },
+  {
+    id: 'portrait-panel',
+    kind: 'centered',
+    target: { clip: 'portrait' },
+    against: 'photo-panel',
+    tolerance: 2,
+  },
+  {
+    id: 'photo-cover',
+    kind: 'covers-canvas',
+    target: { clip: 'hero-shot' },
+  },
+],
+```
+
+`centered` compares horizontal and vertical centers. `inside` checks
+containment, with optional `insets: { top, right, bottom, left }`. Both use
+the canvas by default and accept `against` for a named element.
+`bottom-center` compares the center X and bottom edge to the canvas anchor.
+`upper-left` compares the left and top edges to the requested offsets.
+
+Text placement uses the background panel when present and native font ink
+metrics otherwise. `glyphs-centered` compares shaped glyph bounds in both
+axes against a background panel and excludes stroke, shadow and active-word
+highlight effects. `covers-canvas` checks all four canvas corners against
+the fitted media polygon, including crop, rotation and animated placement.
+Media and graphic checks use the fitted layer's geometry. Transparent
+pixels inside source artwork and face placement need visual review.
+Groups with a matte or foreground blur require visual review and produce a
+structured unsupported-geometry result.
+
+`tolerance` defaults to zero and `required` defaults to true. OpenCut
+checks the active project frame range and returns the worst frame per
+resolved segment. It skips frames where a transition fully hides a layer.
+If authored motion takes a shot off-canvas during a visible part of a fade,
+its coverage check still fails. An assertion targeting missing geometry
+fails. This includes targeting subtitles in a render made with `--no-subtitles`.
+Set `required: false` to collect an advisory result. See the
+[CLI report fields and exit behavior](CLI.md#layout-assertions).
+
 ## Inspect, preview and render
 
 With the checkout fixtures generated, open [the review example](../examples/video/review.video.ts) to try a two-second

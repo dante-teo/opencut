@@ -10,6 +10,11 @@ Use `renderVideo` to compile and render in one call. If `renderCompiledVideo`
 reports that source media changed, recompile before retrying.
 See the repository's [SDK guide](../../../docs/SDK.md) for the public API.
 
+Use `inspectVideoLayout(compiledVideo)` to read required and advisory
+layout checks. Use `planVideoRender(definition, output, options)` with the
+intended render settings to check cache reuse and estimate scratch space.
+See [SDK layout checks and planning](../../../docs/SDK.md#layout-checks-and-render-planning).
+
 For picture reuse, pass the same `pictureCacheDirectory` to `renderVideo`
 or `renderCompiledVideo` on the initial export and revisions. Read
 `pictureRanges` for the status of each range in project frames.

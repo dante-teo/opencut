@@ -21,6 +21,7 @@ import { videoRecipeSchema } from './video-recipe-schema.js';
 import { transitionSchema } from './transitions.js';
 import { checkGraphicScene } from './graphic-scene-schema.js';
 import { graphicAssetSchema } from './video-graphics-contract.js';
+import { layoutAssertionsSchema } from './layout-assertion-schema.js';
 
 const frame = z.int().nonnegative();
 const frameCount = z.int().positive();
@@ -139,6 +140,7 @@ export const videoDefinitionSchema = z.strictObject({
     ]),
   ),
   subtitles: subtitles.optional(),
+  layoutAssertions: layoutAssertionsSchema.optional(),
   transitions: z.array(transitionSchema).optional(),
   visualGroups: snapshotSchema.shape.visualGroups,
   markers: z.array(markerSchema).optional(),

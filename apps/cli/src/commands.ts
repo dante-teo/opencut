@@ -37,6 +37,11 @@ const optionTypes = {
   around: { type: 'string' },
   definition: { type: 'string' },
   'render-report': { type: 'string' },
+  against: { type: 'string' },
+  boundaries: { type: 'string' },
+  'luma-tolerance': { type: 'string' },
+  'boundary-tolerance': { type: 'string' },
+  'audio-master': { type: 'string' },
   'artifact-root': { type: 'string', multiple: true },
   frame: { type: 'string' },
   from: { type: 'string' },
@@ -66,6 +71,16 @@ const mixOptions = [
 ];
 const mixUsage =
   '[--mix-settings <mix.json>] [--mix-comparison <before|after>] [--mix-cache <directory>] [--music-candidate <id>] [--music-loudness <matched|authored>]';
+
+const renderOptions = [
+  'output',
+  'params',
+  'picture-cache',
+  'picture-version',
+  ...mixOptions,
+  ...Object.keys(renderOptionTypes),
+  ...Object.keys(processingOptionTypes),
+];
 
 const commands = {
   'mix analyze': {
@@ -115,15 +130,11 @@ const commands = {
   },
   render: {
     args: `${definition} --output <new.mp4> [--picture-cache <directory> [--picture-version <save|id>]] ${qualityOption} ${mixUsage} ${params}`,
-    options: [
-      'output',
-      'params',
-      'picture-cache',
-      'picture-version',
-      ...mixOptions,
-      ...Object.keys(renderOptionTypes),
-      ...Object.keys(processingOptionTypes),
-    ],
+    options: renderOptions,
+  },
+  'render plan': {
+    args: `${definition} --output <delivery.mp4> [--picture-cache <directory> [--picture-version <save|id>]] ${qualityOption} ${mixUsage} ${params}`,
+    options: renderOptions,
   },
   batch: {
     args: `${definition} --variants <variants.json> --output-dir <directory> [--only <id,id>] [--concurrency <1..8>] [--fail-fast] [--temp-bytes <bytes>] [--memory-bytes <bytes>]`,
@@ -184,6 +195,20 @@ const commands = {
       'columns',
       'params',
       ...previewOptions,
+    ],
+  },
+  'verify export': {
+    args: '<export.mp4> --against <approved-preview.mp4> --output <new-directory> [--frames <n,n>] [--boundaries <n,n>] [--render-report <report.json>] [--audio-master <master.mp4>] [--luma-tolerance <n>] [--boundary-tolerance <n>] [--size <64..640>]',
+    options: [
+      'against',
+      'output',
+      'frames',
+      'boundaries',
+      'render-report',
+      'audio-master',
+      'luma-tolerance',
+      'boundary-tolerance',
+      'size',
     ],
   },
   'subtitles export': {
@@ -288,15 +313,16 @@ export function printHelp(positionals: string[], json: boolean | undefined) {
           '  Use opencut doctor --json to discover graphic scenes, adapters and prerequisites.',
         ]
       : []),
-    ...(['render', 'batch'].includes(scope)
+    ...(['render', 'render plan', 'batch'].includes(scope)
       ? [
           scope === 'batch'
             ? renderOptionHelp.replace(' --overwrite', '')
             : renderOptionHelp,
         ]
       : []),
-    ...(['render', 'batch', 'validate', 'inspect'].includes(scope) ||
-    scope.startsWith('preview')
+    ...(['render', 'render plan', 'batch', 'validate', 'inspect'].includes(
+      scope,
+    ) || scope.startsWith('preview')
       ? [
           scope === 'batch'
             ? processingOptionHelp.replace(' --recipe-workers <count>', '')

@@ -26,6 +26,7 @@ export {
   renderTimelineFrame,
   analyzeTimelineAudioMix,
   validateVideoTimeline,
+  checkRenderEncoders,
   validateSubtitleBurnIn,
   renderCodecs,
   renderResolutions,
@@ -58,6 +59,11 @@ export type { RenderEncoder, RenderEncoderReport } from './render-encoder.js';
 export type { RenderProgress } from './render-progress.js';
 export { renderContactSheet, renderMp4ContactSheet } from './contact-sheet.js';
 export { readMp4FrameIndex } from './media-frame-index.js';
+export type { Mp4FrameIndex } from './media-frame-index.js';
+export {
+  compareAudioPackets,
+  compareExportFrames,
+} from './export-verification.js';
 export { rasterizeTextLayer, validateEmbeddedFont } from './text.js';
 export type { TextRaster } from './text.js';
 export { runRecipeProcess, recipeBackendVersion } from './recipe-process.js';
@@ -87,3 +93,5 @@ export { enhancementBackendId } from './enhance.js';
 export type { AudioMixReport, LoudnessMeasurement } from './audio-mastering.js';
 export type { AudioMixCache } from './professional-mix.js';
 export type { MusicLoudnessReport } from './music-comparison.js';
+export { inspectTimelineRender } from './render.js';
+export type { TimelinePlan } from './render.js';

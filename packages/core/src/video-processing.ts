@@ -15,7 +15,7 @@ import {
   sampleMemoryPressure,
 } from '@opencut/media';
 import type { InterpolationPlan, RecipeProcessLimits } from '@opencut/media';
-import { fingerprintFile, hashJson } from './video-integrity.js';
+import { fingerprintFile, hashJson, missing } from './video-integrity.js';
 import { videoInputIdentity } from './video-input.js';
 import type { IdentifiedMedia } from './video-input.js';
 import {
@@ -23,7 +23,11 @@ import {
   isInterpolationStep,
 } from './video-recipe-schema.js';
 import type { RecipeFormat } from './video-recipe-schema.js';
-import { materializeMediaEntry } from './video-media-cache.js';
+import {
+  findMediaEntry,
+  materializeMediaEntry,
+  mediaCacheMissReason,
+} from './video-media-cache.js';
 import {
   recipeArguments,
   recipeMedia,
@@ -58,6 +62,25 @@ export interface RecipeRecovery {
   record(
     stage: Pick<VideoProcessingProgress, 'assetId' | 'step' | 'key' | 'format'>,
   ): Promise<void>;
+}
+
+export interface RecipeCachePlan {
+  steps: RecipePlanStep[];
+  pendingSources: Map<string, string>;
+}
+
+export interface RecipePlanStep {
+  assetId: string;
+  step: number;
+  format: RecipeFormat;
+  key?: string;
+  status: 'reuse' | 'rebuild';
+  reason:
+    | 'verified-cache-entry'
+    | 'entry-missing'
+    | 'entry-invalid'
+    | 'upstream-step-needs-build';
+  estimatedBytes?: number;
 }
 
 const MiB = 1024 * 1024;
@@ -98,6 +121,7 @@ export async function processVideoRecipes(
   options: VideoProcessingOptions = {},
   signal?: AbortSignal,
   recovery?: RecipeRecovery,
+  plan?: RecipeCachePlan,
 ) {
   const results = new Map<string, IdentifiedMedia>();
   signal?.throwIfAborted();
@@ -129,8 +153,11 @@ export async function processVideoRecipes(
         processingSignal,
       )),
   };
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  const cacheDirectory = await realpath(directory);
+  if (!plan) await mkdir(directory, { recursive: true, mode: 0o700 });
+  const cacheDirectory = await realpath(directory).catch((error: unknown) => {
+    if (plan && missing(error)) return directory;
+    throw error;
+  });
   const jobs = recipes.values();
   await Promise.all(
     Array.from({ length: Math.min(concurrency, recipes.length) }, async () => {
@@ -146,8 +173,9 @@ export async function processVideoRecipes(
             processingSignal,
             options.onProgress,
             recovery,
+            plan,
           );
-          results.set(recipe.inspection.assetId, result);
+          if (result) results.set(recipe.inspection.assetId, result);
         }
       } catch (error) {
         controller.abort(error);
@@ -173,6 +201,7 @@ async function processRecipe(
   signal: AbortSignal,
   onProgress?: VideoProcessingOptions['onProgress'],
   recovery?: RecipeRecovery,
+  plan?: RecipeCachePlan,
 ) {
   let current = input;
   // A partial final packet affects ffprobe's average, but not the cadence of
@@ -216,25 +245,57 @@ async function processRecipe(
           : []),
         ...(enhancement ? await backends.enhancement() : []),
       ]);
+      const fields = { assetId, step: index, key, format: step.format };
+      if (plan) {
+        const cached = await findMediaEntry(
+          directory,
+          key,
+          step.format,
+          signal,
+        );
+        if (!cached) {
+          plan.steps.push({
+            ...fields,
+            status: 'rebuild',
+            reason: await mediaCacheMissReason(directory, key),
+            estimatedBytes: estimateRecipeBytes(step.media),
+          });
+          for (const [offset, downstream] of steps.slice(index + 1).entries())
+            plan.steps.push({
+              assetId,
+              step: index + offset + 1,
+              format: downstream.format,
+              status: 'rebuild',
+              reason: 'upstream-step-needs-build',
+              estimatedBytes: estimateRecipeBytes(downstream.media),
+            });
+          return;
+        }
+        plan.steps.push({
+          ...fields,
+          status: 'reuse',
+          reason: 'verified-cache-entry',
+        });
+        const published = join(directory, key, `media.${step.format}`);
+        if (cached.entry.metadata.path !== published)
+          plan.pendingSources.set(cached.entry.metadata.path, assetId);
+        current = cached.entry;
+        dependency = `${key}:${cached.entry.sha256}`;
+        if (step.interpolation || declaredCadence !== null)
+          declaredCadence = step.media.frameRate;
+        continue;
+      }
       const report = (
         status: VideoProcessingProgress['status'],
         seconds?: number,
       ) => {
         onProgress?.({
-          assetId,
-          step: index,
-          key,
-          format: step.format,
+          ...fields,
           status,
           ...(seconds !== undefined && { seconds }),
         });
       };
-      await recovery?.record({
-        assetId,
-        step: index,
-        key,
-        format: step.format,
-      });
+      await recovery?.record(fields);
       const { entry, reused } = await materializeMediaEntry(
         directory,
         key,
@@ -319,6 +380,19 @@ async function processRecipe(
   }
   assertCurrent(input);
   return current;
+}
+
+function estimateRecipeBytes(media: RecipeMedia) {
+  const frames = Math.max(
+    1,
+    Math.ceil((media.durationSeconds ?? 0) * (media.frameRate ?? 1)),
+  );
+  return Math.ceil(
+    frames * (media.width ?? 0) * (media.height ?? 0) * 1.5 +
+      (media.hasAudio
+        ? (media.audioDurationSeconds ?? media.durationSeconds ?? 0) * 192000
+        : 0),
+  );
 }
 
 function pixels({ width, height }: RecipeMedia) {

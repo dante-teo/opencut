@@ -24,7 +24,7 @@ type MediaEntry = IdentifiedMedia & { sha256: string };
 const stageDirectory = (directory: string, key: string) =>
   join(directory, `.${key}.stage`);
 
-export const mediaCacheReceipt = z.strictObject({
+const mediaCacheReceipt = z.strictObject({
   version: z.literal(1),
   key: z.string(),
   bytes: z.int().positive(),
@@ -145,13 +145,19 @@ export async function findMediaEntry(
   return published();
 }
 
+export async function mediaCacheMissReason(directory: string, key: string) {
+  return (await statIfPresent(join(directory, key)))
+    ? ('entry-invalid' as const)
+    : ('entry-missing' as const);
+}
+
 async function statIfPresent(path: string) {
   return lstat(path).catch((error: unknown) => {
     if (!missing(error)) throw error;
   });
 }
 
-async function readMediaEntry(
+export async function readMediaEntry(
   target: string,
   key: string,
   format: string,
@@ -162,16 +168,18 @@ async function readMediaEntry(
   try {
     if (
       !(await lstat(target)).isDirectory() ||
-      !(await lstat(manifest)).isFile() ||
-      !(await lstat(path)).isFile()
+      !(await lstat(manifest)).isFile()
     )
       return;
+    const info = await lstat(path);
+    if (!info.isFile()) return;
     const parsed = mediaCacheReceipt.safeParse(
       JSON.parse(await readFile(manifest, 'utf8')),
     );
     if (
       !parsed.success ||
       parsed.data.key !== key ||
+      parsed.data.bytes !== info.size ||
       hashJson(parsed.data.metadata) !== parsed.data.metadataSha256
     )
       return;

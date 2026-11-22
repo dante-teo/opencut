@@ -7,7 +7,7 @@ import {
   drawMediaLayer,
   gradePixels,
   transformTextLayer,
-  transitionOpacity,
+  transitionLayerGeometry,
   transitionProgress,
   visualGeometry,
 } from '@opencut/shared';
@@ -216,13 +216,14 @@ function transitionTransform(
   const style = ramp.style;
   if (!style) return;
   const incoming = ramp.direction === 'in';
-  if (style.kind === 'push' || (style.kind === 'slide' && incoming)) {
-    const position = incoming ? progress - 1 : progress;
-    const [x, y] = transitionVector(style.direction, width, height);
-    ctx.translate(x * position, y * position);
-  }
-  if (style.kind === 'zoom') {
-    const scale = 1 + style.amount * (incoming ? 1 - progress : progress);
+  const { x, y, scale } = transitionLayerGeometry(
+    progress,
+    ramp,
+    width,
+    height,
+  );
+  if (x || y) ctx.translate(x, y);
+  if (scale !== 1) {
     ctx.translate(width / 2, height / 2);
     ctx.scale(scale, scale);
     ctx.translate(-width / 2, -height / 2);
@@ -230,23 +231,6 @@ function transitionTransform(
   if (style.kind === 'blur') {
     const radius = style.radius * (incoming ? 1 - progress : progress);
     if (radius > 0) ctx.filter = `blur(${radius}px)`;
-  }
-}
-
-function transitionVector(
-  direction: 'left' | 'right' | 'up' | 'down',
-  width: number,
-  height: number,
-) {
-  switch (direction) {
-    case 'left':
-      return [-width, 0] as const;
-    case 'right':
-      return [width, 0] as const;
-    case 'up':
-      return [0, -height] as const;
-    case 'down':
-      return [0, height] as const;
   }
 }
 
@@ -264,38 +248,19 @@ function finishTransition(
   )
     return;
   const progress = transitionProgress(frame, ramp);
-  let alpha = transitionOpacity(frame, ramp);
-  let region: [number, number, number, number] = [0, 0, width, height];
-  if (style?.kind === 'dip-to-color') alpha = Math.max(0, 2 * alpha - 1);
-  if (style?.kind === 'wipe' || style?.kind === 'slide') {
-    const [x] = transitionVector(style.direction, width, height);
-    const extent = Math.round((x ? width : height) * progress);
-    const incoming = ramp.direction === 'in';
-    const first = style.direction === 'right' || style.direction === 'down';
-    const boundary = first ? extent : (x ? width : height) - extent;
-    const takeFirst = first === incoming;
-    region = x
-      ? [
-          takeFirst ? 0 : boundary,
-          0,
-          takeFirst ? boundary : width - boundary,
-          height,
-        ]
-      : [
-          0,
-          takeFirst ? 0 : boundary,
-          width,
-          takeFirst ? boundary : height - boundary,
-        ];
-    alpha = region[2] && region[3] ? 1 : 0;
-  }
+  const { alpha, clip } = transitionLayerGeometry(
+    progress,
+    ramp,
+    width,
+    height,
+  );
   ctx.save();
   if (alpha === 0) ctx.clearRect(0, 0, width, height);
   else {
-    if (region[0]) ctx.clearRect(0, 0, region[0], height);
-    if (region[1]) ctx.clearRect(0, 0, width, region[1]);
-    ctx.clearRect(region[0] + region[2], 0, width, height);
-    ctx.clearRect(0, region[1] + region[3], width, height);
+    if (clip.left) ctx.clearRect(0, 0, clip.left, height);
+    if (clip.top) ctx.clearRect(0, 0, width, clip.top);
+    ctx.clearRect(clip.right, 0, width, height);
+    ctx.clearRect(0, clip.bottom, width, height);
     if (alpha !== 1) {
       ctx.globalCompositeOperation = 'destination-in';
       ctx.fillStyle = '#fff';

@@ -2,14 +2,16 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
   copyFile,
+  link,
   mkdir,
   mkdtemp,
   readFile,
   readdir,
   rm,
+  symlink,
   writeFile,
 } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join, relative } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { fixtureDirectory } from '../fixture-paths.js';
@@ -25,7 +27,8 @@ await mkdir(fixtureDirectory, { recursive: true });
 const cli = fileURLToPath(
   new URL('../../apps/cli/dist/index.js', import.meta.url),
 );
-const run = (...args: string[]) =>
+const run = (...args: string[]) => runCli(args);
+const runCli = (args: string[], environment: NodeJS.ProcessEnv = {}) =>
   spawnSync(process.execPath, [cli, ...args, '--json'], {
     encoding: 'utf8',
     timeout: 90_000,
@@ -40,6 +43,7 @@ const run = (...args: string[]) =>
         ),
         'test-cache',
       ),
+      ...environment,
     },
   });
 function json(...args: string[]) {
@@ -132,6 +136,553 @@ function worst(a: Buffer, b: Buffer) {
   return max;
 }
 
+test('layout assertions check subtitle ink and panel placement and stop a failing render', async (t) => {
+  const directory = await mkdtemp(join(fixtureDirectory, 'layout-assertions-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  patches(directory, 24, 12);
+  const definition = join(directory, 'layout.video.ts');
+  const output = join(directory, 'layout.mp4');
+  const write = (x: number, rotation = 0) =>
+    writeFile(
+      definition,
+      'export default ' +
+        JSON.stringify({
+          canvas: {
+            width: 192,
+            height: 256,
+            frameRate: 24,
+            durationFrames: 12,
+          },
+          assets: { shot: { path: 'patches.mov', kind: 'video' } },
+          tracks: [
+            {
+              type: 'video',
+              clips: [
+                {
+                  id: 'shot-clip',
+                  asset: 'shot',
+                  at: 0,
+                  sourceOut: 12,
+                  visual: { fit: 'cover', rotation },
+                },
+              ],
+            },
+            {
+              id: 'panels',
+              type: 'text',
+              clips: [
+                {
+                  id: 'panel',
+                  at: 0,
+                  duration: 12,
+                  text: {
+                    content: 'Hello',
+                    fontSize: 18,
+                    wrapWidth: 110,
+                    alignment: 'left',
+                    background: { color: '#333333', padding: 4 },
+                  },
+                },
+              ],
+            },
+          ],
+          transitions: [
+            { id: 'fade-in', kind: 'fade-in', clipId: 'shot-clip', frames: 3 },
+          ],
+          subtitles: {
+            style: {
+              x,
+              y: 96,
+              fontSize: 24,
+              stroke: null,
+              background: { color: '#000000', padding: 4 },
+            },
+            cues: [
+              {
+                id: 'dialogue',
+                text: '你好',
+                start: { numerator: 0, denominator: 1 },
+                end: { numerator: 1, denominator: 2 },
+              },
+            ],
+          },
+          layoutAssertions: [
+            {
+              id: 'dialogue-anchor',
+              kind: 'bottom-center',
+              target: { subtitles: true },
+              bottom: 32,
+              tolerance: 0,
+            },
+            {
+              id: 'caption-ink',
+              kind: 'glyphs-centered',
+              target: { subtitles: true },
+              tolerance: 7,
+            },
+            {
+              id: 'panel-ink',
+              kind: 'glyphs-centered',
+              target: { track: 'panels' },
+              tolerance: 3,
+              required: false,
+            },
+            {
+              id: 'full-shot',
+              kind: 'covers-canvas',
+              target: { clip: 'shot-clip' },
+            },
+          ],
+        }),
+    );
+  await write(0);
+  const { layout } = json('validate', definition).data;
+  assert.equal(layout.ok, true);
+  const [anchor, ink, panel, shot] = layout.checks;
+  assert.deepEqual(
+    [anchor.objectId, anchor.framesChecked, anchor.deviationPixels],
+    ['dialogue', 12, 0],
+  );
+  assert.ok(ink.referenceBounds.right > ink.actualBounds.right);
+  assert.equal(panel.passed, false);
+  assert.ok(panel.deviationPixels > 20);
+  assert.equal(shot.passed, true);
+  assert.equal(shot.framesChecked, 11);
+  await write(-20, 12);
+  const validate = run('validate', definition);
+  assert.equal(validate.status, 1, validate.stderr);
+  const failed = JSON.parse(validate.stdout).layout.checks;
+  assert.equal(failed[0].deviationPixels, 20);
+  assert.equal(failed[3].passed, false, 'rotated corners do not cover canvas');
+  const render = run('render', definition, '--output', output);
+  assert.equal(render.status, 1);
+  assert.equal(JSON.parse(render.stderr).error.code, 'LAYOUT_ASSERTION_FAILED');
+  await assert.rejects(readFile(output), { code: 'ENOENT' });
+});
+
+test('coverage assertions report an animated shot off-canvas during a fade', async (t) => {
+  const directory = await mkdtemp(join(fixtureDirectory, 'fade-coverage-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  patches(directory, 24, 3);
+  const definition = join(directory, 'coverage.video.ts');
+  await writeFile(
+    definition,
+    'export default ' +
+      JSON.stringify({
+        canvas: { width: 192, height: 256, frameRate: 24, durationFrames: 3 },
+        assets: { source: { path: 'patches.mov', kind: 'video' } },
+        tracks: [
+          {
+            type: 'video',
+            clips: [
+              {
+                id: 'shot',
+                asset: 'source',
+                at: 0,
+                sourceOut: 3,
+                visual: { fit: 'cover' },
+                keyframes: {
+                  x: [
+                    {
+                      time: { numerator: 0, denominator: 1 },
+                      value: 500,
+                      easing: 'linear',
+                    },
+                    {
+                      time: { numerator: 1, denominator: 12 },
+                      value: 0,
+                      easing: 'linear',
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+        transitions: [
+          { id: 'fade-in', kind: 'fade-in', clipId: 'shot', frames: 3 },
+        ],
+        layoutAssertions: [
+          { id: 'coverage', kind: 'covers-canvas', target: { clip: 'shot' } },
+        ],
+      }),
+  );
+  const result = run('validate', definition);
+  assert.equal(result.status, 1, result.stderr);
+  const { checks } = JSON.parse(result.stdout).layout;
+  assert.equal(checks[0].passed, false);
+  assert.equal(checks[0].frame, 1);
+  assert.equal(checks[0].framesChecked, 2);
+});
+
+test('render plan leaves cold caches untouched and predicts exact warm recipe and picture reuse', async (t) => {
+  const directory = await mkdtemp(join(fixtureDirectory, 'render-plan-qa-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  patches(directory, 24, 12);
+  const definition = join(directory, 'cache.video.ts');
+  const output = join(directory, 'planned.mp4');
+  await writeFile(
+    definition,
+    'export default ' +
+      JSON.stringify({
+        canvas: { width: 192, height: 256, frameRate: 24, durationFrames: 18 },
+        assets: {
+          derived: {
+            path: 'patches.mov',
+            kind: 'video',
+            recipe: [
+              { type: 'crop', x: 0, y: 0, width: 128, height: 192 },
+              { type: 'resize', width: 96, height: 128 },
+            ],
+          },
+          original: { path: 'patches.mov', kind: 'video' },
+        },
+        tracks: [
+          {
+            type: 'video',
+            clips: [
+              { id: 'direct', asset: 'original', at: 0, sourceOut: 6 },
+              { id: 'derived-clip', asset: 'derived', at: 6, sourceOut: 6 },
+              { id: 'repeat', asset: 'original', at: 12, sourceOut: 6 },
+            ],
+          },
+        ],
+      }),
+  );
+  const args = [
+    definition,
+    '--output',
+    output,
+    '--recipe-cache',
+    join(directory, 'recipes'),
+    '--picture-cache',
+    join(directory, 'picture'),
+  ];
+  const before = await readdir(directory);
+  const cold = json('render', 'plan', ...args).data;
+  assert.deepEqual(await readdir(directory), before);
+  assert.deepEqual(
+    cold.recipes.map(({ reason }: { reason: string }) => reason),
+    ['entry-missing', 'upstream-step-needs-build'],
+  );
+  assert.deepEqual(
+    cold.pictureRanges.map(({ reason }: { reason: string }) => reason),
+    [
+      'entry-missing',
+      'recipe-artifact-needed-for-key',
+      'scheduled-earlier-range',
+    ],
+  );
+  assert.ok(cold.storage.peakScratchBytes > 0);
+  assert.ok(cold.storage.filesystems[0].freeBytes > 0);
+  const rendered = json('render', ...args, '--picture-version', 'save').data;
+  const warm = json('render', 'plan', ...args, '--overwrite').data;
+  assert.ok(
+    warm.recipes.every(({ status }: { status: string }) => status === 'reuse'),
+  );
+  assert.ok(
+    warm.pictureRanges.every(
+      ({ status }: { status: string }) => status === 'reuse',
+    ),
+  );
+  assert.equal(warm.pictureRanges[0].key, cold.pictureRanges[0].key);
+  assert.ok(warm.storage.peakScratchBytes < cold.storage.peakScratchBytes);
+  const saved = json(
+    'render',
+    'plan',
+    ...args,
+    '--overwrite',
+    '--picture-version',
+    rendered.pictureVersion.id,
+  ).data;
+  assert.equal(saved.savedPicture.status, 'reuse');
+});
+
+test('render plan rejects overwriting an original used exclusively by a recipe', async (t) => {
+  const directory = await mkdtemp(
+    join(fixtureDirectory, 'plan-protect-input-'),
+  );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const original = join(directory, 'original.mp4');
+  const alias = join(directory, 'alias.mp4');
+  ffmpeg(['-i', patches(directory, 24, 6), '-c', 'copy', original]);
+  await link(original, alias);
+  const before = await readFile(original);
+  const definition = join(directory, 'protected.video.ts');
+  await writeFile(
+    definition,
+    'export default ' +
+      JSON.stringify({
+        canvas: { width: 192, height: 256, frameRate: 24, durationFrames: 6 },
+        assets: {
+          derived: {
+            path: 'original.mp4',
+            kind: 'video',
+            recipe: [{ type: 'resize', width: 96, height: 128 }],
+          },
+        },
+        tracks: [
+          { type: 'video', clips: [{ asset: 'derived', at: 0, sourceOut: 6 }] },
+        ],
+      }),
+  );
+  const cache = join(directory, 'recipes');
+  const args = [definition, '--recipe-cache', cache];
+  const rejected = (output: string) => {
+    const result = run(
+      'render',
+      'plan',
+      ...args,
+      '--output',
+      output,
+      '--overwrite',
+    );
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(
+      JSON.parse(result.stderr).error.message,
+      /must not replace input .*original\.mp4/,
+    );
+  };
+  rejected(original);
+  assert.ok(!(await readdir(directory)).includes('recipes'));
+  json('render', ...args, '--output', join(directory, 'delivery.mp4'));
+  rejected(alias);
+  assert.deepEqual(await readFile(original), before);
+});
+
+test('render plan checks the FFmpeg encoders used by the planned picture and audio', async (t) => {
+  const directory = await mkdtemp(join(fixtureDirectory, 'plan-encoders-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const bin = join(directory, 'bin');
+  await mkdir(bin);
+  const realFfmpeg = command('which', ['ffmpeg']).toString().trim();
+  await writeFile(
+    join(bin, 'ffmpeg'),
+    `#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = "-encoders" ]; then
+    "$OPENCUT_TEST_REAL_FFMPEG" "$@" | awk '$2 != ENVIRON["OPENCUT_TEST_MISSING_ENCODER"]'
+    exit
+  fi
+done
+exec "$OPENCUT_TEST_REAL_FFMPEG" "$@"
+`,
+    { mode: 0o755 },
+  );
+  const definition = join(directory, 'encoders.video.ts');
+  const write = (rotation: number) =>
+    writeFile(
+      definition,
+      'export default ' +
+        JSON.stringify({
+          canvas: { width: 96, height: 128, frameRate: 24, durationFrames: 3 },
+          tracks: [
+            {
+              type: 'text',
+              clips: [
+                {
+                  at: 0,
+                  duration: 3,
+                  visual: { rotation },
+                  text: { content: 'OpenCut' },
+                },
+              ],
+            },
+          ],
+        }),
+    );
+  const plan = (encoder: string, ...extra: string[]) =>
+    runCli(
+      [
+        'render',
+        'plan',
+        definition,
+        '--output',
+        join(directory, 'delivery.mp4'),
+        ...extra,
+      ],
+      {
+        PATH: [bin, process.env.PATH].join(delimiter),
+        OPENCUT_TEST_REAL_FFMPEG: realFfmpeg,
+        OPENCUT_TEST_MISSING_ENCODER: encoder,
+      },
+    );
+  const missing = (encoder: string, ...extra: string[]) => {
+    const result = plan(encoder, ...extra);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(
+      JSON.parse(result.stderr).error.message,
+      `Required encoder '${encoder}' is unavailable in this FFmpeg installation.`,
+    );
+  };
+  await write(0);
+  missing('libx264');
+  missing('aac');
+  const direct = plan('ffv1');
+  assert.equal(direct.status, 0, direct.stderr);
+  const cacheArgs = ['--picture-cache', join(directory, 'pictures')];
+  missing('ffv1', ...cacheArgs);
+  json(
+    'render',
+    definition,
+    '--output',
+    join(directory, 'warm.mp4'),
+    ...cacheArgs,
+  );
+  const warm = plan('ffv1', ...cacheArgs);
+  assert.equal(warm.status, 0, warm.stderr);
+  assert.equal(JSON.parse(warm.stdout).pictureRanges[0].status, 'reuse');
+  await write(12);
+  missing('ffv1');
+});
+
+test('export verification publishes paired samples, checks boundary luma and compares packet payloads', async (t) => {
+  const directory = await mkdtemp(
+    join(fixtureDirectory, 'export-verification-'),
+  );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const preview = join(directory, 'approved.mp4');
+  const delivery = join(directory, 'delivery.mp4');
+  const broken = join(directory, 'broken.mp4');
+  ffmpeg([
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=gray:s=96x128:r=24:d=0.5',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=440:duration=0.5',
+    '-c:v',
+    'libx264',
+    '-c:a',
+    'aac',
+    preview,
+  ]);
+  ffmpeg([
+    '-i',
+    preview,
+    '-map',
+    '0',
+    '-c',
+    'copy',
+    '-metadata',
+    'title=Delivery',
+    delivery,
+  ]);
+  const passedPath = join(directory, 'passed');
+  const passed = json(
+    'verify',
+    'export',
+    delivery,
+    '--against',
+    preview,
+    '--audio-master',
+    preview,
+    '--output',
+    passedPath,
+    '--frames',
+    '0,11',
+    '--boundaries',
+    '6',
+  ).data;
+  assert.equal(passed.ok, true);
+  assert.deepEqual(
+    passed.samples.map(({ frame }: { frame: number }) => frame),
+    [0, 5, 6, 11],
+  );
+  assert.equal(passed.audio.tracks[0].firstMismatch, null);
+  assert.ok(
+    (await readFile(join(passedPath, passed.samples[0].image))).length > 0,
+  );
+  assert.equal(JSON.parse(await readFile(passed.path, 'utf8')).ok, true);
+
+  ffmpeg([
+    '-i',
+    preview,
+    '-vf',
+    "drawbox=c=white:t=fill:enable='gte(n,6)'",
+    '-af',
+    'volume=0.5',
+    '-c:v',
+    'libx264',
+    '-c:a',
+    'aac',
+    broken,
+  ]);
+  const failed = run(
+    'verify',
+    'export',
+    broken,
+    '--against',
+    preview,
+    '--audio-master',
+    preview,
+    '--output',
+    join(directory, 'failed'),
+    '--frames',
+    '0',
+    '--boundaries',
+    '6',
+  );
+  assert.equal(failed.status, 1, failed.stderr);
+  const report = JSON.parse(failed.stdout);
+  assert.equal(report.boundaries[0].passed, false);
+  assert.ok(report.boundaries[0].maxRegionLumaChangeError > 80);
+  assert.equal(report.audio.passed, false);
+  assert.equal(JSON.parse(await readFile(report.path, 'utf8')).ok, false);
+
+  await t.test(
+    'rejects a video delay with unchanged pictures and audio packets',
+    async () => {
+      const delayed = join(directory, 'delayed.mp4');
+      ffmpeg([
+        '-itsoffset',
+        '0.5',
+        '-i',
+        preview,
+        '-i',
+        preview,
+        '-map',
+        '0:v:0',
+        '-map',
+        '1:a:0',
+        '-c',
+        'copy',
+        delayed,
+      ]);
+      const result = run(
+        'verify',
+        'export',
+        delayed,
+        '--against',
+        preview,
+        '--audio-master',
+        preview,
+        '--output',
+        join(directory, 'delayed-report'),
+        '--frames',
+        '0,11',
+      );
+      assert.equal(result.status, 1, result.stderr);
+      const delayedReport = JSON.parse(result.stdout);
+      assert.equal(delayedReport.timing.firstTimingMismatch, 0);
+      assert.equal(delayedReport.timing.passed, false);
+      assert.equal(
+        delayedReport.timing.exportStartSeconds -
+          delayedReport.timing.previewStartSeconds,
+        0.5,
+      );
+      assert.ok(
+        delayedReport.samples.every(
+          ({ passed }: { passed: boolean }) => passed,
+        ),
+      );
+      assert.equal(delayedReport.audio.passed, true);
+    },
+  );
+});
+
 test('limited BT.709 picture stays continuous across cache and bounded picture seams', async (t) => {
   const directory = await mkdtemp(join(fixtureDirectory, 'cli-weak-seams-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -206,6 +757,26 @@ test('limited BT.709 picture stays continuous across cache and bounded picture s
   await write(34);
   const bounded = render('bounded');
   assert.ok(bounded.data.pictureRanges.length > 1);
+  const reportPath = join(directory, 'bounded.render.json');
+  await writeFile(reportPath, JSON.stringify(bounded.data));
+  const verification = json(
+    'verify',
+    'export',
+    bounded.data.path,
+    '--against',
+    baseRender.data.path,
+    '--render-report',
+    reportPath,
+    '--output',
+    join(directory, 'verification'),
+  ).data;
+  for (const { startFrame } of bounded.data.pictureRanges.slice(1))
+    assert.ok(
+      verification.boundaries.some(
+        ({ frame, reasons }: { frame: number; reasons: string[] }) =>
+          frame === startFrame && reasons.includes('picture-range'),
+      ),
+    );
   const frames = [
     ...new Set([
       3,
@@ -857,12 +1428,69 @@ test('dependency inspection reads nested graphic resources and known artifacts w
   assert.equal(get('missing.tsx').status, 'missing');
   assert.deepEqual(get('unknown.mp4').roles, ['unclassified']);
   assert.deepEqual(get('export.mp4').roles, ['export']);
+  assert.equal(get('unknown.mp4').classification, 'unclassified');
+  assert.equal(get('export.mp4').classification, 'delivery');
+  assert.ok(result.byteTotals.regenerableCache > 0);
+  assert.equal(result.byteTotals.deliveries, (await readFile(output)).length);
   assert.ok(
     result.files.some(({ roles }: { roles: string[] }) =>
       roles.includes('cache-media'),
     ),
   );
   assert.deepEqual(await tree(), before);
+
+  await t.test(
+    'rejects same-size replacements and symlinks as cache artifacts',
+    async () => {
+      const recipe = rendered.progress.find(
+        ({ stage, status }) => stage === 'recipe' && status === 'completed',
+      );
+      const media = join(cache, recipe.key, 'media.' + recipe.format);
+      const original = await readFile(media);
+      const replacement = Buffer.from(original);
+      replacement[0] = replacement[0]! ^ 1;
+      const sibling = join(dirname(media), 'media.mp4');
+      assert.notEqual(sibling, media);
+      await writeFile(sibling, replacement);
+      const inspect = (...options: string[]) =>
+        json(
+          'inspect',
+          'dependencies',
+          definition,
+          '--recipe-cache',
+          cache,
+          ...options,
+        ).data.files;
+      const classify = (
+        files: { relativePath: string; classification: string }[],
+        path: string,
+      ) =>
+        files.find(
+          ({ relativePath }) => relativePath === relative(directory, path),
+        )?.classification;
+      const scanned = inspect('--artifact-root', cache);
+      assert.equal(classify(scanned, media), 'regenerable-cache');
+      assert.equal(classify(scanned, sibling), 'unclassified');
+
+      await writeFile(media, replacement);
+      assert.equal(classify(inspect(), media), 'unclassified');
+      assert.equal(
+        classify(inspect('--artifact-root', cache), media),
+        'unclassified',
+      );
+
+      const unrelated = join(directory, 'unrelated.mov');
+      await writeFile(unrelated, original);
+      await rm(media);
+      await symlink(unrelated, media);
+      const alias = inspect().find(
+        ({ resolvedPath }: { resolvedPath: string }) =>
+          resolvedPath === unrelated,
+      );
+      assert.equal(alias.classification, 'unclassified');
+      assert.equal(alias.regenerable, false);
+    },
+  );
 
   const unresolved = join(directory, 'unresolved.video.ts');
   await writeFile(

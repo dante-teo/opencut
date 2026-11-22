@@ -16,10 +16,23 @@ Each command uses the saved definition. Use new output paths for revisions.
 
 ```sh
 opencut preview contact-sheet edit.video.ts --from 0 --to 48 --count 4 --output revised.png
+opencut preview clip edit.video.ts --from 0 --to 48 --quality quality --output approved.mp4
+```
+
+Play `approved.mp4` before rendering the final.
+
+```sh
+opencut render plan edit.video.ts --output final.mp4 --picture-cache ./render-cache --json
 opencut render edit.video.ts --output final.mp4 --picture-cache ./render-cache --json > final.render.json
+opencut verify export final.mp4 --against approved.mp4 --render-report final.render.json --output verification
 opencut preview contact-sheet final.mp4 --render-report final.render.json --around captions,picture --output final-qa.png
 opencut probe final.mp4 --json
 ```
+
+Review the paired images and `verification/report.json` after export.
+Use `--audio-master` with an approved master when a picture-only revision
+must preserve the encoded audio packets. Keep the comparison preview on the
+delivery frame grid.
 
 Review `final-qa.png` with its `final-qa.png.json` manifest. The render report
 ties the requested boundary samples to the bytes of `final.mp4`. Add

@@ -48,6 +48,7 @@ export type VideoCompileOptions = Pick<
 type InputOptions = CompilationOptions &
   VideoCompileOptions & {
     checkpoint?: boolean;
+    authoredPaths?: Set<string> | undefined;
     scriptWorker?: { maxOldGenerationSizeMb?: number };
     batch?: NonNullable<VideoBuild['batch']>;
     resolveMusicSelection?: (
@@ -91,6 +92,13 @@ export async function compileVideoInput(
   options: InputOptions,
 ): Promise<CompiledVideo> {
   const input = await readBuildInput(file, options);
+  if (options.authoredPaths) {
+    for (const { path } of input.sources.values())
+      options.authoredPaths.add(path);
+    for (const font of Object.values(input.definition.fonts ?? {}))
+      if ('path' in font)
+        options.authoredPaths.add(resolve(dirname(input.path), font.path));
+  }
   if (options.resolveMusicSelection)
     options = {
       ...options,

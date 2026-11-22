@@ -31,7 +31,9 @@ Run `opencut --help` to discover commands and `opencut render --help` for export
    fades, and transitions to the definition itself.
 3. Run `opencut validate DEFINITION --json` and
    `opencut inspect DEFINITION --json`. Inspect exact frames with
-   `opencut timeline inspect DEFINITION --frame N --json`.
+   `opencut timeline inspect DEFINITION --frame N --json`. Declare
+   [layout assertions](references/video-definitions.md#layout-assertions) for
+   essential caption, panel, watermark and coverage geometry.
 4. Review the composition with `opencut preview DEFINITION --watch`, the
    desktop **Open definition** action, or a deterministic frame, clip, or
    contact sheet from `opencut preview --help`. Use exact samples on the
@@ -45,6 +47,8 @@ Run `opencut --help` to discover commands and `opencut render --help` for export
    to pause on the first frame at or after its start. A selection made during
    loading takes effect when the preview is ready.
 5. Deliver a new MP4 with `opencut render DEFINITION --output final.mp4`.
+   Run `opencut render plan DEFINITION --output final.mp4 --json` with the
+   same options to check cache reuse and estimated scratch space first.
    The CLI defaults to `quality` and runs directly. Use `--quality maximum`
    for slower MP4 encoding with the same AI algorithms as `quality`.
    Export an SRT or VTT
@@ -58,8 +62,10 @@ Run `opencut --help` to discover commands and `opencut render --help` for export
    unfinished encoding. For transfer, run `opencut package DEFINITION --output bundle`
    and `opencut package verify bundle`. Render `bundle/opencut.bundle.video.ts`
    with the required backends.
-8. Probe the final MP4 and decode samples around cuts, caption changes and
-   interpolated frames. Play the output with audio to check timing. Record
+8. Use `opencut verify export` with the approved MP4 preview, the render
+   JSON and, for picture-only revisions, the approved audio master.
+   Review the paired images and boundary checks. Play the output with
+   audio to check timing. Record
    the definition, input hashes, effective profile, worker versions, recipe
    results and verification.
 

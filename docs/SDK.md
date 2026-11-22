@@ -162,6 +162,21 @@ Pass a signal to `compileVideo` or `renderVideo` to cancel preprocessing.
 `maxBufferedFrames`, `maxPixels`, and `timeoutMs`. See the
 [processing limits](CLI.md#media-recipes) for defaults and scope.
 
+## Layout checks and render planning
+
+`inspectVideoLayout(video, { burnSubtitles, signal })` checks a compiled
+video's declared layout assertions. It returns `ok` and the individual
+`checks`, including advisory failures. Set `burnSubtitles: false` to
+check the layout that would be rendered with subtitles disabled.
+`renderVideo` and `renderCompiledVideo` enforce required assertions
+before encoding.
+
+`planVideoRender(definition, output, options)` accepts the intended
+render settings and returns the recipe and picture cache decisions,
+scratch-space estimates and available bytes without writing the render
+or cache. A blocked saved picture version returns `ok: false`. See the
+[CLI render plan](CLI.md#read-only-render-plan) for the report fields.
+
 ## Recovery and portable projects
 
 ```ts

@@ -123,6 +123,13 @@ function layoutLines(ctx: SKRSContext2D, content: string, wrap?: number) {
   return lines;
 }
 
+interface InkBox {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
 export interface TextRaster {
   x: number;
   y: number;
@@ -130,6 +137,9 @@ export interface TextRaster {
   height: number;
   png: Buffer | null;
   warning: string | null;
+  /** Native font ink extents in text-local pixels, before stroke and shadow. */
+  ink?: readonly InkBox[];
+  panel?: InkBox;
 }
 
 const rasters = new LRUCache<string, TextRaster>({
@@ -242,6 +252,7 @@ export async function rasterizeTextLayer(
   let right = blockWidth / 2 + padding;
   let top = -blockHeight / 2 - padding;
   let bottom = blockHeight / 2 + padding;
+  const ink: InkBox[] = [];
   const positions = measured.map((line, i) => {
     const x = (blockWidth - line.width) * align - blockWidth / 2;
     const y = baseline + i * lineHeight;
@@ -249,6 +260,16 @@ export async function rasterizeTextLayer(
     right = Math.max(right, x + line.actualBoundingBoxRight);
     top = Math.min(top, y - line.actualBoundingBoxAscent);
     bottom = Math.max(bottom, y + line.actualBoundingBoxDescent);
+    if (
+      line.actualBoundingBoxLeft + line.actualBoundingBoxRight > 0 &&
+      line.actualBoundingBoxAscent + line.actualBoundingBoxDescent > 0
+    )
+      ink.push({
+        left: x - line.actualBoundingBoxLeft,
+        right: x + line.actualBoundingBoxRight,
+        top: y - line.actualBoundingBoxAscent,
+        bottom: y + line.actualBoundingBoxDescent,
+      });
     return { x, y };
   });
   const radians = ((text.rotation ?? 0) * Math.PI) / 180;
@@ -416,6 +437,17 @@ export async function rasterizeTextLayer(
     height: canvas.height,
     png,
     warning,
+    ink,
+    ...(text.background &&
+      text.background.color.toLowerCase() !== 'transparent' &&
+      !/^#[\da-f]{6}00$/i.test(text.background.color) && {
+        panel: {
+          left: -blockWidth / 2 - padding,
+          right: blockWidth / 2 + padding,
+          top: -blockHeight / 2 - padding,
+          bottom: blockHeight / 2 + padding,
+        },
+      }),
   };
   rasters.set(key, raster);
   return raster;

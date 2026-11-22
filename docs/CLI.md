@@ -113,6 +113,59 @@ and `adjacentClipIds` when known. With timeline context, each sample has
 `firstPts` and each sample's original `pts`. Samples are sorted by actual
 frame index.
 
+## Layout assertions
+
+Declare `layoutAssertions` in a video definition and run
+`opencut validate edit.video.ts --json` before rendering. The render command
+checks the same requirements before encoding.
+
+`layout.checks` reports the `assertionId`, `objectId`, worst zero-based
+project `frame` and `framesChecked` for each resolved segment. Bounds use
+`left`, `top`, `right` and `bottom`. Bounds, `tolerancePixels` and
+`deviationPixels` use project pixels. A failed check with no measurable
+deviation uses `deviationPixels: null` and includes a `reason`.
+
+A required failure exits with status 1. `validate --json` still writes the
+result to stdout with `ok: false`. `render --json` writes
+`LAYOUT_ASSERTION_FAILED` and the layout results to stderr. Advisory
+failures appear in the JSON report and allow rendering to continue.
+See [assertion kinds and examples](VIDEO_DEFINITIONS.md#layout-assertions).
+
+## Read-only render plan
+
+```sh
+opencut render plan edit.video.ts --output portrait.mp4 --recipe-cache ./recipes --picture-cache ./render-cache --json
+```
+
+Use the intended render options and parameters, including `--overwrite` when
+planning to replace an existing delivery. Planning uses the same authored-input
+protection as rendering. The plan reads current recipes and cache receipts,
+checks required FFmpeg encoders and prints JSON. It does not create
+build receipts, cache files or an export. As with other definition commands,
+the TypeScript definition and its imports are trusted executable code.
+
+`recipes` lists referenced asset steps by zero-based step index.
+`pictureRanges` uses half-open intervals on the project frame grid.
+Both report `status: 'reuse' | 'rebuild'` and a `reason`. A
+`verified-cache-entry` matched a current cache artifact. A
+`scheduled-earlier-range` will reuse an entry built earlier in the same
+render. Miss reasons distinguish an absent key, an invalid entry, and an
+upstream recipe artifact whose output is needed to know the exact key.
+The planner estimates affected range boundaries using declared recipe output
+metadata until the output exists. Unaffected ranges use the renderer's exact
+keys.
+
+With `--picture-version`, inspect `savedPicture` for the decision on the
+encoded picture. A blocked version produces a plan with `ok: false` and
+exits with status 1. Reusing all picture ranges or a saved encoded picture
+requires no FFV1 encoding.
+
+`storage` reports estimated peak scratch bytes, its component estimates,
+and current available bytes on the filesystems for the requested output
+and caches. If a cache directory does not yet exist, free space comes from
+the nearest existing ancestor. Compression, cloning, and overlap between
+render stages affect actual usage.
+
 ## Read-only dependency inventory
 
 ```sh
@@ -144,8 +197,48 @@ An `export` role means the current file matched a recorded fingerprint.
 Missing, replaced, or otherwise unverifiable files are marked
 `unverified-export` for that reference.
 Repeat `--artifact-root` to inventory other directories and recognize
-OpenCut cache receipts and their payloads. Files without known provenance
-are `unclassified`. The scan leaves cache and project files untouched.
+OpenCut cache receipts and their payloads. Payloads must match their
+recorded byte count and SHA-256 before they qualify as regenerable.
+Files without known provenance are `unclassified`. The scan leaves cache
+and project files untouched.
+Each file has a `classification` and a `regenerable` flag. `byteTotals`
+reports logical sizes by classification across resolved paths. Deliveries
+and unclassified files have their own totals alongside regenerable cache
+artifacts and other dependencies.
+
+## Post-export verification
+
+```sh
+opencut verify export final.mp4 --against approved-preview.mp4 \
+  --render-report final.render.json --frames 59,60 \
+  --audio-master approved-master.mp4 --output final-verification
+```
+
+Supply an approved MP4 preview on the same frame grid as the export.
+OpenCut checks decoded frame counts and presentation timestamps, including
+the first video frame on each MP4's presentation clock. It then
+compares the same zero-based frame indices at a common tile size. Use
+`--frames` to select specific samples. By default, the command selects up
+to eight evenly spaced frames. A fingerprinted render result adds samples
+immediately before and at its internal clip, caption and picture-range
+boundaries. Use `--boundaries 120,300` to add specific delivery boundaries.
+If delivery uses `--fps`, render the approval copy at that same rate.
+
+The new directory contains `report.json` and one side-by-side PNG per sample,
+with the approved preview on the left. The same JSON is printed to stdout.
+`timing` reports both start times in seconds. `firstTimingMismatch` marks
+the first frame whose presentation timestamps differ by more than the
+reported tolerance.
+`--luma-tolerance` controls mean absolute per-frame luma error.
+`--boundary-tolerance` controls the largest difference between the preview
+and export's before-to-after luma change over an 8×8 grid. Both default to
+4 on a 0–255 scale. Use `--size` to set the longest tile dimension (64–640).
+
+For a picture-only revision, `--audio-master` compares the ordered SHA-256
+hashes of each track's encoded audio packet payloads. Container tags and
+packet timestamps do not affect this comparison. The picture timing and
+audio payload results are reported independently. Failed checks still publish
+the report and return status 1.
 
 ## Reuse picture between exports
 
