@@ -72,47 +72,27 @@ jobs:
         shell: bash
         working-directory: ${{ runner.temp }}/opencut-npm-release
         run: |
-          registry_status() {
-            curl -fsS --retry 2 --max-time 10 -H 'Cache-Control: no-cache' \
-              "https://registry.npmjs.org/@dantea%2Fopencut?check=$(date +%s)"
-          }
-
           expected="sha512-$(openssl dgst -sha512 -binary "$OPENCUT_ARCHIVE" | openssl base64 -A)"
-          metadata="$(registry_status)"
+          metadata="$(curl -fsS --retry 2 --max-time 10 -H 'Cache-Control: no-cache' \
+            "https://registry.npmjs.org/@dantea%2Fopencut?check=$(date +%s)")"
           published="$(jq -r --arg version "$OPENCUT_VERSION" '.versions[$version].dist.integrity // empty' <<< "$metadata")"
           current_latest="$(jq -r '.["dist-tags"].latest // empty' <<< "$metadata")"
           if [[ "$(printf '%s\n' "$current_latest" "$OPENCUT_VERSION" | sort -V | tail -1)" != "$OPENCUT_VERSION" ]]; then
             echo "::error::npm latest already points to a newer version ($current_latest)."
             exit 1
           fi
-          if [[ -z "$published" ]]; then
-            if ! result="$(corepack pnpm@11.20.0 publish "$OPENCUT_ARCHIVE" --access public --tag latest --registry=https://registry.npmjs.org 2>&1)"; then
-              echo "$result"
-              if [[ "$result" != *"Cannot publish over previously staged version \"$OPENCUT_VERSION\"."* ]]; then
-                exit 1
-              fi
-              echo "npm already has $OPENCUT_VERSION pending validation."
-            else
-              echo "$result"
-              echo "npm accepted $OPENCUT_VERSION. Waiting for registry validation."
+          if [[ -n "$published" ]]; then
+            if [[ "$published" != "$expected" || "$current_latest" != "$OPENCUT_VERSION" ]]; then
+              echo "::error::The existing npm version has a different archive or is not tagged latest."
+              exit 1
             fi
+            echo "Already published @dantea/opencut@$OPENCUT_VERSION as latest with matching registry integrity."
+            printf 'Already published @dantea/opencut@%s with matching registry integrity.\n' \
+              "$OPENCUT_VERSION" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
 
-          for attempt in {1..30}; do
-            if metadata="$(registry_status)"; then
-              published="$(jq -r --arg version "$OPENCUT_VERSION" '.versions[$version].dist.integrity // empty' <<< "$metadata")"
-              if [[ -n "$published" && "$published" != "$expected" ]]; then
-                echo "::error::npm has different archive bytes for $OPENCUT_VERSION."
-                exit 1
-              fi
-              if [[ "$published" == "$expected" ]] && jq -e --arg version "$OPENCUT_VERSION" '.["dist-tags"].latest == $version' <<< "$metadata" >/dev/null; then
-                echo "Verified @dantea/opencut@$OPENCUT_VERSION as latest with matching registry integrity."
-                printf 'Verified [@dantea/opencut@%s](https://www.npmjs.com/package/@dantea/opencut/v/%s) as the latest version.\n' \
-                  "$OPENCUT_VERSION" "$OPENCUT_VERSION" >> "$GITHUB_STEP_SUMMARY"
-                exit 0
-              fi
-            fi
-            if [[ "$attempt" != 30 ]]; then sleep 60; fi
-          done
-          echo "::error::Could not verify npm latest as $OPENCUT_VERSION. Registry validation may still be pending."
-          exit 1
+          corepack pnpm@11.20.0 publish "$OPENCUT_ARCHIVE" --access public --tag latest --registry=https://registry.npmjs.org
+          echo "npm accepted @dantea/opencut@$OPENCUT_VERSION."
+          printf 'Submitted @dantea/opencut@%s to npm. npm completes registry validation separately.\n' \
+            "$OPENCUT_VERSION" >> "$GITHUB_STEP_SUMMARY"

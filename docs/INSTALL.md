@@ -17,7 +17,7 @@ pnpm dlx @dantea/opencut --help
 You can also install the packed archive directly.
 
 ```sh
-pnpm add -g ./opencut-cli-0.8.0-macos-arm64.tgz
+pnpm add -g ./opencut-cli-0.9.0-macos-arm64.tgz
 ```
 
 Run the CLI from any directory. A definition can import `@opencut/sdk` and
@@ -179,10 +179,10 @@ successful OIDC publish within two days of creating the trust configuration.
 Dispatch the workflow with the latest stable GitHub release tag.
 
 ```sh
-gh workflow run publish-npm.yml --repo dante-teo/opencut --ref main -f tag=v0.8.0
+gh workflow run publish-npm.yml --repo dante-teo/opencut --ref main -f tag=v0.9.0
 ```
 
 The workflow checks the CLI archive against the GitHub release checksums
-and Homebrew formula, then publishes it. It waits for npm's automated review
-and verifies the registry's `latest` tag and archive integrity. A successful run
-reports the verified version in its job summary.
+and Homebrew formula, then submits it to npm. The job summary records the
+submission after npm accepts the upload. npm completes its automated review
+and updates the registry separately.
