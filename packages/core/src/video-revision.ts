@@ -27,6 +27,8 @@ const dependency = span.extend({
   id: z.string(),
   key: sha,
   alignmentKey: sha.optional(),
+  rasterKey: sha.optional(),
+  audioDriven: z.literal(true).optional(),
   kind: z.enum([
     'caption',
     'picture',
@@ -48,6 +50,7 @@ const revisionRenderSettingsSchema = z.object({
     .optional(),
   outputFrameRate: frameRateSchema.optional(),
   videoBitrateKbps: z.int().positive().optional(),
+  keyframeInterval: z.int().min(1).max(10000).optional(),
   audioBitrateKbps: z.int().positive(),
   audioSampleRate: z.union([z.literal(44100), z.literal(48000)]),
   audioChannels: z.union([z.literal(1), z.literal(2)]),
@@ -103,6 +106,9 @@ export function revisionRenderSettings(
     ...(controls.outputSize && { outputSize: controls.outputSize }),
     ...(controls.outputFrameRate && {
       outputFrameRate: controls.outputFrameRate,
+    }),
+    ...(controls.keyframeInterval && {
+      keyframeInterval: controls.keyframeInterval,
     }),
     ...(controls.videoBitrateKbps && {
       videoBitrateKbps: controls.videoBitrateKbps,
@@ -176,11 +182,14 @@ export async function describeRevisionPlan(
       identity(path);
     const sourceIdentity =
       !graphic && visual.path ? identity(visual.path) : null;
+    const rasterKey = visual.text && inspected.textRasterKeys.get(clipId);
     picture.push({
       startFrame: timelineStartFrame,
       endFrame: timelineStartFrame + frameCount,
       id,
       kind,
+      ...(rasterKey && { rasterKey }),
+      ...(transition && graphic?.audioAnalysis && { audioDriven: true }),
       ...(kind === 'picture' &&
         visual.path && {
           alignmentKey: hashJson([
@@ -435,6 +444,35 @@ export function compareRevisionTimelines(
   };
 }
 
+/** Match encoded video and its presentation grid to a render report. */
+export function matchesRevisionPicture(
+  picture: Awaited<ReturnType<typeof inspectEncodedPicture>>,
+  evidence: RevisionEvidence,
+) {
+  const { metadata } = picture;
+  return (
+    picture.packetHash === evidence.packetHash &&
+    picture.timingHash === evidence.timingHash &&
+    picture.frameCount === evidence.frameCount &&
+    metadata.width === evidence.width &&
+    metadata.height === evidence.height &&
+    metadata.codec === evidence.settings.codec &&
+    sameFrameRate(
+      metadata.frameRateRatio,
+      evidence.frameRate.numerator,
+      evidence.frameRate.denominator,
+    ) &&
+    metadata.pixelFormat === 'yuv420p' &&
+    (metadata.rotation ?? 0) === 0 &&
+    (metadata.sampleAspectRatio ?? 1) === 1 &&
+    !metadata.hasHdrMetadata &&
+    metadata.colorSpace === 'bt709' &&
+    metadata.colorPrimaries === 'bt709' &&
+    metadata.colorTransfer === 'bt709' &&
+    metadata.colorRange === 'tv'
+  );
+}
+
 export async function preflightPictureReuse(
   baseline: string,
   evidence: RevisionEvidence,
@@ -477,28 +515,7 @@ export async function preflightPictureReuse(
       'packet timestamps and frame count',
       'video stream settings',
     );
-    const { metadata } = original;
-    if (
-      original.packetHash !== evidence.packetHash ||
-      original.timingHash !== evidence.timingHash ||
-      original.frameCount !== evidence.frameCount ||
-      metadata.width !== evidence.width ||
-      metadata.height !== evidence.height ||
-      metadata.codec !== evidence.settings.codec ||
-      !sameFrameRate(
-        metadata.frameRateRatio,
-        evidence.frameRate.numerator,
-        evidence.frameRate.denominator,
-      ) ||
-      metadata.pixelFormat !== 'yuv420p' ||
-      (metadata.rotation ?? 0) !== 0 ||
-      (metadata.sampleAspectRatio ?? 1) !== 1 ||
-      metadata.hasHdrMetadata ||
-      metadata.colorSpace !== 'bt709' ||
-      metadata.colorPrimaries !== 'bt709' ||
-      metadata.colorTransfer !== 'bt709' ||
-      metadata.colorRange !== 'tv'
-    )
+    if (!matchesRevisionPicture(original, evidence))
       reasons.push(
         'The supplied MP4 does not match the encoded picture or timing in the report.',
       );

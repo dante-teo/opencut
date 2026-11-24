@@ -138,6 +138,9 @@ export async function renderCompiledVideo(
       ...(settings.outputFrameRate !== undefined && {
         outputFrameRate: structuredClone(settings.outputFrameRate),
       }),
+      ...(settings.keyframeInterval !== undefined && {
+        keyframeInterval: settings.keyframeInterval,
+      }),
       ...(settings.videoBitrateKbps !== undefined && {
         videoBitrateKbps: settings.videoBitrateKbps,
       }),

@@ -7,12 +7,13 @@ import type { RenderControls } from '@opencut/media';
 import {
   inspectProject,
   inspectTimeline,
+  previewFrameIndex,
   previewClipSchema,
   previewFrameSchema,
   previewSheetSchema,
 } from './inspection.js';
-import { frameTime, timeSchema } from './time.js';
-import type { FrameRate, RationalTime } from './time.js';
+import { frameTime } from './time.js';
+import type { RationalTime } from './time.js';
 import type { CompiledVideo } from './video-compiler.js';
 import { openAudioMixCache } from './video-audio-mix.js';
 import { describeMusicComparison } from './music-comparison.js';
@@ -26,15 +27,6 @@ export type VideoPreviewOptions = Pick<
 >;
 export type VideoPreviewRange = { startFrame?: number; endFrame?: number };
 export class VideoPreviewRangeError extends RangeError {}
-
-function previewFrameIndex(position: PreviewPosition, rate: FrameRate): number {
-  if (typeof position === 'number') return position;
-  const { numerator, denominator } = timeSchema.parse(position);
-  return Number(
-    (BigInt(numerator) * BigInt(rate.numerator)) /
-      (BigInt(denominator) * BigInt(rate.denominator)),
-  );
-}
 
 export function evenlySpacedFrames(start: number, end: number, count: number) {
   if (count === 1) return [start];
@@ -72,8 +64,10 @@ export function previewVideo(video: CompiledVideo) {
     inspect: () => inspectProject(project, path),
     inspectFrame: (position: PreviewPosition) =>
       inspectTimeline(project, path, previewFrameIndex(position, frameRate)),
-    inspectFraming: (report: ReturnType<typeof inspectTimeline>) =>
-      inspectTimelineFraming(video, report),
+    inspectFraming: (
+      report: ReturnType<typeof inspectTimeline>,
+      signal?: AbortSignal,
+    ) => inspectTimelineFraming(video, report, signal),
     async frame(
       position: PreviewPosition,
       output: string,

@@ -15,6 +15,7 @@ export function graphicsFrameCache(directory: string) {
     frame: number | string,
     render: () => Promise<Buffer>,
     signal: AbortSignal = new AbortController().signal,
+    onHit?: () => void,
   ) => {
     if (remaining < 3840 * 2160 * 4 + 1024 * 1024) return render();
     await (created ??= mkdir(root, { recursive: true, mode: 0o700 }));
@@ -37,6 +38,7 @@ export function graphicsFrameCache(directory: string) {
     const bytes = await readFile(entry.metadata.path, { signal });
     if (createHash('sha256').update(bytes).digest('hex') !== entry.sha256)
       throw new MediaError('Cached graphics frame changed while reading.');
+    onHit?.();
     return bytes;
   };
 }

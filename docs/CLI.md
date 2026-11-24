@@ -55,7 +55,12 @@ and `verification`, alongside `phase`,
 `remainingSeconds`. Frame counts, percentages and elapsed time apply to
 the current stage. Audio analysis, mastering and verification can each
 start at 0% and finish at 100%. Graphics capture and analysis for a graphic
-include a `clipId`. Composition and encoding can overlap in direct exports.
+include a `clipId`. Graphics events distinguish `browser-capture`,
+`graphic-rasterization`, and `intermediate-writing`. Capture events report
+how many frames have completed and how many came from the graphics cache
+or a reused hold. On cancellation the render emits
+`{"event":"render-status","status":"cancelled"}`. Composition and encoding
+can overlap in direct exports. Treat each elapsed time as its own clock.
 When an export reuses a saved picture version, `muxing` tracks copying the
 encoded picture into the new MP4. Wait for the command to succeed and return
 its final JSON before using the output. Use an external clock to measure
@@ -74,7 +79,8 @@ Frames are zero-based. Timestamps accept seconds, fractions or clock
 times. Use `--around` to sample the predecessor and the first frame at or
 after each clip start or end, caption start or end, or reported internal
 picture boundary. The render report's `pictureRanges` supplies the internal
-boundaries for `picture`. Renders with a picture cache report these ranges.
+boundaries for `picture`. Picture-cache renders and local picture revisions
+report these ranges.
 
 For MP4 cuts and captions, use a report with `contactTimeline` or pass
 `--definition` with the definition revision and parameters used for export.
@@ -321,6 +327,43 @@ graphics, other visual layers, or video export settings. Check
 `pictureRanges` in the new plan for the lossless ranges that can still be
 reused. The new encoded picture covers the whole export.
 
+### Local picture revisions
+
+Keep the approved MP4 and the JSON from the same `render --revision-evidence`
+command. The revision inherits its delivery settings from that report.
+Set the frame rate in the definition and leave `--fps` unset when rendering
+the baseline for a local picture revision. An optional
+`--keyframe-interval <frames>` on a full render sets the maximum distance
+between keyframes. Software encoders use closed groups at the chosen
+interval, which gives later edits more independent starting points.
+
+```sh
+opencut render edit.video.ts -o approved.mp4 --revision-evidence --json > approved.render.json
+opencut render revised.video.ts -o revised.mp4 --picture-from approved.mp4 \
+  --render-report approved.render.json --preflight --json
+opencut render revised.video.ts -o revised.mp4 --picture-from approved.mp4 \
+  --render-report approved.render.json --json > revised.render.json
+opencut preview contact-sheet revised.mp4 --render-report revised.render.json \
+  --around cuts,captions,picture --from 350 --to 645 --output revision-qa.png
+```
+
+Preflight is read-only. It shows the changed frames, the expanded ranges
+to encode, the baseline ranges eligible for packet copy, the estimated
+bytes reused, and the audio decision. Ranges are half-open. The preflight
+uses existing recipe cache entries. Run without `--preflight` to process
+missing recipes. The render checks codec initialization, color metadata,
+encoded packet identity, the presentation clock, and full decode before
+publishing the new MP4. An equivalent mix keeps the approved AAC packets.
+A changed mix runs through the normal audio renderer and alignment check.
+Preflight checks rendered text as well as authored text. A font fallback
+can change the rendered pixels, and a report that predates text raster
+evidence can require those ranges to be encoded again during a picture edit.
+The result includes decoded checksums on either side of each join.
+Use its report with `preview contact-sheet` to sample cuts, captions, and
+splice joins in the exported MP4. Set `--from` and `--to` around the part
+of your export you want to check. For a blocked splice, use the reported reason and run a full render with
+the baseline flags omitted.
+
 ## React and SVG graphics
 
 Register and place React/Anime.js clips in the `.video.ts` project by editing
@@ -433,6 +476,23 @@ A matched comparison can use an MP4 baseline if its verified report has no
 active clips from tracks tagged as music. Tag music tracks with `audioRole: 'music'` so
 OpenCut can identify their role in the report.
 
+### Compare a delivered shot with its sources
+
+```sh
+opencut review approved.mp4 --source-comparison --definition edit.video.ts \
+  --timestamp 9.2 --source-clip hat --render-report approved.render.json \
+  --output source-review --json
+```
+
+Open `source-review/index.html` to play the original at the delivery
+crop and scale, the processed source, and the delivered picture. The
+JSON includes source stream dimensions, frame rate, codec and bitrate
+when available. Use `--from` and `--to` for an exclusive project-frame
+range within one shot, up to 20 seconds. When a report is missing or stale,
+supply `--source-mapping <mapping.json>` with `clipId`,
+`projectStartFrame`, and `deliveryStartFrame`. These reviews label the
+editor-supplied correspondence as unverified.
+
 ## Replace audio using an existing export
 
 ```zsh
@@ -490,6 +550,13 @@ frames, and all end positions are exclusive.
       "id": "closing-duo",
       "sourceOut": 142,
       "placement": "ripple"
+    },
+    {
+      "operation": "replace-source",
+      "id": "hat",
+      "asset": "sharp-take",
+      "sourceIn": 90,
+      "audio": "mute"
     }
   ]
 }
@@ -506,11 +573,40 @@ are resolved against the resulting clip edges, and a declared canvas
 duration changes with the ripple. Detached audio can retain its padded tail
 when trimmed. Source availability reports the end of the decoded audio.
 
+`replace-source` selects a declared timed video asset and keeps the
+placement length, speed, crop and transform. The in-point may be a project
+frame number or an exact rational time. Dry-run checks bounds and any
+transition handles against the new source. It reports the retained crop
+and separate overlapping audio clips from the original asset. Use
+`"audio": "replace"` to use the new take's embedded audio or
+`"audio": "mute"` to silence that picture placement when the edit would
+affect audible embedded audio. To change both the take and its trim in
+one patch, put `replace-source` before `trim` for that clip. OpenCut checks
+the trim against the new take's source bounds.
+
 The report lists old and new ranges, source availability, surrounding
 material, transition windows and resulting duration. A valid apply writes a
 new resolved TypeScript definition beside the original, so component and
 asset paths stay editable. Parameterized input is saved at the resolved
 parameter values used for the patch.
+
+## Inspect one timeline frame
+
+```sh
+opencut timeline inspect edit.video.ts --timestamp 9.2 --metadata-only --json
+opencut timeline inspect edit.video.ts --timestamp 9.2 --recipe-cache ./recipe-cache --json
+```
+
+Metadata-only inspection lists authored tracks, clip placements, intended
+source times and crop. It skips media recipes, graphic compilation and cache
+writes. The TypeScript definition still runs as trusted authoring code.
+Resolved inspection adds source paths, SHA-256 fingerprints, processed
+stream information, recipe steps and the resolved view into source pixels.
+For media clips, `source.sourceTime` is the time in the processed asset, and
+`source.originalSourceTime` maps that position back through the recipe.
+OpenCut reports mapped times to microsecond precision when a trim or
+slow-motion recipe changes the source clock. The JSON marks unavailable evidence, including original/synthesized sample
+provenance for a backend that provides no sample map.
 
 ## Check the installation
 
@@ -572,6 +668,34 @@ manage the checkpoint. See [optional AI setup](INSTALL.md#optional-ai).
 SIGINT (Ctrl-C) and SIGTERM also cancel the prerequisite checks, including the
 Python probes and checkpoint verification. The command exits with status 130
 for SIGINT and 143 for SIGTERM.
+
+### Local transcription and corrected timing
+
+OpenCut uses Qwen3-ASR and its optional ForcedAligner locally. Set up a
+Python environment with the `qwen-asr` package and download the desired
+model directories using Qwen's published setup instructions. Point
+`OPENCUT_SPEECH_PYTHON` at that Python executable,
+`OPENCUT_QWEN_ASR_MODEL` at the recognizer weights, and
+`OPENCUT_QWEN_ALIGNER_MODEL` at the aligner weights.
+`opencut doctor --json` reports the runtime, weights and alignment
+languages. OpenCut runs the worker offline. [Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR)
+
+```sh
+opencut transcribe take.mp4 --start 9.2 --end 15 --language Chinese --output draft.json
+opencut transcript align take.mp4 --transcript corrected.json --output aligned.json
+opencut transcript export aligned.json --output aligned.srt
+```
+
+Use a whole media file, a selected source interval, or dialogue-separated
+audio. Video timestamps are relative to the first picture frame. Audio-only
+timestamps are relative to the first audio sample. Start and end times
+use that source clock, including when audio leads the picture in the file.
+Save a copy of the UTF-8 sidecar and edit each segment's `text`. Alignment keeps the segment IDs and the exact edited text, including mixed
+language and punctuation. It reports unmapped or invalid timings in
+`review`. Source-relative word or character times are available when
+ForcedAligner supports the selected language. Export reads the aligned
+sidecar and writes SRT or VTT on the source clock. For narration or
+captions on another timeline, see [the SDK examples](SDK.md#build-narration-and-captions-together).
 
 ## Online media
 
@@ -901,6 +1025,7 @@ From a source checkout, build the CLI and run the revision benchmark.
 
 ```zsh
 python3 scripts/revision-benchmark.py --runs 3
+python3 scripts/revision-benchmark.py --graphics-only --quality fast --runs 3
 ```
 
 It measures a burned-in caption edit, a four-frame graphic move and a
@@ -912,7 +1037,34 @@ Use `--baseline`, `--caption`, `--glitter`, `--music` and `--marks` to
 run the same cases with prepared project definitions. Use
 `--music-candidate` if the music revision is a different track selection
 from the same definition. Supply `--video-bitrate` to pin a delivery
-bitrate across runs.
+bitrate for the revision cases. Graphics-only runs measure a transparent React/SVG
+wipe at 1080p60 and 4K60. The warm run starts with cached graphic PNGs and
+fresh picture ranges. The report includes time to a playable review and
+export, individual stage durations, sampled process-tree RSS and scratch
+usage, and decoded frame and transparent input checks. Compare stage
+durations individually because some stages overlap.
+
+To reproduce the 1,730-frame picture revision fixture, run the native
+integration test after building the CLI. The default run uses a small
+canvas on the same 60 fps timeline. Set `OPENCUT_HAT_FIXTURE_4K=1` for
+the 2160 × 3840 export. Only generated sources are used. Finish package
+and CLI builds before starting the fixture. A parallel rebuild can refresh
+bundled graphics files while the export is verifying its inputs.
+
+```sh
+OPENCUT_HAT_FIXTURE_4K=1 node --import tsx --test tests/integration/video-picture-revision.native.spec.ts
+```
+
+Run `python3 scripts/speech-fixture.py` with FFmpeg and eSpeak NG available
+to generate a bilingual fixture with background speech and known word
+windows. It prints the path, selected interval and reference times.
+
+The Swift comparison runner in `scripts/speech-analyzer.swift` uses
+macOS 26 or later and locally installed SpeechAnalyzer assets. It can
+report available locales with `status` and transcribe an audio file
+with a specified locale. Compare the same source file and calculate
+recognition errors separately from word timing errors.
+[SpeechAnalyzer](https://developer.apple.com/documentation/speech/speechanalyzer)
 
 ## Professional Dialogue Mix
 

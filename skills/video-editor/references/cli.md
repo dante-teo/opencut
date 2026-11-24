@@ -180,6 +180,8 @@ Use `opencut convert name.video.json` to write a `.video.ts` file beside the
 resolved JSON source. See [legacy conversion](../../../docs/CLI.md#convert-a-legacy-definition)
 for the output name and `--json` result.
 `opencut doctor --json` reports graphics capabilities and prerequisites.
+Use `opencut timeline inspect DEFINITION --frame N --metadata-only --json`
+for authored timing and crop without a writable cache.
 `opencut timeline inspect DEFINITION --frame N --json` reports requested
 graphic samples and dependency identity. Use `--params` in watch, preview,
 render or package to apply a declared variant. See the

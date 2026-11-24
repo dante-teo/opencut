@@ -5,6 +5,7 @@ import type { Project } from './project.js';
 import { evaluateTimelineFrame } from './evaluation.js';
 import { listTimeline } from './timeline-view.js';
 import { frameRateSchema, timeSchema } from './time.js';
+import type { FrameRate, RationalTime } from './time.js';
 
 const natural = z.int().nonnegative();
 const version = z.literal(1);
@@ -136,4 +137,16 @@ export function inspectTimeline(project: Project, path: string, frame: number) {
     frameRate: project.settings.frameRate,
     ...evaluateTimelineFrame(project, frame),
   });
+}
+
+export function previewFrameIndex(
+  position: number | RationalTime,
+  rate: FrameRate,
+): number {
+  if (typeof position === 'number') return position;
+  const { numerator, denominator } = timeSchema.parse(position);
+  return Number(
+    (BigInt(numerator) * BigInt(rate.numerator)) /
+      (BigInt(denominator) * BigInt(rate.denominator)),
+  );
 }

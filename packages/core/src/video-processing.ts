@@ -400,6 +400,17 @@ function pixels({ width, height }: RecipeMedia) {
   return (width ?? 0) * (height ?? 0);
 }
 
+export function videoRecipeCacheDirectory(cacheDirectory?: string) {
+  return resolve(
+    cacheDirectory ??
+      join(
+        process.env.XDG_CACHE_HOME || join(homedir(), '.cache'),
+        'opencut',
+        'recipes-v3',
+      ),
+  );
+}
+
 export function processingSettings(options: VideoProcessingOptions) {
   const host = hostRenderResources();
   const concurrency = Math.min(
@@ -413,14 +424,7 @@ export function processingSettings(options: VideoProcessingOptions) {
     ),
     host.nativeBudgetBytes,
   );
-  const directory = resolve(
-    options.cacheDirectory ??
-      join(
-        process.env.XDG_CACHE_HOME || join(homedir(), '.cache'),
-        'opencut',
-        'recipes-v3',
-      ),
-  );
+  const directory = videoRecipeCacheDirectory(options.cacheDirectory);
   const temporaryBytes = positive(
     'maxTemporaryBytes',
     options.maxTemporaryBytes ?? 4 * 1024 * MiB,

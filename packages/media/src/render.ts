@@ -175,6 +175,7 @@ export interface RenderControls {
   resolution?: RenderResolution | undefined;
   outputSize?: { width: number; height: number } | undefined;
   videoBitrateKbps?: number | undefined;
+  keyframeInterval?: number | undefined;
   audioBitrateKbps?: number | undefined;
   audioSampleRate?: 44100 | 48000 | undefined;
   audioChannels?: 1 | 2 | undefined;
@@ -219,6 +220,7 @@ export interface VideoTimelineOptions extends RenderControls {
     },
     frame: number,
     signal?: AbortSignal,
+    onCacheHit?: () => void,
   ) => Promise<Buffer>;
   width: number;
   height: number;
@@ -551,6 +553,7 @@ export interface TimelinePlan {
     pending?: string[];
   }[];
   savedKey: string | undefined;
+  textRasterKeys: ReadonlyMap<string, string>;
   requiresFfv1: boolean;
   encoder: RenderEncoderReport;
   outputWidth: number;
@@ -587,7 +590,7 @@ async function prepareTimeline(
   )
     throw new MediaError('Unknown render codec, quality or resolution preset.');
   const { width, height, frameRate, frameCount } = options;
-  const { outputSize, videoBitrateKbps } = options;
+  const { outputSize, videoBitrateKbps, keyframeInterval } = options;
   const audioBitrateKbps = options.audioBitrateKbps ?? 192;
   const audioSampleRate = options.audioSampleRate ?? 48000;
   const audioChannels = options.audioChannels ?? 2;
@@ -604,6 +607,13 @@ async function prepareTimeline(
     throw new MediaError(
       'Custom dimensions must be even, 2–3840 per side, within 2880×3840 total pixels, and use project resolution mode.',
     );
+  if (
+    keyframeInterval !== undefined &&
+    (!Number.isSafeInteger(keyframeInterval) ||
+      keyframeInterval < 1 ||
+      keyframeInterval > 10000)
+  )
+    throw new MediaError('Keyframe interval must be 1–10000 frames.');
   if (
     videoBitrateKbps !== undefined &&
     (!Number.isInteger(videoBitrateKbps) ||
@@ -717,10 +727,15 @@ async function prepareTimeline(
   try {
     if (!(await stat(dirname(path))).isDirectory())
       throw new Error('Not a directory');
-    await access(dirname(path), constants.W_OK | constants.X_OK);
+    await access(
+      dirname(path),
+      inspect ? constants.X_OK : constants.W_OK | constants.X_OK,
+    );
   } catch (cause) {
     throw new MediaError(
-      'Cannot create render output; use an existing writable directory.',
+      inspect
+        ? 'Cannot inspect render output; use an existing directory.'
+        : 'Cannot create render output; use an existing writable directory.',
       {
         cause,
       },
@@ -756,6 +771,7 @@ async function prepareTimeline(
             height: outputHeight,
             rate: outputRate,
             bitrate: videoBitrateKbps,
+            keyframeInterval,
           },
           options.signal,
         )
@@ -943,6 +959,7 @@ async function prepareTimeline(
     );
   const planCachedPicture = (
     cache: Pick<PictureCache, 'backend' | 'sourceIdentity'>,
+    textRasterKeys?: Map<string, string>,
   ) =>
     planPictureRanges({
       options,
@@ -954,6 +971,7 @@ async function prepareTimeline(
       outputWidth,
       outputHeight,
       warnings,
+      ...(textRasterKeys && { textRasterKeys }),
       rasterize,
       ...(inspect && { pendingSources: inspect.pendingSources }),
     });
@@ -969,8 +987,9 @@ async function prepareTimeline(
       outputFrameCount,
     ]);
   if (inspect) {
+    const textRasterKeys = new Map<string, string>();
     const cached = inspect.cache
-      ? await planCachedPicture(inspect.cache)
+      ? await planCachedPicture(inspect.cache, textRasterKeys)
       : undefined;
     const ranges =
       cached ?? (bounded.length > 1 ? bounded : [{ startFrame, endFrame }]);
@@ -997,6 +1016,7 @@ async function prepareTimeline(
     prepared.timelinePlan = {
       ranges,
       savedKey,
+      textRasterKeys,
       requiresFfv1,
       encoder: encoder!,
       outputWidth,
@@ -1034,14 +1054,47 @@ async function prepareTimeline(
         `${scratchName}.nut`,
         async (destination) => {
           const captureFrames = hold ? 1 : layerFrames;
+          let cacheHits = 0;
+          let captured = 0;
           const graphicProgress =
             source.kind === 'graphic' && options.onProgress
-              ? renderProgress(captureFrames, options.onProgress, {
-                  stage: 'graphics',
-                  clipId: clip.clipId,
-                })
+              ? renderProgress(
+                  captureFrames,
+                  options.onProgress,
+                  {
+                    stage: 'graphics',
+                    clipId: clip.clipId,
+                    detail: source.still
+                      ? 'graphic-rasterization'
+                      : 'browser-capture',
+                  },
+                  () => cacheHits,
+                )
               : undefined;
+          const intermediateProgress =
+            graphicProgress &&
+            renderProgress(captureFrames, options.onProgress, {
+              stage: 'graphics',
+              detail: 'intermediate-writing',
+              clipId: clip.clipId,
+            });
+          const input =
+            source.kind === 'graphic' && graphicProgress
+              ? {
+                  ...source,
+                  async rasterize(frame: number, signal: AbortSignal) {
+                    const raster = await source.rasterize(
+                      frame,
+                      signal,
+                      () => cacheHits++,
+                    );
+                    graphicProgress?.update(++captured);
+                    return raster;
+                  },
+                }
+              : source;
           graphicProgress?.start();
+          intermediateProgress?.start();
           await stageTransformLayer(
             {
               width,
@@ -1051,14 +1104,16 @@ async function prepareTimeline(
               frameCount: captureFrames,
               visual: clip,
               ...(clip.grade && { grade: clip.grade }),
-              source,
+              source: input,
+              ...(intermediateProgress && {
+                onIntermediateProgress: intermediateProgress.chunk,
+              }),
               ...(clip.animation && { animation: clip.animation }),
               ...(ramp && { ramp }),
               signal: options.signal,
             },
             destination,
           );
-          graphicProgress?.update(captureFrames);
           await accountRenderFile(destination);
         },
       );
@@ -1106,12 +1161,12 @@ async function prepareTimeline(
         kind: 'graphic',
         aspect: width / height,
         still: durationFrames === undefined,
-        rasterize(frame, signal) {
+        rasterize(frame, signal, onCacheHit) {
           if (!options.renderGraphic)
             throw new MediaError(
               `Clip '${clip.clipId}' requires an OpenCut graphics renderer.`,
             );
-          return options.renderGraphic(sourceClip, frame, signal);
+          return options.renderGraphic(sourceClip, frame, signal, onCacheHit);
         },
       });
     }

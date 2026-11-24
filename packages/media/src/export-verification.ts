@@ -16,6 +16,7 @@ export async function compareAudioPackets(
   approved: string,
   delivered: string,
   signal?: AbortSignal,
+  options: { includeTiming?: boolean } = {},
 ) {
   async function packets(file: string) {
     const path = await localFile(file);
@@ -32,7 +33,9 @@ export async function compareAudioPackets(
         '-show_data_hash',
         'sha256',
         '-show_entries',
-        'packet=stream_index,size,data_hash:stream=index,codec_name',
+        options.includeTiming
+          ? 'packet=stream_index,size,data_hash,pts,dts,duration:stream=index,codec_name,time_base'
+          : 'packet=stream_index,size,data_hash:stream=index,codec_name',
         '-of',
         'json',
         path,
@@ -46,15 +49,26 @@ export async function compareAudioPackets(
         `Audio source '${path}' changed while verifying packets.`,
       );
     const result = JSON.parse(response.toString()) as {
-      streams?: { index: number; codec_name?: string }[];
-      packets?: { stream_index: number; size?: string; data_hash?: string }[];
+      streams?: { index: number; codec_name?: string; time_base?: string }[];
+      packets?: {
+        stream_index: number;
+        size?: string;
+        data_hash?: string;
+        pts?: number;
+        dts?: number;
+        duration?: number;
+      }[];
     };
     const tracks = new Map(
       (result.streams ?? []).map(
         (stream) =>
           [
             stream.index,
-            { codec: stream.codec_name ?? null, hashes: [] as string[] },
+            {
+              codec: stream.codec_name ?? null,
+              timeBase: stream.time_base,
+              hashes: [] as string[],
+            },
           ] as const,
       ),
     );
@@ -66,7 +80,17 @@ export async function compareAudioPackets(
         !/^SHA256:[\da-f]{64}$/i.test(packet.data_hash)
       )
         throw new MediaError(`Unable to hash an audio packet in '${path}'.`);
-      track.hashes.push(`${packet.size}:${packet.data_hash}`);
+      const timing = options.includeTiming
+        ? [track.timeBase, packet.pts, packet.dts, packet.duration]
+        : [];
+      if (
+        options.includeTiming &&
+        (!track.timeBase || !timing.slice(1).every(Number.isSafeInteger))
+      )
+        throw new MediaError(
+          `Audio packet timing is unavailable in '${path}'.`,
+        );
+      track.hashes.push([packet.size, packet.data_hash, ...timing].join(':'));
     }
     return [...tracks.values()];
   }

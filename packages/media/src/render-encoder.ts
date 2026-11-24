@@ -12,6 +12,7 @@ interface EncoderTarget {
   height: number;
   rate: { numerator: number; denominator: number };
   bitrate?: number | undefined;
+  keyframeInterval?: number | undefined;
 }
 
 type Settings = {
@@ -21,6 +22,8 @@ type Settings = {
   preset?: string;
   threads?: number;
   x265Params?: string;
+  keyframeInterval?: number;
+  closedGop?: boolean;
   allowSoftware?: false;
   realtime?: false;
 };
@@ -42,6 +45,14 @@ export function encoderArguments(report: RenderEncoderReport): string[] {
     ...(rateControl.mode === 'crf'
       ? ['-crf', String(rateControl.crf)]
       : ['-b:v', `${rateControl.bitrateKbps}k`]),
+    ...((settings.keyframeInterval && [
+      '-g',
+      String(settings.keyframeInterval),
+    ]) ||
+      []),
+    ...(settings.closedGop && name === 'libx264'
+      ? ['-sc_threshold', '0', '-flags', '+cgop']
+      : []),
     ...(x265Params ? ['-x265-params', x265Params] : []),
     ...(settings.allowSoftware === false ? ['-allow_sw', '0'] : []),
     ...(settings.realtime === false ? ['-realtime', '0'] : []),
@@ -56,7 +67,8 @@ export async function selectRenderEncoder(
   target: EncoderTarget,
   signal?: AbortSignal,
 ): Promise<RenderEncoderReport> {
-  const { codec, quality, width, height, rate, bitrate } = target;
+  const { codec, quality, width, height, rate, bitrate, keyframeInterval } =
+    target;
   const { encoding } = renderQualityProfiles[quality];
   const software: RenderEncoderReport = {
     requested: requested ?? 'software',
@@ -70,7 +82,12 @@ export async function selectRenderEncoder(
           : { mode: 'bitrate', bitrateKbps: bitrate },
       preset: encoding.preset,
       threads: 2,
-      ...(codec === 'hevc' && { x265Params: 'pools=2:log-level=error' }),
+      ...(keyframeInterval && { keyframeInterval, closedGop: true }),
+      ...(codec === 'hevc' && {
+        x265Params:
+          'pools=2:log-level=error' +
+          (keyframeInterval ? ':open-gop=0:scenecut=0' : ''),
+      }),
     },
   };
   if (requested === undefined) return software;
@@ -96,6 +113,7 @@ export async function selectRenderEncoder(
     settings: {
       pixelFormat: 'yuv420p',
       rateControl: { mode: 'bitrate', bitrateKbps: bitrate ?? targetKbps },
+      ...(keyframeInterval && { keyframeInterval }),
       allowSoftware: false,
       realtime: false,
     },

@@ -191,7 +191,12 @@ function bindGraphicFrames(
     ? graphicsFrameCache(pictureCacheDirectory)
     : undefined;
   let held: { key: string; png: Buffer } | undefined;
-  const frame: RenderGraphic = async (clip, timelineFrame, signal) => {
+  const frame: RenderGraphic = async (
+    clip,
+    timelineFrame,
+    signal,
+    onCacheHit,
+  ) => {
     const { graphic, path, clipId } = clip;
     const bundle = video.graphicSource(graphic.bundleKey);
     if (!bundle)
@@ -227,6 +232,7 @@ function bindGraphicFrames(
         const key = graphic.key + ':hold:' + hold.startFrame;
         if (held?.key === key) {
           if (stats) stats.holdReuses++;
+          onCacheHit?.();
           return held.png;
         }
         const rasterize = () =>
@@ -240,7 +246,7 @@ function bindGraphicFrames(
             signal,
           );
         const png = await (cache
-          ? cache(graphic.key, key, rasterize, signal)
+          ? cache(graphic.key, key, rasterize, signal, onCacheHit)
           : rasterize());
         held = { key, png };
         if (stats) stats.holdRenders++;
@@ -272,7 +278,7 @@ function bindGraphicFrames(
           ? samples[0]
           : sampleDescription;
       return await (cache
-        ? cache(graphic.key, key, rasterize, signal)
+        ? cache(graphic.key, key, rasterize, signal, onCacheHit)
         : rasterize());
     } catch (cause) {
       signal?.throwIfAborted();

@@ -17,6 +17,7 @@ export const renderOptionTypes = {
   codec: { type: 'string' },
   encoder: { type: 'string' },
   'video-bitrate': { type: 'string' },
+  'keyframe-interval': { type: 'string' },
   'audio-bitrate': { type: 'string' },
   'audio-rate': { type: 'string' },
   'audio-channels': { type: 'string' },
@@ -40,7 +41,7 @@ export function parseRenderQuality(
 export const renderOptionHelp = `  --quality <fast|quality|maximum> --resolution <project|720p|1080p>
   --width <pixels> --height <pixels> --fps <n|n/d> --codec <h264|hevc>
   --encoder <${renderEncoders.join('|')}>
-  --video-bitrate <kbps> --audio-bitrate <kbps> --audio-rate <44100|48000>
+  --keyframe-interval <frames> --video-bitrate <kbps> --audio-bitrate <kbps> --audio-rate <44100|48000>
   --audio-channels <1|2> --no-subtitles --overwrite`;
 
 export function parseFrameRateOption(flag: string, value: string) {
@@ -93,6 +94,10 @@ export function parseRenderControls(values: {
       values.fps === undefined
         ? undefined
         : parseFrameRateOption('fps', values.fps),
+    keyframeInterval: positiveIntegerOption(
+      'keyframe-interval',
+      values['keyframe-interval'],
+    ),
     videoBitrateKbps: positiveIntegerOption(
       'video-bitrate',
       values['video-bitrate'],

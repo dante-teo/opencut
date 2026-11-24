@@ -13,6 +13,8 @@ export interface RenderProgress {
     | 'verification'
     | 'review-labels';
   clipId?: string;
+  detail?: 'browser-capture' | 'intermediate-writing' | 'graphic-rasterization';
+  cacheHits?: number;
   percent: number;
   processedFrames: number;
   totalFrames: number;
@@ -24,7 +26,8 @@ export interface RenderProgress {
 export function renderProgress(
   totalFrames: number,
   onProgress?: (progress: RenderProgress) => void,
-  details?: Pick<RenderProgress, 'stage' | 'clipId'>,
+  details?: Pick<RenderProgress, 'stage' | 'clipId' | 'detail'>,
+  cacheHits?: () => number,
 ) {
   let started: number | undefined;
   let pending = '';
@@ -37,6 +40,7 @@ export function renderProgress(
       event: 'progress',
       phase,
       ...details,
+      ...(cacheHits && { cacheHits: cacheHits() }),
       percent: (processedFrames / totalFrames) * 100,
       processedFrames,
       totalFrames,

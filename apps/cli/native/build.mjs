@@ -1,7 +1,13 @@
 import process from 'node:process';
 import { warn } from 'node:console';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
 
 chmodSync('dist/index.js', 0o755);
 const binary = 'dist/system-probe';
@@ -52,3 +58,5 @@ if (process.platform === 'darwin') {
     if (status !== 0) process.exit(status ?? 1);
   }
 }
+
+copyFileSync('native/transcript.py', 'dist/transcript.py');

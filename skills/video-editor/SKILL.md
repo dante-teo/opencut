@@ -87,7 +87,9 @@ For an ordinary footage edit, follow the media workflow below.
    transcripts with [stable segment IDs](references/sdk.md#narration-and-captions).
 3. Run `opencut validate DEFINITION --json` and
    `opencut inspect DEFINITION --json`. Inspect exact frames with
-   `opencut timeline inspect DEFINITION --frame N --json`. Declare
+   `opencut timeline inspect DEFINITION --frame N --metadata-only --json`
+   for authored clip and crop details without cache writes. Run resolved
+   inspection to get processed-media evidence. Declare
    [layout assertions](references/video-definitions.md#layout-assertions) for
    essential caption, panel, watermark and coverage geometry.
 4. Review the composition with `opencut preview DEFINITION --watch`, the
@@ -167,7 +169,22 @@ file path relative to the authored definition. See the
   For music candidates, use the same `musicComparison` group with
   `--music-loudness matched`.
 - Use `opencut timeline patch --dry-run` to check frame ranges, ripple movement
-  and source availability before writing a new definition.
+  and source availability before writing a new definition. For a client note
+  on one shot, use `review --source-comparison` with the delivery, definition
+  and matching report. Use a `replace-source` patch to keep the shot's timing
+  while changing the take, and choose embedded audio explicitly if needed.
+  Put `replace-source` before any `trim` of that clip in the same patch.
+- For a local picture change, use `render --picture-from BASELINE.mp4 --render-report BASELINE.render.json --preflight`.
+  Check the changed and encoded frame ranges, packet reuse and soundtrack
+  decision before rendering to a new output. Save the new render report and
+  use it to sample splice joins with `preview contact-sheet --around picture`.
+  Use a full render when the splice is blocked.
+  [Local picture revisions](../../docs/CLI.md#local-picture-revisions)
 - For an audio-only change, run `opencut remix --preflight` with the existing
   MP4 and its render report, then run `remix` if the decision is `reuse`.
   See the [scripted audio workflow](references/cli.md#scripted-audio-revisions).
+- For local caption timing, use `transcribe` with times relative to the
+  first picture frame or first audio sample for audio-only files. Correct
+  the UTF-8 sidecar, then use `transcript align` and review flagged spans
+  before export. Check `doctor --json` for optional model availability.
+  [Local transcription](../../docs/CLI.md#local-transcription-and-corrected-timing)

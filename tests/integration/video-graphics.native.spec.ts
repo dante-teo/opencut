@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import {
   mkdir,
   mkdtemp,
@@ -437,6 +437,35 @@ test(
         /cancel|abort|timeout/i,
       );
       await assert.rejects(readFile(output), { code: 'ENOENT' });
+
+      const child = spawn(
+        process.execPath,
+        [cli, 'render', file, '--output', output, '--json'],
+        {
+          stdio: ['ignore', 'ignore', 'pipe'],
+        },
+      );
+      const timeout = setTimeout(() => child.kill('SIGKILL'), 10_000);
+      let stderr = '';
+      let cancelled = false;
+      child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
+        stderr += chunk;
+        if (!cancelled && stderr.includes('"detail":"browser-capture"')) {
+          cancelled = true;
+          child.kill('SIGINT');
+        }
+      });
+      try {
+        const status = await new Promise<number | null>((resolve, reject) => {
+          child.once('error', reject);
+          child.once('close', resolve);
+        });
+        assert.equal(status, 130, stderr);
+        assert.match(stderr, /"event":"render-status","status":"cancelled"/);
+        await assert.rejects(readFile(output), { code: 'ENOENT' });
+      } finally {
+        clearTimeout(timeout);
+      }
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

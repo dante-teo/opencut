@@ -11,7 +11,7 @@ import {
   renderCompiledVideo,
 } from '@opencut/core/video';
 import type { VideoProcessingProgress } from '@opencut/core/video';
-import type { RenderProgress } from '@opencut/media';
+import { writeRenderProgress } from './render-progress.js';
 import { withCommandCancellation } from './cancellation.js';
 import { commandUsage, type CommandOptions } from './commands.js';
 import { parseProcessingControls } from './recipe-options.js';
@@ -210,13 +210,7 @@ export async function runVideoCommand(
         pictureVersion,
         ...mixControls,
         signal,
-        onProgress: (event: RenderProgress) => {
-          process.stderr.write(
-            values.json
-              ? JSON.stringify(event) + '\n'
-              : `${event.phase}: ${event.percent.toFixed(1)}% (${event.stage ?? event.phase})\n`,
-          );
-        },
+        onProgress: (event) => writeRenderProgress(event, values.json),
       });
       if (values.json)
         console.log(
@@ -270,5 +264,14 @@ export async function runVideoCommand(
         console.log(`Saved ${result.frameCount} frames to ${result.path}`);
       }
     }
+  }).catch((error: unknown) => {
+    if (command === 'render' && [130, 143].includes(Number(process.exitCode)))
+      process.stderr.write(
+        values.json
+          ? JSON.stringify({ event: 'render-status', status: 'cancelled' }) +
+              '\n'
+          : 'Render cancelled.\n',
+      );
+    throw error;
   });
 }

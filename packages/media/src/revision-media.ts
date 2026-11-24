@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
+import { open, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { MediaError, runMediaTool } from './process.js';
 import { probeMedia, sameFrameRate } from './probe.js';
@@ -9,8 +9,18 @@ import type { RenderProgress } from './render-progress.js';
 
 type Rate = { numerator: number; denominator: number };
 
-/** Bind encoded packet boundaries and codec initialization data to the export. */
-export async function inspectEncodedPicture(
+type EncodedPacket = {
+  pts: number;
+  dts: number;
+  duration: number;
+  size: string;
+  data_hash: string;
+  pos: string;
+  flags: string;
+};
+
+/** Inspect packet boundaries and codec initialization data on a constant frame grid. */
+export async function inspectPicturePackets(
   file: string,
   signal?: AbortSignal,
 ) {
@@ -38,7 +48,7 @@ export async function inspectEncodedPicture(
       '-show_data_hash',
       'sha256',
       '-show_entries',
-      'packet=pts,dts,duration,size,data_hash:stream=extradata_hash',
+      'packet=pts,dts,duration,size,data_hash,pos,flags:stream=extradata_hash',
       '-of',
       'json',
       path,
@@ -49,13 +59,7 @@ export async function inspectEncodedPicture(
   );
   const { streams, packets } = JSON.parse(result.toString()) as {
     streams?: { extradata_hash?: string }[];
-    packets?: {
-      pts: number;
-      dts: number;
-      duration: number;
-      size: string;
-      data_hash: string;
-    }[];
+    packets?: EncodedPacket[];
   };
   const extra = streams?.[0]?.extradata_hash;
   if (
@@ -92,6 +96,9 @@ export async function inspectEncodedPicture(
   const digest = (value: unknown) =>
     createHash('sha256').update(JSON.stringify(value)).digest('hex');
   return {
+    extradataHash: extra,
+    packets,
+    step,
     packetHash: digest([
       extra,
       packets.map(({ size, data_hash }) => [size, data_hash]),
@@ -110,6 +117,79 @@ export async function inspectEncodedPicture(
   };
 }
 
+/** Bind encoded packet payloads and timestamps to an export without exposing packet data. */
+export async function inspectEncodedPicture(
+  file: string,
+  signal?: AbortSignal,
+) {
+  const { packetHash, timingHash, frameCount, metadata } =
+    await inspectPicturePackets(file, signal);
+  return { packetHash, timingHash, frameCount, metadata };
+}
+
+export type PicturePackets = Awaited<ReturnType<typeof inspectPicturePackets>>;
+
+/** Only allow independently decodable accesses that also partition presentation order. */
+export async function randomAccessFrames(
+  path: string,
+  picture: PicturePackets,
+  signal?: AbortSignal,
+) {
+  const { packets, step, metadata } = picture;
+  const suffixMin = Array<number>(packets.length + 1);
+  suffixMin[packets.length] = Infinity;
+  for (let i = packets.length - 1; i >= 0; i--)
+    suffixMin[i] = Math.min(packets[i]!.pts, suffixMin[i + 1]!);
+  let prefixMax = -Infinity;
+  const starts: number[] = [];
+  const file = await open(path, 'r');
+  try {
+    for (const [index, packet] of packets.entries()) {
+      signal?.throwIfAborted();
+      const boundary =
+        packet.pts > prefixMax && packet.pts === suffixMin[index];
+      prefixMax = Math.max(prefixMax, packet.pts);
+      if (!boundary || !packet.flags.includes('K')) continue;
+      const offset = Number(packet.pos);
+      const size = Number(packet.size);
+      if (
+        !Number.isSafeInteger(offset) ||
+        offset < 0 ||
+        !Number.isSafeInteger(size) ||
+        size < 6
+      )
+        continue;
+      const header = Buffer.alloc(6);
+      for (let nal = 0; nal + header.length <= size;) {
+        const { bytesRead } = await file.read(
+          header,
+          0,
+          header.length,
+          offset + nal,
+        );
+        if (bytesRead !== header.length) break;
+        // OpenCut MP4 outputs use four-byte NAL lengths. A packet with a
+        // different layout must fail this probe and fall back to a full render.
+        const length = header.readUInt32BE();
+        if (length < 2 || nal + 4 + length > size) break;
+        const type =
+          metadata.codec === 'h264' ? header[4]! & 31 : (header[4]! >> 1) & 63;
+        const slices =
+          metadata.codec === 'h264' ? type >= 1 && type <= 5 : type < 32;
+        if (slices) {
+          const independent =
+            metadata.codec === 'h264' ? type === 5 : type >= 16 && type <= 21;
+          if (independent) starts.push(packet.pts / step);
+          break;
+        }
+        nal += 4 + length;
+      }
+    }
+  } finally {
+    await file.close();
+  }
+  return starts;
+}
 export interface ReviewClipOptions {
   source: string;
   output: string;

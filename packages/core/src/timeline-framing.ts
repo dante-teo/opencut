@@ -1,7 +1,15 @@
-import { orientedSource, resolveSourceWindow } from '@opencut/media';
+import {
+  orientedSource,
+  resolveSourceWindow,
+  SourceChangedError,
+} from '@opencut/media';
+import { dirname, resolve } from 'node:path';
 import { visualGeometry } from '@opencut/shared';
 import type { CompiledVideo } from './video-compiler.js';
 import type { inspectTimeline } from './inspection.js';
+import { fingerprintFile } from './video-integrity.js';
+import { originalRecipeTime } from './video-recipe.js';
+import { videoInputIdentity } from './video-input.js';
 
 export interface Point {
   x: number;
@@ -67,6 +75,7 @@ export function fittedOutline(geometry: ReturnType<typeof visualGeometry>) {
 export async function inspectTimelineFraming(
   video: CompiledVideo,
   report: ReturnType<typeof inspectTimeline>,
+  signal?: AbortSignal,
 ) {
   const plan = await video.resolveRender();
   const { width, height } = plan;
@@ -146,9 +155,84 @@ export async function inspectTimelineFraming(
       ];
     }),
   );
+  const assetByClip = new Map(
+    video.project.clips.map(({ id, assetId }) => [id, assetId]),
+  );
+  const pathByAsset = new Map<string, string>();
+  for (const { clipId, path } of [...plan.visualClips, ...plan.audioClips]) {
+    const assetId = assetByClip.get(clipId);
+    if (assetId && path && !pathByAsset.has(assetId))
+      pathByAsset.set(assetId, path);
+  }
+  const recipes = new Map(
+    video.recipes.map((recipe) => [recipe.assetId, recipe]),
+  );
+  const directory = dirname(video.path);
+  const sources = new Map(
+    await Promise.all(
+      [
+        ...new Set(
+          [...report.activeClips, ...report.visualClips].flatMap(
+            ({ assetId }) => (assetId ? [assetId] : []),
+          ),
+        ),
+      ].map(async (id) => {
+        const asset = video.definition.assets?.[id];
+        if (!asset || asset.kind === 'graphic') return [id, null] as const;
+        const originalPath = resolve(directory, asset.path);
+        const original = await fingerprintFile(originalPath, signal);
+        const expected = video.sourceIdentity(originalPath);
+        if (
+          (expected && expected !== original.identity) ||
+          original.identity !== videoInputIdentity(originalPath)
+        )
+          throw new SourceChangedError(
+            originalPath,
+            'timeline source inspection',
+            expected ?? original.identity,
+          );
+        const processedPath = pathByAsset.get(id) ?? null;
+        const metadata =
+          processedPath && plan.sourceMetadata.get(processedPath);
+        const steps = recipes.get(id)?.steps ?? [];
+        return [
+          id,
+          {
+            originalPath,
+            fingerprint: { sha256: original.sha256, bytes: original.bytes },
+            processedPath,
+            metadata: metadata
+              ? { video: metadata.video, audio: metadata.audio }
+              : null,
+            steps,
+            sampleProvenance: {
+              status: 'unavailable',
+              reason: steps.length
+                ? 'This recipe does not expose a source sample map.'
+                : 'Inspection does not decode the source sample.',
+            },
+          },
+        ] as const;
+      }),
+    ),
+  );
   const annotate = (clip: (typeof report.visualClips)[number]) => {
     const framing = resolved.get(clip.id);
-    return framing ? { ...clip, framing } : clip;
+    const source = clip.assetId ? sources.get(clip.assetId) : undefined;
+    return {
+      ...clip,
+      ...(framing && { framing }),
+      ...(source && {
+        source: {
+          ...source,
+          sourceTime: clip.sourceTime,
+          originalSourceTime: originalRecipeTime(
+            clip.sourceTime,
+            clip.assetId ? recipes.get(clip.assetId) : undefined,
+          ),
+        },
+      }),
+    };
   };
   return {
     ...report,

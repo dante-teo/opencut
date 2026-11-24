@@ -191,13 +191,27 @@ export function videoSourceDuration(source: MediaMetadata): number | null {
   );
 }
 
+function audioSourceOrigin(source: MediaMetadata): number {
+  return (
+    source.video?.startTimeSeconds ??
+    source.audio?.startTimeSeconds ??
+    source.startTimeSeconds ??
+    0
+  );
+}
+
+/** Convert OpenCut source time to an FFmpeg input seek from the container start. */
+export function audioSourceSeek(
+  source: MediaMetadata,
+  seconds: number,
+): number {
+  const origin = audioSourceOrigin(source);
+  return Math.max(0, seconds + origin - (source.startTimeSeconds ?? origin));
+}
+
 export function audioSourceDuration(source: MediaMetadata): number | null {
   if (!source.audio) return null;
-  const origin =
-    source.video?.startTimeSeconds ??
-    source.audio.startTimeSeconds ??
-    source.startTimeSeconds ??
-    0;
+  const origin = audioSourceOrigin(source);
   const offset = (source.audio.startTimeSeconds ?? origin) - origin;
   return source.audio.durationSeconds === null
     ? source.durationSeconds === null

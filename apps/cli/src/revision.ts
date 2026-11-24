@@ -1,53 +1,85 @@
 import { randomUUID } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import {
+  compileCachedVideo,
+  describeProjectContactTimeline,
   fileFingerprintSchema,
   fingerprintFile,
   inspectVideoRevision,
   isVideoDefinitionPath,
   matchesFingerprint,
   preflightPictureReuse,
+  planPictureRevision,
+  renderPictureRevision,
   renderCompiledVideo,
   revisionEvidenceSchema,
   revisionRenderSettings,
   reviewMarksSchema,
   reviewNotesSchema,
   reviewVideoRevisions,
+  reviewSourcePicture,
+  parseSubtitleTime,
+  previewVideo,
 } from '@opencut/core/video';
 import type { ReviewVersion } from '@opencut/core/video';
 import type { RenderProgress } from '@opencut/media';
+import { writeRenderProgress } from './render-progress.js';
+import { parseFrameIndex } from './contact-sheet.js';
 import { withCommandCancellation } from './cancellation.js';
 import { commandUsage, type CommandOptions } from './commands.js';
 import { readJsonArgument, readParams } from './json-argument.js';
 import { readMixControls } from './mix-options.js';
 import { parseProcessingControls } from './recipe-options.js';
-import { parseRenderControls, parseRenderQuality } from './render-options.js';
+import {
+  parseRenderControls,
+  parseRenderQuality,
+  renderOptionTypes,
+} from './render-options.js';
 import { positiveIntegerOption, UsageError } from './usage.js';
-import { loadVideo } from './video.js';
+import { loadVideo, withDefinitionConsole } from './video.js';
 
-function evidenceFrom(report: unknown) {
-  return revisionEvidenceSchema.safeParse(
-    report &&
-      typeof report === 'object' &&
-      'revisionEvidence' in report &&
-      report.revisionEvidence,
-  ).data;
-}
-
-function progress(values: CommandOptions) {
-  return (event: RenderProgress) => {
-    if (values.json) process.stderr.write(JSON.stringify(event) + '\n');
+function parseRevisionReport(report: unknown) {
+  const fields =
+    report && typeof report === 'object'
+      ? (report as Record<string, unknown>)
+      : {};
+  return {
+    evidence: revisionEvidenceSchema.safeParse(fields.revisionEvidence).data,
+    fingerprint: fileFingerprintSchema.safeParse(fields.outputFingerprint).data,
   };
 }
 
+function reviewSize(size: string | undefined) {
+  const maxDimension = positiveIntegerOption('size', size) ?? 640;
+  if (maxDimension < 64 || maxDimension > 1920)
+    throw new UsageError('--size must be 64–1920.');
+  return maxDimension;
+}
+
+function progress(values: CommandOptions) {
+  return (event: RenderProgress) => writeRenderProgress(event, values.json);
+}
+
 export async function runReview(file: string, values: CommandOptions) {
+  if (values['source-comparison']) return runSourceComparison(file, values);
+  if (
+    [
+      values.definition,
+      values.timestamp,
+      values.from,
+      values.to,
+      values['source-clip'],
+      values['source-mapping'],
+    ].some((value) => value !== undefined)
+  )
+    throw new UsageError(
+      'Source comparison options require --source-comparison.',
+    );
   const { against, output } = values;
   const candidateIsDefinition = isVideoDefinitionPath(file);
   if (!against || !output || !(candidateIsDefinition || /\.mp4$/i.test(file)))
     throw new UsageError(commandUsage('review'));
-  const maxDimension = positiveIntegerOption('size', values.size) ?? 640;
-  if (maxDimension < 64 || maxDimension > 1920)
-    throw new UsageError('--size must be 64–1920.');
+  const maxDimension = reviewSize(values.size);
   await withCommandCancellation(async (signal) => {
     const params = await readParams(values.params, signal);
     const baselineParams = await readParams(values['against-params'], signal);
@@ -93,13 +125,7 @@ export async function runReview(file: string, values: CommandOptions) {
       flag: string,
     ) {
       const report = await readJsonArgument(flag, reportPath, signal);
-      const evidence = evidenceFrom(report);
-      const expected = fileFingerprintSchema.safeParse(
-        report &&
-          typeof report === 'object' &&
-          'outputFingerprint' in report &&
-          report.outputFingerprint,
-      ).data;
+      const { evidence, fingerprint: expected } = parseRevisionReport(report);
       if (!evidence) return;
       const actual = await fingerprintFile(path, signal, 'review export', true);
       if (!expected || !matchesFingerprint(actual, expected))
@@ -282,6 +308,126 @@ export async function runReview(file: string, values: CommandOptions) {
   });
 }
 
+async function runSourceComparison(file: string, values: CommandOptions) {
+  const { definition, output, timestamp, from, to } = values;
+  if (
+    !/\.mp4$/i.test(file) ||
+    !definition ||
+    !isVideoDefinitionPath(definition) ||
+    !output ||
+    values.against ||
+    values.marks ||
+    values.notes ||
+    values.candidate ||
+    values['candidate-report'] ||
+    values['music-option'] ||
+    values['against-params'] ||
+    values['against-music'] ||
+    (timestamp === undefined
+      ? from === undefined || to === undefined
+      : from !== undefined || to !== undefined)
+  )
+    throw new UsageError(commandUsage('review'));
+  const maxDimension = reviewSize(values.size);
+  await withCommandCancellation(async (signal) => {
+    const reportPath = values['render-report'];
+    const report =
+      reportPath &&
+      (await readJsonArgument('render-report', reportPath, signal));
+    const { evidence: revision, fingerprint } = parseRevisionReport(report);
+    if (reportPath && (!revision || !fingerprint) && !values['source-mapping'])
+      throw new UsageError(
+        'Supply compatible render JSON from render --revision-evidence --json, or provide --source-mapping.',
+      );
+    const { audioMixEdit, musicSelection } = await readMixControls(
+      values,
+      signal,
+    );
+    const video = await loadVideo(definition, {
+      params: await readParams(values.params, signal),
+      processing: parseProcessingControls(values),
+      signal,
+      audioMixEdit,
+      musicSelection,
+      quality:
+        revision?.settings.quality ??
+        parseRenderQuality(values.quality, 'quality'),
+      preview: revision?.settings.burnSubtitles === false,
+    });
+    const startFrame =
+      timestamp !== undefined
+        ? previewVideo(video).inspectFrame(parseSubtitleTime(timestamp)).frame
+        : parseFrameIndex('from', from!);
+    const endFrame =
+      to === undefined
+        ? Math.min(
+            video.frameCount,
+            startFrame +
+              Math.max(
+                1,
+                Math.round(
+                  video.project.settings.frameRate.numerator /
+                    video.project.settings.frameRate.denominator,
+                ),
+              ),
+          )
+        : parseFrameIndex('to', to);
+    let mapping:
+      | {
+          clipId: string;
+          projectStartFrame: number;
+          deliveryStartFrame: number;
+        }
+      | undefined;
+    if (values['source-mapping']) {
+      const input = await readJsonArgument(
+        'source-mapping',
+        values['source-mapping'],
+        signal,
+      );
+      if (
+        !input ||
+        typeof input !== 'object' ||
+        !('clipId' in input) ||
+        typeof input.clipId !== 'string' ||
+        !('projectStartFrame' in input) ||
+        !('deliveryStartFrame' in input)
+      )
+        throw new UsageError(
+          '--source-mapping needs clipId, projectStartFrame, and deliveryStartFrame.',
+        );
+      mapping = {
+        clipId: input.clipId,
+        projectStartFrame: parseFrameIndex(
+          'source-mapping projectStartFrame',
+          String(input.projectStartFrame),
+        ),
+        deliveryStartFrame: parseFrameIndex(
+          'source-mapping deliveryStartFrame',
+          String(input.deliveryStartFrame),
+        ),
+      };
+    }
+    const result = await reviewSourcePicture(video, file, {
+      output,
+      startFrame,
+      endFrame,
+      signal,
+      maxDimension,
+      mapping,
+      clipId: values['source-clip'],
+      shortenToClip: timestamp !== undefined,
+      evidence: revision && fingerprint ? { revision, fingerprint } : undefined,
+      onProgress: progress(values),
+    });
+    console.log(
+      values.json
+        ? JSON.stringify(result, null, 2)
+        : 'Source comparison saved to ' + join(result.output, 'index.html'),
+    );
+  });
+}
+
 export async function runRemix(file: string, values: CommandOptions) {
   const {
     output,
@@ -322,7 +468,7 @@ export async function runRemix(file: string, values: CommandOptions) {
       blocked(error instanceof Error ? error.message : String(error));
       return;
     }
-    const evidence = evidenceFrom(report);
+    const { evidence } = parseRevisionReport(report);
     if (!evidence) {
       blocked(
         'The report has no compatible revision evidence. Use a saved picture version, or explicitly render the picture with render --picture-cache --revision-evidence --json.',
@@ -386,5 +532,127 @@ export async function runRemix(file: string, values: CommandOptions) {
         ? JSON.stringify({ ...result, preflight }, null, 2)
         : 'Reused verified picture and saved the revised mix to ' + result.path,
     );
+  });
+}
+
+export async function runPictureRevision(file: string, values: CommandOptions) {
+  const {
+    output,
+    'picture-from': baseline,
+    'render-report': reportPath,
+  } = values;
+  if (
+    !baseline?.toLowerCase().endsWith('.mp4') ||
+    !reportPath ||
+    !output?.toLowerCase().endsWith('.mp4') ||
+    !isVideoDefinitionPath(file)
+  )
+    throw new UsageError(commandUsage('render'));
+  const incompatibleOptions = [
+    ...(Object.keys(renderOptionTypes) as (keyof typeof renderOptionTypes)[]),
+    'picture-cache',
+    'picture-version',
+  ] as const;
+  if (incompatibleOptions.some((key) => values[key] !== undefined))
+    throw new UsageError(
+      'Picture revisions use the baseline report’s export settings and a new output path. Use a full render to change encoding settings.',
+    );
+  await withCommandCancellation(async (signal) => {
+    try {
+      const report = await readJsonArgument(
+        'render-report',
+        reportPath,
+        signal,
+      );
+      const { evidence, fingerprint } = parseRevisionReport(report);
+      if (!evidence || !fingerprint)
+        throw new UsageError(
+          'Supply matching render JSON from render --revision-evidence --json.',
+        );
+      const {
+        audioMixEdit,
+        musicSelection,
+        audioMixCacheDirectory,
+        audioComparison,
+      } = await readMixControls(values, signal);
+      if (
+        audioComparison !== undefined &&
+        audioComparison !== (evidence.settings.audioComparison ?? 'after')
+      )
+        throw new UsageError(
+          'Use a full render to switch the mix comparison setting.',
+        );
+
+      const options = {
+        params: await readParams(values.params, signal),
+        processing: parseProcessingControls(values),
+        signal,
+        audioMixEdit,
+        musicSelection,
+        quality: evidence.settings.quality,
+        preview: !evidence.settings.burnSubtitles,
+      };
+      const video = values.preflight
+        ? await withDefinitionConsole(() => compileCachedVideo(file, options))
+        : await loadVideo(file, options);
+      const preflight = await planPictureRevision(
+        video,
+        baseline,
+        output,
+        evidence,
+        fingerprint,
+        signal,
+      );
+      if (values.preflight || preflight.report.status === 'blocked') {
+        console.log(JSON.stringify(preflight.report, null, 2));
+        if (preflight.report.status === 'blocked') process.exitCode = 1;
+        return;
+      }
+      const result = await renderPictureRevision(
+        video,
+        output,
+        evidence,
+        preflight,
+        {
+          signal,
+          onProgress: progress(values),
+          audioMixCacheDirectory,
+        },
+      );
+      console.log(
+        values.json
+          ? JSON.stringify(
+              {
+                definitionPath: video.path,
+                contactTimeline: describeProjectContactTimeline(video.project),
+                ...result,
+              },
+              null,
+              2,
+            )
+          : 'Verified picture revision saved to ' + result.path,
+      );
+    } catch (error) {
+      signal.throwIfAborted();
+      console.log(
+        JSON.stringify(
+          {
+            event: 'picture-revision-preflight',
+            status: 'blocked',
+            baseline: resolve(baseline),
+            reasons: [error instanceof Error ? error.message : String(error)],
+            changedRanges: [],
+            encodeRanges: [],
+            copyRanges: [],
+            audio: 'unavailable',
+            fallback:
+              'Run render with a new output path and omit --picture-from and --render-report.',
+          },
+          null,
+          2,
+        ),
+      );
+      process.exitCode = 1;
+    }
   });
 }

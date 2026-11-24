@@ -72,6 +72,13 @@ async function executeCommand(
     case 'mix analyze':
     case 'render plan':
     case 'render': {
+      if (
+        command === 'render' &&
+        (values['picture-from'] || values['render-report'] || values.preflight)
+      ) {
+        const { runPictureRevision } = await import('./revision.js');
+        return runPictureRevision(file, values);
+      }
       const { runVideoCommand } = await import('./video.js');
       return runVideoCommand(command, file, values);
     }
@@ -116,6 +123,12 @@ async function executeCommand(
     case 'online download': {
       const { runDefinitionTool } = await import('./definition-tools.js');
       return runDefinitionTool(command, file, values);
+    }
+    case 'transcribe':
+    case 'transcript align':
+    case 'transcript export': {
+      const { runTranscript } = await import('./transcript.js');
+      return runTranscript(command, file, values);
     }
     case 'doctor': {
       const { doctor, formatDoctor } = await import('./doctor.js');

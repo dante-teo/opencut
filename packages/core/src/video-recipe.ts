@@ -1,3 +1,5 @@
+import { rationalTime } from './time.js';
+import type { RationalTime } from './time.js';
 import {
   interpolationTiming,
   isStillImage,
@@ -570,4 +572,26 @@ export function validateRecipeOutput(
     throw new MediaError(
       'Recipe result did not have the requested frame rate.',
     );
+}
+
+export function originalRecipeTime(
+  time: RationalTime,
+  recipe: VideoRecipeInspection | undefined,
+) {
+  let seconds: number | undefined;
+  for (const { parameters } of [...(recipe?.steps ?? [])].reverse()) {
+    if (parameters.type === 'trim') {
+      const start = Number(parameters.start.toFixed(6));
+      if (start)
+        seconds = (seconds ?? time.numerator / time.denominator) + start;
+    } else if (parameters.type === 'smoothSlowMotion') {
+      seconds =
+        (seconds ?? time.numerator / time.denominator) * parameters.speed;
+    }
+  }
+  // Recipes seek and sample on a microsecond clock. Round the mapped time
+  // once so chained speeds do not inflate the rational denominator.
+  return seconds === undefined
+    ? time
+    : rationalTime(BigInt(Math.round(seconds * 1_000_000)), 1_000_000n);
 }

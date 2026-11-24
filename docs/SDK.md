@@ -117,6 +117,28 @@ clips and cues derive from the segment ID. Other segment placements remain
 as authored. Give the containing audio track an explicit ID to keep its
 identity across edits. Supply unique segment IDs across the definition.
 
+An editable transcription sidecar can also supply timing to `buildNarration`.
+Pass the same audio used for alignment and the timeline start of the selected
+source interval. Each resulting clip refers to its timed window in that
+recording. For a separate subtitle track over existing audio, use
+`transcriptCues(aligned, at)` with the same timeline start. Omitting `at`
+keeps the source timestamps.
+
+```ts
+import { readFile } from 'node:fs/promises';
+import { buildNarration, transcriptNarrationSegments } from '@opencut/sdk';
+
+const aligned = JSON.parse(
+  await readFile(new URL('./aligned.json', import.meta.url), 'utf8'),
+);
+const narration = buildNarration(
+  transcriptNarrationSegments(aligned, 'voice.wav', {
+    numerator: 5,
+    denominator: 1,
+  }),
+);
+```
+
 ## Preview and revise exports
 
 To render an exact set of definition frames, pass `frames` to

@@ -40,7 +40,9 @@ export type {
 export { readSubtitleFile, writeSubtitleFile } from './subtitle-files.js';
 export {
   compileVideo,
+  compileCachedVideo,
   inspectVideoBuild,
+  inspectDeclaredTimeline,
   inspectVideoRecipes,
 } from './video-files.js';
 export { VideoDefinitionError } from './video-definition.js';
@@ -72,6 +74,7 @@ export type {
 } from './video-watch.js';
 
 export type { VideoRecipe } from './video-recipe-schema.js';
+export { videoRecipeCacheDirectory } from './video-processing.js';
 export type {
   VideoProcessingOptions,
   VideoProcessingProgress,
@@ -199,3 +202,20 @@ export {
   patchVideoTimeline,
   timelinePatchSchema,
 } from './video-timeline-patch.js';
+
+export {
+  planPictureRevision,
+  renderPictureRevision,
+} from './video-picture-revision.js';
+
+export { reviewSourcePicture } from './video-source-review.js';
+
+export {
+  applyTranscriptTimings,
+  speechBackendResultSchema,
+  transcriptCues,
+  transcriptNarrationSegments,
+  transcriptSchema,
+  validateTranscriptWindows,
+} from './transcript.js';
+export type { Transcript } from './transcript.js';

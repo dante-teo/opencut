@@ -7,7 +7,13 @@ import { checkGraphicAudio } from './graphic-audio.js';
 import { entityIdSchema } from './project.js';
 import type { Project } from './project.js';
 import { subtitleCueInputSchema } from './subtitles.js';
-import { addTimes, compareTimes, frameTime, subtractTimes } from './time.js';
+import {
+  addTimes,
+  compareTimes,
+  frameTime,
+  subtractTimes,
+  timeSchema,
+} from './time.js';
 import type { FrameRate, RationalTime } from './time.js';
 import { resolveTransition } from './transitions.js';
 import { compileDefinition } from './video-compiler.js';
@@ -34,6 +40,13 @@ const operation = z.discriminatedUnion('operation', [
     operation: z.literal('graphic'),
     id: entityIdSchema,
     at: frame,
+  }),
+  z.strictObject({
+    operation: z.literal('replace-source'),
+    id: entityIdSchema,
+    asset: entityIdSchema,
+    sourceIn: z.union([frame, timeSchema]),
+    audio: z.enum(['replace', 'mute']).optional(),
   }),
   z.strictObject({
     operation: z.literal('trim'),
@@ -165,9 +178,9 @@ export async function patchVideoTimeline(
   const plan = await video.resolveRender();
   const original = describe(project, plan);
   const media = new Map(
-    plan.audioClips.map(({ clipId, path, required }) => [
+    plan.audioClips.map(({ clipId, assetId, path, required }) => [
       clipId,
-      { path, audio: required },
+      { assetId, path, audio: required },
     ]),
   );
   const touched = new Set<string>();
@@ -177,6 +190,18 @@ export async function patchVideoTimeline(
     wordTimingsCleared?: boolean;
     rippleFrames?: number;
     moved?: string[];
+    replacement?: {
+      previousAsset: string;
+      sourceIn: RationalTime;
+      sourceOut: RationalTime;
+      sourceDuration: RationalTime | null;
+      sourceWindow:
+        NonNullable<Project['clips'][number]['visual']>['sourceWindow'] | null;
+      crop: NonNullable<Project['clips'][number]['visual']>['crop'] | null;
+      transitionIds: string[];
+      embeddedAudio: 'unchanged' | 'replace' | 'mute';
+      linkedAudioClipIds: string[];
+    };
     source?: {
       before: Range;
       after: Range;
@@ -240,6 +265,98 @@ export async function patchVideoTimeline(
       });
       continue;
     }
+    if (operation.operation === 'replace-source') {
+      const track = project.tracks.find(({ id }) => id === clip.trackId);
+      if (
+        !('asset' in item) ||
+        !asset ||
+        asset.metadata?.kind !== 'video' ||
+        track?.type !== 'video'
+      )
+        throw new VideoDefinitionError(
+          `Clip '${id}' must be a timed picture clip on a video track.`,
+        );
+      const next = project.assets.find(({ id }) => id === operation.asset);
+      if (next?.metadata?.kind !== 'video')
+        throw new VideoDefinitionError(
+          `Replacement asset '${operation.asset}' must be a declared timed video asset. Check the assets in the definition.`,
+        );
+      const sourceIn =
+        typeof operation.sourceIn === 'number'
+          ? frameTime(operation.sourceIn, rate)
+          : operation.sourceIn;
+      const sourceOut = addTimes(
+        sourceIn,
+        subtractTimes(clip.sourceOut, clip.sourceIn),
+      );
+      const changesSource =
+        asset.id !== next.id || compareTimes(clip.sourceIn, sourceIn) !== 0;
+      const audible =
+        !clip.muted &&
+        !track.muted &&
+        (clip.volume ?? 1) > 0 &&
+        (track.volume ?? 1) > 0 &&
+        (!project.musicComparison?.candidates.some(
+          ({ trackId }) => trackId === track.id,
+        ) ||
+          project.musicComparison.selected === track.id);
+      const changesEmbedded =
+        changesSource &&
+        audible &&
+        (asset.metadata.hasAudio || next.metadata.hasAudio);
+      if (changesEmbedded && !operation.audio)
+        throw new VideoDefinitionError(
+          `Replacing '${id}' can change its embedded audio. Set audio to 'replace' or 'mute'.`,
+        );
+      if (
+        operation.audio === 'replace' &&
+        changesEmbedded &&
+        !next.metadata.hasAudio
+      )
+        throw new VideoDefinitionError(
+          `Replacement asset '${next.id}' has no audio stream. Set audio to 'mute'.`,
+        );
+      const transitionIds = (project.transitions ?? [])
+        .filter((transition) => {
+          const resolved = resolveTransition(transition, current, rate);
+          return resolved.layers.some(({ clip }) => clip.id === id);
+        })
+        .map(({ id }) => id);
+      for (const transition of transitionIds) touched.add(transition);
+      const linkedAudioClipIds = [...current.values()]
+        .filter(
+          (other) =>
+            other.assetId === asset.id &&
+            project.tracks.some(
+              ({ id, type }) => id === other.trackId && type === 'audio',
+            ) &&
+            compareTimes(other.timelineStart, oldEnd) < 0 &&
+            compareTimes(clip.timelineStart, clipTimelineEnd(other)) < 0,
+        )
+        .map(({ id }) => id);
+
+      item.asset = clip.assetId = next.id;
+      item.sourceIn = clip.sourceIn = sourceIn;
+      item.sourceOut = clip.sourceOut = sourceOut;
+      if (operation.audio === 'mute') item.muted = clip.muted = true;
+      steps.push({
+        ...operation,
+        before,
+        after: before,
+        replacement: {
+          previousAsset: asset.id,
+          sourceIn,
+          sourceOut,
+          sourceDuration: next.metadata.videoDuration ?? next.duration ?? null,
+          sourceWindow: clip.visual?.sourceWindow ?? null,
+          crop: clip.visual?.crop ?? null,
+          transitionIds,
+          embeddedAudio: operation.audio ?? 'unchanged',
+          linkedAudioClipIds,
+        },
+      });
+      continue;
+    }
     if (operation.sourceIn === undefined && operation.sourceOut === undefined)
       throw new VideoDefinitionError(
         `Trim '${id}' requires sourceIn or sourceOut.`,
@@ -259,11 +376,17 @@ export async function patchVideoTimeline(
       );
     const bound = media.get(id);
     const metadata = bound && plan.sourceMetadata.get(bound.path);
+    const videoDuration = asset.metadata.videoDuration;
     const duration =
-      metadata &&
-      (bound.audio
-        ? audioSourceDuration(metadata)
-        : videoSourceDuration(metadata));
+      bound && bound.assetId !== clip.assetId
+        ? videoDuration
+          ? videoDuration.numerator / videoDuration.denominator
+          : asset.metadata.durationSeconds
+        : metadata &&
+          (bound.audio
+            ? audioSourceDuration(metadata)
+            : videoSourceDuration(metadata));
+
     const sourceLimit =
       duration && duration > 0
         ? projectFrame(
@@ -350,7 +473,7 @@ export async function patchVideoTimeline(
     id: string;
     kind: Item['kind'];
     before: Item | null;
-    after: Item;
+    after: Item | null;
     movementFrames: number | null;
   }>((after) => {
     const before = original.find((item) => itemKey(item) === itemKey(after));
@@ -371,6 +494,19 @@ export async function patchVideoTimeline(
       },
     ];
   });
+  for (const before of original) {
+    if (
+      touched.has(before.id) &&
+      !changed.some((after) => itemKey(before) === itemKey(after))
+    )
+      affected.push({
+        id: before.id,
+        kind: before.kind,
+        before,
+        after: null,
+        movementFrames: null,
+      });
+  }
   // Show adjacent boundaries and anything playing through either side of an edit.
   const neighbors = original.filter(
     (item) =>

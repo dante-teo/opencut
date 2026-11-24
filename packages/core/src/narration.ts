@@ -13,6 +13,7 @@ const segmentSchema = z.strictObject({
   id: entityIdSchema,
   audio: relativeMediaPathSchema,
   at: timeSchema,
+  sourceIn: timeSchema.optional(),
   duration: timeSchema,
   transcript: subtitleCueInputSchema.shape.text,
   timings: subtitleTrackSchema.shape.cues.element.shape.words,
@@ -36,7 +37,8 @@ export function buildNarration(segments: readonly NarrationSegment[]) {
         `Narration segment ${index + 1} ${issue.path.join('.')}: ${issue.message}`,
       );
     }
-    const { id, audio, at, duration, transcript, timings } = parsed.data;
+    const { id, audio, at, sourceIn, duration, transcript, timings } =
+      parsed.data;
     const asset = `narration-audio-${id}`;
     if (Object.hasOwn(assets, asset))
       throw new VideoDefinitionError(`Duplicate narration segment '${id}'.`);
@@ -56,7 +58,13 @@ export function buildNarration(segments: readonly NarrationSegment[]) {
         `Narration segment '${id}' has invalid timings. Use ordered, nonoverlapping text ranges and times within the segment duration.`,
       );
     assets[asset] = { kind: 'audio', path: audio };
-    clips.push({ id: `narration-clip-${id}`, asset, at, sourceOut: duration });
+    clips.push({
+      id: `narration-clip-${id}`,
+      asset,
+      at,
+      ...(sourceIn && { sourceIn }),
+      sourceOut: sourceIn ? addTimes(sourceIn, duration) : duration,
+    });
     cues.push(cue);
   }
 

@@ -4,7 +4,7 @@ import type {
   MixGainPoint,
   RenderTimeMapping,
 } from '@opencut/shared';
-import { audioSourceDuration } from './probe.js';
+import { audioSourceDuration, audioSourceSeek } from './probe.js';
 import type { MediaMetadata } from './probe.js';
 import { MediaError, runMediaTool } from './process.js';
 import type { VideoTimelineOptions } from './render.js';
@@ -66,15 +66,7 @@ export async function centeredChannelWarnings(
     const { start, end } = audioSourceSamples(clip, options.frameRate);
     const duration = Math.min(6, (end - start) / 48000);
     if (duration <= 0) continue;
-    const origin =
-      source.video?.startTimeSeconds ??
-      source.audio.startTimeSeconds ??
-      source.startTimeSeconds ??
-      0;
-    const seek = Math.max(
-      0,
-      start / 48000 + origin - (source.startTimeSeconds ?? origin),
-    );
+    const seek = audioSourceSeek(source, start / 48000);
     let levels: number[] = [];
     await runMediaTool(
       'ffmpeg',

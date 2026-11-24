@@ -1,7 +1,11 @@
 import {
   isVideoDefinitionPath,
   inspectGraphicFrames,
+  inspectDeclaredTimeline,
   parseSubtitleTime,
+  inspectVideoRecipes,
+  VideoDefinitionError,
+  videoRecipeCacheDirectory,
   previewVideo,
   watchVideo,
   VideoPreviewRangeError,
@@ -14,7 +18,8 @@ import { UsageError } from './usage.js';
 import { withCommandCancellation } from './cancellation.js';
 import { readParams } from './json-argument.js';
 import { readMixControls } from './mix-options.js';
-import { loadVideo } from './video.js';
+import { writeRenderProgress } from './render-progress.js';
+import { loadVideo, withDefinitionConsole } from './video.js';
 
 function printWatchStatus(
   { current, ...event }: VideoWatchStatus,
@@ -142,6 +147,14 @@ export async function runInspectionCommand(
       ? { startFrame: integer('from'), endFrame: integer('to') }
       : undefined;
   await withCommandCancellation(async (signal) => {
+    const params = await readParams(values.params, signal);
+    if (command === 'timeline inspect' && values['metadata-only']) {
+      const report = await withDefinitionConsole(() =>
+        inspectDeclaredTimeline(file, selectedFrame!, { params, signal }),
+      );
+      console.log(JSON.stringify(report, null, 2));
+      return;
+    }
     const { audioMixEdit, musicSelection, ...mixControls } =
       await readMixControls(values, signal);
     const video = await loadVideo(file, {
@@ -151,17 +164,47 @@ export async function runInspectionCommand(
       preview: true,
       quality,
       processing,
-      params: await readParams(values.params, signal),
+      params,
+    }).catch(async (error: unknown) => {
+      const cache = videoRecipeCacheDirectory(processing.cacheDirectory);
+      if (
+        command !== 'timeline inspect' ||
+        !(error instanceof Error) ||
+        (!/SQLITE_READONLY|unable to open database file/i.test(error.message) &&
+          !(
+            /EACCES|EPERM|EROFS/.test(error.message) &&
+            error.message.includes(cache)
+          ))
+      )
+        throw error;
+      const recipes = await withDefinitionConsole(() =>
+        inspectVideoRecipes(file, { params, signal, quality }),
+      ).catch(() => undefined);
+      const ids = recipes?.recipes.map(({ assetId }) => assetId).join(', ');
+      throw new VideoDefinitionError(
+        `Resolved inspection needs a writable cache at ${cache}${ids ? ` for recipes ${ids}` : ''}. Choose --recipe-cache <writable-directory> or use --metadata-only. ${error.message}`,
+        { cause: error },
+      );
     });
     const tools = previewVideo(video);
     if (command === 'timeline inspect') {
       const report = await tools.inspectFraming(
         tools.inspectFrame(selectedFrame!),
+        signal,
       );
       const graphics = await inspectGraphicFrames(video, report.frame);
       console.log(
         JSON.stringify(
-          { ...report, ...(graphics.length && { graphics }) },
+          {
+            ...report,
+            mode: 'resolved',
+            evidence: {
+              timeline: 'resolved',
+              media: 'resolved',
+              graphics: graphics.length ? 'resolved' : 'unavailable',
+            },
+            ...(graphics.length && { graphics }),
+          },
           null,
           2,
         ),
@@ -176,11 +219,7 @@ export async function runInspectionCommand(
             ...options,
             ...mixControls,
             onProgress: (progress) =>
-              process.stderr.write(
-                values.json
-                  ? `${JSON.stringify(progress)}\n`
-                  : `${progress.phase}: ${progress.percent.toFixed(1)}%\n`,
-              ),
+              writeRenderProgress(progress, values.json),
           });
     console.log(JSON.stringify(result, null, 2));
   }).catch((error: unknown) => {

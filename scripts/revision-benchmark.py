@@ -2,7 +2,9 @@
 """Measure playable reviews and exports for a subtitle, four-frame cue move and music swap."""
 
 import argparse
+import hashlib
 import json
+import runpy
 import os
 from pathlib import Path
 import platform
@@ -106,8 +108,11 @@ def measure(args, cache_state, output_kind):
         stage = event.get("stage")
         if event.get("event") != "progress" or event.get("percent") != 100 or not stage:
             continue
-        times = graphics if stage == "graphics" else stages
-        times.setdefault(event["clipId"] if stage == "graphics" else stage, []).append(event["elapsedSeconds"])
+        if stage == "graphics":
+            key = event["clipId"] + "/" + event.get("detail", "combined")
+            graphics.setdefault(key, []).append(event["elapsedSeconds"])
+        else:
+            stages.setdefault(stage, []).append(event["elapsedSeconds"])
     row = {
         "secondsToPlayable": round(elapsed, 3),
         "outputKind": output_kind,
@@ -195,9 +200,103 @@ def benchmark(directory, args, project):
     return {"baseline": baseline_run, "cases": cases}
 
 
+def graphics_benchmark(directory, args):
+    helpers = runpy.run_path(ROOT / "tests/reference-motion/measure.py")
+    results = []
+    for width, height in ((1080, 1920), (2160, 3840)):
+        folder = directory / str(height)
+        folder.mkdir()
+        cache = folder / "cache"
+        scratch = folder / "scratch"
+        scratch.mkdir()
+        definition = folder / "transition.video.ts"
+        (folder / "Transition.tsx").write_text("""
+import { useGraphicFrame, useGraphicTiming } from '@opencut/graphics/react';
+export default function Transition() {
+  const tick = Math.floor(useGraphicFrame() / 4);
+  const { width, height } = useGraphicTiming();
+  const edge = tick * width / 15;
+  return <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height}>
+    <defs><linearGradient id="wash"><stop stopColor="#e33eac" stopOpacity=".3"/>
+      <stop offset="1" stopColor="#68e8fe" stopOpacity=".8"/></linearGradient></defs>
+    <path d={`M0 0H${edge}L${edge + width / 6} ${height}H0Z`} fill="url(#wash)"/>
+  </svg>;
+}
+""", encoding="utf-8")
+        definition.write_text("export default " + json.dumps({
+            "canvas": {"width": width, "height": height, "frameRate": 60, "durationFrames": 72,
+                       "backgroundColor": "#304080"},
+            "assets": {
+                "transition": {"kind": "graphic", "renderer": "react", "path": "Transition.tsx",
+                               "durationFrames": 72},
+            },
+            "tracks": [{"id": "graphics", "type": "video", "clips": [
+                {"id": "wash", "asset": "transition", "at": 0, "sourceOut": 72}
+            ]}],
+        }) + ";", encoding="utf-8")
+        env = ["--recipe-cache", folder / "recipes", "--json"]
+
+        def profile(label, command):
+            row = helpers["run"]([*CLI, *command, *env], folder, scratch, label,
+                                 16 * 1024**3, 12 * 1024**3)
+            if row["exitCode"]:
+                raise RuntimeError((folder / (label + ".stderr")).read_text()[-6000:])
+            # Scope scratch also includes stage directories adjacent to outputs.
+            events = [json.loads(line) for line in (folder / (label + ".stderr")).read_text().splitlines()
+                      if line.startswith("{")]
+            row["stageWork"] = [
+                {key: e[key] for key in ("clipId", "stage", "detail", "elapsedSeconds", "totalFrames", "cacheHits")
+                 if key in e}
+                for e in events if e.get("event") == "progress" and e.get("percent") == 100
+            ]
+            return row
+
+        def samples(file):
+            result, _ = execute(["ffmpeg", "-v", "error", "-i", file, "-an", "-vf",
+                                 r"select=eq(n\,0)+eq(n\,20)+eq(n\,42)+eq(n\,71)",
+                                 "-fps_mode", "passthrough", "-f", "framemd5", "-"])
+            return [line.split(",")[-1].strip() for line in result.stdout.splitlines()
+                    if line and not line.startswith("#")]
+
+        rows = []
+        for run in range(1, args.runs + 1):
+            shutil.rmtree(cache, ignore_errors=True)
+            row = {"run": run}
+            row["review"] = profile(f"review-{run}", [
+                "preview", "clip", definition, "--from", "0", "--to", "60",
+                "--output", scratch / f"review-{run}.mp4", "--quality", args.quality,
+            ])
+            for state in ("cold", "warm"):
+                out = scratch / f"{state}-{run}.mp4"
+                row[state] = profile(f"{state}-{run}-render", [
+                    "render", definition, "--output", out, "--picture-cache", cache,
+                    "--encoder", args.encoder, "--quality", args.quality,
+                ])
+                row[state]["sampleFrameHashes"] = samples(out)
+                # Warm the browser raster cache while still composing and encoding the whole clip.
+                shutil.rmtree(cache / "picture-v1", ignore_errors=True)
+            pngs = sorted(cache.glob("graphics-v1/*/media.png"))
+            row["transparentPngHashes"] = [
+                hashlib.sha256(pngs[i].read_bytes()).hexdigest()
+                for i in sorted({0, len(pngs) // 2, len(pngs) - 1}) if 0 <= i < len(pngs)
+            ]
+            if pngs:
+                pixels, _ = execute(["ffmpeg", "-v", "error", "-i", pngs[len(pngs) // 2], "-vf",
+                                     "alphaextract,signalstats,metadata=print:file=-",
+                                     "-frames:v", "1", "-f", "null", "-"])
+                row["alphaMinMax"] = [line for line in pixels.stdout.splitlines()
+                                      if line.startswith(("lavfi.signalstats.YMIN", "lavfi.signalstats.YMAX"))]
+            if row["cold"]["sampleFrameHashes"] != row["warm"]["sampleFrameHashes"]:
+                raise RuntimeError("Cold and warm exports differ.")
+            rows.append(row)
+        results.append({"width": width, "height": height, "fps": 60, "runs": rows})
+    return {"graphics": results}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runs", type=int, default=3)
+    parser.add_argument("--graphics-only", action="store_true")
     parser.add_argument("--encoder", choices=("software", "videotoolbox"), default="software")
     parser.add_argument("--quality", choices=("fast", "quality", "maximum"), default="quality")
     for key in ("baseline", "caption", "glitter", "music", "marks"):
@@ -218,9 +317,12 @@ def main():
         FIXTURES.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="revision-", dir=None if args.baseline else FIXTURES) as scratch:
         directory = Path(scratch)
-        project = (*[path.resolve() for path in custom],
+        if args.graphics_only:
+            result = graphics_benchmark(directory, args)
+        else:
+            project = (*[path.resolve() for path in custom],
                    ["--music-candidate", args.music_candidate] if args.music_candidate else []) if args.baseline else generated_project(directory)
-        result = benchmark(directory, args, project)
+            result = benchmark(directory, args, project)
     processor = platform.processor() or platform.machine()
     if platform.system() == "Darwin":
         processor = execute(["sysctl", "-n", "machdep.cpu.brand_string"])[0].stdout.strip()
@@ -232,10 +334,11 @@ def main():
         "workingTreeChanges": bool(execute(["git", "status", "--porcelain"])[0].stdout.strip()),
         "renderSettings": {"encoder": args.encoder, "quality": args.quality, "videoBitrateKbps": args.video_bitrate,
                            "recipeWorkers": 1},
-        "project": str(args.baseline.resolve()) if args.baseline else "Generated 180×320, 24 fps, six-second project",
+        "project": "Generated transparent React/SVG wipe at 1080p and 4K, 60 fps" if args.graphics_only else
+                   (str(args.baseline.resolve()) if args.baseline else "Generated 180×320, 24 fps, six-second project"),
         "runsPerCase": args.runs,
         "cacheDefinitions": {"cold": "Empty OpenCut picture and recipe caches; operating-system caches are uncontrolled.",
-                             "warm": "Independent copy of the OpenCut caches seeded by the baseline."},
+                             "warm": "A populated graphics raster cache with the picture cache cleared." if args.graphics_only else "Independent copy of the OpenCut caches seeded by the baseline."},
         "timing": "Command launch to verified publication. Stage clocks may overlap.",
         **result,
     }, indent=2))

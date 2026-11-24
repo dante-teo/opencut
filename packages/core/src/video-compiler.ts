@@ -1,7 +1,7 @@
 import type { VideoMixEdit } from '@opencut/shared';
 import { videoMixEditSchema } from './professional-mix.js';
 import { createHash } from 'node:crypto';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import {
   audioSourceDuration,
   orientedSource,
@@ -20,7 +20,7 @@ import type {
 import { compileVideoAssets, readEmbeddedFont } from './video-assets.js';
 import type { CompiledVideoAsset, VideoAssetOptions } from './video-assets.js';
 import { validateProject } from './project.js';
-import type { Project, TimelineClip } from './project.js';
+import type { MediaAsset, Project, TimelineClip } from './project.js';
 import { bindRenderSources } from './render-sources.js';
 import { planProjectRender } from './render-plan.js';
 import { clipTimelineEnd } from './clip-timing.js';
@@ -318,7 +318,8 @@ export async function compileDefinition(
         },
       );
     },
-    sourceIdentity: (path: string) => sourceIdentities.get(path),
+    sourceIdentity: (path: string) =>
+      sourceIdentities.get(path) ?? profileIdentities.get(path) ?? undefined,
     async resolveRender() {
       return {
         ...structuredClone(renderPlan),
@@ -329,9 +330,10 @@ export async function compileDefinition(
   return compiled;
 }
 
-async function buildProject(
-  { path, definition, graphics }: DefinitionSources,
+async function buildAuthoredTimeline(
+  { path, definition }: Pick<DefinitionSources, 'path' | 'definition'>,
   options: CompilationOptions,
+  metadataOnly = false,
 ) {
   const { signal, inputs, audioMixEdit } = options;
   const {
@@ -388,13 +390,24 @@ async function buildProject(
     ...(musicComparison && { musicComparison }),
   };
 
-  const resolveFont = await loadFonts(
-    path,
-    definition.fonts,
-    signal,
-    inputs?.record,
-    options.pinnedSources,
-  );
+  const resolveFont = metadataOnly
+    ? async <Style extends FontStyle>(
+        { font, ...style }: Style,
+        location: string,
+      ) => {
+        if (font !== undefined && !Object.hasOwn(definition.fonts ?? {}, font))
+          throw new VideoDefinitionError(
+            `${location}.font: Unknown font '${font}'.`,
+          );
+        return style;
+      }
+    : await loadFonts(
+        path,
+        definition.fonts,
+        signal,
+        inputs?.record,
+        options.pinnedSources,
+      );
   const { subtitles } = definition;
   if (subtitles) {
     const cues = [];
@@ -502,6 +515,90 @@ async function buildProject(
   for (const id of Object.keys(audioMixEdit?.roles ?? {}))
     if (!project.tracks.some((track) => track.id === id))
       throw new VideoDefinitionError(`Unknown audio track '${id}'.`);
+  return { project, clipLocations };
+}
+
+function validateAuthoredTimeline(project: Project, clipLocations: string[]) {
+  const validated = validateProject(project);
+  if (!validated.success)
+    throw new VideoDefinitionError(
+      validated.error.issues
+        .map(
+          ({ path, message }) =>
+            `${path.replace(/^\/clips\/(\d+)/, (_, index: string) => clipLocations[Number(index)]!)}: ${message}`,
+        )
+        .join('\n'),
+      { cause: validated.error },
+    );
+  return validated.project;
+}
+
+export async function compileDeclaredTimeline(
+  sources: Pick<DefinitionSources, 'path' | 'definition'>,
+  options: CompilationOptions,
+) {
+  const { project, clipLocations } = await buildAuthoredTimeline(
+    sources,
+    options,
+    true,
+  );
+  project.assets = Object.entries(sources.definition.assets ?? {}).map(
+    ([id, source]): MediaAsset => {
+      const graphic = source.kind === 'graphic';
+      const kind = !graphic && source.freezeFrame ? 'image' : source.kind;
+      const duration =
+        graphic && 'durationFrames' in source
+          ? frameTime(source.durationFrames, project.settings.frameRate)
+          : undefined;
+      return {
+        id,
+        name: source.name ?? id,
+        file: {
+          type: 'relative',
+          path: source.path ?? basename(sources.path),
+        },
+        mediaTypes:
+          kind === 'video'
+            ? ['video', 'audio']
+            : [kind === 'audio' ? 'audio' : 'video'],
+        ...(!graphic &&
+          source.freezeFrame && { freezeFrame: source.freezeFrame }),
+        ...(duration && { duration }),
+        ...((kind === 'image' || graphic) && {
+          metadata: {
+            kind: graphic ? 'graphic' : 'image',
+            formatName: graphic ? source.renderer : null,
+            durationSeconds: duration
+              ? duration.numerator / duration.denominator
+              : null,
+            width: null,
+            height: null,
+            videoCodec: null,
+            audioCodec: null,
+            frameRate: null,
+            frameRateRatio: null,
+            hasAudio: false,
+          },
+        }),
+      };
+    },
+  );
+  return validateAuthoredTimeline(project, clipLocations);
+}
+
+async function buildProject(
+  sources: DefinitionSources,
+  options: CompilationOptions,
+) {
+  const {
+    path,
+    graphics,
+    definition: { assets = {} },
+  } = sources;
+  const { project, clipLocations } = await buildAuthoredTimeline(
+    sources,
+    options,
+  );
   const mediaAssets = Object.fromEntries(
     Object.entries(assets).flatMap(([id, asset]) =>
       asset.kind === 'graphic' ? [] : ([[id, asset]] as const),
@@ -528,20 +625,9 @@ async function buildProject(
     compiled.assets.set(id, { asset: graphic.asset });
   project.assets = [...compiled.assets.values()].map(({ asset }) => asset);
 
-  const validated = validateProject(project);
-  if (!validated.success)
-    throw new VideoDefinitionError(
-      validated.error.issues
-        .map(
-          ({ path, message }) =>
-            `${path.replace(/^\/clips\/(\d+)/, (_, index: string) => clipLocations[Number(index)]!)}: ${message}`,
-        )
-        .join('\n'),
-      { cause: validated.error },
-    );
-
-  validateSourceBounds(validated.project, compiled.assets, clipLocations);
-  return { project: validated.project, ...compiled };
+  const validated = validateAuthoredTimeline(project, clipLocations);
+  validateSourceBounds(validated, compiled.assets, clipLocations);
+  return { project: validated, ...compiled };
 }
 
 function validateSourceBounds(

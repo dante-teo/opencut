@@ -8,6 +8,7 @@ export {
   isStillImage,
   videoSourceDuration,
   audioSourceDuration,
+  audioSourceSeek,
 } from './probe.js';
 export { orientedSource, resolveSourceWindow } from './source-window.js';
 export { decodeStillFrame, extractFrame } from './frame.js';
@@ -19,7 +20,12 @@ export {
 export { inspectVideoToolboxWorkers } from './video-toolbox-workers.js';
 export { inspectRenderMemory } from './process-memory.js';
 export { separateDialogue } from './dialogue.js';
-export { fileIdentity, MediaError, RenderCancelledError } from './process.js';
+export {
+  fileIdentity,
+  MediaError,
+  RenderCancelledError,
+  runMediaTool,
+} from './process.js';
 export {
   findSourceChange,
   fingerprintSourceFile,
@@ -103,4 +109,11 @@ export type { MusicLoudnessReport } from './music-comparison.js';
 export { inspectTimelineRender } from './render.js';
 export type { TimelinePlan } from './render.js';
 
-export { inspectEncodedPicture, renderReviewClip } from './revision-media.js';
+export {
+  inspectEncodedPicture,
+  inspectPicturePackets,
+  randomAccessFrames,
+  renderReviewClip,
+} from './revision-media.js';
+
+export type { PicturePackets } from './revision-media.js';

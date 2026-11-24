@@ -18,6 +18,14 @@ const optionTypes = {
   'revision-evidence': { type: 'boolean' },
   'picture-from': { type: 'string' },
   preflight: { type: 'boolean' },
+  'metadata-only': { type: 'boolean' },
+  'source-comparison': { type: 'boolean' },
+  'source-clip': { type: 'string' },
+  'source-mapping': { type: 'string' },
+  start: { type: 'string' },
+  end: { type: 'string' },
+  language: { type: 'string' },
+  transcript: { type: 'string' },
   marks: { type: 'string' },
   notes: { type: 'string' },
   candidate: { type: 'string', multiple: true },
@@ -99,9 +107,16 @@ const renderOptions = [
 
 const commands = {
   review: {
-    args: `<definition.video.ts|export.mp4> --against <definition.video.ts|export.mp4> --output <new-directory> [--marks <marks.json>] [--notes <notes.json>] [--candidate <definition.video.ts|export.mp4> ...] [--music-option <track-id> ...] [--against-music <track-id>] [--render-report <report.json>] [--candidate-report <report.json>] [--size <64..1920>] ${mixUsage} ${params}`,
+    args: `<definition.video.ts|export.mp4> (--source-comparison --definition <definition.video.ts> (--timestamp <time> | --from <frame> --to <frame>) [--source-clip <id>] [--source-mapping <mapping.json>] | --against <definition.video.ts|export.mp4>) --output <new-directory> [--marks <marks.json>] [--notes <notes.json>] [--candidate <definition.video.ts|export.mp4> ...] [--music-option <track-id> ...] [--against-music <track-id>] [--render-report <report.json>] [--candidate-report <report.json>] [--size <64..1920>] ${mixUsage} ${params}`,
     options: [
       'against',
+      'source-comparison',
+      'definition',
+      'timestamp',
+      'from',
+      'to',
+      'source-clip',
+      'source-mapping',
       'output',
       'marks',
       'notes',
@@ -187,12 +202,26 @@ const commands = {
     options: ['edit', 'output', 'component', 'params'],
   },
   'timeline inspect': {
-    args: `${definition} ${position} ${qualityOption} ${params}`,
-    options: ['frame', 'timestamp', 'quality', 'params'],
+    args: `${definition} ${position} [--metadata-only] [--recipe-cache <directory>] ${qualityOption} ${params}`,
+    options: [
+      'frame',
+      'timestamp',
+      'quality',
+      'params',
+      'metadata-only',
+      'recipe-cache',
+    ],
   },
   render: {
-    args: `${definition} --output <new.mp4> [--picture-cache <directory> [--picture-version <save|id>]] [--retry-source-change] [--revision-evidence] ${qualityOption} ${mixUsage} ${params}`,
-    options: [...renderOptions, 'retry-source-change', 'revision-evidence'],
+    args: `${definition} --output <new.mp4> [--picture-cache <directory> [--picture-version <save|id>]] [--retry-source-change] [--revision-evidence] [--picture-from <baseline.mp4> --render-report <report.json> [--preflight]] ${qualityOption} ${mixUsage} ${params}`,
+    options: [
+      ...renderOptions,
+      'retry-source-change',
+      'revision-evidence',
+      'picture-from',
+      'render-report',
+      'preflight',
+    ],
   },
   'render plan': {
     args: `${definition} --output <delivery.mp4> [--picture-cache <directory> [--picture-version <save|id>]] ${qualityOption} ${mixUsage} ${params}`,
@@ -291,6 +320,18 @@ const commands = {
   'online download': {
     args: '<request.json> --result <id|index> --directory <media-directory>',
     options: ['result', 'directory'],
+  },
+  transcribe: {
+    args: '<media> --output <new.json> [--start <time>] [--end <time>] [--language <name|auto>]',
+    options: ['output', 'start', 'end', 'language'],
+  },
+  'transcript align': {
+    args: '<media> --transcript <edited.json> --output <new.json> [--language <name>]',
+    options: ['transcript', 'output', 'language'],
+  },
+  'transcript export': {
+    args: '<transcript.json> --output <new.srt|new.vtt>',
+    options: ['output'],
   },
   doctor: { args: '', options: [] },
   'models inspect': { args: '', options: [] },

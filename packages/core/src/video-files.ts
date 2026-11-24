@@ -14,7 +14,10 @@ import {
 } from './video-package-format.js';
 import { inspectAssetRecipes } from './video-assets.js';
 import { checkGraphicAudio } from './graphic-audio.js';
-import { compileDefinition } from './video-compiler.js';
+import {
+  compileDeclaredTimeline,
+  compileDefinition,
+} from './video-compiler.js';
 import { compileVideoGraphics, graphicBundleKeys } from './video-graphics.js';
 import {
   isVideoDefinitionPath,
@@ -27,6 +30,8 @@ import type {
   VideoParameters,
 } from './video-definition.js';
 import type { CompilationOptions, CompiledVideo } from './video-compiler.js';
+import { inspectTimeline, previewFrameIndex } from './inspection.js';
+import type { PreviewPosition } from './video-preview.js';
 import { identifyVideoInput, videoInputIdentity } from './video-input.js';
 import type { VideoInput } from './video-input.js';
 import { fingerprintFile, hashJson } from './video-integrity.js';
@@ -187,6 +192,75 @@ async function compileResolvedVideo(
       steps,
     },
   }));
+}
+
+/** Evaluate authored positions without opening media or compiling graphic bundles. */
+export async function inspectDeclaredTimeline(
+  file: string,
+  position: PreviewPosition,
+  options: Pick<VideoCompileOptions, 'params' | 'signal'> = {},
+) {
+  const { path, value } = await readVideoInput(file, options);
+  const definition = parseVideoDefinition(value);
+  checkGraphicAudio(definition);
+  const project = await compileDeclaredTimeline({ path, definition }, options);
+  const report = inspectTimeline(
+    project,
+    path,
+    previewFrameIndex(position, project.settings.frameRate),
+  );
+  const clips = new Map(project.clips.map((clip) => [clip.id, clip]));
+  const annotate = (clip: (typeof report.activeClips)[number]) => {
+    const asset = clip.assetId ? definition.assets?.[clip.assetId] : undefined;
+    return {
+      ...clip,
+      declared: {
+        sourceTime: clip.sourceTime,
+        visual: clips.get(clip.id)?.visual ?? null,
+        ...(asset &&
+          asset.kind !== 'graphic' && {
+            sourcePath: resolve(dirname(path), asset.path),
+            ...(asset.recipe && { recipe: asset.recipe }),
+          }),
+      },
+      resolved: null,
+    };
+  };
+  return {
+    ...report,
+    mode: 'metadata-only',
+    evidence: {
+      timeline: 'declared',
+      media: 'unavailable',
+      graphics: 'unavailable',
+    },
+    declaredTimeline: {
+      tracks: project.tracks,
+      clips: project.clips,
+      transitions: project.transitions,
+    },
+    activeClips: report.activeClips.map(annotate),
+    visualClips: report.visualClips.map(annotate),
+    audioClips: report.audioClips.map(annotate),
+    mixingSources: report.mixingSources.map(annotate),
+  };
+}
+
+/** Compile against existing artifacts only, for preflight that must not write. */
+export async function compileCachedVideo(
+  file: string,
+  options: VideoCompileOptions = {},
+) {
+  const pendingSources = new Map<string, string>();
+  const video = await compileVideoInput(file, {
+    ...options,
+    recipePlan: { pendingSources, steps: [] },
+  });
+  if (pendingSources.size)
+    throw new VideoDefinitionError(
+      `Preflight requires existing processed media for ${[...pendingSources.values()].join(', ')}. Run the revision without --preflight to process these recipes.`,
+    );
+  return video;
 }
 
 export type VideoBuildInspection = Awaited<

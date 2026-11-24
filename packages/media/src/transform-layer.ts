@@ -30,7 +30,11 @@ type TransformSource =
       kind: 'graphic';
       still: boolean;
       aspect: number;
-      rasterize(frame: number, signal: AbortSignal): Promise<Buffer>;
+      rasterize(
+        frame: number,
+        signal: AbortSignal,
+        onCacheHit?: () => void,
+      ): Promise<Buffer>;
     }
   | {
       kind: 'media';
@@ -60,6 +64,7 @@ export interface TransformLayerOptions {
   grade?: ColorGrade;
   source: TransformSource;
   signal?: AbortSignal | undefined;
+  onIntermediateProgress?: (chunk: Buffer) => void;
 }
 
 function rawSource(
@@ -113,18 +118,26 @@ function rawSource(
   };
 }
 
-function ffmpeg(args: string[], signal: AbortSignal, decode: boolean) {
+function ffmpeg(
+  args: string[],
+  signal: AbortSignal,
+  decode: boolean,
+  progress?: (chunk: Buffer) => void,
+) {
   const command = renderToolCommand(
     'ffmpeg',
     ['-v', 'error', '-nostdin', '-xerror', ...args],
     !decode,
   );
   const child = spawn(command.tool, command.args, {
-    stdio: decode ? ['ignore', 'pipe', 'pipe'] : ['pipe', 'ignore', 'pipe'],
+    stdio: decode
+      ? ['ignore', 'pipe', 'pipe']
+      : ['pipe', progress ? 'pipe' : 'ignore', 'pipe'],
     signal,
     killSignal: 'SIGKILL',
     windowsHide: true,
   });
+  if (progress) child.stdout!.on('data', progress);
   let diagnostics = '';
   child.stderr!.setEncoding('utf8').on('data', (chunk: string) => {
     diagnostics = (diagnostics + chunk).slice(-16384);
@@ -317,6 +330,9 @@ async function writeTransformLayer(
   const encoder = ffmpeg(
     [
       '-n',
+      ...(options.onIntermediateProgress
+        ? ['-progress', 'pipe:1', '-stats_period', '0.25']
+        : []),
       '-f',
       'rawvideo',
       '-pixel_format',
@@ -340,6 +356,7 @@ async function writeTransformLayer(
     ],
     signal,
     false,
+    options.onIntermediateProgress,
   );
 
   const decoder = media && ffmpeg(media.args, signal, true);
@@ -352,6 +369,7 @@ async function writeTransformLayer(
     const sourceCtx = media?.canvas.getContext('2d');
     let graphic: Image | Canvas | undefined;
     let graphicBytes: Buffer | undefined;
+    let staticTransform: Buffer | undefined;
     for (let i = 0; i < frameCount; i++) {
       signal.throwIfAborted();
       if (media && decoded && (!media.still || i === 0)) {
@@ -364,7 +382,8 @@ async function writeTransformLayer(
       }
       if (source.kind === 'graphic' && (!graphic || !source.still)) {
         const bytes = await source.rasterize(startFrame + i, signal);
-        if (bytes !== graphicBytes) {
+        if (bytes !== graphicBytes && !graphicBytes?.equals(bytes)) {
+          staticTransform = undefined;
           graphicBytes = bytes;
           const image = await loadImage(bytes);
           if (options.grade) {
@@ -377,6 +396,12 @@ async function writeTransformLayer(
             graphic = canvas;
           } else graphic = image;
         }
+      }
+      // An identical PNG under a constant transform produces the same
+      // immutable RGBA buffer. Avoid another full-resolution canvas readback.
+      if (staticTransform) {
+        yield staticTransform;
+        continue;
       }
       const sampled = evaluateVisual(
         visual,
@@ -422,7 +447,14 @@ async function writeTransformLayer(
       if (options.ramp)
         finishTransition(ctx, startFrame + i, options.ramp, width, height);
       const pixels = ctx.getImageData(0, 0, width, height).data;
-      yield Buffer.from(pixels.buffer, pixels.byteOffset, pixels.byteLength);
+      const frame = Buffer.from(
+        pixels.buffer,
+        pixels.byteOffset,
+        pixels.byteLength,
+      );
+      if (source.kind === 'graphic' && !animation && !options.ramp)
+        staticTransform = frame;
+      yield frame;
     }
     if (decoded && !(await decoded.next()).done)
       throw new MediaError('FFmpeg returned extra transform frames.');

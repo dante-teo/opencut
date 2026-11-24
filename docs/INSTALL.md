@@ -85,6 +85,11 @@ opencut models remove bandit-v2
 
 The Python runtime, model and user caches are managed separately from npm or Homebrew upgrades and uninstallations.
 
+For local transcription and corrected-text alignment, configure a Python
+environment and Qwen model directories. Check `ai.transcription` in
+`opencut doctor --json` for readiness.
+[Local transcription setup](CLI.md#local-transcription-and-corrected-timing)
+
 ## Release builds
 
 Build on Apple Silicon with the Node and pnpm versions pinned in the

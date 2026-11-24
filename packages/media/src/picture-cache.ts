@@ -47,6 +47,7 @@ interface CachePlan {
   outputWidth: number;
   outputHeight: number;
   warnings: string[];
+  textRasterKeys?: Map<string, string>;
   rasterize(
     clip: VisualTimelineClip & { text: TextLayer },
   ): Promise<TextRaster>;
@@ -79,6 +80,7 @@ export async function planPictureRanges({
   outputWidth,
   outputHeight,
   warnings,
+  textRasterKeys,
   rasterize,
 }: CachePlan) {
   const { width, height, frameRate, signal } = options;
@@ -100,6 +102,10 @@ export async function planPictureRanges({
         const { png, x, y, warning } = await rasterize(clip);
         if (warning) warnings.push(`Clip '${clip.clipId}': ${warning}`);
         sourceKey = png && [digest(png), x, y];
+        textRasterKeys?.set(
+          clip.clipId,
+          digest(JSON.stringify(sourceKey ?? null)),
+        );
       } else if (clip.graphic) {
         still = clip.graphic.durationFrames === undefined;
         sourceKey = clip.graphic.key;

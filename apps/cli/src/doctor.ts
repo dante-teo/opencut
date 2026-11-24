@@ -13,6 +13,7 @@ import {
   inspectRenderMemory,
   inspectVideoToolboxWorkers,
 } from '@opencut/media';
+import { inspectSpeechRuntime } from './transcript.js';
 import { inspectSystem } from './system.js';
 
 const exec = promisify(execFile);
@@ -66,16 +67,25 @@ export async function inspectReactGraphics() {
 }
 
 export async function doctor() {
-  const [ffmpeg, ffprobe, rssHelper, system, workers, dialogue, graphics] =
-    await Promise.all([
-      inspectExecutable('ffmpeg'),
-      inspectExecutable('ffprobe'),
-      inspectRenderMemory(),
-      inspectSystem(),
-      inspectVideoToolboxWorkers(),
-      inspectDialogueModel(),
-      inspectReactGraphics(),
-    ]);
+  const [
+    ffmpeg,
+    ffprobe,
+    rssHelper,
+    system,
+    workers,
+    dialogue,
+    graphics,
+    transcription,
+  ] = await Promise.all([
+    inspectExecutable('ffmpeg'),
+    inspectExecutable('ffprobe'),
+    inspectRenderMemory(),
+    inspectSystem(),
+    inspectVideoToolboxWorkers(),
+    inspectDialogueModel(),
+    inspectReactGraphics(),
+    inspectSpeechRuntime(),
+  ]);
   const { stdout } =
     ffmpeg.status === 'available'
       ? await exec(ffmpeg.path, ['-hide_banner', '-encoders'], options).catch(
@@ -124,6 +134,7 @@ export async function doctor() {
             : null,
       },
       dialogue,
+      transcription,
     },
   };
 }
@@ -145,6 +156,7 @@ export function formatDoctor(result: Awaited<ReturnType<typeof doctor>>) {
     'Default MP4 export: ' + (result.media.ready ? 'ready' : result.media.hint),
     'VideoToolbox: ' + result.system.videoToolbox.status,
     'Bandit v2 dialogue model: ' + result.ai.dialogue.model.status,
+    'Local speech backend: ' + result.ai.transcription.status,
     'React graphics: ' +
       result.graphics.status +
       ('hint' in result.graphics && result.graphics.hint
