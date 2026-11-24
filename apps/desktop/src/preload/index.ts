@@ -30,6 +30,9 @@ const api: DesktopAPI = {
   loadDialogueMix: () => ipcRenderer.invoke(DEFINITION_CHANNELS.loadMix),
   saveDialogueMix: (edit) =>
     ipcRenderer.invoke(DEFINITION_CHANNELS.saveMix, edit),
+  editMotion: (generation, edit) =>
+    ipcRenderer.invoke(DEFINITION_CHANNELS.motionEdit, generation, edit),
+  refreshDefinition: () => ipcRenderer.invoke(DEFINITION_CHANNELS.refresh),
   openDefinition: () => ipcRenderer.invoke(DEFINITION_CHANNELS.open),
   closeDefinition: () => ipcRenderer.invoke(DEFINITION_CHANNELS.close),
   onDefinitionChanged(callback) {

@@ -322,10 +322,43 @@ reused. The new encoded picture covers the whole export.
 
 ## React and SVG graphics
 
+Register and place React/Anime.js clips in the `.video.ts` project by editing
+its `assets` and `tracks`. Set declared asset `props` as parameter defaults
+and override them on individual clips. See the
+[Anime.js authoring and rendering workflow](GRAPHICS.md#animejs-motion-graphics).
+
+Use `timeline edit-graphic` to apply a data-only edit and write a new
+definition beside the original. The new definition resolves the selected
+`--params` variant and keeps the TSX and media paths editable. Choose a
+filename that is available in the same directory.
+
+For a local copy of the [Tideline example](../examples/motion/tideline/tideline.video.ts),
+save this as `graphic-edit.json` to split the overlay at project frame 154.
+
+```json
+{ "operation": "split", "clip": "tideline-overlay", "at": 154 }
+```
+
+```sh
+opencut timeline edit-graphic tideline.video.ts --edit graphic-edit.json --output tideline-split.video.ts --json
+```
+
+Use clip and asset IDs from the authored definition or timeline inspection.
+All times are whole project frames. For `change`, `sourceOut` is exclusive
+and `props` replaces the placement's overrides. Use one edit per JSON file.
+
+| Operation   | Fields                                                                                                                                                                                               |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `import`    | `at`, `duration`, `options` (set `seed` and `parameters` here), `props` defaults, optional `resources`. Supply `--component PATH` pointing to a TSX or JSX component under the definition directory. |
+| `add`       | `asset`, `at`. Places the registered composition on a new video track.                                                                                                                               |
+| `change`    | `clip`, `at`, `sourceIn`, `sourceOut`, `props`. Move, trim within the current source range, or replace per-clip overrides.                                                                           |
+| `duplicate` | `clip`, `at`. Copies the placement onto the same track with the same source window and parameters.                                                                                                   |
+| `split`     | `clip`, `at`. Splits at an interior project frame that leaves any attached transition whole.                                                                                                         |
+
 Use the regular `validate`, `preview`, `render`, and `package` commands for
 [graphics definitions](GRAPHICS.md). `validate --json` reports the optional
-browser status for React assets. `doctor --json` reports graphics availability
-and the pinned-runtime setup command. `--picture-cache` also retains reusable
+browser status for React assets. `doctor --json` reports the pinned Anime.js
+version, graphics availability, and the browser setup command. `--picture-cache` retains reusable
 graphic source frames.
 
 ## Check the installation

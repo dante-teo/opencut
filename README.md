@@ -37,6 +37,7 @@ details.
 ## Documentation
 
 - [Video-as-Code reference and runnable examples](docs/VIDEO_DEFINITIONS.md)
+- [React, SVG, and Anime.js motion graphics](docs/GRAPHICS.md#animejs-motion-graphics)
 - [Media preprocessing recipes](docs/VIDEO_DEFINITIONS.md#media-preprocessing-recipes)
 - [Architecture and compatibility](docs/ARCHITECTURE.md)
 - [CLI reference](docs/CLI.md)
@@ -49,4 +50,5 @@ details.
 OpenCut is available under the [MIT License](LICENSE). The bundled fonts
 retain their own SIL Open Font License notices for
 [Noto Sans SC](packages/media/fonts/OFL.txt) and
-[Noto Emoji](packages/media/fonts/OFL-NotoEmoji.txt).
+[Noto Emoji](packages/media/fonts/OFL-NotoEmoji.txt). See
+[Third-party notices](THIRD_PARTY_NOTICES) for the bundled Anime.js license.

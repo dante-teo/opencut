@@ -12,13 +12,22 @@ import {
 import iconPath from '../../resources/opencut-icon.png?asset';
 import { randomUUID } from 'node:crypto';
 import { readFile, stat, writeFile } from 'node:fs/promises';
-import { basename, isAbsolute, join, relative, resolve } from 'node:path';
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getApplicationInfo } from '@opencut/core';
 import {
   isVideoDefinitionPath,
+  motionEditSchema,
   musicSelectionSchema,
   renderCompiledVideo,
+  saveMotionDefinition,
   videoMixEditSchema,
 } from '@opencut/core/video';
 import { probeMedia } from '@opencut/media';
@@ -424,6 +433,86 @@ app
           generation,
           musicSelectionSchema.parse(selection),
         );
+      },
+    );
+    ipcMain.handle(DEFINITION_CHANNELS.refresh, (event, ...args: unknown[]) => {
+      assertSender(event);
+      if (args.length) throw new Error('Unexpected refresh arguments.');
+      definitionReview.refresh();
+    });
+    ipcMain.handle(
+      DEFINITION_CHANNELS.motionEdit,
+      async (event, ...args: unknown[]) => {
+        assertSender(event);
+        const [generation, input] = args;
+        if (
+          args.length !== 2 ||
+          typeof generation !== 'number' ||
+          !Number.isSafeInteger(generation) ||
+          generation < 1
+        )
+          throw new Error('Expected a preview generation and motion edit.');
+        if (
+          !mainWindow ||
+          openingPreview ||
+          selectingDefinition ||
+          definitionExport
+        )
+          return false;
+        const window = mainWindow;
+        const edit = motionEditSchema.parse(input);
+        let closed: AbortSignal | undefined;
+        selectingDefinition = true;
+        try {
+          const context = await definitionReview.prepareMotionEdit(
+            generation,
+            edit,
+          );
+          closed = context.closed;
+          const { path, signal } = context;
+          signal.throwIfAborted();
+          const folder = dirname(path);
+          let component: string | undefined;
+          if (edit.operation === 'import') {
+            const result = await dialog.showOpenDialog(window, {
+              title: 'Import React composition',
+              defaultPath: folder,
+              properties: ['openFile'],
+              filters: [
+                { name: 'React components', extensions: ['tsx', 'jsx'] },
+              ],
+            });
+            if (result.canceled || !result.filePaths[0]) return false;
+            signal.throwIfAborted();
+            assertSender(event);
+            component = result.filePaths[0];
+          }
+          const name = basename(path, '.video.ts');
+          const result = await dialog.showSaveDialog(window, {
+            title: 'Save motion graphics revision',
+            defaultPath: join(folder, name + '-edit.video.ts'),
+            filters: [{ name: 'Video definitions', extensions: ['ts'] }],
+          });
+          if (result.canceled || !result.filePath) return false;
+          signal.throwIfAborted();
+          assertSender(event);
+          const output = await definitionReview.exportRevision(
+            generation,
+            (video) =>
+              saveMotionDefinition(video, result.filePath, edit, {
+                component,
+                signal,
+              }),
+          );
+          signal.throwIfAborted();
+          definitionReview.open(output);
+          return true;
+        } catch (error) {
+          if (closed?.aborted) return false;
+          throw error;
+        } finally {
+          selectingDefinition = false;
+        }
       },
     );
     ipcMain.handle(

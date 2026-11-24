@@ -50,10 +50,11 @@ function copyBuild(from, to, matchSources = true) {
 function runtimeDependencies(manifest) {
   return new Map([
     ...Object.keys(manifest.dependencies ?? {}).map((name) => [name, false]),
-    ...Object.keys(manifest.peerDependencies ?? {}).map((name) => [
-      name,
-      !!manifest.peerDependenciesMeta?.[name]?.optional,
-    ]),
+    ...Object.keys(manifest.peerDependencies ?? {}).flatMap((name) => {
+      const optional = !!manifest.peerDependenciesMeta?.[name]?.optional;
+      // Optional declaration-only peers belong in authoring environments.
+      return optional && name.startsWith('@types/') ? [] : [[name, optional]];
+    }),
     ...Object.keys(manifest.optionalDependencies ?? {}).map((name) => [
       name,
       true,
@@ -151,5 +152,9 @@ export function stageRuntime(root, destination, app, appManifest) {
 
   copyBuild(app, destination, app.endsWith('/cli'));
   cpSync(join(root, 'LICENSE'), join(destination, 'LICENSE'));
+  cpSync(
+    join(root, 'THIRD_PARTY_NOTICES'),
+    join(destination, 'THIRD_PARTY_NOTICES'),
+  );
   return dependencies;
 }

@@ -79,6 +79,10 @@ async function executeCommand(
       const { runBatch } = await import('./video-batch.js');
       return runBatch(file, values);
     }
+    case 'timeline edit-graphic': {
+      const { runMotionEdit } = await import('./motion-edit.js');
+      return runMotionEdit(file, values);
+    }
     case 'preview':
     case 'timeline inspect':
     case 'preview frame':

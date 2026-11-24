@@ -1,5 +1,14 @@
 import { createRequire } from 'node:module';
-import { dirname, extname, join, relative, resolve } from 'node:path';
+import {
+  dirname,
+  extname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from 'node:path';
+import { realpath } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { context, version } from 'esbuild';
@@ -18,6 +27,21 @@ const sharedRuntime = fileURLToPath(import.meta.resolve('@opencut/shared'));
 const runtimeFile = (name: string) =>
   JSON.stringify(fileURLToPath(new URL(name, import.meta.url)));
 const templates = fileURLToPath(new URL('./templates.js', import.meta.url));
+const animeRuntime = fileURLToPath(import.meta.resolve('animejs'));
+const animeVersion = (
+  createRequire(import.meta.url)('animejs/package.json') as { version: string }
+).version;
+const graphicModules = {
+  react: reactHooks,
+  templates,
+  anime: fileURLToPath(new URL('./anime.js', import.meta.url)),
+} as const;
+
+function isWithin(root: string, file: string) {
+  const path = relative(root, file);
+  return path !== '..' && !path.startsWith('..' + sep) && !isAbsolute(path);
+}
+
 const runtime = createRequire(import.meta.url)(
   'playwright-core/package.json',
 ) as { version: string };
@@ -105,9 +129,44 @@ export async function compileReactGraphic(
   signal?: AbortSignal,
   missing?: (path: string) => void,
   builtin?: BuiltinGraphic,
+  animation?: { root: string; seed: number },
 ): Promise<ReactGraphicBundle> {
   signal?.throwIfAborted();
   const inputs = new Map<string, string>();
+  const project = animation && {
+    root: animation.root,
+    realRoot: await realpath(animation.root),
+  };
+  const runtimeRoots = project
+    ? [
+        dirname(browserRuntime),
+        dirname(sharedRuntime),
+        dirname(animeRuntime),
+        dirname(resolveRuntime('react')),
+        dirname(resolveRuntime('react-dom')),
+        dirname(
+          createRequire(resolveRuntime('react-dom')).resolve('scheduler'),
+        ),
+      ]
+    : [];
+  async function checkProjectFile(file: string) {
+    if (!project) return;
+    const path = relative(project.root, file);
+    const outsideProject = `Anime.js composition inputs must be local project files: '${file}'.`;
+    if (
+      !isWithin(project.root, file) ||
+      path.split(sep).includes('node_modules')
+    )
+      throw new Error(outsideProject);
+    const target = await realpath(file).catch((cause: unknown) => {
+      missing?.(file);
+      throw new Error(
+        `Missing or unreadable Anime.js composition input '${file}'.`,
+        { cause },
+      );
+    });
+    if (!isWithin(project.realRoot, target)) throw new Error(outsideProject);
+  }
   const snapshot = async (path: string, runtime?: boolean) => {
     const bytes = await read(path, runtime);
     inputs.set(path, createHash('sha256').update(bytes).digest('hex'));
@@ -118,12 +177,14 @@ export async function compileReactGraphic(
       Object.entries(resources).map(async ([id, file]) => {
         const type = mime[extname(file).toLowerCase()];
         if (!type) throw new Error(`Unsupported graphics resource '${file}'.`);
+        await checkProjectFile(file);
         const bytes = await snapshot(file);
         if (type === 'application/json') JSON.parse(bytes.toString('utf8'));
         return [id, `data:${type};base64,${bytes.toString('base64')}`];
       }),
     ),
   );
+  await checkProjectFile(path);
   const template =
     builtin?.kind === 'template'
       ? builtin.name
@@ -143,7 +204,9 @@ export async function compileReactGraphic(
         ${
           builtin
             ? builtinEntry(builtin)
-            : `import Component from ${JSON.stringify(path)}; installGraphic(Component);`
+            : animation
+              ? `import ${runtimeFile('./anime-clock.js')}; import Component from ${JSON.stringify(path)}; installGraphic(Component, true, ${animation.seed});`
+              : `import Component from ${JSON.stringify(path)}; installGraphic(Component);`
         }`,
       sourcefile: 'opencut-graphic-entry.js',
       resolveDir: directory,
@@ -201,10 +264,12 @@ export async function compileReactGraphic(
           plugin.onResolve(
             {
               filter:
-                /^(?:@opencut|@dantea\/opencut)\/graphics\/(react|templates)$/,
+                /^(?:@opencut|@dantea\/opencut)\/graphics\/(react|templates|anime)$/,
             },
             ({ path }) => ({
-              path: path.endsWith('/react') ? reactHooks : templates,
+              path: graphicModules[
+                path.split('/').at(-1) as keyof typeof graphicModules
+              ],
             }),
           );
           plugin.onResolve({ filter: /^@opencut\/shared$/ }, () => ({
@@ -216,19 +281,35 @@ export async function compileReactGraphic(
               path: resolveRuntime(path),
             }),
           );
+          if (project) {
+            plugin.onResolve({ filter: /^animejs$/ }, () => ({
+              path: animeRuntime,
+            }));
+            plugin.onResolve({ filter: /^[^./]/ }, ({ path, importer }) => {
+              if (runtimeRoots.some((root) => isWithin(root, importer))) return;
+              return {
+                errors: [
+                  {
+                    text: `'${path}' is not a supported Anime.js composition dependency.`,
+                  },
+                ],
+              };
+            });
+          }
           plugin.onLoad(
             { filter: /.*/, namespace: 'file' },
             async ({ path }) => {
               const loader = loaders[extname(path).toLowerCase()];
               if (!loader)
                 throw new Error(`Unsupported graphics import '${path}'.`);
+              const trusted = project
+                ? runtimeRoots.some((root) => isWithin(root, path))
+                : dirname(path) === dirname(browserRuntime) ||
+                  dirname(path) === dirname(sharedRuntime) ||
+                  path.split(/[\\/]/).includes('node_modules');
+              if (!trusted) await checkProjectFile(path);
               return {
-                contents: await snapshot(
-                  path,
-                  dirname(path) === dirname(browserRuntime) ||
-                    dirname(path) === dirname(sharedRuntime) ||
-                    path.split(/[\\/]/).includes('node_modules'),
-                ),
+                contents: await snapshot(path, trusted),
                 loader,
                 resolveDir: dirname(path),
               };
@@ -295,6 +376,7 @@ export async function compileReactGraphic(
         sourceMap,
         template,
         adapter,
+        ...(animation ? ['anime', animeVersion, animation.seed] : []),
         captured,
       ]),
     )
@@ -319,23 +401,26 @@ const adapters = {
 } as const;
 
 export function adapterVersions() {
-  return Object.fromEntries(
-    Object.entries(adapters).map(([id, [name, version]]) => {
-      try {
-        resolveRuntime(name);
-        return [id, { version, status: 'available' }];
-      } catch {
-        return [
-          id,
-          {
-            version,
-            status: 'missing',
-            hint: `Install OpenCut with optional ${name}@${version}.`,
-          },
-        ];
-      }
-    }),
-  );
+  return {
+    anime: { version: animeVersion, status: 'available' },
+    ...Object.fromEntries(
+      Object.entries(adapters).map(([id, [name, version]]) => {
+        try {
+          resolveRuntime(name);
+          return [id, { version, status: 'available' }];
+        } catch {
+          return [
+            id,
+            {
+              version,
+              status: 'missing',
+              hint: `Install OpenCut with optional ${name}@${version}.`,
+            },
+          ];
+        }
+      }),
+    ),
+  };
 }
 
 function assertAdapterInstalled(adapter: keyof typeof adapters) {

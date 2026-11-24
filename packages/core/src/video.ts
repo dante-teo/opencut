@@ -165,3 +165,12 @@ export {
   videoGraphicsCapabilities,
   videoGraphicsSchemas,
 } from './graphics-inspection.js';
+
+export {
+  describeMotionGraphics,
+  editMotionDefinition,
+  motionEditSchema,
+  saveMotionDefinition,
+  validateMotionSplit,
+} from './video-motion-edit.js';
+export type { MotionEdit, MotionGraphics } from './video-motion-edit.js';

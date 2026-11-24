@@ -38,6 +38,8 @@ const optionTypes = {
   timestamps: { type: 'string' },
   around: { type: 'string' },
   definition: { type: 'string' },
+  edit: { type: 'string' },
+  component: { type: 'string' },
   'render-report': { type: 'string' },
   against: { type: 'string' },
   boundaries: { type: 'string' },
@@ -129,6 +131,10 @@ const commands = {
   'recipes validate': {
     args: `${definition} ${qualityOption} ${params}`,
     options: ['quality', 'params'],
+  },
+  'timeline edit-graphic': {
+    args: `${definition} --edit <edit.json> --output <new.video.ts> [--component <component.tsx>] ${params}`,
+    options: ['edit', 'output', 'component', 'params'],
   },
   'timeline inspect': {
     args: `${definition} ${position} ${qualityOption} ${params}`,

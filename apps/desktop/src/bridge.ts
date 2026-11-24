@@ -2,6 +2,8 @@ import type { ApplicationInfo, Project } from '@opencut/core';
 import type {
   AudioMixReport,
   MusicSelection,
+  MotionEdit,
+  MotionGraphics,
   VideoMixEdit,
   describeMusicComparison,
 } from '@opencut/core/video';
@@ -19,6 +21,8 @@ export const DEFINITION_CHANNELS = {
   changed: 'definition:changed',
   export: 'definition:export',
   cancelExport: 'definition:cancel-export',
+  motionEdit: 'definition:motion-edit',
+  refresh: 'definition:refresh',
   progress: 'definition:progress',
 } as const;
 
@@ -33,6 +37,7 @@ export interface DefinitionReview {
     dialogueMixRevision: string;
     project: Project;
     frameCount: number;
+    motionGraphics: MotionGraphics;
     audioMix?: AudioMixReport;
     musicComparison?: NonNullable<ReturnType<typeof describeMusicComparison>>;
     url: string;
@@ -66,6 +71,8 @@ export interface DesktopAPI {
   cancelDefinitionExport(): Promise<void>;
   onDefinitionExportProgress(callback: (percent: number) => void): () => void;
   openDefinition(): Promise<void>;
+  editMotion(generation: number, edit: MotionEdit): Promise<boolean>;
+  refreshDefinition(): Promise<void>;
   createDialogueMix(): Promise<void>;
   applyDialogueMix(
     generation: number,

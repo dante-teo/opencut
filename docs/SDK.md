@@ -185,6 +185,18 @@ hard links to publish the completed PNG atomically.
 
 ## React and SVG graphics
 
+Use `describeMotionGraphics(video)` to list Anime.js assets, exposed
+parameters and clip ranges. A clip's optional `splitLimits.earliest` and
+`splitLimits.latest` are inclusive project frames set by its transitions.
+A split point also needs to sit inside the clip.
+
+`editMotionDefinition(video, edit, newId)` returns a resolved definition.
+For an import, pass `{ path, name }` as its fourth argument and make the
+path relative to the definition. `saveMotionDefinition(video, output, edit)`
+validates the revision and writes a new file beside the source. Its options
+accept `component` for the TSX or JSX import path and `signal` to cancel a
+pending save. See [the edit operations](CLI.md#react-and-svg-graphics).
+
 `VideoDefinition` accepts `GraphicAssetDefinition` on video tracks. Declare
 React props at the asset and override them at the placement. The SDK exports
 `GraphicAssetDefinition` and `GraphicProps` for typed helpers. `compileVideo`,

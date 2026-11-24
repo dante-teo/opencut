@@ -18,6 +18,7 @@ import type {
 import {
   graphicSurface,
   resolveGraphicProps,
+  validateAnimationProps,
 } from './video-graphics-contract.js';
 import type {
   GraphicAssetDefinition,
@@ -81,12 +82,18 @@ export async function compileVideoGraphics(
     overrides?: GraphicProps,
   ) => {
     const source = graphics.get(id);
-    if (source?.bundle.renderer !== 'react' || !source.bundle.template) return;
+    if (source?.bundle.renderer !== 'react') return;
+    const asset = assets[id];
+    const props = resolveGraphicProps(source.react?.props, overrides);
     try {
-      await validateGraphicTemplate(
-        source.bundle.template,
-        resolveGraphicProps(source.react?.props, overrides),
-      );
+      if (
+        asset?.kind === 'graphic' &&
+        asset.renderer === 'react' &&
+        asset.animation
+      )
+        validateAnimationProps(asset.animation.parameters ?? {}, props);
+      if (source.bundle.template)
+        await validateGraphicTemplate(source.bundle.template, props);
     } catch (cause) {
       throw new VideoDefinitionError(
         `${location}.props: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -375,12 +382,23 @@ export async function compileGraphic(
       signal,
       record && ((file) => record(identifyVideoInput(file, 'graphic'))),
       builtin,
+      definition.renderer === 'react' && definition.animation
+        ? { root: directory, seed: definition.animation.seed ?? 0 }
+        : undefined,
     );
     return { ...bundle, renderer: 'react' };
   }
 
   try {
     const { width, height } = graphicSurface(definition, canvas);
+    if (
+      definition.renderer === 'react' &&
+      definition.animation &&
+      (definition.sampling || definition.motionBlur)
+    )
+      throw new Error(
+        'Anime.js compositions sample whole source frames. Exact sampling and motion blur are unavailable.',
+      );
     const exact =
       definition.renderer === 'scene' ||
       definition.renderer === 'three' ||

@@ -85,7 +85,7 @@ async function packCli() {
   const { manifest, path, dependencies } = stage('cli');
   const adapters = ['sdk'];
   if (dependencies['@opencut/graphics'])
-    adapters.push('graphics/react', 'graphics/templates');
+    adapters.push('graphics/react', 'graphics/anime', 'graphics/templates');
   const exports = Object.fromEntries(
     adapters.map((name) => {
       const base = './dist/' + name.replace('/', '-');
@@ -142,7 +142,7 @@ async function packCli() {
     cpu: ['arm64'],
     bin: manifest.bin,
     exports,
-    files: ['dist', 'docs', 'skills', 'examples'],
+    files: ['dist', 'docs', 'skills', 'examples', 'THIRD_PARTY_NOTICES'],
     dependencies,
     bundledDependencies: Object.keys(dependencies),
     publishConfig: { access: 'public' },

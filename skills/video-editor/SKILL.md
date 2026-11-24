@@ -1,6 +1,6 @@
 ---
 name: video-editor
-description: Create, revise, preview and render complete videos headlessly from TypeScript with the installed OpenCut CLI and SDK.
+description: Create, revise, preview and render videos in OpenCut with TypeScript. Includes editable React/TSX, SVG and Anime.js v4 motion graphics, kinetic typography, animated captions, diagrams, charts, transitions, ordinary media and audio.
 ---
 
 On Apple Silicon with macOS 15 or later, see the
@@ -15,6 +15,60 @@ Default-export a value from `defineVideo` in a `.video.ts` file. Import
 `defineVideo` from `@opencut/sdk`. Use `opencut convert name.video.json` to
 migrate a legacy composition to a `.video.ts` file beside the resolved JSON source.
 Run `opencut --help` to discover commands and `opencut render --help` for export controls.
+
+## Choose graphics when the video calls for them
+
+OpenCut can author and render custom **React/TSX, HTML, CSS, SVG, and Anime.js v4**
+compositions as editable, transparent clips. Reach for this when the brief asks
+for kinetic type, animated captions, SVG path drawing or morphs, coordinated
+scene transitions, product diagrams, infographics, or a distinctive motion
+identity. A declarative scene or template is a simpler fit for standard graphics.
+For an ordinary footage edit, follow the media workflow below.
+
+- Decide what the viewer should notice in each beat. Mark the entrance, the
+  moment the idea becomes clear, and the handoff to the next beat. Leave words
+  on screen long enough to read at the smallest intended viewing size.
+- Give the main subject the clearest movement. Stagger supporting elements
+  in the order they should be read, and give related elements a shared rhythm.
+  Ease into a resting pose. Use spring overshoot when it suits the subject.
+- Carry a shape, direction, or color between scenes so the transition connects
+  the ideas. Time important changes to a spoken phrase or an audio cue when
+  the cut has one. In Tideline, a drawn wave introduces the tide, a contour
+  gives the swell a shape, and a rotating needle brings the focus to rhythm.
+
+1. Put the default-exported TSX component beside the project or in a subfolder.
+   Declare an asset with `kind: 'graphic'`, `renderer: 'react'`, the TSX `path`,
+   `durationFrames` and `animation: { version: 1, seed, parameters }`.
+   Set asset `props` as defaults and clip `props` for each placement. Declare
+   local images and fonts in `resources`. Put soundtrack material on audio tracks.
+2. Register animation with `useGraphicTimeline(ref, build)` from
+   `@opencut/graphics/anime` (installed CLI:
+   `@dantea/opencut/graphics/anime`). Use Anime.js `stagger`, `createSpring`
+   and `svg` helpers with explicit initial and target values. OpenCut builds
+   and seeks the paused timeline for each source frame. Drive visual state
+   from that clock. Use stable-ID randomness and scoped SVG IDs.
+3. Place it on a video track with `asset`, `at`, optional `sourceIn` and
+   exclusive `sourceOut`. The graphic can appear over video, stills or other
+   graphics and keeps its alpha. Set clip transforms with `visual` and
+   `keyframes`. Edit timing and props in the definition or with
+   `opencut timeline edit-graphic` and a
+   [JSON edit](../../docs/CLI.md#react-and-svg-graphics). Use whole project
+   frames and split where any attached transitions can stay whole.
+4. Run `opencut doctor --json` for the pinned Chromium prerequisite,
+   `opencut validate DEFINITION --json` for code and parameter validation,
+   and `opencut preview frame DEFINITION --frame N --quality quality --output frame.png`.
+   Check the clip's first and final visible samples and both sides of motion
+   boundaries. Use
+   `opencut preview clip DEFINITION --from START --to END --output motion-review.mp4`
+   to review a beat or transition in motion with the audio. Check where the
+   eye goes, whether text has time to read, and how the next scene arrives.
+   Adjust the timing and play the revision before rendering with
+   `opencut render DEFINITION --output final.mp4`.
+   Keep the editable TSX and assets with the definition and package them if needed.
+   See the [Anime.js authoring API](../../docs/GRAPHICS.md#animejs-motion-graphics)
+   and [runnable Tideline example](../../examples/motion/tideline/tideline.video.ts).
+
+## Edit and deliver
 
 1. Probe inputs with `opencut probe FILE --json`. Reference media paths
    relative to the definition. Keep original media intact. Use ordered asset
@@ -95,7 +149,7 @@ with `audioRole: 'dialogue'`, `'music'` or `'other'` and enable
 for editable curves and a loudness report before encoding picture. See the
 [mix definition, delivery presets and offline AI options](../../docs/AUDIO_MIX.md).
 
-For a new motion graphic, declare a version 3 scene directly in the
+For declarative motion graphics, declare a version 3 scene directly in the
 definition. Choose a preset or add primitives with stable node IDs. Give
 text explicit pixel bounds and an overflow policy. Set motion in local
 source frames. Use the timeline inspector to check the resolved sample,

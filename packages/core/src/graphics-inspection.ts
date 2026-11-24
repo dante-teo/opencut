@@ -9,7 +9,10 @@ import { threeSceneSchema } from './graphic-adapter-inputs.js';
 import { visualGroupsSchema } from './visual-groups.js';
 import { graphicSceneSchema, sceneLimits } from './graphic-scene-schema.js';
 import { graphicScenePresets, presetSceneSchema } from './scene-presets.js';
-import { graphicTemplates } from './video-graphics-contract.js';
+import {
+  graphicAnimationSchema,
+  graphicTemplates,
+} from './video-graphics-contract.js';
 import { graphicFrameSamples } from './graphic-sampling.js';
 import type { CompiledVideo } from './video-compiler.js';
 
@@ -28,6 +31,12 @@ export const videoGraphicsCapabilities = {
       version: 2,
       requirements: ['pinned Chromium Headless Shell'],
       trustedCode: true,
+    },
+    anime: {
+      version: 1,
+      requirements: ['pinned Chromium Headless Shell', 'Anime.js 4.5.0'],
+      sampling: 'source-frames',
+      normalSpeedOnly: true,
     },
     scene: { version: 1, requirements: ['pinned Chromium Headless Shell'] },
     lottie: {
@@ -86,6 +95,7 @@ export const videoGraphicsCapabilities = {
 export function videoGraphicsSchemas() {
   const options = { cycles: 'ref', unrepresentable: 'any' } as const;
   return {
+    anime: z.toJSONSchema(graphicAnimationSchema, options),
     scene: z.toJSONSchema(graphicSceneSchema, options),
     preset: z.toJSONSchema(presetSceneSchema, options),
     three: z.toJSONSchema(threeSceneSchema, options),

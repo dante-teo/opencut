@@ -1,4 +1,5 @@
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useId } from 'react';
+import { seededVariation } from '@opencut/shared';
 import type { GraphicAudioSample } from '@opencut/shared';
 
 export interface GraphicTiming {
@@ -16,10 +17,11 @@ export const graphicContext = createContext<{
   timing: GraphicTiming;
   resources: Record<string, string>;
   readiness: Promise<unknown>[];
+  animation?: { seed: number; prepare: (() => void)[] } | undefined;
   audio?: GraphicAudioSample | undefined;
 } | null>(null);
 
-function useGraphicContext() {
+export function useGraphicContext() {
   const value = useContext(graphicContext);
   if (!value) throw new Error('Graphics hooks require an OpenCut graphic.');
   return value;
@@ -84,4 +86,17 @@ export function graphicProgress(frame: number, start: number, end: number) {
   if (end <= start) return frame >= end ? 1 : 0;
   const t = Math.max(0, Math.min(1, (frame - start) / (end - start)));
   return t * t * (3 - 2 * t);
+}
+
+/** A repeatable 0–1 sample for a stable author-provided identifier. */
+export function useGraphicRandom() {
+  const { animation } = useGraphicContext();
+  if (!animation)
+    throw new Error('useGraphicRandom requires animation: { version: 1 }.');
+  return (id: string) => seededVariation(animation.seed, id);
+}
+
+/** Use the same returned ID in an SVG definition and its fragment references. */
+export function useGraphicSvgId() {
+  return 'opencut-' + useId().replace(/[^a-zA-Z0-9_-]/g, '-');
 }

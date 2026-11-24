@@ -21,6 +21,8 @@ export interface VisualKeyframe {
   easing: KeyframeEasing;
   /** Subdomain of the outgoing easing curve retained by a split or trim. */
   curve?: [number, number] | undefined;
+  /** Unclamped curve sample at a trim or split boundary. */
+  curveValue?: number | undefined;
   /** Original value delta for trimming a nonmonotonic curve. */
   curveAmplitude?: number | undefined;
 }
@@ -48,6 +50,15 @@ export const visualRanges = {
   opacity: [0, 1],
 } as const;
 
+export function clampVisualValue(property: AnimatedProperty, value: number) {
+  const [min, max] = visualRanges[property];
+  return Math.max(min, Math.min(max, value));
+}
+
+function curveValue(key: VisualKeyframe) {
+  return key.curveValue ?? key.value;
+}
+
 export function maximumVisualScale(
   visual: VisualTransform,
   keyframes?: VisualKeyframes,
@@ -64,13 +75,15 @@ export function maximumVisualScale(
     const from = ease(start, left.easing);
     const to = ease(end, left.easing);
     const [lo, hi] = easingBounds(left.easing);
-    const delta = right.value - left.value;
+    const startValue = curveValue(left);
+    const endValue = curveValue(right);
+    const delta = endValue - startValue;
     const amplitude =
       left.curveAmplitude ?? (to === from ? 0 : delta / (to - from));
     // Bound the eased and affine terms independently. Full-range keys
     // cancel the affine term so ordinary springs get a tighter bound.
-    const affineStart = left.value - amplitude * from;
-    const affineEnd = right.value - amplitude * to;
+    const affineStart = startValue - amplitude * from;
+    const affineEnd = endValue - amplitude * to;
     maximum = Math.max(
       maximum,
       Math.max(affineStart, affineEnd) +
@@ -147,10 +160,12 @@ export function sampleKeyframes(
     if (relative(keys[mid]!.time) >= 0n) lo = mid + 1;
     else hi = mid;
   }
-  if (lo === 0) return keys[0]!.value;
+  if (lo === 0) return curveValue(keys[0]!);
   const left = keys[lo - 1]!;
+  const startValue = curveValue(left);
   const right = keys[lo];
-  if (!right) return left.value;
+  if (!right) return startValue;
+  const endValue = curveValue(right);
   const span = difference(right.time, left.time);
   const t =
     Number(relative(left.time) * BigInt(right.time.denominator)) /
@@ -163,21 +178,16 @@ export function sampleKeyframes(
     const amplitude = left.curveAmplitude;
     if (amplitude !== undefined)
       return (
-        lerp(left.value, right.value, t) +
-        amplitude * (progress - lerp(a, b, t))
+        lerp(startValue, endValue, t) + amplitude * (progress - lerp(a, b, t))
       );
-    return lerp(
-      left.value,
-      right.value,
-      a === b ? t : (progress - a) / (b - a),
-    );
+    return lerp(startValue, endValue, a === b ? t : (progress - a) / (b - a));
   }
-  if (left.value === right.value) return left.value;
+  if (startValue === endValue) return startValue;
   const progress = easingProgress(left.easing, t, left.curve ?? [0, 1]);
-  const value = left.value + (right.value - left.value) * progress;
+  const value = lerp(startValue, endValue, progress);
   return Math.max(
-    Math.min(left.value, right.value),
-    Math.min(Math.max(left.value, right.value), value),
+    Math.min(startValue, endValue),
+    Math.min(Math.max(startValue, endValue), value),
   );
 }
 
@@ -192,13 +202,11 @@ export function evaluateVisual<T extends VisualTransform>(
   const result = { ...visual };
   for (const property of animatedProperties) {
     const keys = keyframes[property];
-    if (keys?.length) {
-      const [min, max] = visualRanges[property];
-      result[property] = Math.max(
-        min,
-        Math.min(max, sampleKeyframes(keys, time, start)),
+    if (keys?.length)
+      result[property] = clampVisualValue(
+        property,
+        sampleKeyframes(keys, time, start),
       );
-    }
   }
   return result;
 }

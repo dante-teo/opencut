@@ -1,12 +1,23 @@
 import { randomUUID } from 'node:crypto';
-import { describeMusicComparison, watchVideo } from '@opencut/core/video';
-import type { MusicSelection, VideoMixEdit } from '@opencut/core/video';
+import {
+  describeMotionGraphics,
+  describeMusicComparison,
+  validateMotionSplit,
+  watchVideo,
+} from '@opencut/core/video';
+import type {
+  MotionEdit,
+  MusicSelection,
+  VideoMixEdit,
+} from '@opencut/core/video';
 import type { DefinitionReview } from '../bridge.js';
 
 export class DefinitionReviewSession {
   private controller: AbortController | undefined;
   private work: Promise<void> = Promise.resolve();
   private watcher: Awaited<ReturnType<typeof watchVideo>> | undefined;
+  private motionRevision:
+    { generation: number; controller: AbortController } | undefined;
   private media: { url: string; path: string } | undefined;
 
   constructor(
@@ -21,6 +32,7 @@ export class DefinitionReviewSession {
     this.controller?.abort();
     this.media = undefined;
     this.watcher = undefined;
+    this.motionRevision = undefined;
     const controller = new AbortController();
     this.controller = controller;
     this.send({ path, generation: 0, status: 'compiling', current: null });
@@ -32,6 +44,17 @@ export class DefinitionReviewSession {
           signal: controller.signal,
           onStatus: ({ current, ...status }) => {
             if (controller.signal.aborted) return;
+            const generation =
+              status.status === 'ready' ? current?.generation : undefined;
+            if (this.motionRevision?.generation !== generation) {
+              this.motionRevision?.controller.abort(
+                new Error('The preview changed. Start the motion edit again.'),
+              );
+              this.motionRevision =
+                generation === undefined
+                  ? undefined
+                  : { generation, controller: new AbortController() };
+            }
             if (current && ready?.generation !== current.generation) {
               const url =
                 this.media?.path === current.playback.path
@@ -47,6 +70,7 @@ export class DefinitionReviewSession {
                 dialogueMixRevision: current.dialogueMixRevision,
                 project: current.video.project,
                 frameCount: current.video.frameCount,
+                motionGraphics: describeMotionGraphics(current.video),
                 ...(current.playback.audioMix && {
                   audioMix: current.playback.audioMix,
                 }),
@@ -122,11 +146,31 @@ export class DefinitionReviewSession {
     return this.watcher.withCurrent(generation, run);
   }
 
+  prepareMotionEdit(generation: number, edit: MotionEdit) {
+    const session = this.controller;
+    const revision = this.motionRevision;
+    if (!session || revision?.generation !== generation)
+      throw new Error('The preview changed. Start the motion edit again.');
+    const closed = session.signal;
+    const signal = AbortSignal.any([closed, revision.controller.signal]);
+    return this.exportRevision(generation, async (video) => {
+      signal.throwIfAborted();
+      if (edit.operation === 'split')
+        validateMotionSplit(video, edit.clip, edit.at);
+      return { path: video.path, closed, signal };
+    });
+  }
+
+  refresh() {
+    this.watcher?.refresh();
+  }
+
   close() {
     this.controller?.abort();
     this.controller = undefined;
     this.media = undefined;
     this.watcher = undefined;
+    this.motionRevision = undefined;
     this.send(null);
     return this.work;
   }

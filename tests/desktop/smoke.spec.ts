@@ -25,6 +25,8 @@ test('built desktop displays React through the sandboxed bridge', async () => {
       'selectMusic',
       'loadDialogueMix',
       'saveDialogueMix',
+      'editMotion',
+      'refreshDefinition',
       'openDefinition',
       'closeDefinition',
       'onDefinitionChanged',

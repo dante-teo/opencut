@@ -37,6 +37,7 @@ import type {
 import { identifyVideoInput, videoInputIdentity } from './video-input.js';
 import type { RecordVideoInput, VideoInput } from './video-input.js';
 import { graphicLayer } from './video-graphics.js';
+import { graphicFrameIndex } from './video-graphics-contract.js';
 import type { CompiledGraphics } from './video-graphics.js';
 import type { VideoBuild } from './video-files.js';
 import { checkpointQualityCompilation } from './video-build.js';
@@ -89,6 +90,7 @@ export interface CompiledVideo {
   readonly build?: VideoBuild;
   /** A deeply frozen project snapshot. */
   readonly project: Project;
+  readonly definition: ParsedVideoDefinition;
   readonly frameCount: number;
   readonly layoutAssertions?: ParsedVideoDefinition['layoutAssertions'];
   readonly recipes: readonly VideoRecipeInspection[];
@@ -269,6 +271,7 @@ export async function compileDefinition(
     path,
     ...(build && { build: freeze(build) }),
     project: freeze(project),
+    definition,
     ...(audioMixEdit && { audioMixEdit }),
     frameCount: renderPlan.frameCount,
     ...(definition.layoutAssertions?.length && {
@@ -442,6 +445,24 @@ async function buildProject(
         throw new VideoDefinitionError(
           `${location}.props: Only React graphics and templates accept placement props.`,
         );
+      if (
+        asset?.kind === 'graphic' &&
+        asset.renderer === 'react' &&
+        asset.animation
+      ) {
+        if (clip.speed && clip.speed.numerator !== clip.speed.denominator)
+          throw new VideoDefinitionError(
+            `${location}.speed: Anime.js compositions support normal speed only.`,
+          );
+        try {
+          graphicFrameIndex(clip.at, frameRate);
+          graphicFrameIndex(clip.sourceIn ?? 0, frameRate);
+          if (clip.sourceOut !== undefined)
+            graphicFrameIndex(clip.sourceOut, frameRate);
+        } catch (cause) {
+          throw definitionLoadError(location, cause);
+        }
+      }
       if (
         asset?.kind === 'graphic' &&
         (type !== 'video' ||

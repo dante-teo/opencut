@@ -106,9 +106,9 @@ for definitions using [React or SVG graphics](GRAPHICS.md). The optional top-lev
   `rotation` and `opacity`. Media accepts `fit`, `sourceWindow` in source pixels, and fractional `crop` insets.
   `keyframes` maps x, y, scale, rotation and opacity to arrays of
   `{ time, value, easing }` using the [easing rules](#visual-keyframe-easing).
-  Key times are rational seconds from the clip's timeline start. Changing a
-  source in point or speed leaves those offsets intact. Keys must fit within
-  the resulting playback duration.
+  Key times are rational seconds from the clip's timeline start. Editing only
+  the source in point or speed in the definition leaves those offsets intact.
+  Keys must fit within the resulting playback duration.
 - Media grading takes all six fields in
   `grade: { exposure: 0, temperature: 0, tint: 0, contrast: 1, saturation: 1, curve: [] }`.
   That example is neutral. Contrast and saturation range from 0 to 3.
@@ -192,10 +192,19 @@ Times extend from zero through the clip's duration, inclusive. The nearest
 key holds outside the channel's key span. Rotation interpolates the specified
 numbers directly, so 0 to 360 is one clockwise turn.
 
-A key's easing applies to the segment that follows it. Use `linear`,
-`ease-in`, `ease-out`, or `ease-in-out` for quadratic easing. An optional
-`curve: [from, to]` selects a strictly increasing subrange of `[0, 1]`.
-Sampling renormalizes the easing within that subrange.
+A key's easing applies to the segment that follows it. Use `linear` for a
+constant rate of change. The named `ease-in`, `ease-out`, and `ease-in-out`
+curves use quadratic easing. For a custom curve, use
+`{ type: 'cubic-bezier', x1, y1, x2, y2 }` or
+`{ type: 'spring', mass, stiffness, damping, duration }`. Spring duration
+sets the simulated interval in seconds. Property limits apply after sampling.
+
+An optional `curve: [from, to]` selects a strictly increasing subrange of
+`[0, 1]`. A saved [motion-graphics trim or split](CLI.md#react-and-svg-graphics)
+may include `curveAmplitude` to retain the shape of the easing segment and
+`curveValue` to retain an unclamped sample at a new keyframe. For example, a
+spring can pass above opacity `1` while the visible opacity stays at `1`.
+Keep these fields when copying edited keyframes to preserve that motion.
 
 ### Evaluation order
 

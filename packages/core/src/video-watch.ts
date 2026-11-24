@@ -447,5 +447,12 @@ export async function watchVideo(file: string, options: VideoWatchOptions) {
     schedule();
   }
 
-  return { path, close, withCurrent, setAudioMix, selectMusic };
+  return {
+    path,
+    close,
+    withCurrent,
+    setAudioMix,
+    selectMusic,
+    refresh: schedule,
+  };
 }

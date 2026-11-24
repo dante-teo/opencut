@@ -1,22 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { frameTime } from '@opencut/core';
 import type { DefinitionReview } from '../bridge.js';
-import type { MusicSelection } from '@opencut/core/video';
+import type { MotionEdit, MusicSelection } from '@opencut/core/video';
+import { MotionGraphics } from './motion-graphics.js';
 import { ProjectTimeline } from './project-timeline.js';
 import { DialogueMix } from './dialogue-mix.js';
 import { frameIndex } from './timeline-geometry.js';
 
 function DefinitionPlayback({
   revision,
+  disabled,
+  initialTime,
+  saveMotion,
 }: {
+  disabled: boolean;
+  initialTime: number;
+  saveMotion: (edit: MotionEdit, time: number) => Promise<boolean>;
   revision: NonNullable<DefinitionReview['current']>;
 }) {
   const { project, url, frameCount } = revision;
   const rate = project.settings.frameRate;
   const fps = rate.numerator / rate.denominator;
   const player = useRef<HTMLVideoElement>(null);
-  const resumeTime = useRef(0);
-  const [time, setTime] = useState(0);
+  const resumeTime = useRef(initialTime);
+  const [time, setTime] = useState(initialTime);
   const [selection, setSelection] = useState<string | null>(null);
   const attachPlayer = useCallback((video: HTMLVideoElement | null) => {
     if (!video) return;
@@ -79,6 +86,14 @@ function DefinitionPlayback({
           </button>
         </div>
       </section>
+      <MotionGraphics
+        generation={revision.generation}
+        onEdit={(edit) => saveMotion(edit, time)}
+        graphics={revision.motionGraphics}
+        selected={selection}
+        playhead={frame}
+        disabled={disabled}
+      />
       <ProjectTimeline
         project={project}
         selected={selection}
@@ -104,6 +119,7 @@ export function DefinitionWorkspace({
   onClose: () => void;
 }) {
   const { current, status } = state;
+  const resumeTime = useRef(0);
   const [progress, setProgress] = useState<number | null>(null);
   const [feedback, setFeedback] = useState<{
     error?: string;
@@ -154,8 +170,20 @@ export function DefinitionWorkspace({
           <span title={state.path}>{state.path.split(/[/\\]/).at(-1)}</span>
         </div>
         <div className="project-actions">
-          <button onClick={onOpen} disabled={progress !== null}>
+          <button
+            onClick={() => {
+              resumeTime.current = 0;
+              onOpen();
+            }}
+            disabled={progress !== null}
+          >
             Open definition
+          </button>
+          <button
+            onClick={() => void window.opencut.refreshDefinition()}
+            disabled={progress !== null}
+          >
+            Refresh source
           </button>
           <button onClick={onClose} disabled={progress !== null}>
             Close definition
@@ -243,6 +271,12 @@ export function DefinitionWorkspace({
             </div>
           )}
           <DefinitionPlayback
+            initialTime={resumeTime.current}
+            saveMotion={(edit, time) => {
+              resumeTime.current = time;
+              return window.opencut.editMotion(current.generation, edit);
+            }}
+            disabled={status !== 'ready' || progress !== null}
             key={`${state.path}:playback`}
             revision={current}
           />

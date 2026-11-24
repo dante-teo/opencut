@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { timeSchema } from './time.js';
+import type { FrameRate, RationalTime } from './time.js';
 import { audioAnalysisSchema } from './graphic-audio-schema.js';
 import { presetSceneSchema } from './scene-presets.js';
 import { graphicSceneSchema } from './graphic-scene-schema.js';
@@ -50,6 +51,36 @@ const durationFrames = z.int().positive();
 const fixedSampling = { motionBlur: motionBlur.optional() };
 const animatedGraphic = graphicLocation.extend({ durationFrames, resources });
 
+const animationParameters = z.record(
+  entityIdSchema,
+  z.enum(['string', 'number', 'boolean', 'json']),
+);
+
+export const graphicAnimationSchema = z.strictObject({
+  version: z.literal(1),
+  seed: z.int().nonnegative().max(0xffffffff).optional(),
+  parameters: animationParameters.optional(),
+});
+
+export function validateAnimationProps(
+  parameters: z.output<typeof animationParameters>,
+  props: GraphicProps,
+) {
+  for (const key of Object.keys(props)) {
+    if (!Object.hasOwn(parameters, key))
+      throw new Error(`Unknown parameter '${key}'.`);
+  }
+  for (const [key, type] of Object.entries(parameters)) {
+    if (
+      !Object.hasOwn(props, key) ||
+      (type !== 'json' && typeof props[key] !== type)
+    )
+      throw new Error(
+        `Parameter '${key}' requires a default and must be a ${type} value.`,
+      );
+  }
+}
+
 export const graphicAssetSchema = z.discriminatedUnion('renderer', [
   graphicLocation.extend({
     renderer: z.literal('svg'),
@@ -81,6 +112,7 @@ export const graphicAssetSchema = z.discriminatedUnion('renderer', [
     props: graphicPropsSchema.optional(),
     resources,
     ...exactGraphicSampling,
+    animation: graphicAnimationSchema.optional(),
     audioAnalysis: audioAnalysisSchema.optional(),
   }),
   animatedGraphic.extend({
@@ -154,4 +186,20 @@ export function resolveGraphicProps(
   return JSON.parse(
     JSON.stringify({ ...defaults, ...overrides }),
   ) as GraphicProps;
+}
+
+/** Anime.js placements use whole samples on the project's rational frame grid. */
+export function graphicFrameIndex(
+  time: number | RationalTime,
+  rate: FrameRate,
+) {
+  if (typeof time === 'number') return time;
+  const ticks = BigInt(time.numerator) * BigInt(rate.numerator);
+  const size = BigInt(time.denominator) * BigInt(rate.denominator);
+  const frame = ticks / size;
+  if (ticks % size || frame > BigInt(Number.MAX_SAFE_INTEGER))
+    throw new Error(
+      'Anime.js clip boundaries must land on whole project frames.',
+    );
+  return Number(frame);
 }

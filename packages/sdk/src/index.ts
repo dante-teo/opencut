@@ -6,6 +6,9 @@ export {
   convertJsonVideoDefinition,
   defineVideo,
   defineGraphicScene,
+  describeMotionGraphics,
+  editMotionDefinition,
+  saveMotionDefinition,
   createPresetScene,
   graphicScenePresets,
   graphicTemplates,
@@ -47,6 +50,8 @@ export {
 export type {
   AudioMixAnalysisOptions,
   AudioMixReport,
+  MotionEdit,
+  MotionGraphics,
   AudioRole,
   DeliveryPreset,
   DialoguePreset,

@@ -1,4 +1,8 @@
-import { animatedProperties, visualRanges } from '@opencut/shared';
+import {
+  animatedProperties,
+  clampVisualValue,
+  visualRanges,
+} from '@opencut/shared';
 import type { AnimatedProperty } from '@opencut/shared';
 import { z } from 'zod';
 import { timeSchema } from './time.js';
@@ -18,11 +22,24 @@ const visualKeyframeSchema = z.strictObject({
     .tuple([unit, unit])
     .refine(([a, b]) => a < b, 'Curve bounds must increase.')
     .optional(),
+  curveValue: z.number().optional(),
   curveAmplitude: z.number().min(-72000).max(72000).optional(),
 });
 const channel = (property: AnimatedProperty) =>
   z
-    .array(visualKeyframeSchema.extend({ value: visualValueSchema(property) }))
+    .array(
+      visualKeyframeSchema
+        .extend({ value: visualValueSchema(property) })
+        .refine(
+          ({ value, curveValue }) =>
+            curveValue === undefined ||
+            value === clampVisualValue(property, curveValue),
+          {
+            path: ['curveValue'],
+            message: 'The curve sample must clamp to the keyframe value.',
+          },
+        ),
+    )
     .min(1)
     .optional();
 export const visualKeyframesSchema = z

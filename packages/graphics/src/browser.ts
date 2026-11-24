@@ -6,6 +6,8 @@ import { graphicContext } from './react.js';
 import type { GraphicTiming } from './react.js';
 import type { GraphicAudioSample } from '@opencut/shared';
 
+const nextPaint = window.requestAnimationFrame.bind(window);
+
 export interface GraphicFrame {
   timing: GraphicTiming;
   props: Record<string, unknown>;
@@ -26,7 +28,11 @@ declare global {
   }
 }
 
-export function installGraphic(component: ComponentType, fontAliases = false) {
+export function installGraphic(
+  component: ComponentType,
+  fontAliases = false,
+  seed?: number,
+) {
   if (!component)
     throw new Error('Export a React component as the default export.');
   const host = document.getElementById('graphic')!;
@@ -61,6 +67,15 @@ export function installGraphic(component: ComponentType, fontAliases = false) {
     requestId,
   ) => {
     const readiness: Promise<unknown>[] = [];
+    const animation =
+      seed === undefined ? undefined : { seed, prepare: [] as (() => void)[] };
+    if (
+      animation &&
+      (timing.frame < 0 || timing.frame >= timing.durationFrames)
+    )
+      throw new RangeError(
+        'Requested source frame is outside the composition.',
+      );
     root?.unmount();
     const errors: unknown[] = [];
     root = createRoot(host, {
@@ -78,6 +93,7 @@ export function installGraphic(component: ComponentType, fontAliases = false) {
                 ? Object.freeze({ ...resources, ...mediaFrames })
                 : resources,
               readiness,
+              animation,
               audio,
             },
           },
@@ -108,6 +124,8 @@ export function installGraphic(component: ComponentType, fontAliases = false) {
       }
     }
     for (const source of cssSources) {
+      if (source.startsWith('#') || source.startsWith(location.href + '#'))
+        continue;
       if (!source.startsWith('data:image/'))
         throw new Error(
           'CSS images must come from captured local graphics resources.',
@@ -122,10 +140,39 @@ export function installGraphic(component: ComponentType, fontAliases = false) {
       }
       images.push(decoding);
     }
+    if (animation) {
+      if (
+        host.querySelector(
+          'audio, video, iframe, object, embed, animate, animateTransform, animateMotion, set',
+        )
+      )
+        throw new Error(
+          'Use timeline-controlled graphics and ordinary OpenCut audio or video tracks.',
+        );
+      for (const element of host.querySelectorAll<SVGImageElement>('image')) {
+        const source = element.href.baseVal;
+        if (!source.startsWith('data:image/'))
+          throw new Error(
+            'SVG images must come from captured local graphics resources.',
+          );
+        const image = new Image();
+        image.src = source;
+        images.push(image.decode());
+      }
+    }
     await Promise.all([document.fonts.ready, ...images, ...readiness]);
     for (const font of document.fonts)
       if (font.status === 'error')
         throw new Error(`Could not load font '${font.family}'.`);
+    if (animation) {
+      for (const prepare of animation.prepare) prepare();
+      if (document.getAnimations().length)
+        throw new Error(
+          'Browser animations must use a host-controlled Anime.js timeline.',
+        );
+      // Synchronize with paint while keeping time on the requested source frame.
+      await new Promise<void>((ready) => nextPaint(() => ready()));
+    }
     return requestId;
   };
 }

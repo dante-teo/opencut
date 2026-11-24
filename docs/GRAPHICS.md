@@ -139,6 +139,124 @@ from sources you trust. Errors from a component or its imported modules
 include the original TSX or TS filename, line and column when a frame
 location is available. Source maps travel with offline bundles.
 
+## Anime.js motion graphics
+
+Use the existing React asset with `animation: { version: 1 }` to opt into
+the host-controlled Anime.js 4.5.0 runtime. This surface uses the project
+frame rate, whole-frame clip boundaries, a finite source duration, and normal
+playback speed. Its first valid source frame is 0 and its last is
+`durationFrames - 1`. At project frame `f`, an active clip samples
+`sourceIn + f - at`. Trimming narrows that range and splitting preserves the
+source frame sequence. Both edits keep the clip's position, scale, rotation,
+and opacity keyframe motion over the frames they retain. This includes springs
+that overshoot a property limit and settle back into range.
+
+A split must leave every attached transition whole. If a fade-in occupies
+frames 0 through 7, split at frame 8 or later inside the clip. Exact subframe
+sampling, motion blur, and retiming are unavailable in this mode.
+
+Declare exposed inputs with `animation.parameters: { title: 'string' }`.
+Supported types are `string`, `number`, `boolean`, and `json`. Set a default
+in asset `props` for each declared key. Clip `props` overrides validate against
+the same declaration, and unknown keys fail validation. React receives the
+resolved values as component props. Use `animation.seed` for `useGraphicRandom()`,
+which returns a 0–1 value keyed by a stable string. Declare local resources
+through `resources`. Declared fonts are loaded before animation under the
+family `OpenCut Resource <id>`.
+
+```tsx
+import { useRef } from 'react';
+import { stagger } from 'animejs';
+import { useGraphicTimeline } from '@opencut/graphics/anime';
+
+export default function Headline({ title }: { title: string }) {
+  const root = useRef<HTMLDivElement>(null);
+  useGraphicTimeline(root, (timeline) => {
+    timeline.add(
+      '.word',
+      {
+        translateY: [42, 0],
+        opacity: [0, 1],
+        delay: stagger(110),
+        duration: 640,
+        ease: 'out(3)',
+      },
+      0,
+    );
+  });
+  return (
+    <div ref={root}>
+      {title.split(' ').map((word, i) => (
+        <span
+          className="word"
+          key={i}
+          style={{ display: 'inline-block', marginRight: 12 }}
+        >
+          {word}
+        </span>
+      ))}
+    </div>
+  );
+}
+```
+
+The published authoring path is `@dantea/opencut/graphics/anime`. The compiler
+supplies its pinned `animejs`, React, and OpenCut SDK modules. Composition
+source and local imports stay within the definition directory. OpenCut bundles
+them without running project build configuration or package scripts. The
+graphics package contains the Anime.js license, with the full notice also
+included in OpenCut distributions and Anime.js project bundles.
+
+Build timelines synchronously after commit and use scoped selectors or
+element references. React owns the baseline markup. Let Anime.js own the
+properties it animates after mount. The host samples the timeline using
+`seek(sourceTimeMs, true)` after the DOM and resources are ready. Every
+sample starts from a fresh React tree and timeline baseline inside a
+reused browser surface. A build callback can return a cleanup function,
+and OpenCut reverts its Anime.js scope when the sample unmounts.
+`useGraphicSvgId()` returns a unique fragment ID for SVG masks, clip paths,
+filters and gradients.
+
+Use timelines, keyframes, easing and springs, stagger, and `svg` helpers
+for stroke drawing, motion paths and compatible SVG morph targets. Supply
+explicit from/to values or a stable authored baseline. Author morph shapes
+with corresponding commands and points and check intermediate frames.
+Build all necessary DOM before the timeline runs. Callback side effects,
+playback loops, timers, WAAPI, autonomous CSS transitions and animations,
+wall-clock values, user input and network data are outside the deterministic
+contract. Use ordinary OpenCut tracks for audio and video.
+
+The desktop editor opens the definition and automatically refreshes changed
+sources. Use **Refresh source** to request a rebuild immediately. Expand
+**Motion graphics** to import a TSX component or place a registered composition
+on a new video track. Select a motion clip in the timeline to edit its frame
+range and parameters, duplicate it at a new position, or split at the playhead.
+If the playhead would divide a transition, **Split at frame** is disabled.
+Move to the transition's edge or beyond it.
+
+Edits save and open a new resolved `.video.ts` beside the original. The copy
+captures the selected variant and continues to use the same component sources
+and local assets. Closing the definition cancels a pending motion edit. If
+the source refreshes during **Save As**, retry the edit from the rebuilt preview.
+
+In the import dialog, use `options.parameters` and `props` in the settings JSON
+to expose fields, and `resources` for local file aliases.
+
+The [Tideline example](../examples/motion/tideline/tideline.video.ts) is a
+13-second 1080p30 project with transparent Anime.js layers, an ordinary SVG
+underlay, and audio cues on an OpenCut track. It includes compatible path
+morphs, staggered and clipped type, a drawn stroke, motion paths and layered
+transitions. Its [asset credits](../examples/motion/tideline/ASSETS.md) travel
+with the example.
+
+```sh
+opencut validate examples/motion/tideline/tideline.video.ts --json
+opencut preview frame examples/motion/tideline/tideline.video.ts --frame 154 --quality quality --output tideline-frame.png
+opencut render examples/motion/tideline/tideline.video.ts --quality quality --output Tideline.mp4
+opencut package examples/motion/tideline/tideline.video.ts --resource ASSETS.md --output tideline-bundle
+opencut package verify tideline-bundle
+```
+
 ## Static SVG
 
 Use `{ kind: 'graphic', renderer: 'svg', path: './graphics/Mark.svg' }`
@@ -287,9 +405,8 @@ outgoing `easing` can be a named easing, `{ type: 'cubic-bezier', x1, y1,
 x2, y2 }`, or `{ type: 'spring', mass, stiffness, damping, duration }`.
 Spring duration is in seconds and defines the simulated interval within
 the segment. The sampler anchors both endpoints and retains overshoot.
-Property limits apply after interpolation. For a trimmed nonmonotone
-native curve, supply the retained normalized `curve` and the original
-segment delta in `curveAmplitude`.
+Property limits apply after interpolation. For motion on the whole clip,
+see [visual keyframe easing](VIDEO_DEFINITIONS.md#visual-keyframe-easing).
 
 Channel `before` and `after` accept `clamp`, `extend` and `identity`.
 `extend` uses the adjacent segment's linear slope. `identity` passes

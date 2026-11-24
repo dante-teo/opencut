@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./anime": {
+      "types": "./dist/anime.d.ts",
+      "import": "./dist/anime.js"
+    },
     "./react": {
       "types": "./dist/react.d.ts",
       "import": "./dist/react.js"
@@ -26,6 +30,7 @@
   },
   "dependencies": {
     "@opencut/shared": "workspace:*",
+    "animejs": "4.5.0",
     "esbuild": "0.28.2",
     "playwright-core": "1.64.1",
     "react": "19.3.1",

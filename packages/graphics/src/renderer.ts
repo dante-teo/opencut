@@ -174,6 +174,7 @@ export function openReactGraphics(
       offline: true,
       locale: 'en-US',
       timezoneId: 'UTC',
+      reducedMotion: 'no-preference',
     });
     const page = await context.newPage();
     const next: Surface = { key, context, page };
