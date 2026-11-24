@@ -14,6 +14,7 @@ import {
   renderAudioGraph,
 } from './professional-mix.js';
 import { MediaError } from './process.js';
+import { renderProgress } from './render-progress.js';
 import type { VideoTimelineOptions } from './render.js';
 
 const sampleRate = 48_000;
@@ -45,6 +46,10 @@ export async function decodeGraphicAudio(
     return existing;
   }
   const directory = await scratch();
+  const analysis = renderProgress(plan.frameCount, plan.onProgress, {
+    stage: 'audio-analysis',
+  });
+  analysis.start();
   const readSource = async ({ path }: { path: string }) => {
     const result = plan.sourceMetadata?.get(path);
     if (!result)
@@ -56,6 +61,9 @@ export async function decodeGraphicAudio(
   const waveformPath = join(directory, 'analysis.wav');
   let sourcePath = waveformPath;
   if (mix && mix.enabled !== false) {
+    const mastering = renderProgress(plan.frameCount, plan.onProgress, {
+      stage: 'audio-mastering',
+    });
     const music = await prepareMusicComparison(plan, readSource, directory);
     const result = await prepareProfessionalMix(
       music.options,
@@ -63,7 +71,9 @@ export async function decodeGraphicAudio(
       directory,
       readSource,
       { base: samples, from: 0, to: samples },
+      mastering.start,
     );
+    mastering.update(plan.frameCount);
     sourcePath = result.path;
   } else {
     const music = await prepareMusicComparison(plan, readSource, directory);
@@ -99,6 +109,7 @@ export async function decodeGraphicAudio(
   );
   const series = await analyzePcm(mono, samples, settings, plan.signal);
   await record?.publish(series, stride);
+  analysis.update(plan.frameCount);
   saved.set(key, series);
   return series;
 }

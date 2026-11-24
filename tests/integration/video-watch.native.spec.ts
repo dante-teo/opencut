@@ -9,6 +9,7 @@ import {
   rename,
   rm,
   symlink,
+  utimes,
   writeFile,
 } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -18,6 +19,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import {
   compileVideo,
+  findSourceChange,
   previewVideo,
   renderCompiledVideo,
   watchVideo,
@@ -34,6 +36,16 @@ import { fixtureDirectory, videoExample } from '../fixture-paths.js';
 
 const cli = resolve('apps/cli/dist/index.js');
 const example = videoExample('review.video.ts');
+
+function reportsChangedSource(path: string, content?: 'changed' | 'unchanged') {
+  return (error: unknown) => {
+    const change = findSourceChange(error);
+    assert.equal(change?.code, 'SOURCE_CHANGED');
+    assert.equal(change.change.path, path);
+    if (content) assert.equal(change.change.content, content);
+    return true;
+  };
+}
 
 test('watch falls back to authored music when an auditioned candidate is removed', async (t) => {
   const directory = await mkdtemp(join(fixtureDirectory, 'watch-music-'));
@@ -245,13 +257,13 @@ test('watch observes imports, missing files and in-place media changes without m
     const staleOutput = join(directory, 'stale.png');
     await assert.rejects(
       ordinary.frame(0, staleOutput),
-      /changed after it was read/,
+      reportsChangedSource(still, 'changed'),
     );
     await assert.rejects(access(staleOutput), { code: 'ENOENT' });
     const staleExport = join(directory, 'stale.mp4');
     await assert.rejects(
       renderCompiledVideo(compiled, staleExport),
-      /changed after it was read/,
+      reportsChangedSource(still, 'changed'),
     );
     await assert.rejects(access(staleExport), { code: 'ENOENT' });
     updated = (
@@ -440,6 +452,17 @@ test('definition previews stage media only when decoding it', async (t) => {
     })};\n`,
   );
   const preview = previewVideo(await compileVideo(file, { preview: true }));
+  const changedSheet = join(directory, 'touched.png');
+  await utimes(image, 1, 1);
+  await assert.rejects(
+    preview.contactSheet({ startFrame: 5, endFrame: 6 }, changedSheet),
+    reportsChangedSource(image, 'unchanged'),
+  );
+  await assert.rejects(access(changedSheet), { code: 'ENOENT' });
+  const freshPreview = previewVideo(
+    await compileVideo(file, { preview: true }),
+  );
+  await freshPreview.contactSheet({ startFrame: 5, endFrame: 6 }, changedSheet);
   await rm(image);
   const clip = await preview.clip(
     { startFrame: 0, endFrame: 4 },
@@ -460,14 +483,14 @@ test('definition previews stage media only when decoding it', async (t) => {
   );
   await assert.rejects(
     preview.frame(5, join(directory, 'insert-frame.png')),
-    /insert\.png.*changed after it was read/,
+    reportsChangedSource(image),
   );
   await assert.rejects(
     preview.clip(
       { startFrame: 0, endFrame: 4 },
       join(directory, 'audio-changed.mp4'),
     ),
-    /tone\.wav.*changed after it was read/,
+    reportsChangedSource(audio),
   );
 });
 

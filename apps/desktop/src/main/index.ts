@@ -527,7 +527,7 @@ app
                 const result = await renderCompiledVideo(video, filePath, {
                   signal: controller.signal,
                   onProgress: ({ percent, stage }) => {
-                    if (stage === 'graphics' || stage === 'composition') return;
+                    if (stage !== 'encoding' && stage !== 'muxing') return;
                     if (!window.isDestroyed())
                       window.webContents.send(
                         DEFINITION_CHANNELS.progress,

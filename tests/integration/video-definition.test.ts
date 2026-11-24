@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { evaluateTimelineFrame } from '@opencut/core';
 import {
   batchRenderVideo,
+  buildNarration,
   compileVideo,
   defineVideo,
   packageVideo,
@@ -83,6 +84,111 @@ async function writeDefinition(value: unknown, file = 'title.video.ts') {
 }
 
 describe('whole-video definitions', () => {
+  it.each(['metadata', 'content'] as const)(
+    'reports a %s change and only retries a stable metadata-only update',
+    async (kind) => {
+      const source = join(directory, 'changing.video.ts');
+      const flag = join(directory, 'touched');
+      await writeFile(
+        source,
+        `import { appendFileSync, existsSync, utimesSync, writeFileSync } from 'node:fs';
+if (!existsSync(${JSON.stringify(flag)})) {
+  writeFileSync(${JSON.stringify(flag)}, '');
+  const source = new URL(import.meta.url);
+  if (${kind === 'content'}) appendFileSync(source, '\\n// New revision\\n');
+  else utimesSync(source, 1, 1);
+}
+export default ${JSON.stringify(definition())};`,
+      );
+      const first = run('validate', source, '--retry-source-change');
+      const events = first.stderr
+        .split('\n')
+        .filter((line) => line.startsWith('{'))
+        .map((line) => JSON.parse(line));
+      const [event] = events;
+      const content = kind === 'metadata' ? 'unchanged' : 'changed';
+      if (kind === 'metadata') {
+        expect(first.status, first.stderr).toBe(0);
+        expect(JSON.parse(first.stdout)).toMatchObject({ ok: true });
+        expect(events).toEqual([
+          expect.objectContaining({
+            event: 'source-change-retry',
+            attempt: 2,
+            sourceChange: expect.objectContaining({ content }),
+          }),
+        ]);
+      } else {
+        expect(first.status).toBe(1);
+        expect(first.stdout).toBe('');
+        expect(event).toMatchObject({
+          error: {
+            code: 'SOURCE_CHANGED',
+            sourceChange: {
+              path: await realpath(source),
+              stage: 'definition loading',
+              content,
+            },
+          },
+        });
+      }
+      const change = event.sourceChange ?? event.error.sourceChange;
+      expect(change.after).not.toBe(change.before);
+      expect(change.beforeSha256 === change.afterSha256).toBe(
+        kind === 'metadata',
+      );
+    },
+  );
+
+  it('replaces one narration recording and its caption while preserving other segments', () => {
+    const time = (n: number) => ({ numerator: n, denominator: 2 });
+    const first = {
+      id: 'first',
+      audio: 'a.wav',
+      at: time(1),
+      duration: time(2),
+      transcript: 'Today',
+    };
+    const second = {
+      id: 'second',
+      audio: 'b.wav',
+      at: time(6),
+      duration: time(2),
+      transcript: 'Later',
+    };
+    const original = buildNarration([first, second]);
+    const rerecorded = {
+      ...first,
+      audio: 'new.wav',
+      transcript: 'Hello!',
+      duration: time(3),
+      timings: [{ from: 0, to: 5, start: time(0), end: time(2) }],
+    };
+    const revised = buildNarration([rerecorded, second]);
+    expect(revised.clips[0]).toMatchObject({
+      id: original.clips[0]!.id,
+      at: first.at,
+      sourceOut: time(3),
+    });
+    expect(revised.cues[0]).toMatchObject({
+      id: original.cues[0]!.id,
+      start: first.at,
+      end: { numerator: 2, denominator: 1 },
+      text: rerecorded.transcript,
+      words: rerecorded.timings,
+    });
+    expect(revised.assets[revised.clips[0]!.asset]?.path).toBe('new.wav');
+    expect(revised.clips[1]).toEqual(original.clips[1]);
+    expect(revised.cues[1]).toEqual(original.cues[1]);
+    expect(() =>
+      buildNarration([
+        {
+          ...rerecorded,
+          timings: [{ from: 0, to: 5, start: time(0), end: time(4) }],
+        },
+      ]),
+    ).toThrow(/Narration segment 'first'.*timings.*segment duration/);
+  });
+
   it('compiles deterministically with exact fractional timing and stable IDs across unrelated track reordering', async () => {
     const input = definition();
     const path = await writeDefinition(input);

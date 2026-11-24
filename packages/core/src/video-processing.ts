@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
   MediaError,
+  SourceChangedError,
   enhancementBackendVersion,
   hostRenderResources,
   interpolationBackendVersion,
@@ -462,6 +463,7 @@ function positive(name: string, value: number, max = Number.MAX_SAFE_INTEGER) {
 }
 
 function assertCurrent({ metadata: { path }, identity }: IdentifiedMedia) {
-  if (videoInputIdentity(path) !== identity)
-    throw new MediaError(`Media '${path}' changed during recipe processing.`);
+  const observed = videoInputIdentity(path);
+  if (observed !== identity)
+    throw new SourceChangedError(path, 'recipe processing', identity, observed);
 }

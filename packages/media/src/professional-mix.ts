@@ -1,4 +1,5 @@
 import { masterAudioMix, renderAudioFile } from './audio-mastering.js';
+import { sourceIdentity, SourceChangedError } from './source-integrity.js';
 import type { AudioMixReport } from './audio-mastering.js';
 import { localEnhancer } from './deepfilter.js';
 import { createHash } from 'node:crypto';
@@ -389,10 +390,18 @@ async function stageDialogue(
     const directory = join(folder, `dialogue-${index}`);
     await mkdir(directory);
     const raw = join(directory, 'raw.wav');
-    const stamp = await sourceFileStamp(clip.path);
+    const stamp =
+      options.boundSourceIdentity?.(clip.path) ??
+      (await sourceFileStamp(clip.path));
     const bound = await (options.snapshotSource?.(clip.path) ?? clip.path);
-    if (stamp !== (await sourceFileStamp(clip.path)))
-      throw new MediaError('Dialogue source changed while being read.');
+    const observed = sourceIdentity(clip.path);
+    if (observed !== stamp)
+      throw new SourceChangedError(
+        clip.path,
+        'dialogue analysis',
+        stamp,
+        observed,
+      );
     const source = sources.get(clip.clipId)!;
     const run = runs.get(clip.clipId);
     const key = digest([
@@ -597,6 +606,7 @@ export async function prepareProfessionalMix(
   folder: string,
   readSource: SourceReader,
   { base, from, to }: { base: number; from: number; to: number },
+  beginMastering?: () => void,
 ) {
   const { dialogue, music, warnings } = await stageDialogue(
     options,
@@ -606,6 +616,7 @@ export async function prepareProfessionalMix(
     base,
   );
   warnings.push(...(await centeredChannelWarnings(options, readSource)));
+  beginMastering?.();
   const { path, report } = await masterAudioMix(
     options,
     mix.delivery,

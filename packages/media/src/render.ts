@@ -37,9 +37,15 @@ import {
 import { constants } from 'node:fs';
 import type { Stats } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
-import { probeMedia, isStillImage, videoSourceDuration } from './probe.js';
+import {
+  probeMedia,
+  isStillImage,
+  sameFrameRate,
+  videoSourceDuration,
+} from './probe.js';
 import type { MediaMetadata } from './probe.js';
 import { checkRenderSignal, MediaError, runMediaTool } from './process.js';
+import { findSourceChange } from './source-integrity.js';
 import { accountRenderBytes, accountRenderFile } from './render-budget.js';
 import { renderQualities } from '@opencut/shared';
 import type { RenderQuality } from '@opencut/shared';
@@ -183,8 +189,10 @@ export interface VideoTimelineOptions extends RenderControls {
   onVerifiedOutput?: (staged: string) => Promise<void>;
   /** Metadata already probed for this render invocation, indexed by resolved source path. */
   sourceMetadata?: ReadonlyMap<string, MediaMetadata>;
+  /** Identity associated with the compiled metadata, when the host supplies it. */
+  boundSourceIdentity?: (sourcePath: string) => string | undefined;
   /** Stage inputs on first decode. For a ranged preview, omit visual layers outside that range. */
-  snapshotSource?: (sourcePath: string) => Promise<string>;
+  snapshotSource?: (sourcePath: string, stage?: string) => Promise<string>;
   /** Allow a desktop host to do text shaping off its main thread. */
   rasterizeText?: typeof rasterizeTextLayer;
   renderGraphic?: (
@@ -450,20 +458,6 @@ function validAudioFades(
     (!fadeOut ||
       (fadeOut.from >= fadeOut.to &&
         (fadeOut.from === 1 || c * rate === frames * d)))
-  );
-}
-
-function sameFrameRate(
-  actual: string | null,
-  numerator: number,
-  denominator: number,
-): boolean {
-  const parts = actual?.match(/^(\d+)\/(\d+)$/);
-  return (
-    !!parts &&
-    BigInt(parts[1]!) * BigInt(denominator) ===
-      BigInt(numerator) * BigInt(parts[2]!) &&
-    BigInt(parts[2]!) > 0n
   );
 }
 
@@ -1515,6 +1509,7 @@ async function prepareTimeline(
       const segmentOptions = { ...options };
       delete segmentOptions.segments;
       const checkSeek = pictureSeekCheck(options.signal);
+      const persisted: PictureRange[] = [];
       const { concat, ranges } = await cachePicture(
         planned,
         pictureCache,
@@ -1556,8 +1551,16 @@ async function prepareTimeline(
             await staging.close();
           }
         },
-        onPictureRange,
-      );
+        (range) => {
+          if (options.pictureCache) persisted.push(range);
+          onPictureRange?.(range.endFrame);
+        },
+      ).catch((error: unknown) => {
+        const change = findSourceChange(error);
+        if (change && persisted.length)
+          change.change.completedPictureRanges = persisted;
+        throw error;
+      });
       prepared.pictureRanges = ranges;
       args.push('-f', 'concat', '-safe', '0', '-protocol_whitelist', 'file');
       const pictureInput = registerInput('picture.ffconcat', (destination) =>
@@ -1628,59 +1631,89 @@ async function prepareTimeline(
   const to = options.range
     ? from + audioSampleAtFrame(outputFrameCount, outputRate)
     : audioSampleAtFrame(outputFrameCount, outputRate);
-  const mix = options.professionalMix;
-  const music = await prepareMusicComparison(
-    options,
-    readSource,
-    scratch && options.musicComparison?.matchLoudness
-      ? await scratch.open()
-      : undefined,
-  );
-  prepared.musicLoudness = music.musicLoudness;
-  if (music.warnings) warnings.push(...music.warnings);
+  const { professionalMix: mix, snapshotSource } = options;
+  const master = scratch && mix && mix.enabled !== false;
+  const matchMusic = scratch && options.musicComparison?.matchLoudness;
+  const analyzeChannels =
+    scratch &&
+    options.audioClips?.some(
+      ({ channelMode, muted, volume }) =>
+        channelMode === 'mono-center' && !muted && volume > 0,
+    );
+  const analysis =
+    master || matchMusic || analyzeChannels
+      ? renderProgress(outputFrameCount, options.onProgress, {
+          stage: 'audio-analysis',
+        })
+      : undefined;
+  let audioStage = analysis ? 'audio analysis' : 'audio source snapshot';
+  const snapshotAudio =
+    snapshotSource && ((path: string) => snapshotSource(path, audioStage));
   let audioMap = '[audio]';
-  if (mix && mix.enabled !== false && scratch) {
-    const result = await prepareProfessionalMix(
-      music.options,
-      mix,
-      await scratch.open(),
+  try {
+    analysis?.start();
+    const music = await prepareMusicComparison(
+      { ...options, ...(snapshotAudio && { snapshotSource: snapshotAudio }) },
       readSource,
-      {
-        base: audioSampleAtFrame(frameCount, frameRate),
-        from,
-        to,
-      },
+      matchMusic ? await scratch.open() : undefined,
     );
-    prepared.audioMix = result.report;
-    warnings.push(...result.report.warnings);
-    args.push('-i', result.path);
-    audioMap = `${input++}:a:0`;
-  } else {
-    if (scratch)
-      warnings.push(
-        ...(await centeredChannelWarnings(music.options, readSource)),
-      );
-    await buildAudioGraph(
-      music.options,
-      {
-        filters,
+    prepared.musicLoudness = music.musicLoudness;
+    if (music.warnings) warnings.push(...music.warnings);
+    if (master) {
+      const mastering = renderProgress(outputFrameCount, options.onProgress, {
+        stage: 'audio-mastering',
+      });
+      const result = await prepareProfessionalMix(
+        music.options,
+        mix,
+        await scratch.open(),
         readSource,
-        inputPathFor,
-        openInput: (clip, path) => {
-          const existing = inputs.get(clip.clipId);
-          if (existing !== undefined) return existing;
-          args.push('-threads', '1', '-i', path);
-          return input++;
+        { base: audioSampleAtFrame(frameCount, frameRate), from, to },
+        () => {
+          analysis?.update(outputFrameCount);
+          audioStage = 'audio mastering';
+          mastering.start();
         },
-      },
-      {
-        total: options.range
-          ? audioSampleAtFrame(frameCount, frameRate)
-          : audioSampleAtFrame(outputFrameCount, outputRate),
-        from,
-        to: options.range ? audioSampleAtFrame(endFrame, frameRate) : to,
-      },
-    );
+      );
+      mastering.update(outputFrameCount);
+      prepared.audioMix = result.report;
+      warnings.push(...result.report.warnings);
+      args.push('-i', result.path);
+      audioMap = `${input++}:a:0`;
+    } else {
+      if (scratch)
+        warnings.push(
+          ...(await centeredChannelWarnings(music.options, readSource)),
+        );
+      analysis?.update(outputFrameCount);
+      audioStage = 'audio source snapshot';
+      await buildAudioGraph(
+        music.options,
+        {
+          filters,
+          readSource,
+          inputPathFor: snapshotAudio ?? inputPathFor,
+          openInput: (clip, path) => {
+            const existing = inputs.get(clip.clipId);
+            if (existing !== undefined) return existing;
+            args.push('-threads', '1', '-i', path);
+            return input++;
+          },
+        },
+        {
+          total: options.range
+            ? audioSampleAtFrame(frameCount, frameRate)
+            : audioSampleAtFrame(outputFrameCount, outputRate),
+          from,
+          to: options.range ? audioSampleAtFrame(endFrame, frameRate) : to,
+        },
+      );
+    }
+  } catch (error) {
+    const change = findSourceChange(error);
+    if (change && options.pictureCache && prepared.pictureRanges)
+      change.change.completedPictureRanges = prepared.pictureRanges;
+    throw error;
   }
   checkRenderSignal(options.signal);
   const metadataInput = options.buildMetadata === undefined ? -1 : input;
@@ -1898,9 +1931,9 @@ export async function renderVideoTimeline(
     const rendered = join(await scratch.open(), 'render.mp4');
     args.push(rendered);
     const progress = renderProgress(frameCount, options.onProgress, {
-      stage: 'encoding',
+      stage: prepared.sourcePicture ? 'muxing' : 'encoding',
     });
-    if (!prepared.sourcePicture) progress.start();
+    progress.start();
     checkRenderSignal(options.signal);
     await runMediaTool('ffmpeg', args, 4 * 1024 * 1024, 600_000, {
       signal: options.signal,
@@ -1921,8 +1954,12 @@ export async function renderVideoTimeline(
     });
     await accountRenderFile(rendered);
     checkRenderSignal(options.signal);
+    progress.update(frameCount);
     if (!prepared.pictureRanges) composition.update(pictureFrames);
-    progress.verifying();
+    const verification = renderProgress(frameCount, options.onProgress, {
+      stage: 'verification',
+    });
+    verification.verifying(false);
     const metadata = await probeMedia(rendered, options.signal, {
       stage: 'verifying encoded MP4',
     });
@@ -1995,6 +2032,7 @@ export async function renderVideoTimeline(
         status: 'saved',
       };
     }
+    verification.verifying();
     await options.onVerifiedOutput?.(rendered);
     checkRenderSignal(options.signal);
     try {

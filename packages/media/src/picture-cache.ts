@@ -334,7 +334,7 @@ export async function cachePicture(
     endFrame: number,
     destination: string,
   ) => Promise<void>,
-  onRange?: (endFrame: number) => void,
+  onRange?: (range: PictureRange) => void,
 ) {
   let concat = '';
   const ranges: PictureRange[] = [];
@@ -376,12 +376,13 @@ export async function cachePicture(
       throw new MediaError('Picture cache paths cannot contain line breaks.');
     const duration = (count * frameRate.denominator) / frameRate.numerator;
     concat += `file '${path.replaceAll("'", "'\\''")}'\nduration ${duration.toFixed(6)}\n`;
-    ranges.push({
+    const range: PictureRange = {
       startFrame: start,
       endFrame: end,
       status: reused ? 'reused' : 'rendered',
-    });
-    onRange?.(end);
+    };
+    ranges.push(range);
+    onRange?.(range);
   }
   return { concat, ranges };
 }

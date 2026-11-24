@@ -2,6 +2,7 @@ export { decodeGraphicAudio, sampleGraphicAudio } from './reactive-audio.js';
 export { exposeGraphic } from './graphic-exposure.js';
 export {
   probeMedia,
+  sameFrameRate,
   probeRecipeMedia,
   recipeInputArguments,
   isStillImage,
@@ -18,7 +19,13 @@ export {
 export { inspectVideoToolboxWorkers } from './video-toolbox-workers.js';
 export { inspectRenderMemory } from './process-memory.js';
 export { separateDialogue } from './dialogue.js';
-export { MediaError, RenderCancelledError } from './process.js';
+export { fileIdentity, MediaError, RenderCancelledError } from './process.js';
+export {
+  findSourceChange,
+  fingerprintSourceFile,
+  sourceIdentity,
+  SourceChangedError,
+} from './source-integrity.js';
 export type { MediaMetadata, MediaStream } from './probe.js';
 export type { FrameResult } from './frame.js';
 export {

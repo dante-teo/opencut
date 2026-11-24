@@ -5,6 +5,7 @@ import {
   checkRenderEncoders,
   recipeBackendVersion,
   MediaError,
+  SourceChangedError,
 } from '@opencut/media';
 import { usesLayerTransform } from '@opencut/shared';
 import { compileVideoInput } from './video-files.js';
@@ -94,9 +95,13 @@ export async function planVideoRender(
           sourceIdentity(path: string) {
             if (pendingSources.has(path)) return path;
             const identity = video.sourceIdentity(path);
-            if (!identity || identity !== videoInputIdentity(path))
-              throw new MediaError(
-                `Media '${path}' changed after compilation.`,
+            const observed = videoInputIdentity(path);
+            if (!identity || identity !== observed)
+              throw new SourceChangedError(
+                path,
+                'picture render planning',
+                identity ?? null,
+                observed,
               );
             return identity;
           },

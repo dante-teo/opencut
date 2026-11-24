@@ -39,13 +39,17 @@ type Plan = Awaited<ReturnType<CompiledVideo['resolveRender']>>;
 type Analysis = Awaited<ReturnType<typeof decodeGraphicAudio>>;
 export type GraphicAudioControls = Pick<
   VideoTimelineOptions,
-  'audioComparison' | 'audioChannels' | 'audioSampleRate' | 'audioBitrateKbps'
+  | 'audioComparison'
+  | 'audioChannels'
+  | 'audioSampleRate'
+  | 'audioBitrateKbps'
+  | 'onProgress'
 >;
 
 /** The dependency edges run from graphic -> analysis -> resolved audio inputs. */
 export function bindGraphicAudio(
   video: CompiledVideo,
-  plan: Plan,
+  plan: Plan & Pick<VideoTimelineOptions, 'boundSourceIdentity'>,
   scratch: () => Promise<string>,
   snapshotSource: VideoTimelineOptions['snapshotSource'],
   controls: GraphicAudioControls,
@@ -79,7 +83,10 @@ export function bindGraphicAudio(
       ...plan,
       output: video.path,
       audioClips,
-      ...(snapshotSource && { snapshotSource }),
+      ...(snapshotSource && {
+        snapshotSource: (path: string) =>
+          snapshotSource(path, 'graphic audio analysis'),
+      }),
       signal,
       ...controls,
     };
@@ -119,7 +126,7 @@ export function bindGraphicAudio(
     recipes.set(pictureKey, { settings, options, key });
   }
   const pending = new Map<string, Promise<Analysis>>();
-  return async (graphic: GraphicLayer, frame: number) => {
+  return async (graphic: GraphicLayer, frame: number, clipId: string) => {
     if (!graphic.audioAnalysis) return;
     const recipe = recipes.get(graphic.key);
     if (!recipe)
@@ -129,10 +136,16 @@ export function bindGraphicAudio(
     const { settings, options, key } = recipe;
     let analysis = pending.get(key);
     if (!analysis) {
+      const { onProgress } = options;
       analysis = decodeGraphicAudio(
         key,
         settings,
-        options,
+        onProgress
+          ? {
+              ...options,
+              onProgress: (event) => onProgress({ ...event, clipId }),
+            }
+          : options,
         async () => mkdtemp(join(await scratch(), 'analysis-')),
         video.build?.processing.directory,
       );

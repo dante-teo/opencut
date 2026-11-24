@@ -1,4 +1,5 @@
 import { parentPort, workerData } from 'node:worker_threads';
+import { findSourceChange } from '@opencut/media';
 import type { VideoParameters } from './video-definition.js';
 import { readDefinitionScript } from './video-script.js';
 
@@ -19,5 +20,6 @@ try {
 } catch (error) {
   port.postMessage({
     error: error instanceof Error ? error.message : String(error),
+    sourceChange: findSourceChange(error)?.change,
   });
 }

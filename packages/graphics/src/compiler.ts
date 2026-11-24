@@ -3,7 +3,7 @@ import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { context, version } from 'esbuild';
-import type { Loader } from 'esbuild';
+import type { BuildFailure, Loader } from 'esbuild';
 import { templateEntry } from './template-entry.js';
 import type { GraphicScene, ThreeScene } from '@opencut/shared';
 import type { IntrinsicRange } from './intrinsic-time.js';
@@ -254,6 +254,17 @@ export async function compileReactGraphic(
       signal?.throwIfAborted();
       if (deadline.aborted)
         throw new Error('Graphics compilation timed out.', { cause });
+      if (
+        cause instanceof Error &&
+        'errors' in cause &&
+        Array.isArray(cause.errors)
+      ) {
+        const pluginErrors = (cause as BuildFailure).errors
+          .map(({ detail }): unknown => detail)
+          .filter((detail) => detail instanceof Error);
+        if (pluginErrors.length)
+          throw new AggregateError(pluginErrors, cause.message, { cause });
+      }
       throw cause;
     } finally {
       control.removeEventListener('abort', cancel);

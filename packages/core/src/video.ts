@@ -44,6 +44,8 @@ export {
   inspectVideoRecipes,
 } from './video-files.js';
 export { VideoDefinitionError } from './video-definition.js';
+export { buildNarration } from './narration.js';
+export type { NarrationSegment } from './narration.js';
 export type { CompiledVideo } from './video-compiler.js';
 export {
   evenlySpacedFrames,

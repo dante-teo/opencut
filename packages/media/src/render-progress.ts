@@ -3,7 +3,14 @@ import { performance } from 'node:perf_hooks';
 export interface RenderProgress {
   event: 'progress';
   phase: 'rendering' | 'verifying';
-  stage?: 'graphics' | 'composition' | 'encoding' | 'verification';
+  stage?:
+    | 'graphics'
+    | 'composition'
+    | 'audio-analysis'
+    | 'audio-mastering'
+    | 'encoding'
+    | 'muxing'
+    | 'verification';
   clipId?: string;
   percent: number;
   processedFrames: number;
@@ -18,17 +25,17 @@ export function renderProgress(
   onProgress?: (progress: RenderProgress) => void,
   details?: Pick<RenderProgress, 'stage' | 'clipId'>,
 ) {
-  const started = performance.now();
+  let started: number | undefined;
   let pending = '';
   let frames = 0;
   let processedFrames = 0;
   const emit = (phase: RenderProgress['phase']) => {
-    const elapsedSeconds = (performance.now() - started) / 1000;
+    const now = performance.now();
+    const elapsedSeconds = (now - (started ??= now)) / 1000;
     onProgress?.({
       event: 'progress',
       phase,
       ...details,
-      ...(details && phase === 'verifying' && { stage: 'verification' }),
       percent: (processedFrames / totalFrames) * 100,
       processedFrames,
       totalFrames,
@@ -65,8 +72,8 @@ export function renderProgress(
           update(frames);
       }
     },
-    verifying: () => {
-      processedFrames = totalFrames;
+    verifying: (complete = true) => {
+      processedFrames = complete ? totalFrames : 0;
       emit('verifying');
     },
   };

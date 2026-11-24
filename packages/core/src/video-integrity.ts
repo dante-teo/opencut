@@ -1,10 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { constants } from 'node:fs';
 import { open, rename, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { z } from 'zod';
 import { setTimeout as delay } from 'node:timers/promises';
-import { fileIdentity, videoInputIdentity } from './video-input.js';
+export { fingerprintSourceFile as fingerprintFile } from '@opencut/media';
 
 export const hashJson = (value: unknown) =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -24,30 +23,6 @@ export function matchesFingerprint(
   expected: FileFingerprint,
 ) {
   return actual?.bytes === expected.bytes && actual.sha256 === expected.sha256;
-}
-
-export async function fingerprintFile(path: string, signal?: AbortSignal) {
-  signal?.throwIfAborted();
-  const file = await open(
-    path,
-    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-  );
-  try {
-    const info = await file.stat({ bigint: true });
-    const identity = fileIdentity(info);
-    if (!identity) throw new Error(`Expected a regular file: '${path}'.`);
-    const hash = createHash('sha256');
-    for await (const bytes of file.createReadStream({
-      signal,
-      autoClose: false,
-    }))
-      hash.update(bytes);
-    if (videoInputIdentity(path) !== identity)
-      throw new Error(`File '${path}' changed while it was being read.`);
-    return { bytes: Number(info.size), sha256: hash.digest('hex'), identity };
-  } finally {
-    await file.close();
-  }
 }
 
 export async function syncPath(path: string) {

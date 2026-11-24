@@ -1,6 +1,10 @@
 import { mkdir, realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { MediaError, recipeBackendVersion } from '@opencut/media';
+import {
+  MediaError,
+  recipeBackendVersion,
+  SourceChangedError,
+} from '@opencut/media';
 import type { PictureCache } from '@opencut/media';
 import type { CompiledVideo } from './video-compiler.js';
 import { videoInputIdentity } from './video-input.js';
@@ -40,9 +44,13 @@ export async function openPictureCache(
     sourceIdentity(path) {
       signal.throwIfAborted();
       const identity = video.sourceIdentity(path);
-      if (!identity || videoInputIdentity(path) !== identity)
-        throw new MediaError(
-          `Media '${path}' changed after it was read. Compile the definition again.`,
+      const observed = videoInputIdentity(path);
+      if (!identity || observed !== identity)
+        throw new SourceChangedError(
+          path,
+          'picture cache planning',
+          identity ?? null,
+          observed,
         );
       return identity;
     },

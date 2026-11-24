@@ -443,6 +443,41 @@ test(
   },
 );
 
+test('graphic import failures retain source-change details through esbuild', async (t) => {
+  const { compileReactGraphic, findSourceChange, SourceChangedError } =
+    await import('../../packages/media/src/index.js');
+  const directory = await mkdtemp(
+    join(fixtureDirectory, 'graphics-source-change-'),
+  );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const component = join(directory, 'Graphic.jsx');
+  const helper = join(directory, 'helper.js');
+  await Promise.all([
+    writeFile(
+      component,
+      "import { label } from './helper.js'; export default () => <b>{label}</b>;",
+    ),
+    writeFile(helper, 'export const label = "Card";'),
+  ]);
+  const sourceChange = new SourceChangedError(
+    helper,
+    'graphics capture',
+    'before',
+    'after',
+  );
+  await assert.rejects(
+    compileReactGraphic(component, {}, async (path) => {
+      if (path === helper) throw sourceChange;
+      return readFile(path);
+    }),
+    (error: unknown) => {
+      assert.match((error as Error).message, /Build failed/);
+      assert.equal(findSourceChange(error), sourceChange);
+      return true;
+    },
+  );
+});
+
 test(
   'a Chromium crash invalidates the surface and closes its tracked process',
   { timeout: 25_000 },

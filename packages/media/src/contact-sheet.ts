@@ -97,7 +97,8 @@ export async function decodeMp4Tiles(
   signal?: AbortSignal,
 ) {
   const select = frames.map((frame) => `eq(n,${frame})`).join('+');
-  await index.checkSource();
+  const stage = 'MP4 frame decoding';
+  await index.checkSource(stage);
   await runMediaTool(
     'ffmpeg',
     [
@@ -128,8 +129,7 @@ export async function decodeMp4Tiles(
     undefined,
     600_000,
     { signal, writesFile: true, stage: 'decoding selected MP4 frames' },
-  );
-  await index.checkSource();
+  ).finally(() => index.checkSource(stage));
   return {
     paths: frames.map((_, i) => join(directory, `tile-${i}.png`)),
     width,

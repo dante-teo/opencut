@@ -43,6 +43,20 @@ export const renderOptionHelp = `  --quality <fast|quality|maximum> --resolution
   --video-bitrate <kbps> --audio-bitrate <kbps> --audio-rate <44100|48000>
   --audio-channels <1|2> --no-subtitles --overwrite`;
 
+export function parseFrameRateOption(flag: string, value: string) {
+  if (!/^\d+(?:\/\d+)?$/.test(value))
+    throw new UsageError(
+      `--${flag} must be an integer or fraction such as 30000/1001.`,
+    );
+  const [numerator, denominator = 1] = value.split('/').map(Number);
+  if (
+    numerator === undefined ||
+    [numerator, denominator].some((n) => !Number.isSafeInteger(n) || n <= 0)
+  )
+    throw new UsageError(`--${flag} requires positive safe integers.`);
+  return { numerator, denominator };
+}
+
 export function parseRenderControls(values: {
   [
     K in keyof typeof renderOptionTypes
@@ -65,18 +79,6 @@ export function parseRenderControls(values: {
   const height = positiveIntegerOption('height', values.height);
   if ((width === undefined) !== (height === undefined))
     throw new UsageError('Specify both --width and --height.');
-  const fps = values.fps;
-  if (fps !== undefined && !/^\d+(?:\/\d+)?$/.test(fps))
-    throw new UsageError(
-      '--fps must be an integer or fraction such as 30000/1001.',
-    );
-  const [numerator, denominator = 1] = fps?.split('/').map(Number) ?? [];
-  if (
-    numerator !== undefined &&
-    [numerator, denominator].some((n) => !Number.isSafeInteger(n) || n <= 0)
-  )
-    throw new UsageError('--fps requires positive safe integers.');
-
   const { quality, resolution, codec } = values;
   return {
     quality: parseRenderQuality(quality, 'quality'),
@@ -88,7 +90,9 @@ export function parseRenderControls(values: {
         ? { width, height }
         : undefined,
     outputFrameRate:
-      numerator === undefined ? undefined : { numerator, denominator },
+      values.fps === undefined
+        ? undefined
+        : parseFrameRateOption('fps', values.fps),
     videoBitrateKbps: positiveIntegerOption(
       'video-bitrate',
       values['video-bitrate'],

@@ -10,6 +10,19 @@ Use `renderVideo` to compile and render in one call. If `renderCompiledVideo`
 reports that source media changed, recompile before retrying.
 See the repository's [SDK guide](../../../docs/SDK.md) for the public API.
 
+## Narration and captions
+
+Use `buildNarration(segments)` from `@opencut/sdk`. Each segment has a
+stable `id`, an `audio` path relative to the definition, an exact rational
+timeline start `at`, a recording `duration` and a `transcript`. Optional
+`timings` carry `{ from, to, start, end }` ranges in UTF-16 transcript
+offsets and exact rational seconds from the segment start. Use the return
+value's `assets`, `clips` and `cues` in the definition. Keep the segment
+ID and update the recording, transcript, duration and timings together on
+a revision. See the [narration definition example](../../../docs/SDK.md#build-narration-and-captions-together).
+
+## Rendering and inspection
+
 Use `inspectVideoLayout(compiledVideo)` to read required and advisory
 layout checks. Use `planVideoRender(definition, output, options)` with the
 intended render settings to check cache reuse and estimate scratch space.

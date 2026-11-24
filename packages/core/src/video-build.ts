@@ -9,6 +9,7 @@ import {
 } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
+import { findSourceChange, SourceChangedError } from '@opencut/media';
 import type { RenderQuality } from '@opencut/shared';
 import { VideoDefinitionError } from './video-definition.js';
 import { graphicBundleKeys } from './video-graphics.js';
@@ -116,6 +117,7 @@ export async function prepareVideoBuild(
     path: string,
     expected?: string | null,
     label?: string,
+    baseline?: Fingerprint,
   ) => {
     signal?.throwIfAborted();
     const actual = await realpath(path).catch((cause: unknown) => {
@@ -136,17 +138,25 @@ export async function prepareVideoBuild(
           : await fingerprintFile(actual, signal);
       files.set(actual, digest);
     }
-    if (digest.identity !== identity || videoInputIdentity(path) !== identity)
-      throw new VideoDefinitionError(
-        `Build input '${path}' changed during compilation.`,
+    const observed = videoInputIdentity(path);
+    if (digest.identity !== identity || observed !== identity) {
+      const error = new SourceChangedError(
+        path,
+        'build input collection',
+        identity,
+        observed,
       );
+      await error.compareContent(baseline ?? digest, signal);
+      throw error;
+    }
     inputs.set(path, { path, sha256: digest.sha256 });
     // The definition and its modules have already been evaluated. Media and
     // font files are read later by the compiler, so keep checking those.
     if (expected === undefined) identities.set(path, identity);
   };
   for (const input of sources.values())
-    if (input.identity) await add(input.path, input.identity);
+    if (input.identity)
+      await add(input.path, input.identity, undefined, input.fingerprint);
   for (const [id, asset] of Object.entries(definition.assets ?? {}))
     if (asset.kind !== 'graphic')
       await add(
@@ -207,6 +217,22 @@ function locateBuild(
 type BuildIdentity = Awaited<ReturnType<typeof prepareVideoBuild>>;
 const checkpoints = new WeakMap<CompiledVideo, BuildIdentity>();
 
+async function diagnoseBuildSourceChange(
+  error: unknown,
+  files: BuildIdentity['files'],
+  signal?: AbortSignal,
+) {
+  const change = findSourceChange(error);
+  if (change && change.change.content === 'unknown') {
+    const file = change.change.path;
+    const canonical = await realpath(file).catch(() => file);
+    await change.compareContent(
+      files.get(file) ?? files.get(canonical),
+      signal,
+    );
+  }
+}
+
 export function checkpointQualityCompilation(
   video: CompiledVideo,
   definition: ParsedVideoDefinition,
@@ -226,6 +252,15 @@ export function checkpointQualityCompilation(
 
 export function authoredInputs(video: CompiledVideo) {
   return checkpoints.get(video)?.inputs.map(({ path }) => path) ?? [];
+}
+
+export async function diagnoseCompiledSourceChange(
+  video: CompiledVideo,
+  error: unknown,
+  signal?: AbortSignal,
+) {
+  const build = checkpoints.get(video);
+  if (build) await diagnoseBuildSourceChange(error, build.files, signal);
 }
 
 export async function checkpointCompilation(
@@ -278,11 +313,16 @@ export async function checkpointCompilation(
         steps.set(JSON.stringify([stage.assetId, stage.step]), stage);
         return checkpoint('compiling');
       });
-      for (const [input, identity] of identities)
-        if (videoInputIdentity(input) !== identity)
-          throw new VideoDefinitionError(
-            `Build input '${input}' changed during compilation.`,
+      for (const [input, identity] of identities) {
+        const observed = videoInputIdentity(input);
+        if (observed !== identity)
+          throw new SourceChangedError(
+            input,
+            'compilation',
+            identity,
+            observed,
           );
+      }
       await checkpoint('compiled', { frameCount: video.frameCount });
       checkpoints.set(video, build);
       return video;
@@ -291,6 +331,7 @@ export async function checkpointCompilation(
       await checkpoint('failed', { error: errorMessage(error) }).catch(
         () => {},
       );
+      await diagnoseBuildSourceChange(error, build.files, signal);
       throw error;
     }
   } finally {

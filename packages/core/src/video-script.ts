@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { SourceChangedError } from '@opencut/media';
 import { findPackageJSON, isBuiltin, registerHooks } from 'node:module';
 import { dirname, isAbsolute, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -12,7 +13,7 @@ import type {
   ResolvedVideoDefinition,
   VideoParameters,
 } from './video-definition.js';
-import { identifyVideoInput } from './video-input.js';
+import { identifyVideoInput, videoInputIdentity } from './video-input.js';
 import type { RecordVideoInput, VideoInput } from './video-input.js';
 
 export type ScriptImport = {
@@ -65,6 +66,17 @@ export async function readDefinitionScript(
   const parameter = 'opencut-build';
   const url = pathToFileURL(path);
   url.searchParams.set(parameter, build);
+  const loadedSources = new Map<string, VideoInput>();
+  function checkSource(input: VideoInput) {
+    const observed = videoInputIdentity(input.path);
+    if (input.identity && observed !== input.identity)
+      throw new SourceChangedError(
+        input.path,
+        'definition loading',
+        input.identity,
+        observed,
+      );
+  }
   const hooks = registerHooks({
     resolve(specifier, context, nextResolve) {
       const { parentURL } = context;
@@ -123,12 +135,33 @@ export async function readDefinitionScript(
     },
     load(url, context, nextLoad) {
       if (
-        record &&
         url.startsWith('file:') &&
         new URL(url).searchParams.get(parameter) === build
       ) {
         const path = fileURLToPath(url);
-        record(identifyVideoInput(path, 'source'));
+        const input = identifyVideoInput(path, 'source');
+        loadedSources.set(path, input);
+        let result: ReturnType<typeof nextLoad>;
+        try {
+          result = nextLoad(url, context);
+        } finally {
+          checkSource(input);
+        }
+        // Node's TypeScript loader returns the source bytes before stripping types.
+        if (input.identity && ArrayBuffer.isView(result.source)) {
+          const bytes = Buffer.from(
+            result.source.buffer,
+            result.source.byteOffset,
+            result.source.byteLength,
+          );
+          input.fingerprint = {
+            identity: input.identity,
+            bytes: bytes.length,
+            sha256: createHash('sha256').update(bytes).digest('hex'),
+          };
+        }
+        record?.(input);
+        return result;
       }
       return nextLoad(url, context);
     },
@@ -136,8 +169,14 @@ export async function readDefinitionScript(
   try {
     // An async default export can still import helpers after module evaluation.
     const value: unknown = await (await import(url.href)).default;
-    return await resolveVideoDefinition(value, params);
+    const result = await resolveVideoDefinition(value, params);
+    for (const input of loadedSources.values()) checkSource(input);
+    return result;
   } catch (cause) {
+    if (cause instanceof SourceChangedError)
+      await cause.compareContent(
+        loadedSources.get(cause.change.path)?.fingerprint,
+      );
     throw definitionLoadError(path, cause);
   } finally {
     hooks.deregister();
@@ -180,14 +219,24 @@ export async function readIsolatedDefinitionScript(
             | { input: VideoInput }
             | { edge: ScriptImport }
             | { result: ResolvedVideoDefinition }
-            | { error: string },
+            | { error: string; sourceChange?: SourceChangedError['change'] },
         ) => {
           if ('input' in message) {
             record?.(message.input);
           } else if ('edge' in message) trace?.(message.edge);
-          else if ('error' in message)
-            reject(new VideoDefinitionError(message.error));
-          else resolve(message.result);
+          else if ('error' in message) {
+            const change = message.sourceChange;
+            const cause =
+              change &&
+              new SourceChangedError(
+                change.path,
+                change.stage,
+                change.before,
+                change.after,
+              );
+            if (cause) Object.assign(cause.change, change);
+            reject(new VideoDefinitionError(message.error, { cause }));
+          } else resolve(message.result);
         },
       );
       worker.on('error', reject);

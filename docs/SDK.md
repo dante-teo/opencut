@@ -25,7 +25,7 @@ await renderCompiledVideo(video, 'delivery.mp4', {
   quality: 'maximum',
   encoder: 'auto',
   onProgress: ({ stage, percent }) => {
-    if (stage === 'encoding' || stage === 'verification') {
+    if (stage === 'encoding' || stage === 'muxing') {
       console.error(percent);
     }
   },
@@ -38,11 +38,20 @@ picture. It copies media on first decode. If a source has changed, compile
 the definition again.
 Pass an `AbortSignal` to cancel a foreground render.
 
-`onProgress` reports frame counts and percentages within each `stage`.
-For a single encoding progress bar, use the `encoding` and `verification`
-events, as above. Graphic capture can report a separate 0–100% sequence for
-each `clipId`. Direct exports can compose and encode together, and reuse of
-saved picture packets skips encoding.
+`onProgress` reports counts, percentages, and elapsed time within each
+`stage`. For one progress bar, follow `encoding` or `muxing` as above.
+Verification has its own 0–100% sequence. Treat the export as complete once
+the render promise resolves. Graphic capture can report a separate sequence
+for each `clipId`. `audio-analysis` and `audio-mastering` report start and
+completion when those stages run. Direct exports can compose and encode
+together.
+
+Use `findSourceChange(error)` to read the underlying `SourceChangedError`
+if compilation, preview or export encounters a changing input, including a
+React graphic import. Its `change` details include the path, stage,
+identities, and content comparison when available. For a retry after a
+metadata-only touch, compile again and create a fresh preview or render.
+See [source change recovery](CLI.md#source-changes-during-a-command).
 
 Set `encoder` to `'auto'`, `'software'` or `'videotoolbox'`. The render
 result reports the selected encoder and its effective settings. OpenCut
@@ -50,6 +59,65 @@ defaults to software and includes `encoder.fallbackReason` when `auto`
 selects software after a hardware probe failure. Checkpointed renders
 include `outputFingerprint` with the published MP4's byte count and SHA-256.
 See [encoder selection](CLI.md#encoder-selection-and-render-progress).
+
+## Build narration and captions together
+
+Use `buildNarration` inside a definition to create assets, audio clips, and
+subtitle cues from the same segments.
+
+```ts
+import { buildNarration, defineVideo } from '@opencut/sdk';
+
+const narration = buildNarration([
+  {
+    id: 'welcome',
+    audio: 'voice/welcome.wav',
+    at: { numerator: 1, denominator: 1 },
+    duration: { numerator: 3, denominator: 2 },
+    transcript: 'Welcome back.',
+    timings: [
+      {
+        from: 0,
+        to: 7,
+        start: { numerator: 0, denominator: 1 },
+        end: { numerator: 3, denominator: 4 },
+      },
+    ],
+  },
+]);
+
+export default defineVideo({
+  canvas: { width: 1080, height: 1440, frameRate: 60, durationFrames: 240 },
+  assets: narration.assets,
+  tracks: [
+    {
+      id: 'voiceover',
+      type: 'audio',
+      audioRole: 'dialogue',
+      clips: narration.clips,
+    },
+  ],
+  subtitles: { style: { fontSize: 58 }, cues: narration.cues },
+});
+```
+
+Times are exact rational seconds. `at` is absolute on the timeline.
+`duration` is the part of the recording to use, starting at the file's
+beginning. The subtitle cue uses this same interval. Compilation checks
+the recording's available duration. Optional `timings` use times relative
+to the start of the segment and half-open UTF-16 offsets `[from, to)`
+into the transcript. Supply one range for a character, a word, or a short
+phrase. Ranges and times must be ordered, nonoverlapping, and within the
+transcript and segment, respectively. Each segment produces one cue and can
+include up to 128 timing ranges.
+
+To replace a line, keep its `id` and `at`, then update the audio path,
+duration, transcript and timings together. IDs in the returned assets,
+clips and cues derive from the segment ID. Other segment placements remain
+as authored. Give the containing audio track an explicit ID to keep its
+identity across edits. Supply unique segment IDs across the definition.
+
+## Preview and revise exports
 
 To render an exact set of definition frames, pass `frames` to
 `previewVideo(video).contactSheet()`.

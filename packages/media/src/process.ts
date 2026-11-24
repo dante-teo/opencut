@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { access, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
+import type { BigIntStats } from 'node:fs';
 import { resolve } from 'node:path';
 import { renderToolCommand, trackRenderProcess } from './render-budget.js';
 
@@ -44,11 +45,16 @@ export async function localFile(file: string): Promise<string> {
   return path;
 }
 
+export function fileIdentity(info: BigIntStats) {
+  return info.isFile()
+    ? `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`
+    : null;
+}
+
 export async function sourceFileStamp(path: string) {
-  const info = await stat(path, { bigint: true });
-  if (!info.isFile())
-    throw new MediaError('Media source must be a regular file.');
-  return [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':');
+  const identity = fileIdentity(await stat(path, { bigint: true }));
+  if (!identity) throw new MediaError('Media source must be a regular file.');
+  return identity;
 }
 
 // execFile passes arguments directly, without shell expansion. Bound both runtime

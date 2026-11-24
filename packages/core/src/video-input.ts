@@ -1,7 +1,11 @@
-import { constants, statSync } from 'node:fs';
-import type { BigIntStats } from 'node:fs';
+import { constants } from 'node:fs';
 import { copyFile } from 'node:fs/promises';
-import type { MediaMetadata } from '@opencut/media';
+import {
+  sourceIdentity as videoInputIdentity,
+  SourceChangedError,
+} from '@opencut/media';
+import type { fingerprintSourceFile, MediaMetadata } from '@opencut/media';
+export { videoInputIdentity };
 
 export type VideoInputKind =
   'source' | 'media' | 'font' | 'graphic' | 'graphic-runtime';
@@ -9,6 +13,7 @@ export interface VideoInput {
   path: string;
   kind: VideoInputKind;
   identity: string | null;
+  fingerprint?: Awaited<ReturnType<typeof fingerprintSourceFile>>;
 }
 
 export interface IdentifiedMedia {
@@ -25,40 +30,28 @@ export function identifyVideoInput(
   return { path, kind, identity: videoInputIdentity(path) };
 }
 
-/** Include inode and high-resolution change time for replacements and in-place edits. */
-export function videoInputIdentity(path: string): string | null {
-  try {
-    return fileIdentity(statSync(path, { bigint: true }));
-  } catch {
-    return null;
-  }
-}
-
-export function fileIdentity(info: BigIntStats) {
-  return info.isFile()
-    ? `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`
-    : null;
-}
-
 /** A private copy keeps the renderer's source stable across in-place edits. */
 export async function copyVideoInput(
   path: string,
   identity: string,
   output: string,
   signal?: AbortSignal,
+  stage = 'source snapshot',
 ) {
   const check = () => {
     signal?.throwIfAborted();
-    if (videoInputIdentity(path) !== identity)
-      throw new Error(
-        `Media '${path}' changed after it was read. Compile the definition again.`,
-      );
+    const observed = videoInputIdentity(path);
+    if (observed !== identity)
+      throw new SourceChangedError(path, stage, identity, observed);
   };
   check();
-  await copyFile(
-    path,
-    output,
-    constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL,
-  );
-  check();
+  try {
+    await copyFile(
+      path,
+      output,
+      constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL,
+    );
+  } finally {
+    check();
+  }
 }

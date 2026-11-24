@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import {
   copyFile,
   link,
@@ -13,8 +14,19 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { frameTime } from '@opencut/core';
-import { defineVideo, renderVideo } from '@opencut/sdk';
-import { renderVideoTimeline } from '../../packages/media/src/index.js';
+import {
+  compileVideo,
+  defineVideo,
+  findSourceChange,
+  planVideoRender,
+  renderCompiledVideo,
+  renderVideo,
+} from '@opencut/sdk';
+import {
+  findSourceChange as findMp4SourceChange,
+  readMp4FrameIndex,
+  renderVideoTimeline,
+} from '../../packages/media/src/index.js';
 import type {
   PictureCache,
   PictureRange,
@@ -128,6 +140,28 @@ test('CLI saves verified picture packets and stream copies them into an audio-on
       'pipe:1',
     ]).toString();
   assert.equal(packetHash(saved.path), packetHash(revised.path));
+  assert.ok(
+    revised.result.stderr
+      .split('\n')
+      .some(
+        (line) => line.startsWith('{') && JSON.parse(line).stage === 'muxing',
+      ),
+  );
+  for (const [expected, status] of [
+    ['120/2', 0],
+    ['30', 1],
+  ] as const) {
+    const probe = spawnSync(
+      process.execPath,
+      [entry, 'probe', revised.path, '--expect-fps', expected, '--json'],
+      { encoding: 'utf8' },
+    );
+    assert.equal(probe.status, status, probe.stderr);
+    assert.deepEqual(
+      JSON.parse(probe.stdout).frameRateCheck.passed,
+      status === 0,
+    );
+  }
   verifyVideoTimestamps(revised.path, rate, 24);
   assert.notDeepEqual(
     decodeAudio(saved.path).samples,
@@ -145,6 +179,136 @@ test('CLI saves verified picture packets and stream copies them into an audio-on
   const corrupt = run(id, 'corrupt-picture');
   assert.equal(corrupt.result.status, 1);
   assert.match(corrupt.result.stderr, /Saved picture is missing or corrupt/);
+});
+
+test('an audio source change after composition preserves verified cached picture ranges', async (t) => {
+  const directory = await mkdtemp(
+    join(fixtureDirectory, 'changed-render-source-'),
+  );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, 'edit.video.ts');
+  const wav = join(directory, 'music.wav');
+  const output = join(directory, 'render.mp4');
+  const cache = join(directory, 'cache');
+  const audio = await readFile(join(fixtureDirectory, 'audio-tone.wav'));
+  await writeFile(wav, audio);
+  const writeEdit = (audioRole: 'music' | 'dialogue') =>
+    writeFile(
+      file,
+      'export default ' +
+        JSON.stringify(
+          defineVideo({
+            canvas: {
+              width: 160,
+              height: 90,
+              frameRate: 60,
+              durationFrames: 24,
+            },
+            assets: { music: { path: 'music.wav', kind: 'audio' } },
+            tracks: [
+              {
+                type: 'text',
+                clips: [{ at: 0, duration: 24, text: { content: 'Picture' } }],
+              },
+              {
+                type: 'audio',
+                audioRole,
+                clips: [{ asset: 'music', at: 0, sourceOut: 24 }],
+              },
+            ],
+            professionalMix: { preset: 'natural-cinematic' },
+          }),
+        ),
+    );
+  await writeEdit('music');
+  const options = {
+    pictureCacheDirectory: cache,
+    pictureVersion: 'save',
+    processing: { cacheDirectory: join(directory, 'recipes') },
+  };
+  for (const scenario of ['unchanged', 'changed', 'removed'] as const) {
+    if (scenario === 'removed') await writeEdit('dialogue');
+    const video = await compileVideo(file, options);
+    await assert.rejects(
+      renderCompiledVideo(video, output, {
+        ...options,
+        onProgress(event) {
+          if (event.stage !== 'composition' || event.percent !== 100) return;
+          if (scenario === 'unchanged') utimesSync(wav, 1, 1);
+          else if (scenario === 'removed') unlinkSync(wav);
+          else {
+            audio[audio.length - 1] = audio[audio.length - 1]! ^ 1;
+            writeFileSync(wav, audio);
+          }
+        },
+      }),
+      (error: unknown) => {
+        const change = findSourceChange(error)?.change;
+        assert.equal(change?.path, wav);
+        assert.equal(
+          change?.stage,
+          scenario === 'removed' ? 'audio analysis' : 'audio mastering',
+        );
+        assert.equal(
+          change?.content,
+          scenario === 'removed' ? 'unknown' : scenario,
+        );
+        if (scenario === 'removed') {
+          assert.equal(change.after, null);
+          assert.ok(change.before);
+          assert.ok(change.beforeSha256);
+        }
+        assert.equal(change?.completedPictureRanges?.length, 1);
+        assert.deepEqual(change.completedPictureRanges[0], {
+          startFrame: 0,
+          endFrame: 24,
+          status: scenario === 'unchanged' ? 'rendered' : 'reused',
+        });
+        return true;
+      },
+    );
+    await assert.rejects(readFile(output), { code: 'ENOENT' });
+    if (scenario === 'removed') await writeFile(wav, audio);
+    const plan = await planVideoRender(file, output, options);
+    assert.equal(plan.pictureRanges[0]?.status, 'reuse');
+  }
+  const audioStages: string[] = [];
+  await renderVideo(file, output, {
+    ...options,
+    onProgress(event) {
+      if (event.stage?.startsWith('audio-'))
+        audioStages.push(`${event.stage}:${event.percent}`);
+    },
+  });
+  assert.deepEqual(audioStages, [
+    'audio-analysis:0',
+    'audio-analysis:100',
+    'audio-mastering:0',
+    'audio-mastering:100',
+  ]);
+});
+
+test('MP4 frame inspection identifies metadata-only and content changes', async (t) => {
+  const directory = await mkdtemp(
+    join(fixtureDirectory, 'changed-mp4-source-'),
+  );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, 'input.mp4');
+  const source = join(fixtureDirectory, 'video-medium.mp4');
+  await copyFile(source, path);
+  const checkChange = (content: string) => (error: unknown) => {
+    const change = findMp4SourceChange(error)?.change;
+    assert.equal(change?.path, path);
+    assert.equal(change?.content, content);
+    assert.notEqual(change?.before, change?.after);
+    return true;
+  };
+  const first = await readMp4FrameIndex(path);
+  utimesSync(path, 1, 1);
+  await assert.rejects(first.checkSource(), checkChange('unchanged'));
+  const next = await readMp4FrameIndex(path);
+  await copyFile(join(fixtureDirectory, 'video-short.mp4'), path);
+  await assert.rejects(next.checkSource(), checkChange('changed'));
 });
 
 test('CLI picture cache reuses shifted 60 fps picture and preserves caption and narration timing', async () => {

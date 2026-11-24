@@ -6,6 +6,7 @@ import {
   audioSourceDuration,
   orientedSource,
   resolveSourceWindow,
+  SourceChangedError,
   videoSourceDuration,
   validateEmbeddedFont,
   validateSubtitleBurnIn,
@@ -152,11 +153,16 @@ export async function compileDefinition(
     }),
   );
   const checkInputs = (quality: RenderQuality) => {
-    for (const [file, identity] of profileIdentities)
-      if (videoInputIdentity(file) !== identity)
-        throw new VideoDefinitionError(
-          `Media or font '${file}' changed since compilation. Compile the definition again for ${quality}.`,
+    for (const [file, identity] of profileIdentities) {
+      const observed = videoInputIdentity(file);
+      if (observed !== identity)
+        throw new SourceChangedError(
+          file,
+          `input check for ${quality} compilation`,
+          identity,
+          observed,
         );
+    }
   };
   const { project, assets, recipes, qualitySensitive } = await buildProject(
     sources,

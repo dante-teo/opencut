@@ -1,10 +1,12 @@
 import type { MediaMetadata } from '@opencut/media';
+import { sameFrameRate } from '@opencut/media';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { CommandOptions } from './commands.js';
 import { UsageError } from './usage.js';
 import { readParams } from './json-argument.js';
 import { withCommandCancellation } from './cancellation.js';
+import { parseFrameRateOption } from './render-options.js';
 
 function formatProbe(media: MediaMetadata): string {
   const { video, audio } = media;
@@ -80,9 +82,27 @@ export async function runDefinitionTool(
       const { extractFrame, probeMedia, separateDialogue } =
         await import('@opencut/media');
       if (command === 'probe') {
+        const expected =
+          values['expect-fps'] === undefined
+            ? undefined
+            : parseFrameRateOption('expect-fps', values['expect-fps']);
         const media = await probeMedia(file, signal);
         result = media;
         if (!values.json) formatted = formatProbe(media);
+        if (expected) {
+          const actual = media.video?.frameRateRatio ?? null;
+          const passed = sameFrameRate(
+            actual,
+            expected.numerator,
+            expected.denominator,
+          );
+          result = { ...media, frameRateCheck: { expected, actual, passed } };
+          if (!passed) {
+            process.exitCode = 1;
+            if (!values.json)
+              formatted += `\nExpected ${expected.numerator}/${expected.denominator} fps. Found ${actual ?? 'no video rate'}.`;
+          }
+        }
       } else if (command === 'separate-dialogue') {
         if (!output?.trim())
           throw new UsageError('Specify --output <new-directory>.');

@@ -49,18 +49,22 @@ and effective settings participate in encoded picture identity.
 The final `render --json` result goes to stdout. Stderr emits JSON lines
 with `event: "progress"`. Recipe events carry `stage: "recipe"` plus the
 asset, step and status. Renderer events carry `stage` values `graphics`,
-`composition`, `encoding` and `verification`, alongside `phase`,
+`composition`, `audio-analysis`, `audio-mastering`, `encoding`, `muxing`
+and `verification`, alongside `phase`,
 `processedFrames`, `totalFrames`, `percent`, `elapsedSeconds` and
-`remainingSeconds`. Graphics events include a `clipId`. Frame counters
-apply to the event's stage. Composition and encoding run together for
-direct exports and their events can overlap. Reused encoded picture skips
-the encoding stage. Filter stderr for progress objects if other diagnostics
-are present.
+`remainingSeconds`. Frame counts, percentages and elapsed time apply to
+the current stage. Audio analysis, mastering and verification can each
+start at 0% and finish at 100%. Graphics capture and analysis for a graphic
+include a `clipId`. Composition and encoding can overlap in direct exports.
+When an export reuses a saved picture version, `muxing` tracks copying the
+encoded picture into the new MP4. Wait for the command to succeed and return
+its final JSON before using the output. Use an external clock to measure
+the full command. Stderr can also contain other diagnostics.
 
 ## Frame-targeted contact sheets
 
 ```sh
-opencut preview contact-sheet edit.video.ts --frames 59,60 --timestamps 3/2 --output edit-qa.png
+opencut preview contact-sheet edit.video.ts --frames 59,60 --timestamps 3/2 --retry-source-change --output edit-qa.png
 opencut render edit.video.ts --output final.mp4 --picture-cache ./render-cache --json > final.render.json
 opencut preview contact-sheet final.mp4 --render-report final.render.json --around cuts,captions,picture --from 55 --to 75 --output export-qa.png
 opencut preview contact-sheet final.mp4 --definition edit.video.ts --frames 59,60 --output decoded-qa.png
@@ -109,9 +113,10 @@ and rational `time`, its cell `x` and `y`, and a `requests` array. Each request
 records its `reason` and either `requestedFrame` or `requestedTime`.
 Boundary requests preserve the original timeline time and include `side`
 and `adjacentClipIds` when known. With timeline context, each sample has
-`clipIds` for its actual frame. An MP4 manifest also gives the `timeBase`,
-`firstPts` and each sample's original `pts`. Samples are sorted by actual
-frame index.
+`clipIds` for its actual frame. An MP4 manifest also gives the average
+stream rate in `frameRateRatio`, the `timeBase`, `firstPts` and each sample's
+original `pts`. Its `input.fingerprint` contains the byte count and SHA-256
+of the inspected MP4. Samples are sorted by actual frame index.
 
 ## Layout assertions
 
@@ -277,26 +282,43 @@ selection.
 
 ### Audio-only revisions
 
-Save a verified encoded picture on the initial export.
+Save a reusable encoded picture when you deliver the review MP4. Keep the
+render JSON and the absolute path to its picture cache.
 
 ```sh
-opencut render edit.video.ts -o approved.mp4 --picture-cache ./render-cache --picture-version save --json
+cache="$PWD/render-cache"
+opencut render edit.video.ts -o approved.mp4 --picture-cache "$cache" \
+  --picture-version save --json > approved.render.json
 ```
 
-After revising music, effects or dialogue, use the reported
-`pictureVersion.id` in place of `PICTURE_VERSION_ID` and keep the same
-cache directory and video export settings.
+After revising music, effects or dialogue, read `pictureVersion.id` from the
+report. Plan the new export with the same cache and video settings.
 
 ```sh
-opencut render edit.video.ts -o revised.mp4 --picture-cache ./render-cache --picture-version PICTURE_VERSION_ID --json
+id=$(jq -er '.pictureVersion.id' approved.render.json)
+opencut render plan edit.video.ts -o revised.mp4 --picture-cache "$cache" \
+  --picture-version "$id" --json > revision.plan.json &&
+opencut render edit.video.ts -o revised.mp4 --picture-cache "$cache" \
+  --picture-version "$id" --json > revised.render.json
 ```
 
-OpenCut copies the verified picture packets and mixes the new audio.
-The report shows `pictureVersion.status` as `reused`. If the revision changes
-an audio dependency of the picture, the saved ID is rejected. Export again
-with `--picture-version save` to create a new version. Do the same after
-changing the visual content or video export settings. Keep the cache
-available for revisions of each saved version.
+A successful plan reports `savedPicture.status: "reuse"`. The render copies
+the verified video packets, mixes new audio, and reports
+`pictureVersion.status: "reused"`. To compare the encoded video payloads,
+run the same packet hash command for each MP4 and compare the SHA-256 values.
+
+```sh
+ffmpeg -v error -i approved.mp4 -map 0:v:0 -c:v copy -f hash -hash sha256 -
+ffmpeg -v error -i revised.mp4 -map 0:v:0 -c:v copy -f hash -hash sha256 -
+```
+
+If the plan reports `savedPicture.status: "blocked"`, inspect its reason.
+For a missing or invalid entry, restore the original cache or plan and
+render with `--picture-version save`, then keep the new ID. Use
+`--picture-version save` after changes to burned-in subtitles, audio-driven
+graphics, other visual layers, or video export settings. Check
+`pictureRanges` in the new plan for the lossless ranges that can still be
+reused. The new encoded picture covers the whole export.
 
 ## React and SVG graphics
 
@@ -434,6 +456,46 @@ start with one recipe worker. Use `system inspect --json` for the supported
 configurations and model readiness, then `validate` to run the actual job.
 See [enhancement presets and limits](VIDEO_DEFINITIONS.md#ai-enhancement).
 
+### Verify interpolation and upscale
+
+For a comparison, make two definitions with the same clip trim, timeline
+placement, canvas and frame rate. Use the original asset in the comparison
+without interpolation. For upscale, use a `resize` recipe with `lanczos`
+at the same target dimensions as `superResolution`. Keep the timeline at
+60 fps for a 30-to-60 fps interpolation comparison. A 30 fps timeline
+samples the composition on a 30 fps grid even if the export is set to 60.
+
+```sh
+opencut probe source.mp4 --json > source.probe.json
+opencut inspect processed.video.ts --json > processed.inspect.json
+opencut timeline inspect processed.video.ts --frame 60 --json > sample.json
+opencut render baseline.video.ts -o baseline.mp4 --fps 60 --json > baseline.render.json
+opencut render processed.video.ts -o processed.mp4 --fps 60 --json > processed.render.json
+opencut probe processed.mp4 --expect-fps 60 --json > delivery.probe.json
+opencut preview contact-sheet baseline.mp4 --frames 59,60,61 --output baseline.png
+opencut preview contact-sheet processed.mp4 --frames 59,60,61 --output processed.png
+```
+
+Read the input rate from `video.frameRateRatio` in the source probe, the
+actually processed rate from the relevant asset's `metadata.frameRateRatio`
+in the definition inspection, the timeline rate and source sample from
+`frameRate` and `visualClips[].sourceTime` in the timeline inspection,
+and the delivered rate from the output probe. `inspect` materializes
+referenced recipes with the default `quality` profile. Set a recipe's
+`quality` for a comparison that uses another AI profile. Both contact-sheet
+manifests identify each sampled frame and its presentation timestamp.
+Choose a few consecutive frames at a turn, occlusion, moving light, or cut
+to check for ghosting. Compare faces, fabric and small lettering at matched
+sizes, looking for oversharpening and changes across successive frames.
+
+`probe --expect-fps` checks the reported average video stream rate as an
+exact fraction. The JSON result includes `frameRateCheck.expected` as a
+numerator and denominator, `actual` as a fraction string or `null`, and
+`passed` as a boolean. A mismatch still returns the result on stdout and
+exits with status 1. Use the intended delivery rate, including 30 fps for a
+30 fps delivery from 60 fps footage. To check every decoded presentation
+timestamp against an approved export, use [`verify export`](#post-export-verification).
+
 ## Build recovery
 
 ```sh
@@ -467,6 +529,34 @@ removes the old scratch for the same build and output. A verified MP4 is
 published atomically; a failed or interrupted overwrite leaves any previous
 output intact until a replacement is verified. If inspection finds the MP4
 was already published, use it, or choose a new output explicitly.
+
+### Source changes during a command
+
+In JSON mode, a detected source change reports `error.code: "SOURCE_CHANGED"`
+on stderr. Read `error.sourceChange` for the `path`, `stage` and observed
+identities in `before` and `after`. An identity includes device, inode, size,
+modification time and change time. An unavailable identity is `null`,
+including when an input disappears. `beforeSha256` and `afterSha256` are
+optional. When OpenCut verifies both sets of bytes, it reports `content`
+as `"unchanged"` or `"changed"`. If either hash is unavailable, it reports
+`"unknown"`.
+
+Pass `--retry-source-change` to `validate`, `render` or
+`preview contact-sheet` to make at most one fresh attempt after a detected
+change with verified identical content and a still-matching file identity.
+A JSON retry writes a `source-change-retry` event to stderr before the next
+attempt. For a definition contact sheet, the retry recompiles the definition
+before sampling. For an MP4 contact sheet, it rebuilds the decoded frame
+index. For changed or unknown content, let any writes finish and restore
+any missing input before rerunning on the intended revision. Each attempt
+rechecks its inputs. A failed attempt leaves existing deliveries available.
+
+When a source changes after picture ranges have been cached, look for
+`error.sourceChange.completedPictureRanges`. For example, a dialogue
+recording can disappear during audio preparation after picture composition.
+Use `render plan` with the same cache and settings to see which ranges still
+match the current inputs. `build inspect` checks recorded recipe stages for
+the current build.
 
 ## Portable projects
 

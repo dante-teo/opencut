@@ -15,6 +15,8 @@ const optionTypes = {
   ...renderOptionTypes,
   'picture-cache': { type: 'string' },
   'picture-version': { type: 'string' },
+  'retry-source-change': { type: 'boolean' },
+  'expect-fps': { type: 'string' },
   'mix-settings': { type: 'string' },
   'mix-comparison': { type: 'string' },
   'mix-cache': { type: 'string' },
@@ -105,8 +107,12 @@ const commands = {
     options: ['recipe-cache', 'no-subtitles', 'quality', 'params'],
   },
   validate: {
-    args: `${definition} ${params}`,
-    options: ['params', ...Object.keys(processingOptionTypes)],
+    args: `${definition} [--retry-source-change] ${params}`,
+    options: [
+      'params',
+      'retry-source-change',
+      ...Object.keys(processingOptionTypes),
+    ],
   },
   inspect: {
     args: `${definition} ${params}`,
@@ -129,8 +135,8 @@ const commands = {
     options: ['frame', 'timestamp', 'quality', 'params'],
   },
   render: {
-    args: `${definition} --output <new.mp4> [--picture-cache <directory> [--picture-version <save|id>]] ${qualityOption} ${mixUsage} ${params}`,
-    options: renderOptions,
+    args: `${definition} --output <new.mp4> [--picture-cache <directory> [--picture-version <save|id>]] [--retry-source-change] ${qualityOption} ${mixUsage} ${params}`,
+    options: [...renderOptions, 'retry-source-change'],
   },
   'render plan': {
     args: `${definition} --output <delivery.mp4> [--picture-cache <directory> [--picture-version <save|id>]] ${qualityOption} ${mixUsage} ${params}`,
@@ -180,7 +186,7 @@ const commands = {
     ],
   },
   'preview contact-sheet': {
-    args: `<definition.video.ts|export.mp4> --output <new.png> [--frames <n,n>] [--timestamps <time,time>] [--around <cuts,captions,picture>] [--definition <definition.video.ts>] [--render-report <report.json>] [--from <n>] [--to <n>] [--count <1..16>] [--columns <1..16>] [--size <64..640>] ${qualityOption} ${params}`,
+    args: `<definition.video.ts|export.mp4> --output <new.png> [--frames <n,n>] [--timestamps <time,time>] [--around <cuts,captions,picture>] [--definition <definition.video.ts>] [--render-report <report.json>] [--from <n>] [--to <n>] [--count <1..16>] [--columns <1..16>] [--size <64..640>] [--retry-source-change] ${qualityOption} ${params}`,
     options: [
       'frames',
       'timestamps',
@@ -194,6 +200,7 @@ const commands = {
       'count',
       'columns',
       'params',
+      'retry-source-change',
       ...previewOptions,
     ],
   },
@@ -215,7 +222,7 @@ const commands = {
     args: `${definition} --output <new.srt|new.vtt> ${params}`,
     options: ['output', 'params'],
   },
-  probe: { args: '<media>', options: [] },
+  probe: { args: '<media> [--expect-fps <n|n/d>]', options: ['expect-fps'] },
   'extract-frame': {
     args: '<media> --timestamp <seconds> --output <new.png>',
     options: ['timestamp', 'output'],

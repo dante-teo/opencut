@@ -79,6 +79,20 @@ function parseFrameRate(value: unknown): number | null {
   return Number.isFinite(result) && result > 0 ? result : null;
 }
 
+export function sameFrameRate(
+  actual: string | null,
+  numerator: number,
+  denominator: number,
+): boolean {
+  const parts = actual?.match(/^(\d+)\/(\d+)$/);
+  return (
+    !!parts &&
+    BigInt(parts[1]!) * BigInt(denominator) ===
+      BigInt(numerator) * BigInt(parts[2]!) &&
+    BigInt(parts[2]!) > 0n
+  );
+}
+
 function parseStream(value: unknown): MediaStream {
   const data = record(value);
   const index = finiteNumber(data.index);

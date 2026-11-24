@@ -28,7 +28,9 @@ Run `opencut --help` to discover commands and `opencut render --help` for export
    Check [AI recipe support and scene boundaries](references/video-definitions.md#media-recipes).
 2. Set canvas size, frame rate, ordered tracks, and clip ranges. Use integer
    frame positions or exact rationals as documented. Add subtitles, effects,
-   fades, and transitions to the definition itself.
+   fades, and transitions to the definition itself. Use `buildNarration`
+   to create dialogue clips and caption cues together from recordings and
+   transcripts with [stable segment IDs](references/sdk.md#narration-and-captions).
 3. Run `opencut validate DEFINITION --json` and
    `opencut inspect DEFINITION --json`. Inspect exact frames with
    `opencut timeline inspect DEFINITION --frame N --json`. Declare
@@ -49,6 +51,8 @@ Run `opencut --help` to discover commands and `opencut render --help` for export
 5. Deliver a new MP4 with `opencut render DEFINITION --output final.mp4`.
    Run `opencut render plan DEFINITION --output final.mp4 --json` with the
    same options to check cache reuse and estimated scratch space first.
+   For a review MP4 that may get audio revisions, [save its encoded picture
+   and retain the version ID and cache path](references/cli.md#scripted-audio-revisions).
    The CLI defaults to `quality` and runs directly. Use `--quality maximum`
    for slower MP4 encoding with the same AI algorithms as `quality`.
    Export an SRT or VTT
@@ -58,14 +62,17 @@ Run `opencut --help` to discover commands and `opencut render --help` for export
    Run `opencut batch DEFINITION --variants variants.json --output-dir outputs --json`.
    Read each result and retry corrected entries with `--only id,id`.
 7. If interrupted, run `opencut build inspect DEFINITION --json` with the
-   same cache, quality and parameters. Retry to reuse verified recipes and restart
-   unfinished encoding. For transfer, run `opencut package DEFINITION --output bundle`
+   same cache, quality and parameters. Check source-change JSON for the file,
+   stage and content comparison. For transfer, run `opencut package DEFINITION --output bundle`
    and `opencut package verify bundle`. Render `bundle/opencut.bundle.video.ts`
    with the required backends.
 8. Use `opencut verify export` with the approved MP4 preview, the render
    JSON and, for picture-only revisions, the approved audio master.
    Review the paired images and boundary checks. Play the output with
-   audio to check timing. Record
+   audio to check timing. For a 60 fps delivery, check
+   `opencut probe final.mp4 --expect-fps 60 --json`.
+   Follow the [matched-frame workflow](../../docs/CLI.md#verify-interpolation-and-upscale)
+   for interpolation or upscale. Record
    the definition, input hashes, effective profile, worker versions, recipe
    results and verification.
 

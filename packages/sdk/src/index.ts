@@ -1,6 +1,7 @@
 export {
   analyzeVideoMix,
   batchRenderVideo,
+  buildNarration,
   compileVideo,
   convertJsonVideoDefinition,
   defineVideo,
@@ -52,6 +53,7 @@ export type {
   MixAutomation,
   MixGainPoint,
   MusicSelection,
+  NarrationSegment,
   ProfessionalMix,
   VideoMixEdit,
   CompiledVideo,
@@ -111,6 +113,8 @@ export {
   MediaError,
   probeMedia,
   RenderCancelledError,
+  SourceChangedError,
+  findSourceChange,
   separateDialogue,
 } from '@opencut/media';
 export type {

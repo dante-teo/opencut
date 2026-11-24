@@ -30,12 +30,6 @@ ranges after a timeline shift, including ranges with captions that shift
 together with picture. Audio is mixed on the revised timeline. Read
 `pictureRanges` in JSON for the status of each half-open project-frame range.
 See [picture cache options](../../../docs/CLI.md#reuse-picture-between-exports).
-To reuse encoded picture for audio revisions, save the approved export with
-`--picture-version save`. Keep its ID and export the audio revision with the
-same cache and video settings and `--picture-version <id>`. Save a new
-version when an edit changes audio used by graphics. For graphics analyzing
-a Professional Dialogue Mix, changes to `--audio-channels`,
-`--audio-rate`, or `--audio-bitrate` also require a new picture version.
 Use `--music-candidate <track-id>` and `--music-loudness matched|authored`
 with `render` or `preview clip` to select and compare authored music
 candidates. Before final delivery, confirm the selected track and any
@@ -65,6 +59,13 @@ Use `opencut build inspect DEFINITION --json` with the original
 processing and render states. Retry with the same cache to reuse stages
 marked `reusable`. An interrupted MP4 encode starts over. When a verified
 MP4 exists, `lastAttempt` reports a newer retry separately from the output.
+When JSON stderr reports `error.code: "SOURCE_CHANGED"`, inspect
+`error.sourceChange`. Use `--retry-source-change` on `validate`, `render`
+or `preview contact-sheet` for one retry after OpenCut verifies that the
+bytes stayed the same and the file is stable. For changed or unknown bytes,
+let any writes finish and restore any missing input before rerunning.
+If `error.sourceChange.completedPictureRanges` lists cached ranges, recheck
+their reuse with `render plan`. See [source change recovery](../../../docs/CLI.md#source-changes-during-a-command).
 
 `opencut package DEFINITION --output BUNDLE` creates a portable directory.
 Use `--root DIR` if the inputs share a wider root, `--resource PATH` per
@@ -89,6 +90,11 @@ For frame QA, run `opencut preview contact-sheet DEFINITION --frames 59,60
 boundary sampling. With an MP4, use the fingerprinted `render --json`
 report for that export. OpenCut writes a JSON manifest beside the PNG.
 See [frame-targeted contact sheets](../../../docs/CLI.md#frame-targeted-contact-sheets).
+For processed footage, use the same timeline grid and output size in both
+comparisons. Get source and delivered rates with `probe`, the processed
+rate with `inspect`, and the sampled time with `timeline inspect` or the
+contact-sheet manifest. Use `probe EXPORT --expect-fps 60 --json` for a
+60 fps delivery. See [interpolation and upscale verification](../../../docs/CLI.md#verify-interpolation-and-upscale).
 
 For cleanup planning run `opencut inspect dependencies DEFINITION --json`.
 Supply `--artifact-root` for additional directories and
@@ -107,6 +113,38 @@ samples, timing results and luma checks. Use an approved MP4 on the same
 frame grid as the export. Add `--audio-master master.mp4` to require exact
 encoded audio packets for a picture-only revision. See the
 [CLI verification reference](../../../docs/CLI.md#post-export-verification).
+
+## Scripted audio revisions
+
+Save the encoded picture while delivering the review export. Retain the
+absolute cache path and `pictureVersion.id` from the render JSON.
+
+```sh
+cache="$PWD/render-cache"
+opencut render edit.video.ts -o review.mp4 --picture-cache "$cache" \
+  --picture-version save --json > review.render.json
+```
+
+After the audio edit, keep the same video settings. Use the render plan
+to confirm `savedPicture.status: "reuse"` before rendering.
+
+```sh
+id=$(jq -er '.pictureVersion.id' review.render.json)
+opencut render plan edit.video.ts -o revised.mp4 --picture-cache "$cache" \
+  --picture-version "$id" --json > revised.plan.json &&
+opencut render edit.video.ts -o revised.mp4 --picture-cache "$cache" \
+  --picture-version "$id" --json > revised.render.json
+```
+
+If the cache entry is missing or invalid, restore the original cache or
+render with `--picture-version save` and retain the new ID. Save a new
+version when burned-in captions change or an audio edit affects graphics.
+With a Professional Dialogue Mix driving graphics, changes to
+`--audio-channels`, `--audio-rate`, or `--audio-bitrate` also affect
+picture reuse. Use the new plan's `pictureRanges` to see which lossless
+ranges can be reused. Read progress events on stderr, including
+`audio-analysis`, `audio-mastering` and `muxing`, and the final report
+on stdout. See [packet verification](../../../docs/CLI.md#audio-only-revisions).
 
 ## 3:4 4K60 delivery
 

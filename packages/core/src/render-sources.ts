@@ -7,6 +7,7 @@ import {
   exposeGraphic,
   MediaError,
   openGraphicsRenderer,
+  SourceChangedError,
   withDefaultRenderBudget,
 } from '@opencut/media';
 import type {
@@ -20,14 +21,15 @@ import { graphicFrameSamples } from './graphic-sampling.js';
 import { compareTimes, frameTime } from './time.js';
 import type { AudioRenderClip, ProjectRenderPlan } from './render-plan.js';
 import type { CompiledVideo } from './video-compiler.js';
-import { copyVideoInput } from './video-input.js';
+import { diagnoseCompiledSourceChange } from './video-build.js';
+import { copyVideoInput, videoInputIdentity } from './video-input.js';
 import { graphicsFrameCache } from './video-graphics-cache.js';
 import type { GraphicProps } from './video-graphics-contract.js';
 
 type BoundPlan = Awaited<ReturnType<CompiledVideo['resolveRender']>>;
 type RenderSourceBindings = Pick<
   VideoTimelineOptions,
-  'snapshotSource' | 'renderGraphic'
+  'boundSourceIdentity' | 'snapshotSource' | 'renderGraphic'
 >;
 type RenderGraphic = NonNullable<RenderSourceBindings['renderGraphic']>;
 
@@ -50,7 +52,10 @@ export async function withRenderSources<T>(
     ...audioControls
   }: RenderSourceOptions = {},
 ) {
-  const plan = pinnedPlan ?? (await video.resolveRender());
+  const plan = {
+    ...(pinnedPlan ?? (await video.resolveRender())),
+    boundSourceIdentity: video.sourceIdentity,
+  };
   return withDefaultRenderBudget(signal, async () => {
     const staged = new Map<string, Promise<string>>();
     let sourceCount = 0;
@@ -61,7 +66,10 @@ export async function withRenderSources<T>(
         join(scratch, 'opencut-render-sources-'),
       )));
 
-    async function snapshotSource(path: string) {
+    async function snapshotSource(
+      path: string,
+      stage = 'picture source snapshot',
+    ) {
       const existing = staged.get(path);
       if (existing) return existing;
       const identity = video.sourceIdentity(path);
@@ -70,8 +78,15 @@ export async function withRenderSources<T>(
       const index = sourceCount++;
       const pending = (async () => {
         const snapshot = join(await open(), `${index}${extname(path)}`);
-        await accountRenderFile(path);
-        await copyVideoInput(path, identity, snapshot, signal);
+        try {
+          await accountRenderFile(path);
+        } catch (error) {
+          const observed = videoInputIdentity(path);
+          if (observed !== identity)
+            throw new SourceChangedError(path, stage, identity, observed);
+          throw error;
+        }
+        await copyVideoInput(path, identity, snapshot, signal, stage);
         return snapshot;
       })();
       staged.set(path, pending);
@@ -136,6 +151,9 @@ export async function withRenderSources<T>(
         ...(!pinnedPlan && { snapshotSource }),
         ...(graphics && { renderGraphic: graphics.frame }),
       });
+    } catch (error) {
+      await diagnoseCompiledSourceChange(video, error, signal);
+      throw error;
     } finally {
       try {
         await graphics?.close();
@@ -192,7 +210,7 @@ function bindGraphicFrames(
         )
       )
         throw new MediaError('Sample is outside the graphics source.');
-      const audio = await audioAt(graphic, timelineFrame);
+      const audio = await audioAt(graphic, timelineFrame, clipId);
       const rasterize = () =>
         exposeGraphic(
           graphic.width,

@@ -1,4 +1,5 @@
 import type { VideoMixEdit } from '@opencut/shared';
+import { SourceChangedError } from '@opencut/media';
 import { realpath } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import {
@@ -118,7 +119,12 @@ export async function compileVideoInput(
 async function readBuildInput(file: string, options: InputOptions) {
   const sources = new Map<string, VideoInput>();
   const record = (source: VideoInput) => {
-    if (!sources.has(source.path)) sources.set(source.path, source);
+    const previous = sources.get(source.path);
+    if (
+      !previous ||
+      (previous.identity === source.identity && source.fingerprint)
+    )
+      sources.set(source.path, source);
     options.inputs?.record(source);
   };
   const { path, value, params, verified, packagedGraphics } =
@@ -212,13 +218,17 @@ async function hashDefinition(
       cached?.identity === input.identity
         ? cached
         : await fingerprintFile(physical, signal);
-    if (
-      digest.identity !== input.identity ||
-      videoInputIdentity(input.path) !== input.identity
-    )
-      throw new VideoDefinitionError(
-        `Definition source '${input.path}' changed during compilation.`,
+    const observed = videoInputIdentity(input.path);
+    if (digest.identity !== input.identity || observed !== input.identity) {
+      const error = new SourceChangedError(
+        input.path,
+        'definition fingerprinting',
+        input.identity,
+        observed,
       );
+      await error.compareContent(input.fingerprint, signal);
+      throw error;
+    }
     dependencies.set(physical, digest.sha256);
   }
   const root = dependencies.get(path);

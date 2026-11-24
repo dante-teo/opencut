@@ -130,8 +130,15 @@ test('desktop graphic export sends monotonic encoding progress', async () => {
       path,
       `export default {
       canvas: { width: 160, height: 90, frameRate: 12, durationFrames: 12 },
-      assets: { card: { kind: 'graphic', renderer: 'svg', path: './Card.svg' } },
-      tracks: [{ type: 'video', clips: [{ asset: 'card', at: 0, duration: 12 }] }],
+      assets: {
+        card: { kind: 'graphic', renderer: 'svg', path: './Card.svg' },
+        tone: { kind: 'audio', path: '../audio-tone.wav' },
+      },
+      tracks: [
+        { type: 'video', clips: [{ asset: 'card', at: 0, duration: 12 }] },
+        { type: 'audio', audioRole: 'music', clips: [{ asset: 'tone', at: 0, sourceOut: 12 }] },
+      ],
+      professionalMix: { preset: 'natural-cinematic' },
     };`,
     ),
   ]);

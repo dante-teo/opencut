@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { parseCommandLine, printHelp, resolveCommand } from './commands.js';
+import type { CommandOptions } from './commands.js';
 import { UsageError } from './usage.js';
+import { findSourceChange, sourceIdentity } from '@opencut/media';
 
 async function run(args: string[]) {
   const { values, positionals } = parseCommandLine(args);
@@ -19,6 +21,35 @@ async function run(args: string[]) {
   }
 
   const { command, file } = resolveCommand(positionals, values);
+  try {
+    return await executeCommand(command, file, values);
+  } catch (error) {
+    const source = findSourceChange(error);
+    if (
+      !values['retry-source-change'] ||
+      source?.change.content !== 'unchanged' ||
+      sourceIdentity(source.change.path) !== source.change.after
+    )
+      throw error;
+    process.stderr.write(
+      json
+        ? JSON.stringify({
+            event: 'source-change-retry',
+            attempt: 2,
+            sourceChange: source.change,
+          }) + '\n'
+        : `Retrying after verifying unchanged bytes in '${source.change.path}'.\n`,
+    );
+    return executeCommand(command, file, values);
+  }
+}
+
+async function executeCommand(
+  command: ReturnType<typeof resolveCommand>['command'],
+  file: string,
+  values: CommandOptions,
+) {
+  const { json } = values;
   switch (command) {
     case 'convert': {
       const { runConvert } = await import('./convert.js');
@@ -116,6 +147,7 @@ const args = process.argv.slice(2);
 try {
   await run(args);
 } catch (error) {
+  const source = findSourceChange(error);
   const code =
     error instanceof Error && 'code' in error ? String(error.code) : '';
   const message = error instanceof Error ? error.message : String(error);
@@ -123,7 +155,8 @@ try {
     error instanceof UsageError || code.startsWith('ERR_PARSE_ARGS_');
   const errorCode = usage
     ? 'INVALID_ARGUMENTS'
-    : code ||
+    : source?.code ||
+      code ||
       (/Required executable|Install ELUATE/.test(message)
         ? 'MISSING_DEPENDENCY'
         : error instanceof Error && error.name === 'MediaError'
@@ -143,6 +176,21 @@ try {
           error: {
             code: errorCode,
             message,
+            ...(source && {
+              sourceChange: source.change,
+              recovery: {
+                retry:
+                  source.change.content === 'unchanged'
+                    ? 'fresh-attempt'
+                    : 'after-input-stabilizes',
+                ...(source.change.stage.startsWith('MP4')
+                  ? {}
+                  : {
+                      checkRecipeCache: 'build inspect',
+                      checkPictureCache: 'render plan',
+                    }),
+              },
+            }),
             ...(usage && { hint: 'Run opencut --help for usage.' }),
           },
         }) + '\n'

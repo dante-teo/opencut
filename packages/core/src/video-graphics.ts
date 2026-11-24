@@ -1,10 +1,13 @@
 import type { GraphicScene } from '@opencut/shared';
+import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { open, realpath } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import {
   compileReactGraphic,
   compileStaticSvg,
+  fileIdentity,
+  SourceChangedError,
   validateGraphicTemplate,
 } from '@opencut/media';
 import type {
@@ -20,11 +23,7 @@ import type {
   GraphicAssetDefinition,
   GraphicProps,
 } from './video-graphics-contract.js';
-import {
-  fileIdentity,
-  identifyVideoInput,
-  videoInputIdentity,
-} from './video-input.js';
+import { identifyVideoInput, videoInputIdentity } from './video-input.js';
 import type { VideoInput, RecordVideoInput } from './video-input.js';
 import { frameTime } from './time.js';
 import { createPresetScene } from './scene-presets.js';
@@ -229,10 +228,17 @@ export async function compileGraphic(
     );
     try {
       const info = await fd.stat({ bigint: true });
+      const observed = fileIdentity(info);
+      if (observed !== identity)
+        throw new SourceChangedError(
+          file,
+          'graphics capture',
+          identity,
+          observed,
+        );
       const size = Number(info.size);
       if (
         !identity ||
-        fileIdentity(info) !== identity ||
         !size ||
         size > maxFileBytes ||
         totalBytes + size > maxGraphBytes ||
@@ -253,16 +259,33 @@ export async function compileGraphic(
           offset,
         );
         if (!bytesRead)
-          throw new Error(
-            `Graphics dependency '${file}' changed while reading.`,
-          );
+          throw new SourceChangedError(file, 'graphics capture', identity);
         offset += bytesRead;
       }
-      if (
-        videoInputIdentity(file) !== identity ||
-        videoInputIdentity(target) !== identity
-      )
-        throw new Error(`Graphics dependency '${file}' changed while reading.`);
+      const paths = new Set([file, target]);
+      for (const path of paths) {
+        const observed = videoInputIdentity(path);
+        if (observed !== identity)
+          throw new SourceChangedError(
+            path,
+            'graphics capture',
+            identity,
+            observed,
+          );
+      }
+      const fingerprint = {
+        identity,
+        bytes: size,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+      };
+      for (const path of paths) {
+        const input = inputs.get(path)!;
+        if (input.identity === identity) {
+          const captured = { ...input, fingerprint };
+          inputs.set(path, captured);
+          record?.(captured);
+        }
+      }
       return bytes;
     } finally {
       await fd.close();
@@ -378,11 +401,19 @@ export async function compileGraphic(
           ? createPresetScene(definition.scene.preset, { width, height })
           : definition.scene;
     const bundle = packaged ?? (await compileBundle(width, height, scene));
-    for (const { path, identity } of inputs.values())
-      if (videoInputIdentity(path) !== identity)
-        throw new Error(
-          `Graphics dependency '${path}' changed during compilation.`,
+    for (const { path, identity, fingerprint } of inputs.values()) {
+      const observed = videoInputIdentity(path);
+      if (observed !== identity) {
+        const error = new SourceChangedError(
+          path,
+          'graphics compilation',
+          identity,
+          observed,
         );
+        await error.compareContent(fingerprint, signal);
+        throw error;
+      }
+    }
     const duration =
       definition.renderer !== 'svg'
         ? frameTime(definition.durationFrames, canvas.frameRate)

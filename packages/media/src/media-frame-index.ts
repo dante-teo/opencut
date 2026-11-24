@@ -1,10 +1,37 @@
-import { MediaError, runMediaTool, sourceFileStamp } from './process.js';
+import { MediaError, runMediaTool } from './process.js';
 import { probeMedia } from './probe.js';
 import { orientedSource } from './source-window.js';
+import {
+  fingerprintSourceFile,
+  sourceIdentity,
+  SourceChangedError,
+} from './source-integrity.js';
+import { resolve } from 'node:path';
 
 export async function readMp4FrameIndex(file: string, signal?: AbortSignal) {
-  const identity = await sourceFileStamp(file);
-  const { path, video } = await probeMedia(file, signal);
+  const path = resolve(file);
+  const stage = 'MP4 frame indexing';
+  const baseline = await fingerprintSourceFile(path, signal, stage, true);
+  async function checkSource(stage = 'MP4 frame inspection') {
+    signal?.throwIfAborted();
+    const observed = sourceIdentity(path);
+    if (observed !== baseline.identity) {
+      const error = new SourceChangedError(
+        path,
+        stage,
+        baseline.identity,
+        observed,
+      );
+      await error.compareContent(baseline, signal);
+      throw error;
+    }
+  }
+  const { video } = await probeMedia(path, signal).catch(
+    async (error: unknown) => {
+      await checkSource(stage);
+      throw error;
+    },
+  );
   const [numerator = 0, denominator = 0] =
     video?.timeBase?.split('/').map(Number) ?? [];
   if (
@@ -30,7 +57,7 @@ export async function readMp4FrameIndex(file: string, signal?: AbortSignal) {
     32 * 1024 * 1024,
     600_000,
     { signal, stage: 'indexing decoded MP4 frames' },
-  );
+  ).finally(() => checkSource(stage));
   const { frames = [] } = JSON.parse(response.toString()) as {
     frames?: { best_effort_timestamp?: number; duration?: number }[];
   };
@@ -57,16 +84,15 @@ export async function readMp4FrameIndex(file: string, signal?: AbortSignal) {
         );
   return {
     path,
+    fingerprint: { bytes: baseline.bytes, sha256: baseline.sha256 },
     stream: video.index,
+    frameRateRatio: video.frameRateRatio,
     ...orientedSource(video),
     timeBase: { numerator, denominator },
     firstPts: first!,
     ticks,
     end,
-    async checkSource() {
-      if ((await sourceFileStamp(path)) !== identity)
-        throw new MediaError('MP4 changed during frame inspection.');
-    },
+    checkSource,
   };
 }
 

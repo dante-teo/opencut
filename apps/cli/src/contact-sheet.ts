@@ -1,12 +1,4 @@
-import {
-  link,
-  lstat,
-  mkdtemp,
-  realpath,
-  rm,
-  unlink,
-  writeFile,
-} from 'node:fs/promises';
+import { link, lstat, mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import {
   addTimes,
@@ -22,7 +14,6 @@ import {
   describeProjectContactTimeline,
   evenlySpacedFrames,
   fileFingerprintSchema,
-  fingerprintFile,
   isVideoDefinitionPath,
   matchesFingerprint,
   parseSubtitleTime,
@@ -101,10 +92,9 @@ export async function readContactRenderReport(
       throw new UsageError(
         'Render report has no valid output fingerprint. Use the JSON from a new render or supply --definition for timeline context.',
       );
-    const actual = await fingerprintFile(await realpath(media.path), signal);
     await media.checkSource();
     if (
-      !matchesFingerprint(actual, expected.data) ||
+      !matchesFingerprint(media.fingerprint, expected.data) ||
       report.frameCount !== media.ticks.length
     )
       throw new UsageError(
@@ -419,8 +409,13 @@ export async function runContactSheet(file: string, values: CommandOptions) {
         input: {
           kind: media ? 'mp4' : 'definition',
           path: media?.path ?? video!.path,
+          ...(media && { fingerprint: media.fingerprint }),
         },
-        ...(media && { timeBase: media.timeBase, firstPts: media.firstPts }),
+        ...(media && {
+          frameRateRatio: media.frameRateRatio,
+          timeBase: media.timeBase,
+          firstPts: media.firstPts,
+        }),
         startFrame,
         endFrame,
         samples: frames.map((frame, i) => {

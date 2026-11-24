@@ -4,6 +4,7 @@ import {
   isStillImage,
   probeMedia,
   probeRecipeMedia,
+  SourceChangedError,
   validateEmbeddedFont,
   videoSourceDuration,
 } from '@opencut/media';
@@ -124,9 +125,13 @@ export async function compileVideoAssets(
     }
     const { id, definition, path, recipe } = asset;
     recipes.push(recipe.inspection);
-    if (videoInputIdentity(path) !== recipe.input.identity)
-      throw new VideoDefinitionError(
-        `assets.${id}.path: Media changed during compilation.`,
+    const observed = videoInputIdentity(path);
+    if (observed !== recipe.input.identity)
+      throw new SourceChangedError(
+        path,
+        'recipe compilation',
+        recipe.input.identity,
+        observed,
       );
     const media =
       processed.get(id) ??
@@ -280,21 +285,21 @@ async function probeAsset(
     }
   } catch (cause) {
     signal?.throwIfAborted();
+    const observed = videoInputIdentity(path);
+    if (identity && observed !== identity)
+      throw new SourceChangedError(path, 'media probe', identity, observed);
     throw new VideoDefinitionError(
       `assets.${id}.path: Cannot probe '${path}': ${cause instanceof Error ? cause.message : String(cause)}`,
       { cause },
     );
   }
-  if (
-    !identity ||
-    videoInputIdentity(path) !== identity ||
-    videoInputIdentity(metadata.path) !== identity
-  )
-    throw new VideoDefinitionError(
-      recipe
-        ? `assets.${id}.path: Media changed during recipe inspection.`
-        : `assets.${id}.path: Media '${path}' changed during compilation. Retry after the write completes.`,
-    );
+  const stage = recipe ? 'recipe inspection' : 'media probe';
+  if (!identity) throw new SourceChangedError(path, stage, identity);
+  for (const input of new Set([path, metadata.path])) {
+    const observed = videoInputIdentity(input);
+    if (observed !== identity)
+      throw new SourceChangedError(input, stage, identity, observed);
+  }
   return { metadata, identity };
 }
 
@@ -305,10 +310,16 @@ async function pinDerivedAsset(
 ): Promise<IdentifiedMedia> {
   const path = await snapshotMedia(metadata.path);
   const snapshotIdentity = videoInputIdentity(path);
-  if (!snapshotIdentity || videoInputIdentity(metadata.path) !== identity)
-    throw new VideoDefinitionError(
-      `assets.${id}: Recipe result changed during compilation.`,
+  const observed = videoInputIdentity(metadata.path);
+  if (observed !== identity)
+    throw new SourceChangedError(
+      metadata.path,
+      'recipe snapshot',
+      identity,
+      observed,
     );
+  if (!snapshotIdentity)
+    throw new VideoDefinitionError(`assets.${id}: Recipe snapshot is missing.`);
   return { metadata: { ...metadata, path }, identity: snapshotIdentity };
 }
 
