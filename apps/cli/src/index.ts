@@ -79,6 +79,15 @@ async function executeCommand(
       const { runBatch } = await import('./video-batch.js');
       return runBatch(file, values);
     }
+    case 'review':
+    case 'remix': {
+      const { runReview, runRemix } = await import('./revision.js');
+      return (command === 'review' ? runReview : runRemix)(file, values);
+    }
+    case 'timeline patch': {
+      const { runTimelinePatch } = await import('./timeline-patch.js');
+      return runTimelinePatch(file, values);
+    }
     case 'timeline edit-graphic': {
       const { runMotionEdit } = await import('./motion-edit.js');
       return runMotionEdit(file, values);

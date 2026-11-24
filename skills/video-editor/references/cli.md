@@ -116,8 +116,25 @@ encoded audio packets for a picture-only revision. See the
 
 ## Scripted audio revisions
 
-Save the encoded picture while delivering the review export. Retain the
-absolute cache path and `pictureVersion.id` from the render JSON.
+Keep the MP4 and the JSON report from a render with revision evidence.
+After an audio edit, check preflight before reusing the encoded picture.
+
+```sh
+opencut render edit.video.ts -o review.mp4 --revision-evidence --json > review.render.json
+opencut remix edit.video.ts --picture-from review.mp4 --render-report review.render.json \
+  -o revised.mp4 --preflight --json
+```
+
+If preflight reports `status: "reuse"`, run the same remix command without
+`--preflight` and save its JSON report for the next revision. Read the
+reported frame ranges and reasons if the decision is blocked. See
+[replacing audio using an existing export](../../../docs/CLI.md#replace-audio-using-an-existing-export).
+
+### Use a saved picture version
+
+For the picture-cache workflow, save the encoded picture while delivering
+the review export. Retain the absolute cache path and `pictureVersion.id`
+from the render JSON.
 
 ```sh
 cache="$PWD/render-cache"

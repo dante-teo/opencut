@@ -174,3 +174,28 @@ export {
   validateMotionSplit,
 } from './video-motion-edit.js';
 export type { MotionEdit, MotionGraphics } from './video-motion-edit.js';
+
+export {
+  compareRevisionTimelines,
+  inspectVideoRevision,
+  preflightPictureReuse,
+  revisionEvidenceSchema,
+  revisionRenderSettings,
+} from './video-revision.js';
+export type {
+  RevisionEvidence,
+  RevisionTimeline,
+  RevisionRenderSettings,
+} from './video-revision.js';
+
+export {
+  reviewMarksSchema,
+  reviewNotesSchema,
+  reviewVideoRevisions,
+} from './video-review.js';
+export type { ReviewVersion } from './video-review.js';
+
+export {
+  patchVideoTimeline,
+  timelinePatchSchema,
+} from './video-timeline-patch.js';

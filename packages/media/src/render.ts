@@ -25,6 +25,7 @@ import type {
 } from '@opencut/shared';
 import {
   access,
+  copyFile,
   link,
   lstat,
   mkdtemp,
@@ -45,7 +46,11 @@ import {
 } from './probe.js';
 import type { MediaMetadata } from './probe.js';
 import { checkRenderSignal, MediaError, runMediaTool } from './process.js';
-import { findSourceChange } from './source-integrity.js';
+import {
+  findSourceChange,
+  sourceIdentity,
+  SourceChangedError,
+} from './source-integrity.js';
 import { accountRenderBytes, accountRenderFile } from './render-budget.js';
 import { renderQualities } from '@opencut/shared';
 import type { RenderQuality } from '@opencut/shared';
@@ -62,6 +67,7 @@ import { fitVisual, indexedSeekArgs } from './video-filter.js';
 import { pictureSeekCheck } from './picture-seek.js';
 import { stageTransformLayer } from './transform-layer.js';
 import type { GraphicLayer } from './graphics.js';
+import { inspectEncodedPicture } from './revision-media.js';
 import type { TransformLayerOptions } from './transform-layer.js';
 import { rasterizeTextLayer } from './text.js';
 import {
@@ -179,6 +185,15 @@ export interface RenderControls {
 }
 
 export interface VideoTimelineOptions extends RenderControls {
+  /** Preflight-verified picture on the exact output time grid. */
+  pictureFrom?:
+    | {
+        path: string;
+        identity: string;
+        packetHash: string;
+        timingHash: string;
+      }
+    | undefined;
   /** Serialize build provenance in a custom MP4 format tag. */
   buildMetadata?: string;
   pictureCache?: PictureCache | undefined;
@@ -186,7 +201,10 @@ export interface VideoTimelineOptions extends RenderControls {
   /** Parent for private scratch on the destination filesystem. */
   scratchDirectory?: string;
   /** Record a verified file before publication so a caller can reconcile a crash. */
-  onVerifiedOutput?: (staged: string) => Promise<void>;
+  onVerifiedOutput?: (
+    staged: string,
+    encodedPicture?: Awaited<ReturnType<typeof inspectEncodedPicture>>,
+  ) => Promise<void>;
   /** Metadata already probed for this render invocation, indexed by resolved source path. */
   sourceMetadata?: ReadonlyMap<string, MediaMetadata>;
   /** Identity associated with the compiled metadata, when the host supplies it. */
@@ -249,6 +267,11 @@ export interface VideoTimelineResult {
   pictureFrameRate?: VideoTimelineOptions['frameRate'];
   pictureStartFrame?: number;
   pictureVersion?: { id: string; status: 'saved' | 'reused' };
+  pictureReuse?: {
+    baseline: string;
+    packetHash: string;
+    pictureFramesRendered: 0;
+  };
   audioMix?: AudioMixReport;
   musicLoudness?: MusicLoudnessReport;
   audioChannelRouting?: {
@@ -737,7 +760,10 @@ async function prepareTimeline(
           options.signal,
         )
       : undefined;
-  const encoders = new Set(encoder ? [encoder.name, 'aac'] : []);
+  const external = mode === 'mp4' && options.pictureFrom;
+  const encoders = new Set(
+    encoder ? (external ? ['aac'] : [encoder.name, 'aac']) : [],
+  );
   const prepared = {
     args,
     path,
@@ -851,8 +877,9 @@ async function prepareTimeline(
   });
   let scratchBytes = 0;
   let segmentId = 0;
+  const pictureScratch = mode === 'mp4' && !external ? scratch : undefined;
   const temporaryPictureCache: PictureCache | undefined =
-    mode === 'mp4' && scratch && bounded.length > 1 && !options.pictureCache
+    pictureScratch && bounded.length > 1 && !options.pictureCache
       ? {
           backend: 'ffv1-bounded',
           sourceIdentity() {
@@ -861,7 +888,7 @@ async function prepareTimeline(
             );
           },
           async materialize(_key, encode) {
-            const directory = await scratch.open();
+            const directory = await pictureScratch.open();
             const path = join(directory, `picture-${segmentId++}.mkv`);
             await encode(path);
             scratchBytes += (await stat(path)).size;
@@ -874,12 +901,13 @@ async function prepareTimeline(
           },
         }
       : undefined;
-  const pictureCache =
-    mode === 'mp4' && scratch
-      ? (options.pictureCache ?? temporaryPictureCache)
-      : undefined;
+  const pictureCache = pictureScratch
+    ? (options.pictureCache ?? temporaryPictureCache)
+    : undefined;
   const pictureVersion = mode === 'mp4' ? options.pictureVersion : undefined;
   const encodedCache = options.pictureCache?.encoded;
+  if (external && pictureVersion)
+    throw new MediaError('Choose one picture source for a render.');
   if (
     pictureVersion !== undefined &&
     (!(encodedCache || inspect?.cache) ||
@@ -890,7 +918,7 @@ async function prepareTimeline(
       'Use a picture cache and select `save` or a saved picture version ID.',
     );
   if (options.pictureCache) encoders.add('ffv1');
-  if (!pictureCache)
+  if (!pictureCache && !external)
     filters.push(
       `color=c=${opaqueCanvasColor(options.backgroundColor ?? '#000000')}:s=${width}x${height}:r=${rate},` +
         `format=rgba,trim=end_frame=${rangeFrameCount},settb=1/${numerator},setpts=(N+${startFrame})*${denominator}[canvas0]`,
@@ -947,7 +975,7 @@ async function prepareTimeline(
     const ranges =
       cached ?? (bounded.length > 1 ? bounded : [{ startFrame, endFrame }]);
     const savedKey =
-      cached && pictureVersion && !cached.some((range) => range.pending)
+      cached && !cached.some((range) => range.pending)
         ? pictureVersionKey(cached)
         : undefined;
     // A configured cache needs FFV1 only for misses, which core resolves.
@@ -1399,13 +1427,14 @@ async function prepareTimeline(
       const { startFrame: from, endFrame: to } = layers[0]!.ramp;
       return from < endFrame && startFrame < to ? count + layers.length : count;
     }, 0);
+  const inlineClips = pictureCache || external ? [] : visibleClips;
   const groupInputs = new Map<number, number>();
-  for (const clip of pictureCache || !groups.size ? [] : visibleClips) {
+  for (const clip of groups.size ? inlineClips : []) {
     const id = groups.get(clip.trackId ?? '')?.id;
     if (id !== undefined)
       groupInputs.set(id, (groupInputs.get(id) ?? 0) + inputsFor(clip));
   }
-  for (const [index, clip] of (pictureCache ? [] : visibleClips).entries()) {
+  for (const [index, clip] of inlineClips.entries()) {
     const requested = groups.get(clip.trackId ?? '');
     if (group && group.id !== requested?.id) completeGroup();
     if (
@@ -1471,6 +1500,36 @@ async function prepareTimeline(
       ? `${scale},setsar=1,format=rgb24`
       : `${scale}:in_range=pc:out_range=tv:out_color_matrix=bt709,setsar=1,${deliveryColorFilter}`);
   let videoMap = '[video]';
+  if (external && scratch) {
+    await protectSourceFiles(options, existing, external.path);
+    const check = () => {
+      const current = sourceIdentity(external.path);
+      if (current !== external.identity)
+        throw new SourceChangedError(
+          external.path,
+          'picture reuse',
+          external.identity,
+          current,
+        );
+    };
+    check();
+    const snapshot = join(await scratch.open(), 'external-picture.mp4');
+    await copyFile(
+      external.path,
+      snapshot,
+      constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL,
+    );
+    check();
+    await accountRenderFile(snapshot);
+    prepared.sourcePicture = {
+      id: external.packetHash,
+      path: external.path,
+      status: 'reused',
+    };
+    prepared.pictureRanges = [{ startFrame, endFrame, status: 'reused' }];
+    args.push('-i', snapshot);
+    videoMap = `${input++}:v:0`;
+  }
   if (pictureCache) {
     const planned = temporaryPictureCache
       ? bounded.map((range, index) => ({ ...range, key: String(index) }))
@@ -1890,18 +1949,18 @@ export async function renderVideoTimeline(
     const startFrame = options.range?.startFrame ?? 0;
     const pictureFrames =
       (options.range?.endFrame ?? options.frameCount) - startFrame;
-    const composition = renderProgress(
-      Math.max(1, pictureFrames),
-      options.onProgress,
-      { stage: 'composition' },
-    );
-    composition.start();
+    const composition = options.pictureFrom
+      ? undefined
+      : renderProgress(Math.max(1, pictureFrames), options.onProgress, {
+          stage: 'composition',
+        });
+    composition?.start();
     const prepared = await prepareTimeline(
       options,
       'mp4',
       scratch,
       undefined,
-      (endFrame) => composition.update(endFrame - startFrame),
+      composition && ((endFrame) => composition.update(endFrame - startFrame)),
     );
     await scratch.stage(prepared, options.signal);
     const {
@@ -1955,7 +2014,7 @@ export async function renderVideoTimeline(
     await accountRenderFile(rendered);
     checkRenderSignal(options.signal);
     progress.update(frameCount);
-    if (!prepared.pictureRanges) composition.update(pictureFrames);
+    if (!prepared.pictureRanges) composition?.update(pictureFrames);
     const verification = renderProgress(frameCount, options.onProgress, {
       stage: 'verification',
     });
@@ -2018,6 +2077,16 @@ export async function renderVideoTimeline(
           'Check source decodability and trim ranges.',
       );
     checkRenderSignal(options.signal);
+    const encodedPicture = options.pictureFrom
+      ? await inspectEncodedPicture(rendered, options.signal)
+      : undefined;
+    if (
+      encodedPicture &&
+      options.pictureFrom &&
+      (encodedPicture.packetHash !== options.pictureFrom.packetHash ||
+        encodedPicture.timingHash !== options.pictureFrom.timingHash)
+    )
+      throw new MediaError('Mux changed the encoded video packets or timing.');
     let picture = prepared.sourcePicture;
     if (prepared.savePicture) {
       const { key, cache } = prepared.savePicture;
@@ -2033,7 +2102,7 @@ export async function renderVideoTimeline(
       };
     }
     verification.verifying();
-    await options.onVerifiedOutput?.(rendered);
+    await options.onVerifiedOutput?.(rendered, encodedPicture);
     checkRenderSignal(options.signal);
     try {
       if (options.overwrite) {
@@ -2074,9 +2143,17 @@ export async function renderVideoTimeline(
         pictureFrameRate: options.frameRate,
         pictureStartFrame: startFrame,
       }),
-      ...(picture && {
-        pictureVersion: { id: picture.id, status: picture.status },
+      ...(options.pictureFrom && {
+        pictureReuse: {
+          baseline: options.pictureFrom.path,
+          packetHash: options.pictureFrom.packetHash,
+          pictureFramesRendered: 0,
+        },
       }),
+      ...(picture &&
+        !options.pictureFrom && {
+          pictureVersion: { id: picture.id, status: picture.status },
+        }),
       ...(prepared.audioMix && { audioMix: prepared.audioMix }),
       ...(prepared.musicLoudness && { musicLoudness: prepared.musicLoudness }),
       ...(centeredTracks.length && {

@@ -46,3 +46,21 @@ export function graphicFrameSamples(
   }
   return samples.length ? samples : [clipSourceTime(mapping, time)];
 }
+
+/** Reuse only when the entire shutter exposure lies inside one declared hold. */
+export function declaredGraphicHold(
+  graphic: GraphicLayer,
+  samples: readonly (number | RationalTime)[],
+  rate: FrameRate,
+) {
+  if (!graphic.staticRanges || graphic.audioAnalysis || graphic.mediaFrames)
+    return;
+  return graphic.staticRanges.find(({ startFrame, endFrame }) =>
+    samples.every((sample) =>
+      typeof sample === 'number'
+        ? sample >= startFrame && sample < endFrame
+        : compareTimes(sample, frameTime(startFrame, rate)) >= 0 &&
+          compareTimes(sample, frameTime(endFrame, rate)) < 0,
+    ),
+  );
+}

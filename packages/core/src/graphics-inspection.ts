@@ -11,6 +11,7 @@ import { graphicSceneSchema, sceneLimits } from './graphic-scene-schema.js';
 import { graphicScenePresets, presetSceneSchema } from './scene-presets.js';
 import {
   graphicAnimationSchema,
+  graphicStaticRangesSchema,
   graphicTemplates,
 } from './video-graphics-contract.js';
 import { graphicFrameSamples } from './graphic-sampling.js';
@@ -31,6 +32,7 @@ export const videoGraphicsCapabilities = {
       version: 2,
       requirements: ['pinned Chromium Headless Shell'],
       trustedCode: true,
+      staticRanges: 'source-frames',
     },
     anime: {
       version: 1,
@@ -96,6 +98,7 @@ export function videoGraphicsSchemas() {
   const options = { cycles: 'ref', unrepresentable: 'any' } as const;
   return {
     anime: z.toJSONSchema(graphicAnimationSchema, options),
+    staticRanges: z.toJSONSchema(graphicStaticRangesSchema, options),
     scene: z.toJSONSchema(graphicSceneSchema, options),
     preset: z.toJSONSchema(presetSceneSchema, options),
     three: z.toJSONSchema(threeSceneSchema, options),

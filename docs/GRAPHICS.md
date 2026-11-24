@@ -505,3 +505,25 @@ sample rate, or AAC bitrate invalidates the analysis and affected picture
 cache entries. Beat marker changes invalidate picture samples while retaining
 the reusable FFT. OpenCut stores verified analysis features in the recipe
 cache for reuse across CLI runs.
+
+## Reuse a settled graphic
+
+A React graphic can declare source-frame intervals whose transparent pixels
+stay constant. For an end card that settles on source frame 156 of a
+360-frame graphic, add this to the graphic asset.
+
+```ts
+staticRanges: [{ startFrame: 156, endFrame: 360 }],
+```
+
+The intervals are ordered, non-overlapping and end-exclusive. OpenCut uses
+one transparent sample for a hold and still evaluates the enclosing clip's
+transforms and transitions at each timeline frame. At an exposure boundary,
+motion-blur samples that cross the hold edge use normal sampling.
+Audio-driven graphics and graphics with live video frame inputs use normal
+sampling. A change to the graphic code, its resources, props, or sampling
+settings invalidates the held sample. Use this only for verified static
+pixels and compare the first and final hold frames with normal sampling.
+
+JSON render reports include `graphicSampling` with the hold fills and
+subsequent reuses performed during the render.

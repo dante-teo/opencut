@@ -282,8 +282,9 @@ selection.
 
 ### Audio-only revisions
 
-Save a reusable encoded picture when you deliver the review MP4. Keep the
-render JSON and the absolute path to its picture cache.
+Use a saved picture version when you plan to keep the picture cache. Keep
+the render JSON and the absolute path to that cache. You can also keep the
+MP4 with its render report by [capturing revision evidence](#replace-audio-using-an-existing-export).
 
 ```sh
 cache="$PWD/render-cache"
@@ -360,6 +361,156 @@ Use the regular `validate`, `preview`, `render`, and `package` commands for
 browser status for React assets. `doctor --json` reports the pinned Anime.js
 version, graphics availability, and the browser setup command. `--picture-cache` retains reusable
 graphic source frames.
+
+## Review a revision
+
+```zsh
+opencut review edit.video.ts --against approved.video.ts --marks marks.json --output review
+opencut review edit.video.ts --against approved.mp4 --render-report approved.render.json --output changes --json
+```
+
+Open `index.html` to play both versions together and switch between their audio.
+The directory also contains separate portrait or landscape MP4s with the
+version and source position burned in, plus `index.json` for automation. Each
+selection is limited to 30 seconds. The check list records what OpenCut
+verified, and listening and viewing start as pending.
+
+Review marks use a name and an inclusive start and exclusive end in seconds.
+Use decimal seconds, a clock time, or a fraction. Review renders round the
+start down and the end up to show the whole selection.
+
+```json
+[
+  { "name": "opening", "start": 0, "end": 4 },
+  { "name": "reveal", "start": "30.5", "end": "38.1" },
+  {
+    "name": "ending",
+    "start": "38.1",
+    "end": "47.4",
+    "candidate": { "start": "38.1", "end": "47.9" }
+  }
+]
+```
+
+Use `candidate` for a different selection on the revised timeline. With more
+than one candidate, use `candidates` to give specific selections by ID
+(`after-1`, `after-2`, in CLI order). For reusable notes, pass `--notes notes.json`
+with an array such as
+`[{"range":"ending","text":"Check the hand gesture before the cut."}]`.
+Notes can also have a source `timestamp` and version ID (`before` or an
+`after-N` ID). Keep the notes file for the next revision.
+
+When both versions provide compatible timeline evidence, the index identifies
+picture and audio changes by frame range. A TypeScript definition provides
+evidence from its compiled timeline. For an MP4, supply the matching report
+from `render --revision-evidence --json`. Use `--render-report` for the baseline
+and `--candidate-report` for the first candidate. An MP4 needs a constant
+frame rate and a zero video start time.
+
+If you leave out the marks, OpenCut selects changed ranges and adds half a
+second of context on either side when available. Use explicit marks when
+either version lacks compatible evidence. Check any pair flagged for manual
+alignment before judging timing. For a TypeScript input, `--quality` overrides
+the report’s default for both change detection and preview rendering. A
+subtitle-free report keeps subtitles out of those previews.
+
+```zsh
+opencut review edit.video.ts --against baseline.video.ts --marks marks.json \
+  --music-candidate music-a --music-option music-b --music-loudness matched \
+  --output music-review
+```
+
+Add `--candidate other.video.ts` to compare another definition in the same
+review directory. With `--music-loudness authored`, audio plays at authored
+settings. Matched comparisons use TypeScript candidates and the same
+`musicComparison` group across definitions with music. Use `--against-music`
+to select the baseline’s track when it is a definition. The matcher uses
+the full candidate pool to set the target for the selected track, so a change
+to an unselected track can affect the comparison. The index records whether
+voice settings match and whether loudness could be measured.
+
+A matched comparison can use an MP4 baseline if its verified report has no
+active clips from tracks tagged as music. Tag music tracks with `audioRole: 'music'` so
+OpenCut can identify their role in the report.
+
+## Replace audio using an existing export
+
+```zsh
+opencut render edit.video.ts --revision-evidence --output approved.mp4 --json > approved.render.json
+opencut remix revised.video.ts --picture-from approved.mp4 --render-report approved.render.json \
+  --output revised.mp4 --preflight --json
+opencut remix revised.video.ts --picture-from approved.mp4 --render-report approved.render.json \
+  --output revised.mp4 --json > revised.render.json
+```
+
+The report captures visual dependencies and output settings together with
+the encoded video packet and timing hashes. `remix` inherits the video's
+delivery settings from that report. It compares the new timeline and
+verifies the source MP4 before muxing a new audio mix with the original
+video packets. Keep the compiled visual inputs available for comparison.
+The original picture cache is optional. The output is checked for packet
+identity, frame timing and audio alignment before publication.
+Pass `--music-candidate` or `--mix-settings` when changing the mix without
+editing the definition.
+
+`--preflight` prints `status: "reuse"` or `status: "blocked"` without writing
+a delivery. A blocked decision exits with status 1 and lists the checks
+performed and any affected picture ranges. A successful remix reports
+the baseline and packet hash in `pictureReuse`. Keep the new MP4 and render
+report together to use them for the next revision.
+
+Use a [saved picture version](#audio-only-revisions)
+if you already have one. For a legacy render without compatible evidence,
+run `render` explicitly and save the new report. A picture cache can reuse
+compatible lossless ranges during that render.
+
+## Patch a timeline
+
+```zsh
+opencut timeline patch edit.video.ts --edit changes.json --dry-run --json
+opencut timeline patch edit.video.ts --edit changes.json --output revised.video.ts --json
+```
+
+The JSON contains an ordered list of operations. All positions are project
+frames, and all end positions are exclusive.
+
+```json
+{
+  "operations": [
+    {
+      "operation": "caption",
+      "id": "opening-caption",
+      "text": "A little sparkle",
+      "start": 10,
+      "end": 76
+    },
+    { "operation": "graphic", "id": "story-glitter", "at": 317 },
+    {
+      "operation": "trim",
+      "id": "closing-duo",
+      "sourceOut": 142,
+      "placement": "ripple"
+    }
+  ]
+}
+```
+
+`caption` can change text, timing, or both. Changing text clears old
+word-level highlights and reports that change. `graphic` changes a graphic
+placement's start while keeping its source trim. `trim` changes the in or out
+point of timed media. With `keep`, later placements retain their starts.
+With `ripple`, clips and captions starting at or after the edited clip's old
+end move by the duration change, including on other tracks. A clip or
+caption already in progress at that boundary keeps its timing. Transitions
+are resolved against the resulting clip edges, and a declared canvas
+duration changes with the ripple. Detached audio can retain its padded tail
+when trimmed. Source availability reports the end of the decoded audio.
+
+The report lists old and new ranges, source availability, surrounding
+material, transition windows and resulting duration. A valid apply writes a
+new resolved TypeScript definition beside the original, so component and
+asset paths stay editable. Parameterized input is saved at the resolved
+parameter values used for the patch.
 
 ## Check the installation
 
@@ -743,6 +894,25 @@ temporal comparison scores differences between consecutive pictures against
 the same differences in the reference. Review the MP4s for motion artifacts.
 Check each case's `exitCode` in `benchmark.json`. The harness records diagnostics
 for unsuccessful cases and runs the rest of the matrix.
+
+### Revision benchmarks
+
+From a source checkout, build the CLI and run the revision benchmark.
+
+```zsh
+python3 scripts/revision-benchmark.py --runs 3
+```
+
+It measures a burned-in caption edit, a four-frame graphic move and a
+music-only swap on a generated vertical project. The JSON on stdout records
+times to playable review and full export, the host and encoder settings,
+cold and baseline-seeded cache runs, per-range cache decisions and changed
+dependencies, and the costliest graphics tasks. Stage clocks can overlap.
+Use `--baseline`, `--caption`, `--glitter`, `--music` and `--marks` to
+run the same cases with prepared project definitions. Use
+`--music-candidate` if the music revision is a different track selection
+from the same definition. Supply `--video-bitrate` to pin a delivery
+bitrate across runs.
 
 ## Professional Dialogue Mix
 

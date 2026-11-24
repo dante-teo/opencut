@@ -15,6 +15,17 @@ const optionTypes = {
   ...renderOptionTypes,
   'picture-cache': { type: 'string' },
   'picture-version': { type: 'string' },
+  'revision-evidence': { type: 'boolean' },
+  'picture-from': { type: 'string' },
+  preflight: { type: 'boolean' },
+  marks: { type: 'string' },
+  notes: { type: 'string' },
+  candidate: { type: 'string', multiple: true },
+  'candidate-report': { type: 'string' },
+  'music-option': { type: 'string', multiple: true },
+  'against-params': { type: 'string' },
+  'against-music': { type: 'string' },
+  'dry-run': { type: 'boolean' },
   'retry-source-change': { type: 'boolean' },
   'expect-fps': { type: 'string' },
   'mix-settings': { type: 'string' },
@@ -87,6 +98,45 @@ const renderOptions = [
 ];
 
 const commands = {
+  review: {
+    args: `<definition.video.ts|export.mp4> --against <definition.video.ts|export.mp4> --output <new-directory> [--marks <marks.json>] [--notes <notes.json>] [--candidate <definition.video.ts|export.mp4> ...] [--music-option <track-id> ...] [--against-music <track-id>] [--render-report <report.json>] [--candidate-report <report.json>] [--size <64..1920>] ${mixUsage} ${params}`,
+    options: [
+      'against',
+      'output',
+      'marks',
+      'notes',
+      'candidate',
+      'candidate-report',
+      'music-option',
+      'against-music',
+      'against-params',
+      'render-report',
+      'size',
+      'quality',
+      'params',
+      ...mixOptions,
+      ...Object.keys(processingOptionTypes),
+    ],
+  },
+  remix: {
+    args: `${definition} --picture-from <export.mp4> --render-report <report.json> --output <new.mp4> [--preflight] [--audio-bitrate <kbps>] [--audio-rate <44100|48000>] [--audio-channels <1|2>] ${mixUsage} ${params}`,
+    options: [
+      'picture-from',
+      'render-report',
+      'output',
+      'preflight',
+      'params',
+      'audio-bitrate',
+      'audio-rate',
+      'audio-channels',
+      ...mixOptions,
+      ...Object.keys(processingOptionTypes),
+    ],
+  },
+  'timeline patch': {
+    args: `${definition} --edit <changes.json> (--dry-run | --output <new.video.ts>) ${params}`,
+    options: ['edit', 'dry-run', 'output', 'params'],
+  },
   'mix analyze': {
     args: `${definition} ${mixUsage} ${params}`,
     options: [
@@ -141,8 +191,8 @@ const commands = {
     options: ['frame', 'timestamp', 'quality', 'params'],
   },
   render: {
-    args: `${definition} --output <new.mp4> [--picture-cache <directory> [--picture-version <save|id>]] [--retry-source-change] ${qualityOption} ${mixUsage} ${params}`,
-    options: [...renderOptions, 'retry-source-change'],
+    args: `${definition} --output <new.mp4> [--picture-cache <directory> [--picture-version <save|id>]] [--retry-source-change] [--revision-evidence] ${qualityOption} ${mixUsage} ${params}`,
+    options: [...renderOptions, 'retry-source-change', 'revision-evidence'],
   },
   'render plan': {
     args: `${definition} --output <delivery.mp4> [--picture-cache <directory> [--picture-version <save|id>]] ${qualityOption} ${mixUsage} ${params}`,

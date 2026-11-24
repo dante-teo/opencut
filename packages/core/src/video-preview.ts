@@ -168,8 +168,16 @@ export function previewVideo(video: CompiledVideo) {
       selection: Required<VideoPreviewRange>,
       output: string,
       options: VideoPreviewOptions &
-        Pick<RenderControls, 'onProgress' | 'audioComparison'> & {
+        Pick<
+          RenderControls,
+          | 'onProgress'
+          | 'audioComparison'
+          | 'audioBitrateKbps'
+          | 'audioChannels'
+          | 'audioSampleRate'
+        > & {
           audioMixCacheDirectory?: string | undefined;
+          burnSubtitles?: boolean | undefined;
         } = {},
     ) {
       const { startFrame, endFrame } = range(
@@ -185,6 +193,12 @@ export function previewVideo(video: CompiledVideo) {
         );
       const { signal, onProgress } = options;
       const quality = options.quality ?? 'fast';
+      const audioControls = {
+        audioComparison: options.audioComparison,
+        audioBitrateKbps: options.audioBitrateKbps,
+        audioChannels: options.audioChannels,
+        audioSampleRate: options.audioSampleRate,
+      };
       const revision = await video.forQuality(quality, true, signal);
       const audioMixCache = await openAudioMixCache(
         options.audioMixCacheDirectory,
@@ -206,16 +220,19 @@ export function previewVideo(video: CompiledVideo) {
         (plan) =>
           renderVideoTimeline({
             ...plan,
+            ...(options.burnSubtitles === false && {
+              visualClips: plan.visualClips.filter(({ subtitle }) => !subtitle),
+            }),
             signal,
             ...(onProgress && { onProgress }),
             maxDimension: options.maxDimension ?? 640,
-            audioComparison: options.audioComparison,
+            ...audioControls,
             ...(audioMixCache && { audioMixCache }),
             quality,
             output,
             range: { startFrame, endFrame },
           }),
-        { audioComparison: options.audioComparison },
+        audioControls,
       );
       const result = previewClipSchema.parse({
         ...base,

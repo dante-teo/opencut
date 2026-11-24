@@ -10,7 +10,8 @@ export interface RenderProgress {
     | 'audio-mastering'
     | 'encoding'
     | 'muxing'
-    | 'verification';
+    | 'verification'
+    | 'review-labels';
   clipId?: string;
   percent: number;
   processedFrames: number;

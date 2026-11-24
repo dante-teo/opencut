@@ -1,6 +1,9 @@
 import { expect, it } from 'vitest';
 import type { GraphicLayer, VisualTimelineClip } from '@opencut/media';
-import { graphicFrameSamples } from './graphic-sampling.js';
+import {
+  declaredGraphicHold,
+  graphicFrameSamples,
+} from './graphic-sampling.js';
 
 const rate = { numerator: 30000, denominator: 1001 };
 const clip = {
@@ -54,4 +57,39 @@ it('uses distinct exposure samples and excludes samples before the placement sta
   expect(new Set(current.map((value) => JSON.stringify(value))).size).toBe(8);
   graphicFrameSamples(blurred, 44, rate);
   expect(graphicFrameSamples(blurred, 11, rate)).toEqual(current);
+});
+
+it('uses a declared hold only when all exposure samples stay inside it', () => {
+  const hold = { startFrame: 20, endFrame: 24 };
+  const graphic = { ...sample.graphic, staticRanges: [hold] };
+  expect(declaredGraphicHold(graphic, [20, 23], rate)).toBe(hold);
+  expect(declaredGraphicHold(graphic, [19, 20], rate)).toBeUndefined();
+  expect(declaredGraphicHold(graphic, [23, 24], rate)).toBeUndefined();
+  expect(
+    declaredGraphicHold(
+      graphic,
+      [
+        { numerator: 47047, denominator: 60000 },
+        { numerator: 49049, denominator: 60000 },
+      ],
+      rate,
+    ),
+  ).toBeUndefined();
+  expect(
+    declaredGraphicHold(
+      {
+        ...graphic,
+        audioAnalysis: {
+          version: 1,
+          source: 'mix',
+          window: 512,
+          hop: 256,
+          waveform: 4,
+          bins: 4,
+        },
+      },
+      [22],
+      rate,
+    ),
+  ).toBeUndefined();
 });

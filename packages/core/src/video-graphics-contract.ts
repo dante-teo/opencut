@@ -48,6 +48,15 @@ export const graphicTemplates = [
 ] as const;
 const resources = z.record(entityIdSchema, relativeMediaPathSchema).optional();
 const durationFrames = z.int().positive();
+export const graphicStaticRangesSchema = z
+  .array(
+    z.strictObject({
+      startFrame: z.int().nonnegative(),
+      endFrame: z.int().positive(),
+    }),
+  )
+  .min(1)
+  .max(32);
 const fixedSampling = { motionBlur: motionBlur.optional() };
 const animatedGraphic = graphicLocation.extend({ durationFrames, resources });
 
@@ -81,6 +90,40 @@ export function validateAnimationProps(
   }
 }
 
+const reactGraphic = graphicLocation
+  .extend({
+    renderer: z.literal('react'),
+    path: relativeMediaPathSchema.refine(
+      (path) => /\.[jt]sx$/i.test(path),
+      'Expected a TSX or JSX component.',
+    ),
+    durationFrames,
+    props: graphicPropsSchema.optional(),
+    resources,
+    ...exactGraphicSampling,
+    animation: graphicAnimationSchema.optional(),
+    staticRanges: graphicStaticRangesSchema.optional(),
+    audioAnalysis: audioAnalysisSchema.optional(),
+  })
+  .superRefine((asset, context) => {
+    if (!asset.staticRanges) return;
+    let previousEnd = 0;
+    for (const [i, { startFrame, endFrame }] of asset.staticRanges.entries()) {
+      if (
+        startFrame < previousEnd ||
+        startFrame >= endFrame ||
+        endFrame > asset.durationFrames
+      )
+        context.addIssue({
+          code: 'custom',
+          path: ['staticRanges', i],
+          message:
+            'Use ordered, non-overlapping, nonempty source frame ranges within the graphic duration.',
+        });
+      previousEnd = endFrame;
+    }
+  });
+
 export const graphicAssetSchema = z.discriminatedUnion('renderer', [
   graphicLocation.extend({
     renderer: z.literal('svg'),
@@ -102,19 +145,7 @@ export const graphicAssetSchema = z.discriminatedUnion('renderer', [
       'Expected an SVG file.',
     ),
   }),
-  graphicLocation.extend({
-    renderer: z.literal('react'),
-    path: relativeMediaPathSchema.refine(
-      (path) => /\.[jt]sx$/i.test(path),
-      'Expected a TSX or JSX component.',
-    ),
-    durationFrames,
-    props: graphicPropsSchema.optional(),
-    resources,
-    ...exactGraphicSampling,
-    animation: graphicAnimationSchema.optional(),
-    audioAnalysis: audioAnalysisSchema.optional(),
-  }),
+  reactGraphic,
   animatedGraphic.extend({
     renderer: z.literal('scene'),
     scene: z.union([graphicSceneSchema, presetSceneSchema]),

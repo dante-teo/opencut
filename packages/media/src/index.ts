@@ -102,3 +102,5 @@ export type { AudioMixCache } from './professional-mix.js';
 export type { MusicLoudnessReport } from './music-comparison.js';
 export { inspectTimelineRender } from './render.js';
 export type { TimelinePlan } from './render.js';
+
+export { inspectEncodedPicture, renderReviewClip } from './revision-media.js';

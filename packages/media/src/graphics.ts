@@ -57,6 +57,7 @@ export interface GraphicLayer {
   width: number;
   height: number;
   durationFrames?: number;
+  staticRanges?: readonly { startFrame: number; endFrame: number }[];
   props?: Record<string, unknown>;
   sampling?: 'exact';
   audioAnalysis?: GraphicAudioAnalysis;

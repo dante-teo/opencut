@@ -1,6 +1,10 @@
 import { stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { MediaError, renderVideoTimeline } from '@opencut/media';
+import {
+  inspectEncodedPicture,
+  MediaError,
+  renderVideoTimeline,
+} from '@opencut/media';
 import type { RenderControls } from '@opencut/media';
 import { authoredInputs, checkpointRender } from './video-build.js';
 import { withRenderSources } from './render-sources.js';
@@ -14,6 +18,13 @@ import { openAudioMixCache } from './video-audio-mix.js';
 import { openPictureCache } from './video-picture-cache.js';
 import { describeMusicComparison } from './music-comparison.js';
 import { inspectVideoLayout, VideoLayoutError } from './video-layout.js';
+import {
+  describeRevisionPlan,
+  revisionRenderSettings,
+} from './video-revision.js';
+import type { RevisionEvidence } from './video-revision.js';
+import { fingerprintFile } from './video-integrity.js';
+import type { VideoTimelineOptions } from '@opencut/media';
 
 export type VideoRenderOptions = Omit<
   RenderControls,
@@ -27,6 +38,8 @@ export type VideoRenderOptions = Omit<
   processing?: VideoProcessingOptions | undefined;
   params?: VideoCompileOptions['params'];
   musicSelection?: VideoCompileOptions['musicSelection'];
+  revisionEvidence?: boolean | undefined;
+  pictureFrom?: VideoTimelineOptions['pictureFrom'] | undefined;
 };
 
 export type CompiledVideoRenderOptions = Omit<
@@ -90,14 +103,17 @@ export async function renderCompiledVideo(
     quality = 'quality',
     pictureCacheDirectory,
     audioMixCacheDirectory,
+    revisionEvidence,
+    pictureFrom,
     ...options
   }: CompiledVideoRenderOptions = {},
 ) {
   const { onProgress, signal, overwrite, ...settings } = options;
   video = await video.forQuality(quality, !burnSubtitles, signal);
-  const layout = video.layoutAssertions?.length
-    ? await inspectVideoLayout(video, { burnSubtitles, signal })
-    : undefined;
+  const layout =
+    !pictureFrom && video.layoutAssertions?.length
+      ? await inspectVideoLayout(video, { burnSubtitles, signal })
+      : undefined;
   if (layout && !layout.ok) throw new VideoLayoutError(layout);
   const musicComparison = describeMusicComparison(video.project);
   const musicSelection = musicComparison && {
@@ -140,6 +156,7 @@ export async function renderCompiledVideo(
     },
   };
   const buildMetadata = build && JSON.stringify(build);
+  const graphicSampling = { holdRenders: 0, holdReuses: 0 };
   signal?.throwIfAborted();
   return checkpointRender(
     video,
@@ -176,8 +193,23 @@ export async function renderCompiledVideo(
             audioMixCacheDirectory,
             signal,
           );
+          const evidenceSettings = revisionRenderSettings({
+            ...settings,
+            quality,
+            burnSubtitles,
+          });
+          const evidencePlan = revisionEvidence
+            ? await describeRevisionPlan(
+                video,
+                { ...plan, ...settings, quality, signal, overwrite, output },
+                evidenceSettings,
+              )
+            : undefined;
+          let evidence: RevisionEvidence | undefined;
+          let fingerprint: { bytes: number; sha256: string } | undefined;
           const result = await renderVideoTimeline({
             ...plan,
+            ...(pictureFrom && { pictureFrom }),
             ...settings,
             quality,
             signal,
@@ -187,7 +219,34 @@ export async function renderCompiledVideo(
             ...(onProgress && { onProgress }),
             ...(buildMetadata && { buildMetadata }),
             ...(scratchDirectory && { scratchDirectory }),
-            ...(onVerifiedOutput && { onVerifiedOutput }),
+            async onVerifiedOutput(staged, verifiedPicture) {
+              if (evidencePlan) {
+                const encoded =
+                  verifiedPicture ??
+                  (await inspectEncodedPicture(staged, signal));
+                evidencePlan.checkInputs();
+                const rate = settings.outputFrameRate ?? plan.frameRate;
+                evidence = {
+                  version: 1,
+                  settings: evidenceSettings,
+                  timeline: evidencePlan.timeline,
+                  packetHash: encoded.packetHash,
+                  timingHash: encoded.timingHash,
+                  frameCount: encoded.frameCount,
+                  width: encoded.metadata.width,
+                  height: encoded.metadata.height,
+                  frameRate: rate,
+                };
+                if (!onVerifiedOutput) {
+                  const { bytes, sha256 } = await fingerprintFile(
+                    staged,
+                    signal,
+                  );
+                  fingerprint = { bytes, sha256 };
+                }
+              }
+              await onVerifiedOutput?.(staged);
+            },
             output,
           });
           if (
@@ -205,6 +264,9 @@ export async function renderCompiledVideo(
             );
           return {
             ...result,
+            ...(graphicSampling.holdRenders && { graphicSampling }),
+            ...(evidence && { revisionEvidence: evidence }),
+            ...(fingerprint && { outputFingerprint: fingerprint }),
             ...(layout && { layout }),
             ...(build && { build }),
             ...(musicComparison && { musicComparison }),
@@ -213,6 +275,7 @@ export async function renderCompiledVideo(
         {
           scratch: scratchDirectory,
           pictureCacheDirectory,
+          graphicSampling,
           ...(onProgress && { onProgress }),
           audioComparison: settings.audioComparison,
           audioChannels: settings.audioChannels,

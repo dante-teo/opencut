@@ -17,7 +17,10 @@ import type {
 } from '@opencut/media';
 import { bindGraphicAudio } from './graphic-audio.js';
 import type { GraphicAudioControls } from './graphic-audio.js';
-import { graphicFrameSamples } from './graphic-sampling.js';
+import {
+  declaredGraphicHold,
+  graphicFrameSamples,
+} from './graphic-sampling.js';
 import { compareTimes, frameTime } from './time.js';
 import type { AudioRenderClip, ProjectRenderPlan } from './render-plan.js';
 import type { CompiledVideo } from './video-compiler.js';
@@ -33,7 +36,12 @@ type RenderSourceBindings = Pick<
 >;
 type RenderGraphic = NonNullable<RenderSourceBindings['renderGraphic']>;
 
+export interface GraphicSamplingStats {
+  holdRenders: number;
+  holdReuses: number;
+}
 interface RenderSourceOptions extends GraphicAudioControls {
+  graphicSampling?: GraphicSamplingStats;
   scratch?: string | undefined;
   pictureCacheDirectory?: string | undefined;
   /** A watcher owns these private media copies for the full playback render. */
@@ -49,6 +57,7 @@ export async function withRenderSources<T>(
     scratch = tmpdir(),
     pictureCacheDirectory,
     pinnedPlan,
+    graphicSampling,
     ...audioControls
   }: RenderSourceOptions = {},
 ) {
@@ -143,6 +152,7 @@ export async function withRenderSources<T>(
             signal,
           ),
           decodeMedia,
+          graphicSampling,
         )
       : undefined;
     try {
@@ -174,11 +184,13 @@ function bindGraphicFrames(
     sample: number | import('./time.js').RationalTime,
     signal?: AbortSignal,
   ) => Promise<Record<string, string>>,
+  stats?: GraphicSamplingStats,
 ) {
   const graphics = openGraphicsRenderer();
   const cache = pictureCacheDirectory
     ? graphicsFrameCache(pictureCacheDirectory)
     : undefined;
+  let held: { key: string; png: Buffer } | undefined;
   const frame: RenderGraphic = async (clip, timelineFrame, signal) => {
     const { graphic, path, clipId } = clip;
     const bundle = video.graphicSource(graphic.bundleKey);
@@ -210,6 +222,30 @@ function bindGraphicFrames(
         )
       )
         throw new MediaError('Sample is outside the graphics source.');
+      const hold = declaredGraphicHold(graphic, samples, frameRate);
+      if (hold) {
+        const key = graphic.key + ':hold:' + hold.startFrame;
+        if (held?.key === key) {
+          if (stats) stats.holdReuses++;
+          return held.png;
+        }
+        const rasterize = () =>
+          graphics.frame(
+            bundle,
+            graphic,
+            graphic.sampling === 'exact'
+              ? frameTime(hold.startFrame, frameRate)
+              : hold.startFrame,
+            frameRate,
+            signal,
+          );
+        const png = await (cache
+          ? cache(graphic.key, key, rasterize, signal)
+          : rasterize());
+        held = { key, png };
+        if (stats) stats.holdRenders++;
+        return png;
+      }
       const audio = await audioAt(graphic, timelineFrame, clipId);
       const rasterize = () =>
         exposeGraphic(

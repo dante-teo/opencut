@@ -41,6 +41,7 @@ local source file.
 - [Definition format and examples](VIDEO_DEFINITIONS.md)
 - [React and SVG graphics](GRAPHICS.md)
 - [CLI commands](CLI.md)
+- [Compare revisions and reuse verified picture](CLI.md#review-a-revision)
 - [Build recovery and portable projects](CLI.md#build-recovery)
 - [TypeScript SDK](SDK.md)
 - [Export and rendering limits](EXPORT.md)

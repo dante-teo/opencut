@@ -130,6 +130,7 @@ export interface CompiledGraphic {
   scene?: GraphicScene;
   react?: {
     durationFrames: number;
+    staticRanges?: NonNullable<GraphicLayer['staticRanges']>;
     props: GraphicProps | undefined;
     sampling?: 'exact';
     motionBlur?: NonNullable<GraphicLayer['motionBlur']>;
@@ -175,9 +176,11 @@ export function graphicLayer(
       props,
       ...(react?.sampling ? [react.sampling, react.motionBlur] : []),
       ...(mediaFrames ? ['exact-media-frame-pts', mediaFrames] : []),
+      ...(react?.staticRanges ? ['static-range-v1', react.staticRanges] : []),
     ]),
     bundleKey: bundle.key,
     ...(react && { durationFrames: react.durationFrames }),
+    ...(react?.staticRanges && { staticRanges: react.staticRanges }),
     ...(props && { props }),
     ...(mediaFrames && { mediaFrames }),
     ...(react?.sampling && { sampling: react.sampling }),
@@ -445,6 +448,10 @@ export async function compileGraphic(
         react: {
           durationFrames: definition.durationFrames,
           props: 'props' in definition ? definition.props : undefined,
+          ...(definition.renderer === 'react' &&
+            definition.staticRanges && {
+              staticRanges: definition.staticRanges,
+            }),
           ...(exact && { sampling: 'exact' as const }),
           ...(motionBlur && { motionBlur }),
           ...(definition.renderer === 'scene' &&

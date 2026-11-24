@@ -62,6 +62,10 @@ export async function runVideoCommand(
   )
     throw new UsageError(`Usage: ${commandUsage(command)}`);
 
+  if (values['revision-evidence'] && !values.json)
+    throw new UsageError(
+      '--revision-evidence requires --json so the report can be retained.',
+    );
   const pictureCacheDirectory = values['picture-cache'];
   const pictureVersion = values['picture-version'];
   if (pictureCacheDirectory !== undefined && !pictureCacheDirectory.trim())
@@ -201,6 +205,7 @@ export async function runVideoCommand(
     } else {
       const result = await renderCompiledVideo(video, output!, {
         ...controls,
+        revisionEvidence: values['revision-evidence'],
         pictureCacheDirectory,
         pictureVersion,
         ...mixControls,

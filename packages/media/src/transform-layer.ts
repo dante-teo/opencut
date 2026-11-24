@@ -351,6 +351,7 @@ async function writeTransformLayer(
         : null;
     const sourceCtx = media?.canvas.getContext('2d');
     let graphic: Image | Canvas | undefined;
+    let graphicBytes: Buffer | undefined;
     for (let i = 0; i < frameCount; i++) {
       signal.throwIfAborted();
       if (media && decoded && (!media.still || i === 0)) {
@@ -362,18 +363,20 @@ async function writeTransformLayer(
         sourceCtx!.putImageData(media.pixels, 0, 0);
       }
       if (source.kind === 'graphic' && (!graphic || !source.still)) {
-        const image = await loadImage(
-          await source.rasterize(startFrame + i, signal),
-        );
-        if (options.grade) {
-          const canvas = createCanvas(image.width, image.height);
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(image, 0, 0);
-          const pixels = ctx.getImageData(0, 0, image.width, image.height);
-          gradePixels(pixels.data, options.grade);
-          ctx.putImageData(pixels, 0, 0);
-          graphic = canvas;
-        } else graphic = image;
+        const bytes = await source.rasterize(startFrame + i, signal);
+        if (bytes !== graphicBytes) {
+          graphicBytes = bytes;
+          const image = await loadImage(bytes);
+          if (options.grade) {
+            const canvas = createCanvas(image.width, image.height);
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(image, 0, 0);
+            const pixels = ctx.getImageData(0, 0, image.width, image.height);
+            gradePixels(pixels.data, options.grade);
+            ctx.putImageData(pixels, 0, 0);
+            graphic = canvas;
+          } else graphic = image;
+        }
       }
       const sampled = evaluateVisual(
         visual,

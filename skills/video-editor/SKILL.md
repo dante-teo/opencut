@@ -105,8 +105,8 @@ For an ordinary footage edit, follow the media workflow below.
 5. Deliver a new MP4 with `opencut render DEFINITION --output final.mp4`.
    Run `opencut render plan DEFINITION --output final.mp4 --json` with the
    same options to check cache reuse and estimated scratch space first.
-   For a review MP4 that may get audio revisions, [save its encoded picture
-   and retain the version ID and cache path](references/cli.md#scripted-audio-revisions).
+   For an MP4 that may get audio revisions, keep the export and its JSON
+   report from `render --revision-evidence --json`.
    The CLI defaults to `quality` and runs directly. Use `--quality maximum`
    for slower MP4 encoding with the same AI algorithms as `quality`.
    Export an SRT or VTT
@@ -158,3 +158,16 @@ Use `audioAnalysis` and an audio node when visual movement depends on
 actual sound. A missing resource error names its asset or node. Check the
 file path relative to the authored definition. See the
 [declarative scene reference](../../docs/GRAPHICS.md#declarative-scenes).
+
+## Revise an edit
+
+- Use `opencut review` to compare named moments or find changed ranges
+  from compatible timeline evidence. See the [review guide](../../docs/CLI.md#review-a-revision). Open the synchronized comparison
+  and record viewing and listening separately from technical checks.
+  For music candidates, use the same `musicComparison` group with
+  `--music-loudness matched`.
+- Use `opencut timeline patch --dry-run` to check frame ranges, ripple movement
+  and source availability before writing a new definition.
+- For an audio-only change, run `opencut remix --preflight` with the existing
+  MP4 and its render report, then run `remix` if the decision is `reuse`.
+  See the [scripted audio workflow](references/cli.md#scripted-audio-revisions).

@@ -15,6 +15,7 @@ import { videoInputIdentity } from './video-input.js';
 import { processingSettings } from './video-processing.js';
 import type { RecipePlanStep } from './video-processing.js';
 import type { VideoRenderOptions } from './video-render.js';
+import { bindGraphicAudio } from './graphic-audio.js';
 import { protectRenderInputs } from './video-render.js';
 
 async function freeSpace(directory: string) {
@@ -66,6 +67,16 @@ export async function planVideoRender(
     recipePlan: { steps: recipeSteps, pendingSources },
   });
   const plan = await video.resolveRender();
+  bindGraphicAudio(
+    video,
+    plan,
+    async () => {
+      throw new Error('Planning cannot sample graphic audio.');
+    },
+    undefined,
+    controls,
+    signal,
+  );
   if (authoredPaths)
     await protectRenderInputs(
       video,
