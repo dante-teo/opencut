@@ -708,3 +708,9 @@ between 0 and 1.
 
 Native subtitle styling accepts `activeWordStyle: { color, background? }`
 for timed emphasis. Omitting it preserves existing word-highlight colors.
+
+## Beauty recipes
+
+The `beauty` recipe binds source-time effects to a specific analysis, shot,
+and person track. It must come first when enabled. See
+[beauty effect parameters, time mapping and protection policies](BEAUTY.md).

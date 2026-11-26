@@ -1,6 +1,7 @@
 import { Console } from 'node:console';
 import {
   analyzeVideoMix,
+  beautyReports,
   compileVideo,
   describeProjectContactTimeline,
   inspectProject,
@@ -146,6 +147,7 @@ export async function runVideoCommand(
       audioMixEdit,
       musicSelection,
     });
+    const beauty = beautyReports(video.recipes);
     if (command === 'mix analyze') {
       const report = await analyzeVideoMix(video, {
         ...controls,
@@ -173,6 +175,7 @@ export async function runVideoCommand(
         ok: layout?.ok ?? true,
         path: video.path,
         frameCount: video.frameCount,
+        ...(beauty.length && { beauty }),
         ...(graphics && { graphics }),
         ...(executableGraphics.length && { executableGraphics }),
         ...(layout && { layout }),
@@ -226,6 +229,13 @@ export async function runVideoCommand(
           ),
         );
       else {
+        for (const effect of beauty)
+          if (effect.status === 'completed-with-limitations')
+            process.stderr.write(
+              "Beauty limitations for '" +
+                effect.assetId +
+                "'. View interval details in the JSON render report.\n",
+            );
         console.log(`Encoder ${result.encoder.name}`);
         if (result.encoder.fallbackReason)
           process.stderr.write(

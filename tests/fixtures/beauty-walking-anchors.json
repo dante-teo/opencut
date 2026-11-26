@@ -1,0 +1,27 @@
+{
+  "corrections": [
+    {
+      "frame": 107,
+      "shotId": "shot-1",
+      "trackId": "person-2",
+      "anchor": [0.442, 0.348]
+    },
+    {
+      "frame": 133,
+      "shotId": "shot-1",
+      "trackId": "person-1",
+      "anchor": [0.401, 0.432]
+    }
+  ],
+  "overlapFrames": [95, 101],
+  "visible": [
+    { "frame": 80, "trackId": "person-1", "anchor": [0.754, 0.432] },
+    { "frame": 80, "trackId": "person-2", "anchor": [0.127, 0.323] },
+    { "frame": 90, "trackId": "person-1", "anchor": [0.673, 0.431] },
+    { "frame": 90, "trackId": "person-2", "anchor": [0.237, 0.324] },
+    { "frame": 139, "trackId": "person-1", "anchor": [0.288, 0.443] },
+    { "frame": 139, "trackId": "person-2", "anchor": [0.743, 0.35] },
+    { "frame": 150, "trackId": "person-1", "anchor": [0.185, 0.435] },
+    { "frame": 150, "trackId": "person-2", "anchor": [0.895, 0.352] }
+  ]
+}

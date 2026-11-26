@@ -1,0 +1,27 @@
+{
+  "version": "cpu-beauty-visible-v2",
+  "previewWidth": 640,
+  "minimumVisibleDurationFraction": 0.9,
+  "maximumBelowFloorSeconds": 0.125,
+  "minimumContinuousEffectFraction": 0.15,
+  "controls": {
+    "faceSlim": {
+      "percent": 1.25,
+      "previewPixels": 1.25
+    },
+    "headReduce": {
+      "percent": 2,
+      "previewPixels": 1.25
+    },
+    "armLength": {
+      "percent": 2,
+      "previewPixels": 2
+    },
+    "legLength": {
+      "percent": 2.5,
+      "previewPixels": 2
+    }
+  },
+  "strongSettingStartsAt": 0.4,
+  "maximumSettingFloorMultiplier": 2
+}

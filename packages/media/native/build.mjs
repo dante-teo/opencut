@@ -1,7 +1,12 @@
 import { spawnSync } from 'node:child_process';
 import { warn } from 'node:console';
-import { existsSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import process from 'node:process';
+
+cpSync('native/beauty', 'dist/beauty', {
+  recursive: true,
+  filter: (file) => !file.includes('__pycache__'),
+});
 
 const workers = ['video-interpolate', 'video-enhance'];
 const removeUnavailable = (names) => {

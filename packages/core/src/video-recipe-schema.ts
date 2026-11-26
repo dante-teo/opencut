@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { renderQualities } from '@opencut/shared';
+import { beautyRecipeSchema, isActiveBeautyStep } from './beauty-schema.js';
 
 const pixels = z.int().min(1).max(16384);
 export const recipeFormatSchema = z.enum(['mov', 'mp4', 'png', 'wav', 'flac']);
@@ -18,6 +19,7 @@ const interpolation = {
 export const videoRecipeSchema = z
   .array(
     z.discriminatedUnion('type', [
+      beautyRecipeSchema,
       z.strictObject({
         type: z.literal('trim'),
         start: z.number().nonnegative(),
@@ -75,7 +77,17 @@ export const videoRecipeSchema = z
     ]),
   )
   .min(1)
-  .max(32);
+  .max(32)
+  .superRefine((steps, ctx) => {
+    for (const [index, step] of steps.entries())
+      if (step.type === 'beauty' && isActiveBeautyStep(step) && index !== 0)
+        ctx.addIssue({
+          code: 'custom',
+          path: [index],
+          message:
+            'Beauty must be the first media recipe step so its analysis uses the original source.',
+        });
+  });
 
 export type VideoRecipe = z.input<typeof videoRecipeSchema>;
 export type ResolvedVideoRecipe = z.output<typeof videoRecipeSchema>;

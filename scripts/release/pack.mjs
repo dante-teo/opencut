@@ -109,6 +109,7 @@ async function packCli() {
     'CLI',
     'SDK',
     'AUDIO_MIX',
+    'BEAUTY',
     'GRAPHICS',
     'VIDEO_DEFINITIONS',
   ]) {

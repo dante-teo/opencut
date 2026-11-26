@@ -1,3 +1,7 @@
+import { basename, dirname } from 'node:path';
+import { beautySource } from '@opencut/media';
+import { isActiveBeautyEffect, isActiveBeautyStep } from './beauty-schema.js';
+import type { BeautyRenderReport } from './beauty-report.js';
 import { rationalTime } from './time.js';
 import type { RationalTime } from './time.js';
 import {
@@ -74,6 +78,8 @@ export interface VideoRecipeInspection {
   assetId: string;
   source: string;
   steps: RecipeStep[];
+  beauty?: BeautyRenderReport;
+  beautyArtifact?: string;
 }
 
 export function inspectRecipe(
@@ -86,6 +92,16 @@ export function inspectRecipe(
   let input = recipeMedia(source);
   const steps = recipe.map((authored, index) => {
     try {
+      if (authored.type === 'beauty' && isActiveBeautyStep(authored)) {
+        beautySource(source);
+        for (const effect of authored.effects.filter(isActiveBeautyEffect))
+          if (effect.target.assetId !== assetId)
+            throw new MediaError(
+              "Beauty target asset ID must match the recipe's asset '" +
+                assetId +
+                "'.",
+            );
+      }
       const profile =
         renderQualityProfiles[
           ('quality' in authored ? authored.quality : undefined) ?? quality
@@ -156,6 +172,8 @@ export function resolveRecipeStep(
   let output: RecipeFormat =
     input.kind === 'image' ? 'png' : input.kind === 'audio' ? 'wav' : 'mov';
   switch (parameters.type) {
+    case 'beauty':
+      break;
     case 'trim':
       return {
         parameters,
@@ -525,6 +543,25 @@ export function validateRecipeOutput(
     throw new MediaError(
       'Recipe result did not contain the expected media streams, dimensions, or duration.',
     );
+  if (step.parameters.type === 'beauty') {
+    // The beauty worker verifies decoded picture and audio timestamps before
+    // this check. A container can omit stream duration and include initial
+    // codec padding in its reported start. Only compare real stream lengths.
+    if (
+      (input.video?.durationSeconds != null &&
+        Math.abs(
+          (actual.durationSeconds ?? 0) - (expected.durationSeconds ?? 0),
+        ) > 0.001) ||
+      (input.audio?.durationSeconds != null &&
+        Math.abs(
+          (output.audio?.durationSeconds ?? 0) - input.audio.durationSeconds,
+        ) > 0.001)
+    )
+      throw new MediaError(
+        'Beauty recipe failed to preserve the expected picture or audio timing.',
+      );
+    return;
+  }
   if (isEnhancementStep(step.parameters)) {
     validateEnhancementOutput(input, output);
     return;
@@ -594,4 +631,19 @@ export function originalRecipeTime(
   return seconds === undefined
     ? time
     : rationalTime(BigInt(Math.round(seconds * 1_000_000)), 1_000_000n);
+}
+
+export function beautyReports(recipes: readonly VideoRecipeInspection[]) {
+  return recipes.flatMap(({ assetId, beauty, beautyArtifact }) =>
+    beauty && beautyArtifact
+      ? [
+          {
+            assetId,
+            artifact: beautyArtifact,
+            recipeKey: basename(dirname(beautyArtifact)),
+            ...beauty,
+          },
+        ]
+      : [],
+  );
 }

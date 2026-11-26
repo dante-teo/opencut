@@ -117,3 +117,11 @@ export {
 } from './revision-media.js';
 
 export type { PicturePackets } from './revision-media.js';
+export {
+  beautyBackend,
+  beautyModels,
+  beautyRuntimeHint,
+  beautySource,
+  beautyWorkerFiles,
+  runBeautyWorker,
+} from './beauty.js';

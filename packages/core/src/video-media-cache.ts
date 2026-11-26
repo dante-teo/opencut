@@ -9,6 +9,9 @@ import {
 } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { MediaError } from '@opencut/media';
+import { beautyReportSchema } from './beauty-report.js';
+import type { BeautyRenderReport } from './beauty-report.js';
 import type { MediaMetadata } from '@opencut/media';
 import {
   fileLease,
@@ -20,7 +23,10 @@ import {
 } from './video-integrity.js';
 import type { IdentifiedMedia } from './video-input.js';
 
-type MediaEntry = IdentifiedMedia & { sha256: string };
+export type MediaEntry = IdentifiedMedia & {
+  sha256: string;
+  beauty?: BeautyRenderReport;
+};
 const stageDirectory = (directory: string, key: string) =>
   join(directory, `.${key}.stage`);
 
@@ -30,6 +36,8 @@ const mediaCacheReceipt = z.strictObject({
   bytes: z.int().positive(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   metadataSha256: z.string(),
+  beauty: beautyReportSchema.optional(),
+  beautySha256: z.string().optional(),
   metadata: z.custom<Omit<MediaMetadata, 'path'>>(
     (value) =>
       value !== null &&
@@ -45,7 +53,10 @@ export async function materializeMediaEntry(
   key: string,
   format: string,
   signal: AbortSignal,
-  encode: (output: string) => Promise<MediaMetadata>,
+  encode: (
+    output: string,
+  ) => Promise<MediaMetadata | Pick<MediaEntry, 'metadata' | 'beauty'>>,
+  requiresBeauty = false,
 ) {
   const release = await fileLease(
     join(directory, `.lock-${key.slice(0, 2)}.sqlite`),
@@ -72,7 +83,13 @@ export async function materializeMediaEntry(
         reused,
       };
     };
-    const cached = await findMediaEntry(directory, key, format, signal);
+    const cached = await findMediaEntry(
+      directory,
+      key,
+      format,
+      signal,
+      requiresBeauty,
+    );
     if (cached?.directory === target)
       return { entry: cached.entry, reused: true };
     await rm(target, { recursive: true, force: true });
@@ -81,10 +98,17 @@ export async function materializeMediaEntry(
     await mkdir(staging, { mode: 0o700 });
     const attempt = await mkdtemp(join(staging, 'attempt-'));
     const output = join(attempt, filename);
+    const encoded = await encode(output);
+    const result = 'metadata' in encoded ? encoded : { metadata: encoded };
     const metadata: Omit<MediaMetadata, 'path'> & { path?: string } = {
-      ...(await encode(output)),
+      ...result.metadata,
     };
     delete metadata.path;
+    const beauty = result.beauty;
+    if (requiresBeauty && !beauty)
+      throw new MediaError(
+        'Beauty cache entry is missing its processing report.',
+      );
     const { bytes, sha256, identity } = await fingerprintFile(output, signal);
     await syncPath(output);
     await writeCheckpoint(join(attempt, 'result.json'), {
@@ -94,10 +118,16 @@ export async function materializeMediaEntry(
       sha256,
       metadataSha256: hashJson(metadata),
       metadata,
+      ...(beauty && { beauty, beautySha256: hashJson(beauty) }),
     });
     return await publish(
       attempt,
-      { metadata: { ...metadata, path: output }, identity, sha256 },
+      {
+        metadata: { ...metadata, path: output },
+        identity,
+        sha256,
+        ...(beauty && { beauty }),
+      },
       false,
     );
   } finally {
@@ -115,10 +145,17 @@ export async function findMediaEntry(
   key: string,
   format: string,
   signal?: AbortSignal,
+  requiresBeauty = false,
 ): Promise<{ directory: string; entry: MediaEntry } | undefined> {
   const target = join(directory, key);
   const published = async () => {
-    const entry = await readMediaEntry(target, key, format, signal);
+    const entry = await readMediaEntry(
+      target,
+      key,
+      format,
+      signal,
+      requiresBeauty,
+    );
     return entry && { directory: target, entry };
   };
   const cached = await published();
@@ -134,12 +171,16 @@ export async function findMediaEntry(
   for (const name of attempts) {
     if (!/^attempt-[a-zA-Z0-9]{6}$/.test(name)) continue;
     const attempt = join(staging, name);
-    const entry = await readMediaEntry(attempt, key, format, signal).catch(
-      async (error: unknown) => {
-        // An inspector can race a writer moving the attempt to its final location.
-        if (signal?.aborted || (await statIfPresent(attempt))) throw error;
-      },
-    );
+    const entry = await readMediaEntry(
+      attempt,
+      key,
+      format,
+      signal,
+      requiresBeauty,
+    ).catch(async (error: unknown) => {
+      // An inspector can race a writer moving the attempt to its final location.
+      if (signal?.aborted || (await statIfPresent(attempt))) throw error;
+    });
     if (entry) return { directory: attempt, entry };
   }
   return published();
@@ -162,6 +203,7 @@ export async function readMediaEntry(
   key: string,
   format: string,
   signal?: AbortSignal,
+  requiresBeauty = false,
 ): Promise<MediaEntry | undefined> {
   const path = join(target, `media.${format}`);
   const manifest = join(target, 'result.json');
@@ -176,16 +218,25 @@ export async function readMediaEntry(
     const parsed = mediaCacheReceipt.safeParse(
       JSON.parse(await readFile(manifest, 'utf8')),
     );
+    if (!parsed.success) return;
+    const receipt = parsed.data;
+    const { metadata, beauty } = receipt;
     if (
-      !parsed.success ||
-      parsed.data.key !== key ||
-      parsed.data.bytes !== info.size ||
-      hashJson(parsed.data.metadata) !== parsed.data.metadataSha256
+      receipt.key !== key ||
+      (requiresBeauty && !beauty) ||
+      receipt.bytes !== info.size ||
+      hashJson(metadata) !== receipt.metadataSha256 ||
+      (beauty && hashJson(beauty) !== receipt.beautySha256)
     )
       return;
     const { bytes, sha256, identity } = await fingerprintFile(path, signal);
-    if (parsed.data.bytes === bytes && parsed.data.sha256 === sha256)
-      return { metadata: { ...parsed.data.metadata, path }, identity, sha256 };
+    if (receipt.bytes === bytes && receipt.sha256 === sha256)
+      return {
+        metadata: { ...metadata, path },
+        identity,
+        sha256,
+        ...(beauty && { beauty }),
+      };
   } catch (error) {
     if (
       !missing(error) &&

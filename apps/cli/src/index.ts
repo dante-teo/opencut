@@ -161,6 +161,16 @@ async function executeCommand(
               ')',
       );
     }
+    case 'beauty capabilities':
+    case 'beauty preflight':
+    case 'beauty analyze':
+    case 'beauty inspect':
+    case 'beauty validate':
+    case 'beauty evaluate':
+    case 'beauty remove': {
+      const { runBeautyCommand } = await import('./beauty.js');
+      return runBeautyCommand(command, file, values);
+    }
     case 'system inspect': {
       const { inspectSystem, formatSystem } = await import('./system.js');
       const result = await inspectSystem();
@@ -174,6 +184,8 @@ try {
   await run(args);
 } catch (error) {
   const source = findSourceChange(error);
+  const { findBeautyCoverageError } = await import('@opencut/core/video');
+  const beauty = findBeautyCoverageError(error);
   const code =
     error instanceof Error && 'code' in error ? String(error.code) : '';
   const message = error instanceof Error ? error.message : String(error);
@@ -181,7 +193,8 @@ try {
     error instanceof UsageError || code.startsWith('ERR_PARSE_ARGS_');
   const errorCode = usage
     ? 'INVALID_ARGUMENTS'
-    : source?.code ||
+    : beauty?.code ||
+      source?.code ||
       code ||
       (/Required executable|Install ELUATE/.test(message)
         ? 'MISSING_DEPENDENCY'
@@ -196,6 +209,7 @@ try {
     json
       ? JSON.stringify({
           ok: false,
+          ...(beauty && { beauty: beauty.beauty }),
           ...(code === 'LAYOUT_ASSERTION_FAILED' &&
             error instanceof Error &&
             'layout' in error && { layout: error.layout }),

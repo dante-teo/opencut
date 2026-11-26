@@ -1,3 +1,7 @@
+import { validateBeautyBinding } from './beauty-analysis.js';
+import { runBeautyRecipe } from './beauty-render.js';
+import type { BeautyRenderReport } from './beauty-report.js';
+import { isActiveBeautyStep } from './beauty-schema.js';
 import { lstat, mkdir, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -29,6 +33,7 @@ import {
   materializeMediaEntry,
   mediaCacheMissReason,
 } from './video-media-cache.js';
+import type { MediaEntry } from './video-media-cache.js';
 import {
   recipeArguments,
   recipeMedia,
@@ -88,6 +93,7 @@ const MiB = 1024 * 1024;
 type ProcessingLimits = RecipeProcessLimits & {
   highQualityNativeBytes: number;
   offlineInterpolationNativeBytes: number;
+  highResolutionBeautyNativeBytes: number;
 };
 
 function recipeAdmission(budget: number, signal: AbortSignal) {
@@ -126,7 +132,19 @@ export async function processVideoRecipes(
 ) {
   const results = new Map<string, IdentifiedMedia>();
   signal?.throwIfAborted();
-  if (!recipes.length) return results;
+  const pending = recipes.filter(({ input, inspection }) => {
+    if (
+      inspection.steps.every(
+        ({ parameters }) =>
+          parameters.type === 'beauty' && !isActiveBeautyStep(parameters),
+      )
+    ) {
+      results.set(inspection.assetId, input);
+      return false;
+    }
+    return true;
+  });
+  if (!pending.length) return results;
 
   const controller = new AbortController();
   const processingSignal = signal
@@ -159,9 +177,9 @@ export async function processVideoRecipes(
     if (plan && missing(error)) return directory;
     throw error;
   });
-  const jobs = recipes.values();
+  const jobs = pending.values();
   await Promise.all(
-    Array.from({ length: Math.min(concurrency, recipes.length) }, async () => {
+    Array.from({ length: Math.min(concurrency, pending.length) }, async () => {
       try {
         for (const recipe of jobs) {
           processingSignal.throwIfAborted();
@@ -188,7 +206,7 @@ export async function processVideoRecipes(
 }
 
 async function processRecipe(
-  { input, inspection: { assetId, steps } }: RecipeInput,
+  { input, inspection }: RecipeInput,
   directory: string,
   backends: {
     ffmpeg: string;
@@ -204,6 +222,7 @@ async function processRecipe(
   recovery?: RecipeRecovery,
   plan?: RecipeCachePlan,
 ) {
+  const { assetId, steps } = inspection;
   let current = input;
   // A partial final packet affects ffprobe's average, but not the cadence of
   // an interpolation result or subsequent steps that preserve its frame rate.
@@ -216,6 +235,8 @@ async function processRecipe(
   ).sha256;
   assertCurrent(input);
   for (const [index, { parameters }] of steps.entries()) {
+    if (parameters.type === 'beauty' && !isActiveBeautyStep(parameters))
+      continue;
     try {
       signal.throwIfAborted();
       assertCurrent(current);
@@ -231,6 +252,25 @@ async function processRecipe(
       const inputMedia = recipeMedia(source);
       inputMedia.frameRate = declaredCadence ?? inputMedia.frameRate;
       const step = resolveRecipeStep(inputMedia, parameters);
+      const analysis =
+        parameters.type === 'beauty'
+          ? await validateBeautyBinding(
+              parameters,
+              assetId,
+              dependency,
+              directory,
+              signal,
+            )
+          : undefined;
+      const maxNativeBytes =
+        enhancement?.type === 'superResolution' &&
+        enhancement.quality !== 'fast'
+          ? limits.highQualityNativeBytes
+          : step.interpolation?.backend === 'offline'
+            ? limits.offlineInterpolationNativeBytes
+            : analysis && pixels(inputMedia) >= 3_000_000
+              ? limits.highResolutionBeautyNativeBytes
+              : limits.maxNativeBytes;
       const key = hashJson([
         3,
         backends.ffmpeg,
@@ -245,14 +285,28 @@ async function processRecipe(
             ]
           : []),
         ...(enhancement ? await backends.enhancement() : []),
+        ...(analysis
+          ? [analysis.identity.workerSha256, analysis.sha256, maxNativeBytes]
+          : []),
       ]);
       const fields = { assetId, step: index, key, format: step.format };
+      const advance = (entry: MediaEntry) => {
+        current = entry;
+        dependency = `${key}:${entry.sha256}`;
+        if (entry.beauty) {
+          inspection.beauty = entry.beauty;
+          inspection.beautyArtifact = entry.metadata.path;
+        }
+        if (step.interpolation || declaredCadence !== null)
+          declaredCadence = step.media.frameRate;
+      };
       if (plan) {
         const cached = await findMediaEntry(
           directory,
           key,
           step.format,
           signal,
+          !!analysis,
         );
         if (!cached) {
           plan.steps.push({
@@ -280,10 +334,7 @@ async function processRecipe(
         const published = join(directory, key, `media.${step.format}`);
         if (cached.entry.metadata.path !== published)
           plan.pendingSources.set(cached.entry.metadata.path, assetId);
-        current = cached.entry;
-        dependency = `${key}:${cached.entry.sha256}`;
-        if (step.interpolation || declaredCadence !== null)
-          declaredCadence = step.media.frameRate;
+        advance(cached.entry);
         continue;
       }
       const report = (
@@ -313,13 +364,7 @@ async function processRecipe(
             throw new MediaError(
               'Recipe step exceeds its decoded pixel limit.',
             );
-          const maxNativeBytes =
-            enhancement?.type === 'superResolution' &&
-            enhancement.quality !== 'fast'
-              ? limits.highQualityNativeBytes
-              : step.interpolation?.backend === 'offline'
-                ? limits.offlineInterpolationNativeBytes
-                : limits.maxNativeBytes;
+          let beauty: BeautyRenderReport | undefined;
           const release = await admit(maxNativeBytes);
           try {
             report('started');
@@ -338,6 +383,16 @@ async function processRecipe(
               await runEnhancement(
                 source,
                 enhancement,
+                output,
+                stageLimits,
+                signal,
+                progress,
+              );
+            else if (analysis && parameters.type === 'beauty')
+              beauty = await runBeautyRecipe(
+                source,
+                parameters,
+                analysis,
                 output,
                 stageLimits,
                 signal,
@@ -365,15 +420,13 @@ async function processRecipe(
           const metadata = await probeRecipeMedia(output, signal);
           validateRecipeOutput(source, metadata, step);
           assertCurrent(current);
-          return metadata;
+          return { metadata, ...(beauty && { beauty }) };
         },
+        !!analysis,
       );
       assertCurrent(current);
       report(reused ? 'cache-hit' : 'completed');
-      dependency = `${key}:${entry.sha256}`;
-      current = entry;
-      if (step.interpolation || declaredCadence !== null)
-        declaredCadence = step.media.frameRate;
+      advance(entry);
     } catch (cause) {
       signal.throwIfAborted();
       throw recipeStepError(assetId, index, cause);
@@ -437,6 +490,10 @@ export function processingSettings(options: VideoProcessingOptions) {
   const limits: ProcessingLimits = {
     highQualityNativeBytes: Math.min(nativeBudget, 4096 * MiB),
     offlineInterpolationNativeBytes: Math.min(nativeBudget, 2048 * MiB),
+    highResolutionBeautyNativeBytes: Math.min(
+      nativeBudget,
+      (options.maxNativeBytes === undefined ? 2048 : 4096) * MiB,
+    ),
     maxTemporaryBytes: perWorkerBytes,
     maxNativeBytes: Math.min(nativeBudget, 1024 * MiB),
     maxBufferedFrames: positive(

@@ -219,3 +219,20 @@ export {
   validateTranscriptWindows,
 } from './transcript.js';
 export type { Transcript } from './transcript.js';
+export {
+  analyzeBeauty,
+  beautyCapabilities,
+  beautyCorrectionsSchema,
+  discoverBeauty,
+  inspectBeautyAnalysis,
+  removeBeautyAnalysis,
+  sampleBeautyAnalysis,
+} from './beauty-analysis.js';
+export { findBeautyCoverageError } from './beauty-render.js';
+export { validateBeautyRecipes } from './beauty-analysis.js';
+export {
+  beautyReviewSchema,
+  evaluateBeautyRecipe,
+  resolveBeautyReview,
+} from './beauty-render.js';
+export { beautyReports } from './video-recipe.js';

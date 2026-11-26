@@ -58,8 +58,11 @@ const optionTypes = {
   around: { type: 'string' },
   definition: { type: 'string' },
   edit: { type: 'string' },
+  'context-source': { type: 'string' },
+  'context-start': { type: 'string' },
   component: { type: 'string' },
   'render-report': { type: 'string' },
+  'require-visual': { type: 'boolean' },
   against: { type: 'string' },
   boundaries: { type: 'string' },
   'luma-tolerance': { type: 'string' },
@@ -316,6 +319,44 @@ const commands = {
     args: '<media> --output <new-directory>',
     options: ['output'],
   },
+  'beauty capabilities': { args: '', options: [] },
+  'beauty preflight': { args: '', options: [] },
+  'beauty analyze': {
+    args: '<media> [--recipe-cache <directory>] [--edit <corrections.json>] [--context-source <original-media> --context-start <seconds>]',
+    options: [
+      'recipe-cache',
+      'recipe-temp-bytes',
+      'recipe-memory-bytes',
+      'recipe-timeout-ms',
+      'edit',
+      'context-source',
+      'context-start',
+    ],
+  },
+  'beauty inspect': {
+    args: '<analysis-id> [--recipe-cache <directory>] [--output <new-directory>]',
+    options: ['recipe-cache', 'output'],
+  },
+  'beauty validate': {
+    args: definition + ' [--recipe-cache <directory>] ' + params,
+    options: ['recipe-cache', 'params'],
+  },
+  'beauty evaluate': {
+    args: '<media> --result <recipe-key> --from <source-frame> --to <source-frame> --output <new-directory> [--recipe-cache <directory>] [--notes <review.json>] [--require-visual]',
+    options: [
+      'result',
+      'from',
+      'to',
+      'output',
+      'recipe-cache',
+      'notes',
+      'require-visual',
+    ],
+  },
+  'beauty remove': {
+    args: '<analysis-id> [--recipe-cache <directory>]',
+    options: ['recipe-cache'],
+  },
   'online search': { args: '<request.json>', options: [] },
   'online download': {
     args: '<request.json> --result <id|index> --directory <media-directory>',
@@ -396,7 +437,8 @@ export function printHelp(positionals: string[], json: boolean | undefined) {
   // Help for an invocation ignores operands, including the preview filename.
   const scope =
     isCommand(qualified) ||
-    (!isCommand(group) &&
+    (positionals.length > 1 &&
+      !isCommand(group) &&
       commandNames.some((name) => isSubcommand(name, group)))
       ? qualified
       : group;

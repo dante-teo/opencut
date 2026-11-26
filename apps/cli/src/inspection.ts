@@ -1,5 +1,6 @@
 import {
   isVideoDefinitionPath,
+  beautyReports,
   inspectGraphicFrames,
   inspectDeclaredTimeline,
   parseSubtitleTime,
@@ -221,7 +222,10 @@ export async function runInspectionCommand(
             onProgress: (progress) =>
               writeRenderProgress(progress, values.json),
           });
-    console.log(JSON.stringify(result, null, 2));
+    const beauty = beautyReports(video.recipes);
+    console.log(
+      JSON.stringify({ ...result, ...(beauty.length && { beauty }) }, null, 2),
+    );
   }).catch((error: unknown) => {
     if (error instanceof VideoPreviewRangeError)
       throw new UsageError(error.message);

@@ -1,3 +1,4 @@
+import { beautyReports } from './video-recipe.js';
 import { stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import {
@@ -265,8 +266,10 @@ export async function renderCompiledVideo(
             (result.warnings ??= []).push(
               'Maximum uses the same AI interpolation and super-resolution settings as quality. Authored recipe overrides still apply.',
             );
+          const beauty = beautyReports(video.recipes);
           return {
             ...result,
+            ...(beauty.length && { beauty }),
             ...(graphicSampling.holdRenders && { graphicSampling }),
             ...(evidence && { revisionEvidence: evidence }),
             ...(fingerprint && { outputFingerprint: fingerprint }),

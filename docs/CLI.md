@@ -1099,3 +1099,10 @@ Use `doctor --json` to discover graphics capabilities and optional browser and
 adapter readiness. `validate --json` lists custom executable graphics.
 OpenCut keeps structured errors on stderr. Render a portable package from its
 verified `opencut.bundle.video.ts` entry.
+
+## Beauty and body reshaping
+
+Use `opencut beauty --help` to see local backend discovery, analysis, target
+inspection, binding validation, evidence generation, and cache removal.
+Use the regular `preview` and `render` commands for effects authored in
+a video recipe. See [beauty setup and workflow](BEAUTY.md).

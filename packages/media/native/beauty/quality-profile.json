@@ -1,0 +1,17 @@
+{
+  "version": "cpu-beauty-evidence-v1",
+  "outsideInfluence": {
+    "sourceDiagonalFraction": 0.14,
+    "minRadiusPixels": 8,
+    "maxChangedPixels": 0
+  },
+  "requiredIndependentChecks": [
+    "geometryDirectionAndResponse",
+    "targetIdentity",
+    "motionCompensatedStability",
+    "occlusionOrdering",
+    "skinTexture",
+    "colorQuality",
+    "reconstructionContinuity"
+  ]
+}

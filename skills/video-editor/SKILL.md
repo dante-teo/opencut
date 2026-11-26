@@ -145,6 +145,11 @@ and placement props. React errors carry mapped source locations when
 available. Keep animation source-local and use matching preview/export quality.
 See [React and SVG graphics](../../docs/GRAPHICS.md).
 
+For targeted face, body or skin work, use the
+[beauty workflow](references/beauty.md). Check the local backend, bind the
+intended person from source analysis, and inspect the coverage and motion
+evidence before delivering.
+
 For dialogue cleanup and automatic music ducking, route audio or video tracks
 with `audioRole: 'dialogue'`, `'music'` or `'other'` and enable
 `professionalMix` in the definition. Use `opencut mix analyze <file.video.ts> --json`
