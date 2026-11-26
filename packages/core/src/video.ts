@@ -204,6 +204,7 @@ export {
 } from './video-timeline-patch.js';
 
 export {
+  PictureRevisionTimingError,
   planPictureRevision,
   renderPictureRevision,
 } from './video-picture-revision.js';

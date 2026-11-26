@@ -112,8 +112,11 @@ export type { TimelinePlan } from './render.js';
 export {
   inspectEncodedPicture,
   inspectPicturePackets,
+  PictureTimestampError,
   randomAccessFrames,
   renderReviewClip,
+  verifyDeliveryStreamTiming,
+  verifyMuxedPictureTiming,
 } from './revision-media.js';
 
 export type { PicturePackets } from './revision-media.js';

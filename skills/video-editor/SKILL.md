@@ -180,10 +180,14 @@ file path relative to the authored definition. See the
   while changing the take, and choose embedded audio explicitly if needed.
   Put `replace-source` before any `trim` of that clip in the same patch.
 - For a local picture change, use `render --picture-from BASELINE.mp4 --render-report BASELINE.render.json --preflight`.
-  Check the changed and encoded frame ranges, packet reuse and soundtrack
-  decision before rendering to a new output. Save the new render report and
-  use it to sample splice joins with `preview contact-sheet --around picture`.
-  Use a full render when the splice is blocked.
+  Check `checks`, `pendingChecks`, the changed and encoded frame ranges,
+  packet reuse and soundtrack decision before rendering to a new output.
+  An eligible revision still needs to verify timestamps on the actual segments
+  and delivery. Render with `--json` to capture the timing details and the
+  `fallback` command. If you run the fallback, keep its successful JSON report
+  with the MP4 identified by its `path` field for the next baseline. Use a
+  successful revision report to sample splice joins with
+  `preview contact-sheet --around picture`.
   [Local picture revisions](../../docs/CLI.md#local-picture-revisions)
 - For an audio-only change, run `opencut remix --preflight` with the existing
   MP4 and its render report, then run `remix` if the decision is `reuse`.

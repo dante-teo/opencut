@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { basename, dirname, join, resolve } from 'node:path';
+import { lstatSync } from 'node:fs';
+import { basename, dirname, extname, join, resolve } from 'node:path';
 import {
   compileCachedVideo,
   describeProjectContactTimeline,
@@ -10,6 +11,7 @@ import {
   matchesFingerprint,
   preflightPictureReuse,
   planPictureRevision,
+  PictureRevisionTimingError,
   renderPictureRevision,
   renderCompiledVideo,
   revisionEvidenceSchema,
@@ -21,15 +23,21 @@ import {
   parseSubtitleTime,
   previewVideo,
 } from '@opencut/core/video';
-import type { ReviewVersion } from '@opencut/core/video';
+import type {
+  ReviewVersion,
+  RevisionRenderSettings,
+} from '@opencut/core/video';
 import type { RenderProgress } from '@opencut/media';
 import { writeRenderProgress } from './render-progress.js';
 import { parseFrameIndex } from './contact-sheet.js';
 import { withCommandCancellation } from './cancellation.js';
-import { commandUsage, type CommandOptions } from './commands.js';
+import { commandUsage, mixOptions, type CommandOptions } from './commands.js';
 import { readJsonArgument, readParams } from './json-argument.js';
 import { readMixControls } from './mix-options.js';
-import { parseProcessingControls } from './recipe-options.js';
+import {
+  parseProcessingControls,
+  processingOptionTypes,
+} from './recipe-options.js';
 import {
   parseRenderControls,
   parseRenderQuality,
@@ -535,6 +543,71 @@ export async function runRemix(file: string, values: CommandOptions) {
   });
 }
 
+function hasOutputEntry(path: string) {
+  try {
+    return lstatSync(path, { throwIfNoEntry: false }) !== undefined;
+  } catch {
+    // The command will report any destination error when it runs.
+    return false;
+  }
+}
+
+function fullRenderFallback(
+  file: string,
+  output: string,
+  values: CommandOptions,
+  settings?: RevisionRenderSettings,
+) {
+  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+  let destination = resolve(output);
+  if (hasOutputEntry(destination)) {
+    const ext = extname(destination);
+    destination =
+      destination.slice(0, -ext.length) + `-full-${randomUUID()}` + ext;
+  }
+  const args = [
+    'opencut',
+    'render',
+    quote(resolve(file)),
+    '--output',
+    quote(destination),
+  ];
+  const options = {
+    quality: settings?.quality,
+    codec: settings?.codec,
+    resolution: settings?.resolution,
+    encoder: settings?.encoder,
+    width: settings?.outputSize?.width,
+    height: settings?.outputSize?.height,
+    fps:
+      settings?.outputFrameRate &&
+      `${settings.outputFrameRate.numerator}/${settings.outputFrameRate.denominator}`,
+    'keyframe-interval': settings?.keyframeInterval,
+    'video-bitrate': settings?.videoBitrateKbps,
+    'audio-bitrate': settings?.audioBitrateKbps,
+    'audio-rate': settings?.audioSampleRate,
+    'audio-channels': settings?.audioChannels,
+    'mix-comparison': values['mix-comparison'] ?? settings?.audioComparison,
+  };
+  const inputOptions = [
+    'params',
+    ...mixOptions.filter((key) => key !== 'mix-comparison'),
+    ...(Object.keys(
+      processingOptionTypes,
+    ) as (keyof typeof processingOptionTypes)[]),
+  ] as const;
+  for (const [key, value] of [
+    ...Object.entries(options),
+    ...inputOptions.map((key) => [key, values[key]] as const),
+  ]) {
+    if (value !== undefined) args.push(`--${key}=${quote(String(value))}`);
+  }
+  if (settings?.burnSubtitles === false) args.push('--no-subtitles');
+  if (values.json || values['revision-evidence'])
+    args.push('--revision-evidence', '--json');
+  return args.join(' ');
+}
+
 export async function runPictureRevision(file: string, values: CommandOptions) {
   const {
     output,
@@ -558,6 +631,10 @@ export async function runPictureRevision(file: string, values: CommandOptions) {
       'Picture revisions use the baseline report’s export settings and a new output path. Use a full render to change encoding settings.',
     );
   await withCommandCancellation(async (signal) => {
+    let settings: RevisionRenderSettings | undefined;
+    let plan:
+      Awaited<ReturnType<typeof planPictureRevision>>['report'] | undefined;
+    const fallback = () => fullRenderFallback(file, output, values, settings);
     try {
       const report = await readJsonArgument(
         'render-report',
@@ -565,6 +642,7 @@ export async function runPictureRevision(file: string, values: CommandOptions) {
         signal,
       );
       const { evidence, fingerprint } = parseRevisionReport(report);
+      settings = evidence?.settings;
       if (!evidence || !fingerprint)
         throw new UsageError(
           'Supply matching render JSON from render --revision-evidence --json.',
@@ -603,9 +681,17 @@ export async function runPictureRevision(file: string, values: CommandOptions) {
         fingerprint,
         signal,
       );
-      if (values.preflight || preflight.report.status === 'blocked') {
-        console.log(JSON.stringify(preflight.report, null, 2));
-        if (preflight.report.status === 'blocked') process.exitCode = 1;
+      plan = preflight.report;
+      if (values.preflight || plan.status === 'blocked') {
+        const blocked = plan.status === 'blocked';
+        console.log(
+          JSON.stringify(
+            { ...plan, ...(blocked && { fallback: fallback() }) },
+            null,
+            2,
+          ),
+        );
+        if (blocked) process.exitCode = 1;
         return;
       }
       const result = await renderPictureRevision(
@@ -634,25 +720,46 @@ export async function runPictureRevision(file: string, values: CommandOptions) {
       );
     } catch (error) {
       signal.throwIfAborted();
+      const failedDuringRender = plan?.status === 'eligible';
+      const reason = error instanceof Error ? error.message : String(error);
+      const command = fallback();
+      process.exitCode = 1;
+      if (failedDuringRender && !values.json) {
+        process.stderr.write(
+          `${reason}\n\nRun a full render with\n${command}\n`,
+        );
+        return;
+      }
       console.log(
         JSON.stringify(
           {
-            event: 'picture-revision-preflight',
-            status: 'blocked',
             baseline: resolve(baseline),
-            reasons: [error instanceof Error ? error.message : String(error)],
-            changedRanges: [],
-            encodeRanges: [],
-            copyRanges: [],
-            audio: 'unavailable',
-            fallback:
-              'Run render with a new output path and omit --picture-from and --render-report.',
+            reasons: [reason],
+            fallback: command,
+            ...(failedDuringRender
+              ? {
+                  event: 'picture-revision-failed',
+                  status: 'failed',
+                  preflight: plan,
+                  ...(error instanceof PictureRevisionTimingError && {
+                    timing: error.details,
+                  }),
+                }
+              : {
+                  event: 'picture-revision-preflight',
+                  status: 'blocked',
+                  checks: [],
+                  pendingChecks: [],
+                  changedRanges: [],
+                  encodeRanges: [],
+                  copyRanges: [],
+                  audio: 'unavailable',
+                }),
           },
           null,
           2,
         ),
       );
-      process.exitCode = 1;
     }
   });
 }

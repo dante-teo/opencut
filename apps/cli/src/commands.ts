@@ -88,13 +88,13 @@ const params = '[--params <params.json>]';
 const position = '(--frame <n> | --timestamp <time>)';
 const previewOptions = ['quality', ...Object.keys(processingOptionTypes)];
 
-const mixOptions = [
+export const mixOptions = [
   'mix-settings',
   'mix-comparison',
   'mix-cache',
   'music-candidate',
   'music-loudness',
-];
+] as const;
 const mixUsage =
   '[--mix-settings <mix.json>] [--mix-comparison <before|after>] [--mix-cache <directory>] [--music-candidate <id>] [--music-loudness <matched|authored>]';
 

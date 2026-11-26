@@ -67,7 +67,13 @@ import { fitVisual, indexedSeekArgs } from './video-filter.js';
 import { pictureSeekCheck } from './picture-seek.js';
 import { stageTransformLayer } from './transform-layer.js';
 import type { GraphicLayer } from './graphics.js';
-import { inspectEncodedPicture } from './revision-media.js';
+import {
+  describeEncodedPicture,
+  inspectPicturePackets,
+  PictureTimestampError,
+  verifyDeliveryStreamTiming,
+  verifyMuxedPictureTiming,
+} from './revision-media.js';
 import type { TransformLayerOptions } from './transform-layer.js';
 import { rasterizeTextLayer } from './text.js';
 import {
@@ -204,7 +210,7 @@ export interface VideoTimelineOptions extends RenderControls {
   /** Record a verified file before publication so a caller can reconcile a crash. */
   onVerifiedOutput?: (
     staged: string,
-    encodedPicture?: Awaited<ReturnType<typeof inspectEncodedPicture>>,
+    encodedPicture?: ReturnType<typeof describeEncodedPicture>,
   ) => Promise<void>;
   /** Metadata already probed for this render invocation, indexed by resolved source path. */
   sourceMetadata?: ReadonlyMap<string, MediaMetadata>;
@@ -800,6 +806,7 @@ async function prepareTimeline(
     sourcePicture: undefined as
       | (NonNullable<VideoTimelineResult['pictureVersion']> & { path: string })
       | undefined,
+    externalPicturePath: undefined as string | undefined,
     savePicture: undefined as
       { key: string; cache: NonNullable<PictureCache['encoded']> } | undefined,
     audioMix: undefined as AudioMixReport | undefined,
@@ -1576,6 +1583,7 @@ async function prepareTimeline(
     );
     check();
     await accountRenderFile(snapshot);
+    prepared.externalPicturePath = snapshot;
     prepared.sourcePicture = {
       id: external.packetHash,
       path: external.path,
@@ -2078,6 +2086,36 @@ export async function renderVideoTimeline(
       stage: 'verifying encoded MP4',
     });
     const video = metadata.video;
+    const frameRateRatio = video?.frameRateRatio ?? null;
+    const frameRateMatches = sameFrameRate(
+      frameRateRatio,
+      numerator,
+      denominator,
+    );
+    const actualDuration = metadata.durationSeconds;
+    const containerDurationMatches =
+      actualDuration !== null &&
+      Math.abs(actualDuration - durationSeconds) <= 0.0011;
+    if (options.range || options.pictureFrom) {
+      verifyDeliveryStreamTiming(metadata, durationSeconds, frameCount);
+      if (!frameRateMatches)
+        throw new PictureTimestampError({
+          field: 'Video frame rate',
+          expected: `${numerator}/${denominator}`,
+          actual: frameRateRatio,
+          unit: 'fps',
+        });
+      if (!containerDurationMatches)
+        throw new PictureTimestampError(
+          {
+            field: 'Container duration',
+            expected: durationSeconds,
+            actual: actualDuration,
+            unit: 'seconds',
+          },
+          frameCount - 1,
+        );
+    }
     // Decode/count output frames, rather than trusting container duration alone.
     const frameProbe = await runMediaTool(
       'ffprobe',
@@ -2118,11 +2156,10 @@ export async function renderVideoTimeline(
       Math.abs(metadata.audio.durationSeconds - durationSeconds) > 0.0011 ||
       video.width !== outputWidth ||
       video.height !== outputHeight ||
-      !sameFrameRate(video.frameRateRatio, numerator, denominator) ||
+      !frameRateMatches ||
       video.durationSeconds === null ||
       Math.abs(video.durationSeconds - durationSeconds) > 0.000002 ||
-      metadata.durationSeconds === null ||
-      Math.abs(metadata.durationSeconds - durationSeconds) > 0.0011 ||
+      !containerDurationMatches ||
       video.startTimeSeconds !== 0 ||
       Number(counted.streams?.[0]?.nb_read_frames) !== frameCount
     )
@@ -2132,16 +2169,29 @@ export async function renderVideoTimeline(
           'Check source decodability and trim ranges.',
       );
     checkRenderSignal(options.signal);
-    const encodedPicture = options.pictureFrom
-      ? await inspectEncodedPicture(rendered, options.signal)
-      : undefined;
-    if (
-      encodedPicture &&
-      options.pictureFrom &&
-      (encodedPicture.packetHash !== options.pictureFrom.packetHash ||
-        encodedPicture.timingHash !== options.pictureFrom.timingHash)
-    )
-      throw new MediaError('Mux changed the encoded video packets or timing.');
+    let encodedPicture: ReturnType<typeof describeEncodedPicture> | undefined;
+    if (options.pictureFrom) {
+      const actual = await inspectPicturePackets(rendered, options.signal);
+      const timingChanged =
+        actual.timingHash !== options.pictureFrom.timingHash;
+      if (
+        timingChanged ||
+        actual.packetHash !== options.pictureFrom.packetHash
+      ) {
+        if (timingChanged && prepared.externalPicturePath) {
+          const expected = await inspectPicturePackets(
+            prepared.externalPicturePath,
+            options.signal,
+          );
+          if (expected.timingHash === options.pictureFrom.timingHash)
+            verifyMuxedPictureTiming(expected, actual);
+        }
+        throw new MediaError(
+          'Mux changed the encoded video packets or timing.',
+        );
+      }
+      encodedPicture = describeEncodedPicture(actual);
+    }
     let picture = prepared.sourcePicture;
     if (prepared.savePicture) {
       const { key, cache } = prepared.savePicture;

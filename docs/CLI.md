@@ -349,11 +349,12 @@ opencut preview contact-sheet revised.mp4 --render-report revised.render.json \
 
 Preflight is read-only. It shows the changed frames, the expanded ranges
 to encode, the baseline ranges eligible for packet copy, the estimated
-bytes reused, and the audio decision. Ranges are half-open. The preflight
-uses existing recipe cache entries. Run without `--preflight` to process
-missing recipes. The render checks codec initialization, color metadata,
-encoded packet identity, the presentation clock, and full decode before
-publishing the new MP4. An equivalent mix keeps the approved AAC packets.
+bytes reused, and the audio decision. `checks` lists the checks that
+passed, failed, or were skipped. `pendingChecks` lists what still needs
+the actual encoded or copied segments, joined picture, and final delivery.
+`eligible` means OpenCut can attempt the revision. Ranges are half-open.
+The preflight uses existing recipe cache entries. Run without `--preflight`
+to process missing recipes. An equivalent mix keeps the approved AAC packets.
 A changed mix runs through the normal audio renderer and alignment check.
 Preflight checks rendered text as well as authored text. A font fallback
 can change the rendered pixels, and a report that predates text raster
@@ -361,8 +362,61 @@ evidence can require those ranges to be encoded again during a picture edit.
 The result includes decoded checksums on either side of each join.
 Use its report with `preview contact-sheet` to sample cuts, captions, and
 splice joins in the exported MP4. Set `--from` and `--to` around the part
-of your export you want to check. For a blocked splice, use the reported reason and run a full render with
-the baseline flags omitted.
+of your export you want to check.
+
+#### Recover from a failed revision
+
+A blocked preflight reports `status: "blocked"` and lists the reasons. With
+`--json`, a failure during rendering reports `event: "picture-revision-failed"`
+and includes the original preflight results. Both exit with status 1.
+
+For a timestamp failure, read `timing.stage` to see whether the error
+occurred in a `segment`, at the `join`, or during `delivery`, including
+when OpenCut renders new audio. `timing.frame` is the zero-based frame in
+the full timeline. `timing.segment`, when present, gives the affected
+half-open frame range. `timing.timestamp` gives the expected and measured
+values and their units. A segment's timestamps are relative to that segment.
+
+The `fallback` field contains a full-render command. If you saved the JSON
+from the failed render above, print the command from it.
+
+```sh
+jq -r '.fallback' revised.render.json
+```
+
+Run the printed command from the same working directory so relative input
+paths still resolve. It carries over the project options and any settings
+available from the baseline report. If the requested MP4 path is occupied,
+including by a dangling symlink, the command selects a new path beside it.
+If the failed command used `--json`, the fallback includes
+`--revision-evidence`. Save its output to a fresh report file and keep it
+with the MP4 named in the report's `path` field for the next revision.
+
+### Vertical 4K60 delivery
+
+Copy [vertical-4k60.video.ts](../examples/video/vertical-4k60.video.ts) into
+your project. Save the inputs in `vertical.params.json`. Media paths are
+relative to the definition. This example uses 600 frames for 10 seconds,
+and shows a step card from two to four seconds.
+
+```json
+{
+  "picture": "edited-reel.mp4",
+  "frames": 600,
+  "stepCards": [{ "at": 120, "duration": 120, "text": "Step 1 · Prep" }]
+}
+```
+
+The definition sets the 2160 × 3840 canvas and the 60 fps frame grid. Add
+`"soundtrack": "mixed.wav"` to use an externally edited soundtrack that
+starts with the picture and covers the same duration. OpenCut uses the
+video's embedded audio when `soundtrack` is omitted.
+
+```sh
+opencut render vertical-4k60.video.ts --params vertical.params.json \
+  --output vertical.mp4 --codec hevc --encoder software --keyframe-interval 120 \
+  --revision-evidence --json > vertical.render.json
+```
 
 ## React and SVG graphics
 

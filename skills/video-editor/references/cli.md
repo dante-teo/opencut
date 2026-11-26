@@ -163,6 +163,14 @@ ranges can be reused. Read progress events on stderr, including
 `audio-analysis`, `audio-mastering` and `muxing`, and the final report
 on stdout. See [packet verification](../../../docs/CLI.md#audio-only-revisions).
 
+## Vertical 4K60 delivery
+
+Use the [9:16 TypeScript example](../../../examples/video/vertical-4k60.video.ts)
+to deliver 2160 × 3840 at 60 fps with optional step cards and a synced
+external soundtrack. Set the frame rate in the definition for local picture
+revisions and retain the approved MP4 and render report.
+[Export command and parameters](../../../docs/CLI.md#vertical-4k60-delivery)
+
 ## 3:4 4K60 delivery
 
 Set the definition's 3:4 canvas to 60 fps and render with

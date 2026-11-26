@@ -5,10 +5,12 @@ import {
   mkdtemp,
   readdir,
   readFile,
+  readlink,
   rm,
+  symlink,
   writeFile,
 } from 'node:fs/promises';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { fixtureDirectory } from '../fixture-paths.js';
@@ -23,6 +25,331 @@ const height = large ? 3840 : 192;
 const span = (startFrame: number, endFrame: number) => ({
   startFrame,
   endFrame,
+});
+
+test('local revision reports timestamp failures and produces a reusable fallback', async (t) => {
+  await mkdir(fixtureDirectory, { recursive: true });
+  const directory = await mkdtemp(
+    join(fixtureDirectory, "step cards' revision-"),
+  );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const path = (file: string) => join(directory, file);
+  const baseline = path('approved.mp4');
+  const report = path('approved.render.json');
+  const output = path('revised.mp4');
+  const source = path('source.mp4');
+  const draft = path('edit.video.ts');
+  const runRender = (args: string[], status = 0, env = process.env) => {
+    const result = spawnSync(process.execPath, [entry, 'render', ...args], {
+      encoding: 'utf8',
+      env,
+      timeout: 60_000,
+    });
+    assert.equal(result.status, status, result.error?.message || result.stderr);
+    return result;
+  };
+  const render = (args: string[], status?: number, env?: NodeJS.ProcessEnv) =>
+    JSON.parse(runRender([...args, '--json'], status, env).stdout);
+  runTool('ffmpeg', [
+    '-v',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=s=108x192:r=60:d=0.6',
+    '-c:v',
+    'libx264',
+    source,
+  ]);
+  const definition = {
+    canvas: { width: 108, height: 192, frameRate: 60, durationFrames: 36 },
+    assets: { picture: { kind: 'video', path: 'source.mp4' } },
+    tracks: [
+      { type: 'video', clips: [{ asset: 'picture', at: 0, sourceOut: 36 }] },
+    ],
+  };
+  const stepCard = {
+    type: 'text',
+    clips: [{ at: 14, duration: 5, text: { content: 'Prep', fontSize: 20 } }],
+  };
+  const write = (
+    tracks: unknown[],
+    assets: Record<string, unknown> = definition.assets,
+  ) =>
+    writeFile(
+      draft,
+      'export default ' + JSON.stringify({ ...definition, assets, tracks }),
+    );
+  await write(definition.tracks);
+  const approved = render([
+    draft,
+    '--output',
+    baseline,
+    '--revision-evidence',
+    '--encoder',
+    'software',
+    '--quality',
+    'fast',
+    '--keyframe-interval',
+    '12',
+    '--audio-rate',
+    '44100',
+    '--no-subtitles',
+  ]);
+  await writeFile(report, JSON.stringify(approved));
+  await write([...definition.tracks, stepCard]);
+
+  const args = [
+    draft,
+    '--picture-from',
+    baseline,
+    '--render-report',
+    report,
+    '--output',
+    output,
+  ];
+  const files = await readdir(directory);
+  const preflight = render([...args, '--preflight']);
+  assert.deepEqual(await readdir(directory), files);
+  assert.equal(preflight.status, 'eligible');
+  assert.ok(
+    preflight.checks.some(
+      ({ check, status }: { check: string; status: string }) =>
+        check === 'baseline-packet-grid-and-identity' && status === 'passed',
+    ),
+  );
+  assert.deepEqual(preflight.pendingChecks[0], {
+    check: 'encoded-segment-timestamps-codec-and-random-access',
+    ranges: [{ ...span(12, 24), action: 'encode' }],
+  });
+
+  const bin = path('bin');
+  await mkdir(bin);
+  const ffprobe = runTool('which', ['ffprobe']).trim();
+  // Inject timestamp errors at specific points in the revision pipeline.
+  await writeFile(
+    join(bin, 'ffprobe'),
+    `#!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
+const args = process.argv.slice(2);
+const result = spawnSync(process.env.OPENCUT_TEST_FFPROBE, args, { encoding: 'utf8' });
+process.stderr.write(result.stderr);
+if (result.status !== 0) process.exit(result.status ?? 1);
+const fault = process.env.OPENCUT_TEST_PROBE_FAULT ?? 'segment';
+const file = args.at(-1);
+const delivery = file.includes('/.opencut-picture-revision-') && file.endsWith('/render.mp4');
+const metadata = args.includes('-show_format');
+const packets = args.includes('-show_packets');
+let output = result.stdout;
+if (args.includes('json') && (metadata || packets)) {
+  const data = JSON.parse(output);
+  if (fault === 'segment' && metadata && file.endsWith('/part-1.mp4')) {
+    data.streams.find((stream) => stream.codec_type === 'video').start_time = '0.016667';
+  } else if (fault === 'join' && packets && file.endsWith('/joined.mp4')) {
+    data.packets.find((packet) => packet.pts === 24).pts = 25;
+  } else if (delivery && metadata) {
+    const audio = data.streams.find((stream) => stream.codec_type === 'audio');
+    const video = data.streams.find((stream) => stream.codec_type === 'video');
+    if (fault === 'audio-start') audio.start_time = '0.02';
+    if (fault === 'audio-end') audio.duration_ts = 22050;
+    if (fault === 'video-end') video.duration_ts = 30;
+    if (fault === 'container-duration') data.format.duration = '0.5';
+    if (fault === 'frame-rate') video.avg_frame_rate = '30/1';
+  } else if (delivery && packets && fault === 'dts') {
+    for (const packet of data.packets) packet.dts -= 1;
+  }
+  output = JSON.stringify(data);
+}
+process.stdout.write(output);
+`,
+    { mode: 0o755 },
+  );
+  const probeEnv = {
+    ...process.env,
+    PATH: [bin, process.env.PATH].join(delimiter),
+    OPENCUT_TEST_FFPROBE: ffprobe,
+  };
+  const failed = render(args, 1, probeEnv);
+  assert.equal(
+    failed.event,
+    'picture-revision-failed',
+    failed.reasons.join('\n'),
+  );
+  assert.equal(failed.status, 'failed');
+  assert.deepEqual(failed.preflight, preflight);
+  assert.deepEqual(failed.timing, {
+    stage: 'segment',
+    frame: 12,
+    segment: { ...span(12, 24), action: 'encode', index: 1 },
+    timestamp: {
+      field: 'Video stream start time',
+      expected: 0,
+      actual: 0.016667,
+      unit: 'seconds',
+    },
+  });
+  assert.match(
+    failed.reasons[0],
+    /frames \[12, 24\).*Expected 0 seconds, got 0\.016667 seconds/,
+  );
+  assert.deepEqual(await readdir(directory), [...files, 'bin'].sort());
+
+  const textFailure = runRender(args, 1, probeEnv);
+  assert.ok(textFailure.stderr.includes(failed.reasons[0]));
+  assert.equal(
+    textFailure.stderr.trimEnd().split('\n').at(-1),
+    failed.fallback.replace(/ --revision-evidence --json$/, ''),
+  );
+
+  const failProbe = (fault: string) =>
+    render(args, 1, { ...probeEnv, OPENCUT_TEST_PROBE_FAULT: fault });
+  const joined = failProbe('join');
+  assert.deepEqual(
+    joined.timing,
+    {
+      stage: 'join',
+      frame: 24,
+      segment: { ...span(24, 36), action: 'copy', index: 2 },
+      timestamp: {
+        field: 'Video presentation timestamp (PTS)',
+        expected: 24,
+        actual: 25,
+        unit: 'ticks (1/60 seconds per tick)',
+      },
+    },
+    joined.reasons.join('\n'),
+  );
+
+  function runFallback(command: string) {
+    const rerender = spawnSync(
+      '/bin/sh',
+      [
+        '-c',
+        `opencut() { "$OPENCUT_TEST_NODE" "$OPENCUT_TEST_ENTRY" "$@"; }\n${command}`,
+      ],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          OPENCUT_TEST_NODE: process.execPath,
+          OPENCUT_TEST_ENTRY: entry,
+        },
+        timeout: 60_000,
+      },
+    );
+    assert.equal(
+      rerender.status,
+      0,
+      rerender.error?.message || rerender.stderr,
+    );
+    return JSON.parse(rerender.stdout);
+  }
+  const result = runFallback(failed.fallback);
+  assert.equal(result.path, output);
+  assert.equal(result.frameCount, 36);
+  assert.equal(result.quality, 'fast');
+  assert.equal(result.encoder.settings.keyframeInterval, 12);
+  assert.equal(result.metadata.audio.sampleRate, 44100);
+  const fallbackReport = path('revised.render.json');
+  await writeFile(fallbackReport, JSON.stringify(result));
+  const next = render([
+    draft,
+    '--picture-from',
+    output,
+    '--render-report',
+    fallbackReport,
+    '--output',
+    path('next.mp4'),
+    '--preflight',
+  ]);
+  assert.equal(next.status, 'eligible');
+  assert.equal(next.framesToEncode, 0);
+
+  const blocked = render([...args, '--preflight'], 1);
+  assert.equal(blocked.status, 'blocked');
+  assert.deepEqual(blocked.pendingChecks, []);
+  assert.match(blocked.reasons[0], /Refusing to overwrite existing output/);
+  assert.match(blocked.fallback, /revised-full-[\da-f-]+\.mp4/);
+
+  await rm(output);
+  const missingTarget = 'missing.mp4';
+  await symlink(missingTarget, output);
+  const blockedSymlink = render([...args, '--preflight'], 1);
+  assert.match(
+    blockedSymlink.reasons[0],
+    /Refusing to overwrite existing output/,
+  );
+  const recovered = runFallback(blockedSymlink.fallback);
+  assert.notEqual(recovered.path, output);
+  assert.match(recovered.path, /revised-full-[\da-f-]+\.mp4$/);
+  assert.equal(await readlink(output), missingTarget);
+  await assert.rejects(readFile(path(missingTarget)), { code: 'ENOENT' });
+  await rm(output);
+
+  runTool('ffmpeg', [
+    '-v',
+    'error',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=f=440:r=44100:d=0.6',
+    path('mix.wav'),
+  ]);
+  await write(
+    [
+      ...definition.tracks,
+      { type: 'audio', clips: [{ asset: 'mix', at: 0, sourceOut: 36 }] },
+    ],
+    { ...definition.assets, mix: { kind: 'audio', path: 'mix.wav' } },
+  );
+  const firstPacket = JSON.parse(
+    runTool('ffprobe', [
+      '-v',
+      'error',
+      '-select_streams',
+      'v:0',
+      '-read_intervals',
+      '%+#1',
+      '-show_packets',
+      '-show_entries',
+      'packet=dts',
+      '-of',
+      'json',
+      baseline,
+    ]),
+  ).packets[0] as { dts: number };
+  assert.ok(Number.isSafeInteger(firstPacket.dts));
+  for (const [fault, frame, field, expected, actual, unit] of [
+    ['audio-start', 0, 'Audio stream start time', 0, 0.02, 'seconds'],
+    ['audio-end', 35, 'Audio stream end time', 0.6, 0.5, 'seconds'],
+    ['video-end', 35, 'Video stream end time', 0.6, 0.5, 'seconds'],
+    ['container-duration', 35, 'Container duration', 0.6, 0.5, 'seconds'],
+    ['frame-rate', 0, 'Video frame rate', '60/1', '30/1', 'fps'],
+    [
+      'dts',
+      0,
+      'Video decode timestamp (DTS)',
+      firstPacket.dts,
+      firstPacket.dts - 1,
+      'ticks (1/60 seconds per tick)',
+    ],
+  ] as const) {
+    const failure = failProbe(fault);
+    assert.equal(failure.event, 'picture-revision-failed');
+    assert.equal(failure.preflight.audio, 'render');
+    assert.equal(failure.preflight.framesToEncode, 0);
+    assert.deepEqual(
+      failure.timing,
+      {
+        stage: 'delivery',
+        frame,
+        segment: { ...span(0, 36), action: 'copy', index: 0 },
+        timestamp: { field, expected, actual, unit },
+      },
+      failure.reasons.join('\n'),
+    );
+  }
+  await assert.rejects(readFile(output), { code: 'ENOENT' });
 });
 
 test(
@@ -571,6 +898,12 @@ test(
         );
         assert.equal(changedMix.preflight.audio, 'render');
         assert.equal(changedMix.preflight.framesToEncode, 0);
+        assert.ok(
+          changedMix.preflight.pendingChecks.every(
+            ({ check }: { check: string }) =>
+              !check.startsWith('encoded-segment'),
+          ),
+        );
         assert.equal(changedMix.verification.completeDecode, true);
       }
       const blockedReport = path('incompatible.render.json');

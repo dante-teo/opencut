@@ -4,11 +4,14 @@ import {
   compareAudioPackets,
   inspectPicturePackets,
   MediaError,
+  PictureTimestampError,
   probeMedia,
   randomAccessFrames,
   renderVideoTimeline,
   runMediaTool,
   sameFrameRate,
+  verifyDeliveryStreamTiming,
+  verifyMuxedPictureTiming,
 } from '@opencut/media';
 import type { PicturePackets, RenderProgress } from '@opencut/media';
 import { withRenderSources } from './render-sources.js';
@@ -35,6 +38,29 @@ interface Range {
   endFrame: number;
 }
 type Segment = Range & { action: 'encode' | 'copy' };
+type TimingLocation =
+  { stage: 'segment'; index: number } | { stage: 'join' | 'delivery' };
+
+export class PictureRevisionTimingError extends MediaError {
+  readonly details;
+
+  constructor(
+    stage: TimingLocation['stage'],
+    frame: number,
+    segment: (Segment & { index: number }) | undefined,
+    cause: PictureTimestampError,
+  ) {
+    const range = segment
+      ? `, segment ${segment.index + 1} (${segment.action}), frames [${segment.startFrame}, ${segment.endFrame})`
+      : '';
+    super(
+      `Picture revision ${stage}${range}, frame ${frame}. ${cause.message}`,
+      { cause },
+    );
+    this.details = { stage, frame, segment, timestamp: cause.timestamp };
+  }
+}
+
 const length = ({ startFrame, endFrame }: Range) => endFrame - startFrame;
 const overlaps = (a: Range, b: Range) =>
   a.startFrame < b.endFrame && b.startFrame < a.endFrame;
@@ -96,6 +122,15 @@ export async function planPictureRevision(
   const { timeline, inspected } = candidate;
   const before = evidence.timeline;
   const reasons: string[] = [];
+  const checks: { check: string; status: 'passed' | 'failed' | 'skipped' }[] =
+    [];
+  function check(name: string, passed: boolean | undefined, reason?: string) {
+    checks.push({
+      check: name,
+      status: passed === undefined ? 'skipped' : passed ? 'passed' : 'failed',
+    });
+    if (passed === false && reason) reasons.push(reason);
+  }
   // Legacy reports lack raster keys. When the full picture key differs, any
   // text range without matching raster evidence must be encoded again.
   const samePicture = before.pictureKey === timeline.pictureKey;
@@ -126,7 +161,7 @@ export async function planPictureRevision(
         )
       : []),
   ]);
-  if (
+  const compatible = !(
     before.pictureSettingsKey !== timeline.pictureSettingsKey ||
     evidence.width !== inspected.outputWidth ||
     evidence.height !== inspected.outputHeight ||
@@ -138,14 +173,17 @@ export async function planPictureRevision(
       timeline.frameRate.denominator,
     ) ||
     settings.outputFrameRate !== undefined
-  )
-    reasons.push(
-      'The encoder, picture settings, duration or project-to-delivery frame grid differ.',
-    );
-  if (!changed.length && before.pictureKey !== timeline.pictureKey)
-    reasons.push(
-      'Picture dependencies changed outside the ranges described by this report.',
-    );
+  );
+  check(
+    'candidate-delivery-settings',
+    compatible,
+    'The encoder, picture settings, duration or project-to-delivery frame grid differ.',
+  );
+  check(
+    'picture-change-coverage',
+    changed.length > 0 || samePicture,
+    'Picture dependencies changed outside the ranges described by this report.',
+  );
 
   const baselinePath = resolve(baseline);
   const fingerprint = await fingerprintFile(
@@ -154,21 +192,28 @@ export async function planPictureRevision(
     'checking picture revision baseline',
     true,
   );
-  if (!matchesFingerprint(fingerprint, expected))
-    reasons.push(
-      'The baseline MP4 fingerprint does not match the render report.',
-    );
+  check(
+    'baseline-fingerprint',
+    matchesFingerprint(fingerprint, expected),
+    'The baseline MP4 fingerprint does not match the render report.',
+  );
   let picture: PicturePackets | undefined;
   let access: number[] = [];
+  let packetGrid: boolean | undefined;
+  let randomAccess: boolean | undefined;
   if (!reasons.length) {
+    packetGrid = false;
     try {
       picture = await inspectPicturePackets(baselinePath, signal);
       if (!matchesRevisionPicture(picture, evidence))
         throw new MediaError(
           'The baseline video stream or packet grid does not match the render report.',
         );
+      packetGrid = true;
+      randomAccess = false;
       access = await randomAccessFrames(baselinePath, picture, signal);
-      if (access[0] !== 0)
+      randomAccess = access[0] === 0;
+      if (!randomAccess)
         reasons.push(
           'The baseline lacks a provable initial random-access frame.',
         );
@@ -177,8 +222,13 @@ export async function planPictureRevision(
       reasons.push(error instanceof Error ? error.message : String(error));
     }
   }
-  if (fingerprint.identity !== videoInputIdentity(baselinePath))
-    reasons.push('The baseline changed during preflight.');
+  check('baseline-packet-grid-and-identity', packetGrid);
+  check('baseline-random-access', randomAccess);
+  check(
+    'baseline-unchanged',
+    fingerprint.identity === videoInputIdentity(baselinePath),
+    'The baseline changed during preflight.',
+  );
   const segments: Segment[] = [];
   if (!reasons.length) {
     const edges = [...access, evidence.frameCount];
@@ -191,13 +241,32 @@ export async function planPictureRevision(
       if (previous?.action === action) previous.endFrame = endFrame;
       else segments.push({ ...range, action });
     }
-    if (segments.every(({ action }) => action === 'encode'))
-      reasons.push(
-        'The safe coded boundaries cover the entire export. Use a full render.',
-      );
   }
   const copyRanges = segments.filter(({ action }) => action === 'copy');
   const encodeRanges = segments.filter(({ action }) => action === 'encode');
+  check(
+    'partial-reuse',
+    segments.length ? copyRanges.length > 0 : undefined,
+    'The safe coded boundaries cover the entire export. Use a full render.',
+  );
+  const pendingChecks: { check: string; ranges?: Segment[] }[] = [];
+  if (!reasons.length) {
+    if (video.layoutAssertions?.length)
+      pendingChecks.push({ check: 'layout-assertions' });
+    if (encodeRanges.length)
+      pendingChecks.push({
+        check: 'encoded-segment-timestamps-codec-and-random-access',
+        ranges: encodeRanges,
+      });
+    pendingChecks.push(
+      {
+        check: 'copied-segment-timestamps-and-packet-identity',
+        ranges: copyRanges,
+      },
+      { check: 'joined-packet-timestamps-and-identity' },
+      { check: 'delivery-timestamps-audio-alignment-and-full-decode' },
+    );
+  }
   let reusedBytes = 0;
   if (picture) {
     const { packets, step } = picture;
@@ -216,9 +285,8 @@ export async function planPictureRevision(
       event: 'picture-revision-preflight',
       status: reasons.length ? ('blocked' as const) : ('eligible' as const),
       baseline: baselinePath,
-      ...(reasons.length && {
-        fallback: 'Run render without --picture-from and --render-report.',
-      }),
+      checks,
+      pendingChecks,
       reasons,
       changedRanges: changed,
       affectedRanges,
@@ -303,6 +371,7 @@ export async function renderPictureRevision(
     if (videoInputIdentity(baseline) !== identity)
       throw new MediaError('Baseline MP4 changed during picture revision.');
   };
+  let timingLocation: TimingLocation | undefined;
   try {
     const lists: string[] = ['ffconcat version 1.0'];
     const expectedVideo: string[] = [];
@@ -317,6 +386,7 @@ export async function renderPictureRevision(
       : undefined;
     if (layout && !layout.ok) throw new VideoLayoutError(layout);
     for (const [i, segment] of segments.entries()) {
+      timingLocation = { stage: 'segment', index: i };
       const { startFrame, endFrame, action } = segment;
       const name = `part-${i}.mp4`;
       const part = join(scratch, name);
@@ -376,6 +446,7 @@ export async function renderPictureRevision(
       expectedVideo.push(...hashes);
       lists.push(`file '${name}'`, 'duration ' + seconds(length(segment)));
     }
+    timingLocation = { stage: 'join' };
     const list = join(scratch, 'parts.ffconcat');
     await writeFile(list, lists.join('\n') + '\n', { signal });
     const joined = join(scratch, 'joined.mp4');
@@ -395,15 +466,25 @@ export async function renderPictureRevision(
       'joining coded video ranges',
     );
     const joinedPicture = await inspectPicturePackets(joined, signal);
-    if (
-      joinedPicture.timingHash !== picture.timingHash &&
-      (joinedPicture.frameCount !== count ||
-        joinedPicture.step !== picture.step ||
-        joinedPicture.packets[0]!.dts !== picture.packets[0]!.dts)
-    )
+    if (joinedPicture.frameCount !== count)
       throw new MediaError(
-        'Joined ranges changed the delivery frame grid. Use a full render.',
+        `Joined ranges have ${joinedPicture.frameCount} video packets. Expected ${count}.`,
       );
+    const unit = `ticks (${picture.metadata.timeBase} seconds per tick)`;
+    if (joinedPicture.step !== picture.step)
+      throw new PictureTimestampError({
+        field: 'Joined video packet duration',
+        expected: picture.step,
+        actual: joinedPicture.step,
+        unit,
+      });
+    if (joinedPicture.packets[0]!.dts !== picture.packets[0]!.dts)
+      throw new PictureTimestampError({
+        field: 'First joined video decode timestamp (DTS)',
+        expected: picture.packets[0]!.dts,
+        actual: joinedPicture.packets[0]!.dts,
+        unit,
+      });
     if (
       joinedPicture.extradataHash !== picture.extradataHash ||
       hashJson(orderedHashes(joinedPicture)) !== hashJson(expectedVideo)
@@ -411,6 +492,7 @@ export async function renderPictureRevision(
       throw new MediaError(
         'Joined video failed packet identity verification. Use a full render.',
       );
+    timingLocation = { stage: 'delivery' };
     const staged = join(scratch, 'delivery.mp4');
     if (report.audio === 'reuse')
       await run(
@@ -448,20 +530,15 @@ export async function renderPictureRevision(
       });
 
     const delivery = await inspectPicturePackets(staged, signal);
+    verifyMuxedPictureTiming(joinedPicture, delivery);
     const metadata = await probeMedia(staged, signal);
     const durationSeconds = (count * denominator) / numerator;
+    verifyDeliveryStreamTiming(metadata, durationSeconds, count);
     if (
       delivery.packetHash !== joinedPicture.packetHash ||
-      delivery.timingHash !== joinedPicture.timingHash ||
       metadata.audio?.codec !== 'aac' ||
-      metadata.audio.startTimeSeconds !== 0 ||
-      metadata.audio.durationSeconds === null ||
       metadata.audio.sampleRate !== settings.audioSampleRate ||
-      metadata.audio.channels !== settings.audioChannels ||
-      Math.abs(metadata.audio.durationSeconds - durationSeconds) > 0.0011 ||
-      metadata.video?.durationSeconds === null ||
-      Math.abs((metadata.video?.durationSeconds ?? -1) - durationSeconds) >
-        0.000002
+      metadata.audio.channels !== settings.audioChannels
     )
       throw new MediaError(
         'Final delivery did not preserve packet timing or audio alignment.',
@@ -558,6 +635,26 @@ export async function renderPictureRevision(
       },
       seconds: (performance.now() - clock) / 1000,
     };
+  } catch (error) {
+    if (!(error instanceof PictureTimestampError) || !timingLocation)
+      throw error;
+    const { stage } = timingLocation;
+    const index =
+      stage === 'segment'
+        ? timingLocation.index
+        : segments.findIndex(
+            ({ startFrame, endFrame }) =>
+              error.frame >= startFrame && error.frame < endFrame,
+          );
+    const segment = segments[index];
+    const frame =
+      error.frame + (stage === 'segment' ? (segment?.startFrame ?? 0) : 0);
+    throw new PictureRevisionTimingError(
+      stage,
+      frame,
+      segment && { ...segment, index },
+      error,
+    );
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }

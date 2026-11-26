@@ -3,6 +3,7 @@ import { open, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { MediaError, runMediaTool } from './process.js';
 import { probeMedia, sameFrameRate } from './probe.js';
+import type { MediaMetadata } from './probe.js';
 import { rasterizeTextLayer } from './text.js';
 import { renderProgress } from './render-progress.js';
 import type { RenderProgress } from './render-progress.js';
@@ -19,6 +20,80 @@ type EncodedPacket = {
   flags: string;
 };
 
+const packetTimingFields = {
+  pts: 'Video presentation timestamp (PTS)',
+  dts: 'Video decode timestamp (DTS)',
+  duration: 'Video packet duration',
+};
+
+export class PictureTimestampError extends MediaError {
+  constructor(
+    readonly timestamp: {
+      field: string;
+      expected: number | string;
+      actual: number | string | null;
+      unit?: string;
+    },
+    readonly frame = 0,
+  ) {
+    const { field, expected, actual, unit } = timestamp;
+    const format = (value: number | string | null) =>
+      value === null ? 'unavailable' : `${value}${unit ? ' ' + unit : ''}`;
+    super(`${field}. Expected ${format(expected)}, got ${format(actual)}.`);
+  }
+}
+
+function verifyStreamStartTime(
+  stream: 'Video' | 'Audio',
+  actual: number | null,
+) {
+  if (actual !== 0)
+    throw new PictureTimestampError({
+      field: `${stream} stream start time`,
+      expected: 0,
+      actual,
+      unit: 'seconds',
+    });
+}
+
+export function verifyDeliveryStreamTiming(
+  { video, audio }: MediaMetadata,
+  durationSeconds: number,
+  frameCount: number,
+) {
+  if (video) verifyStreamStartTime('Video', video.startTimeSeconds);
+  if (audio) verifyStreamStartTime('Audio', audio.startTimeSeconds);
+  for (const [stream, actual, tolerance] of [
+    ['Audio', audio?.durationSeconds, 0.0011],
+    ['Video', video?.durationSeconds, 0.000002],
+  ] as const) {
+    if (actual == null || Math.abs(actual - durationSeconds) > tolerance)
+      throw new PictureTimestampError(
+        {
+          field: `${stream} stream end time`,
+          expected: durationSeconds,
+          actual: actual ?? null,
+          unit: 'seconds',
+        },
+        frameCount - 1,
+      );
+  }
+}
+
+function verifyPacketTiming(
+  field: keyof typeof packetTimingFields,
+  expected: number,
+  actual: number,
+  unit: string,
+  frame: number,
+) {
+  if (actual !== expected)
+    throw new PictureTimestampError(
+      { field: packetTimingFields[field], expected, actual, unit },
+      frame,
+    );
+}
+
 /** Inspect packet boundaries and codec initialization data on a constant frame grid. */
 export async function inspectPicturePackets(
   file: string,
@@ -30,12 +105,12 @@ export async function inspectPicturePackets(
     !video?.timeBase ||
     !video.width ||
     !video.height ||
-    !video.frameRateRatio ||
-    video.startTimeSeconds !== 0
+    !video.frameRateRatio
   )
     throw new MediaError(
-      'Picture needs a video stream with a zero start time.',
+      'Picture needs a video stream with a valid frame rate and time base.',
     );
+  verifyStreamStartTime('Video', video.startTimeSeconds);
   const result = await runMediaTool(
     'ffprobe',
     [
@@ -75,24 +150,27 @@ export async function inspectPicturePackets(
     throw new MediaError(
       'Picture packets lack timestamps, durations, or codec initialization data.',
     );
-  const pts = packets.map((packet) => packet.pts).sort((a, b) => a - b);
   const step = packets[0]!.duration;
+  const firstDts = packets[0]!.dts;
   const [n, d] = video.timeBase.split('/').map(Number) as [number, number];
-  if (
-    !Number.isSafeInteger(n) ||
-    !Number.isSafeInteger(d) ||
-    n <= 0 ||
-    d <= 0 ||
-    pts.some((value, i) => value !== i * step) ||
-    packets.some(
-      ({ dts, duration }, i) =>
-        duration !== step || dts !== packets[0]!.dts + i * step,
-    ) ||
-    !sameFrameRate(video.frameRateRatio, d, n * step)
-  )
-    throw new MediaError(
-      'Picture packets do not follow a constant, zero-based presentation grid.',
-    );
+  if (!Number.isSafeInteger(n) || !Number.isSafeInteger(d) || n <= 0 || d <= 0)
+    throw new MediaError(`Invalid video time base '${video.timeBase}'.`);
+  const unit = `ticks (${video.timeBase} seconds per tick)`;
+  const presentationTimes = packets.map(({ pts }) => pts).sort((a, b) => a - b);
+  for (const [frame, pts] of presentationTimes.entries())
+    verifyPacketTiming('pts', frame * step, pts, unit, frame);
+  for (const [index, { pts, dts, duration }] of packets.entries()) {
+    const frame = pts / step;
+    verifyPacketTiming('dts', firstDts + index * step, dts, unit, frame);
+    verifyPacketTiming('duration', step, duration, unit, frame);
+  }
+  if (!sameFrameRate(video.frameRateRatio, d, n * step))
+    throw new PictureTimestampError({
+      field: 'Video frame rate',
+      expected: `${d}/${n * step}`,
+      actual: video.frameRateRatio,
+      unit: 'fps',
+    });
   const digest = (value: unknown) =>
     createHash('sha256').update(JSON.stringify(value)).digest('hex');
   return {
@@ -122,12 +200,50 @@ export async function inspectEncodedPicture(
   file: string,
   signal?: AbortSignal,
 ) {
-  const { packetHash, timingHash, frameCount, metadata } =
-    await inspectPicturePackets(file, signal);
+  return describeEncodedPicture(await inspectPicturePackets(file, signal));
+}
+
+export function describeEncodedPicture({
+  packetHash,
+  timingHash,
+  frameCount,
+  metadata,
+}: PicturePackets) {
   return { packetHash, timingHash, frameCount, metadata };
 }
 
 export type PicturePackets = Awaited<ReturnType<typeof inspectPicturePackets>>;
+
+export function verifyMuxedPictureTiming(
+  expected: PicturePackets,
+  actual: PicturePackets,
+) {
+  if (actual.timingHash === expected.timingHash) return;
+  if (actual.frameCount !== expected.frameCount)
+    throw new MediaError(
+      `The final delivery has ${actual.frameCount} video packets. Expected ${expected.frameCount}.`,
+    );
+  if (actual.metadata.timeBase !== expected.metadata.timeBase)
+    throw new PictureTimestampError({
+      field: 'Video packet time base',
+      expected: expected.metadata.timeBase!,
+      actual: actual.metadata.timeBase,
+    });
+  const unit = `ticks (${expected.metadata.timeBase} seconds per tick)`;
+  for (const [i, packet] of expected.packets.entries()) {
+    const muxed = actual.packets[i]!;
+    const frame = packet.pts / expected.step;
+    verifyPacketTiming('pts', packet.pts, muxed.pts, unit, frame);
+    verifyPacketTiming('dts', packet.dts, muxed.dts, unit, frame);
+    verifyPacketTiming(
+      'duration',
+      packet.duration,
+      muxed.duration,
+      unit,
+      frame,
+    );
+  }
+}
 
 /** Only allow independently decodable accesses that also partition presentation order. */
 export async function randomAccessFrames(
