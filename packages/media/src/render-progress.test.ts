@@ -1,7 +1,56 @@
 import { describe, expect, it, vi } from 'vitest';
-import { renderProgress } from './render-progress.js';
+import { performance } from 'node:perf_hooks';
+import { renderProgress, withExportProgress } from './render-progress.js';
 
 describe('structured FFmpeg progress', () => {
+  it('keeps reporting the active stage through quiet work and stops after failure', async () => {
+    const report = vi.fn();
+    vi.useFakeTimers();
+    let now = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    try {
+      const attempt = withExportProgress(report, async (tracked) => {
+        await withExportProgress(tracked, async (nested) => {
+          const stage = renderProgress(120, nested, {
+            stage: 'composition',
+            indeterminate: true,
+          });
+          stage.start();
+          now = 5000;
+          vi.advanceTimersByTime(5000);
+          now = 10000;
+          vi.advanceTimersByTime(5000);
+          stage.update(60);
+          throw new Error('cancelled');
+        });
+      });
+      await expect(attempt).rejects.toThrow('cancelled');
+      expect(
+        report.mock.calls.map(([event]) => [
+          event.stage,
+          event.exportElapsedSeconds,
+          event.idleSeconds,
+          event.heartbeat,
+        ]),
+      ).toEqual([
+        ['preparation', 0, 0, undefined],
+        ['composition', 0, 0, undefined],
+        ['composition', 5, 5, true],
+        ['composition', 10, 10, true],
+        ['composition', 10, 0, undefined],
+      ]);
+      expect(report.mock.calls[2]?.[0]).toMatchObject({
+        remainingSeconds: null,
+      });
+      now = 20000;
+      vi.advanceTimersByTime(10000);
+      expect(report).toHaveBeenCalledTimes(5);
+    } finally {
+      clock.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('parses split/coalesced CRLF records, ignores unknown fields and keeps progress monotonic', () => {
     const callback = vi.fn();
     const progress = renderProgress(20, callback);

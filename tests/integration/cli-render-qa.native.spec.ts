@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
+  access,
   copyFile,
   link,
   mkdir,
@@ -11,9 +12,10 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises';
-import { delimiter, dirname, join, relative } from 'node:path';
+import { delimiter, dirname, join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { probeMedia } from '@opencut/sdk';
 import { fixtureDirectory } from '../fixture-paths.js';
 import {
   command,
@@ -373,6 +375,42 @@ test('render plan leaves cold caches untouched and predicts exact warm recipe an
       'scheduled-earlier-range',
     ],
   );
+  const scaled = json(
+    'render',
+    'plan',
+    ...args,
+    '--width',
+    '288',
+    '--height',
+    '384',
+    '--fps',
+    '48',
+  ).data;
+  assert.deepEqual(scaled.composition, {
+    width: 192,
+    height: 256,
+    frameRate: { numerator: 24, denominator: 1 },
+    frameCount: 18,
+    durationSeconds: 0.75,
+  });
+  assert.deepEqual(scaled.delivery, {
+    width: 288,
+    height: 384,
+    frameRate: { numerator: 48, denominator: 1 },
+    frameCount: 36,
+    durationSeconds: 0.75,
+  });
+  assert.ok(
+    scaled.shots.every(
+      ({
+        compositionMethod,
+        method,
+      }: {
+        compositionMethod: string;
+        method: string;
+      }) => compositionMethod === 'native' && method === 'frame-repetition',
+    ),
+  );
   assert.ok(cold.storage.peakScratchBytes > 0);
   assert.ok(cold.storage.filesystems[0].freeBytes > 0);
   const rendered = json('render', ...args, '--picture-version', 'save').data;
@@ -681,6 +719,430 @@ test('export verification publishes paired samples, checks boundary luma and com
       assert.equal(delayedReport.audio.passed, true);
     },
   );
+});
+
+test('export verification pairs 30 and 60 fps by time and detects unsampled clock and audio shifts', async (t) => {
+  const directory = await mkdtemp(
+    join(fixtureDirectory, 'cross-rate-verification-'),
+  );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const preview = join(directory, 'approved.mp4');
+  const delivery = join(directory, 'delivery.mp4');
+  ffmpeg([
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=gray:s=96x128:r=30:d=1',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=440:duration=1',
+    '-vf',
+    "drawbox=c=white:t=fill:enable='gte(n,15)'",
+    '-c:v',
+    'libx264',
+    '-c:a',
+    'aac',
+    preview,
+  ]);
+  ffmpeg([
+    '-i',
+    preview,
+    '-vf',
+    'fps=60,scale=192:256',
+    '-c:v',
+    'libx264',
+    '-c:a',
+    'copy',
+    delivery,
+  ]);
+  const verify = (file: string, name: string, ...flags: string[]) =>
+    run(
+      'verify',
+      'export',
+      file,
+      '--against',
+      preview,
+      '--audio-master',
+      preview,
+      '--expect-fps',
+      '60',
+      '--timestamps',
+      '0.1,0.5',
+      '--output',
+      join(directory, name),
+      ...flags,
+    );
+  const verified = verify(delivery, 'pass', '--boundary-timestamps', '0.5');
+  assert.equal(verified.status, 0, verified.stderr || verified.stdout);
+  const report = JSON.parse(verified.stdout);
+  assert.deepEqual(
+    report.samples.map(
+      (sample: {
+        frame: number;
+        previewFrame: number;
+        timeSeconds: number;
+      }) => [sample.frame, sample.previewFrame, sample.timeSeconds],
+    ),
+    [
+      [6, 3, 0.1],
+      [29, 14, 29 / 60],
+      [30, 15, 0.5],
+    ],
+  );
+  assert.deepEqual(report.boundaries[0].reasons, ['requested-timestamp']);
+  assert.equal(report.timing.exportFrames, 60);
+  assert.equal(report.audio.content.passed, true);
+  assert.equal(report.audio.timing.passed, true);
+
+  const irregular = join(directory, 'irregular.mp4');
+  ffmpeg([
+    '-i',
+    delivery,
+    '-vf',
+    "settb=1/6000,setpts='PTS+if(eq(N,17),10,0)'",
+    '-fps_mode',
+    'passthrough',
+    '-enc_time_base:v',
+    '1/6000',
+    '-c:v',
+    'libx264',
+    '-c:a',
+    'copy',
+    irregular,
+  ]);
+  const badClock = verify(irregular, 'clock-failure');
+  assert.equal(badClock.status, 1, badClock.stderr || badClock.stdout);
+  const clockReport = JSON.parse(badClock.stdout);
+  assert.ok(
+    clockReport.samples.every(({ passed }: { passed: boolean }) => passed),
+  );
+  assert.equal(clockReport.timing.passed, false);
+  assert.ok([16, 17].includes(clockReport.timing.firstTimingMismatch));
+
+  const shifted = join(directory, 'shifted-audio.mp4');
+  ffmpeg([
+    '-itsoffset',
+    '0.125',
+    '-i',
+    delivery,
+    '-i',
+    delivery,
+    '-map',
+    '1:v:0',
+    '-map',
+    '0:a:0',
+    '-c',
+    'copy',
+    shifted,
+  ]);
+  const badAudio = verify(shifted, 'audio-timing-failure');
+  assert.equal(badAudio.status, 1, badAudio.stderr || badAudio.stdout);
+  const audioReport = JSON.parse(badAudio.stdout);
+  assert.equal(audioReport.timing.passed, true);
+  assert.equal(audioReport.audio.content.passed, true);
+  assert.equal(audioReport.audio.timing.passed, false);
+  const mismatch = audioReport.audio.tracks[0].timing.firstMismatch;
+  assert.equal(mismatch.packet, 0);
+  assert.ok(
+    Math.abs(
+      mismatch.actualTimeSeconds - mismatch.expectedTimeSeconds - 0.125,
+    ) < 0.002,
+  );
+});
+
+test('export verification accepts the renderer’s rounded delivery duration', async (t) => {
+  const directory = await mkdtemp(
+    join(fixtureDirectory, 'rounded-export-verification-'),
+  );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const definition = join(directory, 'rounded.video.ts');
+  await writeFile(
+    definition,
+    'export default ' +
+      JSON.stringify({
+        canvas: { width: 96, height: 128, frameRate: 24, durationFrames: 37 },
+        tracks: [
+          {
+            type: 'video',
+            clips: [{ at: 0, duration: 37, text: { content: '37 frames' } }],
+          },
+        ],
+      }),
+  );
+  const preview = join(directory, 'approved.mp4');
+  const delivery = join(directory, 'delivery.mp4');
+  json('render', definition, '--output', preview);
+  json('render', definition, '--output', delivery, '--fps', '60');
+  const result = json(
+    'verify',
+    'export',
+    delivery,
+    '--against',
+    preview,
+    '--expect-fps',
+    '60',
+    '--output',
+    join(directory, 'report'),
+  ).data;
+  assert.equal(result.timing.expectedFrames, 93);
+  assert.equal(result.timing.exportFrames, 93);
+  assert.equal(result.timing.previewDurationSeconds, 37 / 24);
+  assert.equal(result.timing.expectedDurationSeconds, 93 / 60);
+  assert.equal(result.timing.passed, true);
+});
+
+test('export verification validates reported cadence, snaps quantized frames, and rejects a shifted preview', async (t) => {
+  const directory = await mkdtemp(
+    join(fixtureDirectory, 'quantized-export-verification-'),
+  );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const preview = join(directory, 'approved.mp4');
+  const quantized = join(directory, 'quantized.mp4');
+  const shifted = join(directory, 'shifted-preview.mp4');
+  ffmpeg([
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=gray:s=96x128:r=30:d=0.2',
+    '-vf',
+    "drawbox=c=white:t=fill:enable='gte(n,1)'",
+    '-c:v',
+    'libx264',
+    '-bf',
+    '0',
+    '-video_track_timescale',
+    '30000',
+    preview,
+  ]);
+  ffmpeg([
+    '-i',
+    preview,
+    '-c',
+    'copy',
+    '-video_track_timescale',
+    '1000',
+    quantized,
+  ]);
+  for (const reference of [preview, quantized]) {
+    const report = json(
+      'verify',
+      'export',
+      quantized,
+      '--against',
+      reference,
+      '--frames',
+      '1',
+      '--boundary-timestamps',
+      '1/30',
+      '--output',
+      join(directory, reference === preview ? 'pair' : 'self'),
+    ).data;
+    assert.deepEqual(report.timing.expectedFrameRate, {
+      numerator: 30,
+      denominator: 1,
+    });
+    assert.equal(
+      report.samples.find(({ frame }: { frame: number }) => frame === 1)
+        .previewFrame,
+      1,
+    );
+    assert.equal(report.boundaries[0].frame, 1);
+    assert.equal(report.timing.passed, true);
+  }
+  ffmpeg([
+    '-itsoffset',
+    '0.1',
+    '-i',
+    preview,
+    '-map',
+    '0:v:0',
+    '-c',
+    'copy',
+    shifted,
+  ]);
+  const result = run(
+    'verify',
+    'export',
+    preview,
+    '--against',
+    shifted,
+    '--frames',
+    '1',
+    '--output',
+    join(directory, 'shifted-report'),
+  );
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.samples[0].passed, true);
+  assert.equal(report.timing.firstTimingMismatch, 0);
+  assert.ok(Math.abs(report.timing.previewStartSeconds - 0.1) < 0.000001);
+  assert.equal(report.timing.passed, false);
+});
+
+test('picture-clock trim keeps the covering frame and picture duration when audio leads', async (t) => {
+  const directory = await mkdtemp(
+    join(fixtureDirectory, 'picture-clock-trim-'),
+  );
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const source = join(directory, 'camera.mov');
+  ffmpeg([
+    '-itsoffset',
+    '0.2',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=s=96x128:r=24:d=2',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=440:sample_rate=48000:duration=2.2',
+    '-map',
+    '0:v:0',
+    '-map',
+    '1:a:0',
+    '-c:v',
+    'libx264',
+    '-c:a',
+    'pcm_f32le',
+    '-video_track_timescale',
+    '24000',
+    source,
+  ]);
+  const original = await probeMedia(source);
+  assert.ok(
+    (original.video?.startTimeSeconds ?? NaN) -
+      (original.audio?.startTimeSeconds ?? NaN) >
+      0.15,
+  );
+  const definition = join(directory, 'trim.video.ts');
+  const cache = join(directory, 'cache');
+  await writeFile(
+    definition,
+    'export default ' +
+      JSON.stringify({
+        canvas: { width: 96, height: 128, frameRate: 30, durationFrames: 29 },
+        assets: {
+          camera: {
+            path: 'camera.mov',
+            kind: 'video',
+            recipe: [
+              { type: 'trim', clock: 'picture', start: 31 / 30, end: 2 },
+            ],
+          },
+        },
+        tracks: [
+          { type: 'video', clips: [{ at: 0, asset: 'camera', sourceOut: 29 }] },
+        ],
+      }),
+  );
+  const { data } = json(
+    'render',
+    definition,
+    '--recipe-cache',
+    cache,
+    '--output',
+    join(directory, 'delivery.mp4'),
+  );
+  const trim = join(cache, data.recipeProcessing.at(-1).key, 'media.mov');
+  const { video, audio } = await probeMedia(trim);
+  assert.ok(Math.abs((video?.durationSeconds ?? NaN) - 29 / 30) < 0.000001);
+  assert.equal(video?.startTimeSeconds, 0);
+  assert.ok(Math.abs(audio?.startTimeSeconds ?? NaN) < 1 / 48000);
+  const sourceFrames = decodeFrames(source, [24, 25], 96, 128);
+  assert.notDeepEqual(sourceFrames.get(24), sourceFrames.get(25));
+  const cutFrames = decodeFrames(trim, [0, 1], 96, 128);
+  assert.deepEqual(cutFrames.get(0), sourceFrames.get(24));
+  assert.deepEqual(cutFrames.get(1), sourceFrames.get(25));
+});
+
+test('4K60 delivery plan distinguishes shot interpolation, native frames, and repetition', async (t) => {
+  try {
+    await access(resolve('packages/media/dist/video-interpolate'));
+  } catch {
+    return t.skip('Build the macOS VideoToolbox interpolation worker.');
+  }
+  const directory = await mkdtemp(join(fixtureDirectory, '4k60-preset-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  patches(directory, 30, 18);
+  ffmpeg([
+    '-f',
+    'lavfi',
+    '-i',
+    'color=c=gray:s=96x128:r=60:d=0.5',
+    '-c:v',
+    'libx264',
+    join(directory, 'native.mp4'),
+  ]);
+  const shots = [0, 150, 300, 450, 600, 750, 900, 1050, 1188].map((at, i) => ({
+    at,
+    id: `shot-${i + 1}`,
+    asset: 'camera',
+    sourceIn: 3,
+    sourceOut: 9,
+  }));
+  const approved = join(directory, 'approved.video.ts');
+  const variant = join(directory, 'delivery.video.ts');
+  await writeFile(
+    approved,
+    'export default ' +
+      JSON.stringify({
+        canvas: {
+          width: 1080,
+          height: 1920,
+          frameRate: 30,
+          durationFrames: 1623,
+        },
+        assets: {
+          camera: { path: 'patches.mov', kind: 'video' },
+          native: { path: 'native.mp4', kind: 'video' },
+        },
+        tracks: [
+          {
+            type: 'video',
+            clips: [
+              ...shots,
+              { id: 'native-shot', asset: 'native', at: 1200, sourceOut: 6 },
+              { id: 'repeated', asset: 'camera', at: 1210, sourceOut: 6 },
+            ],
+          },
+        ],
+      }),
+  );
+  await writeFile(
+    variant,
+    `import approved from './approved.video.ts';
+import { create4K60Delivery } from '@opencut/sdk';
+export default create4K60Delivery(approved, ${JSON.stringify({
+      interpolateShots: shots.map(({ id }) => id),
+      nativeSources: ['native'],
+    })});\n`,
+  );
+  const plan = json(
+    'render',
+    'plan',
+    variant,
+    '--output',
+    join(directory, 'master.mp4'),
+  ).data;
+  assert.deepEqual(plan.composition, {
+    width: 2160,
+    height: 3840,
+    frameRate: { numerator: 60, denominator: 1 },
+    frameCount: 3246,
+    durationSeconds: 54.1,
+  });
+  assert.deepEqual(plan.delivery, plan.composition);
+  assert.equal(plan.recipes.length, 18);
+  const byId = new Map<
+    string,
+    { method: string; startFrame: number; startSeconds: number }
+  >(plan.shots.map((shot: { clipId: string }) => [shot.clipId, shot]));
+  assert.equal(byId.get('shot-9')?.method, 'interpolation');
+  assert.equal(byId.get('shot-9')?.startFrame, 2376);
+  assert.equal(byId.get('shot-9')?.startSeconds, 39.6);
+  assert.equal(byId.get('native-shot')?.method, 'native');
+  assert.equal(byId.get('repeated')?.method, 'frame-repetition');
 });
 
 test('limited BT.709 picture stays continuous across cache and bounded picture seams', async (t) => {

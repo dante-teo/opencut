@@ -5,6 +5,7 @@ import {
   inspectEncodedPicture,
   MediaError,
   renderVideoTimeline,
+  withExportProgress,
 } from '@opencut/media';
 import type { RenderControls } from '@opencut/media';
 import { authoredInputs, checkpointRender } from './video-build.js';
@@ -96,7 +97,21 @@ export async function protectRenderInputs(
 }
 
 /** Render one compiled revision using the shared media engine. */
-export async function renderCompiledVideo(
+export function renderCompiledVideo(
+  video: CompiledVideo,
+  output: string,
+  options: CompiledVideoRenderOptions = {},
+) {
+  return withExportProgress(options.onProgress, (onProgress) =>
+    executeCompiledRender(
+      video,
+      output,
+      onProgress ? { ...options, onProgress } : options,
+    ),
+  );
+}
+
+async function executeCompiledRender(
   video: CompiledVideo,
   output: string,
   {
@@ -304,14 +319,20 @@ export async function renderVideo(
     ...options
   }: VideoRenderOptions = {},
 ) {
-  const video = await compileVideo(file, {
-    signal: options.signal,
-    preview: options.burnSubtitles === false,
-    processing,
-    quality: options.quality ?? 'quality',
-    params,
-    audioMixEdit,
-    musicSelection,
+  return withExportProgress(options.onProgress, async (onProgress) => {
+    const video = await compileVideo(file, {
+      signal: options.signal,
+      preview: options.burnSubtitles === false,
+      processing,
+      quality: options.quality ?? 'quality',
+      params,
+      audioMixEdit,
+      musicSelection,
+    });
+    return renderCompiledVideo(
+      video,
+      output,
+      onProgress ? { ...options, onProgress } : options,
+    );
   });
-  return renderCompiledVideo(video, output, options);
 }

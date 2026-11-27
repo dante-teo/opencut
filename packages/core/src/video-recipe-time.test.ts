@@ -17,6 +17,7 @@ const media = {
 describe('original recipe time', () => {
   it('maps a valid fractional slow-motion speed through a precise trim', () => {
     const recipe: VideoRecipeInspection = {
+      sourceFrameRate: 60,
       assetId: 'clip',
       source: '/source.mp4',
       steps: [

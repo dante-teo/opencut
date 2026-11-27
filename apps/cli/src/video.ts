@@ -1,4 +1,6 @@
 import { Console } from 'node:console';
+import { withExportProgress } from '@opencut/media';
+import type { RenderProgress } from '@opencut/media';
 import {
   analyzeVideoMix,
   beautyReports,
@@ -49,7 +51,7 @@ export async function withDefinitionConsole<T>(run: () => Promise<T>) {
   }
 }
 
-export async function runVideoCommand(
+export function runVideoCommand(
   command: VideoCommand,
   file: string,
   values: CommandOptions,
@@ -79,6 +81,32 @@ export async function runVideoCommand(
     command === 'mix analyze'
       ? parseRenderControls(values)
       : {};
+  const progress =
+    command === 'render'
+      ? (event: RenderProgress) => {
+          // Keep immediate preflight errors as a single JSON record.
+          if (values.json && event.stage === 'preparation' && !event.heartbeat)
+            return;
+          writeRenderProgress(event, values.json);
+        }
+      : undefined;
+  return withExportProgress(progress, (onProgress) =>
+    executeVideoCommand(command, file, values, controls, onProgress),
+  );
+}
+
+async function executeVideoCommand(
+  command: VideoCommand,
+  file: string,
+  values: CommandOptions,
+  controls: ReturnType<typeof parseRenderControls>,
+  onProgress?: (event: RenderProgress) => void,
+) {
+  const {
+    output,
+    'picture-cache': pictureCacheDirectory,
+    'picture-version': pictureVersion,
+  } = values;
   await withCommandCancellation(async (signal) => {
     const params = await readParams(values.params, signal);
     if (command === 'recipes inspect' || command === 'recipes validate') {
@@ -213,7 +241,7 @@ export async function runVideoCommand(
         pictureVersion,
         ...mixControls,
         signal,
-        onProgress: (event) => writeRenderProgress(event, values.json),
+        ...(onProgress && { onProgress }),
       });
       if (values.json)
         console.log(

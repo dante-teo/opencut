@@ -49,7 +49,7 @@ export async function readMp4FrameIndex(file: string, signal?: AbortSignal) {
       String(video.index),
       '-show_frames',
       '-show_entries',
-      'frame=best_effort_timestamp,duration',
+      'frame=pts,best_effort_timestamp,duration',
       '-of',
       'json',
       path,
@@ -59,7 +59,11 @@ export async function readMp4FrameIndex(file: string, signal?: AbortSignal) {
     { signal, stage: 'indexing decoded MP4 frames' },
   ).finally(() => checkSource(stage));
   const { frames = [] } = JSON.parse(response.toString()) as {
-    frames?: { best_effort_timestamp?: number; duration?: number }[];
+    frames?: {
+      pts?: number;
+      best_effort_timestamp?: number;
+      duration?: number;
+    }[];
   };
   const first = frames[0]?.best_effort_timestamp;
   const ticks: number[] = [];
@@ -87,6 +91,8 @@ export async function readMp4FrameIndex(file: string, signal?: AbortSignal) {
     fingerprint: { bytes: baseline.bytes, sha256: baseline.sha256 },
     stream: video.index,
     frameRateRatio: video.frameRateRatio,
+    nominalFrameRateRatio: video.nominalFrameRateRatio,
+    frameClock: frames.map(({ pts, duration }) => ({ pts, duration })),
     ...orientedSource(video),
     timeBase: { numerator, denominator },
     firstPts: first!,

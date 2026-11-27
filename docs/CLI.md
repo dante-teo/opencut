@@ -48,23 +48,25 @@ and effective settings participate in encoded picture identity.
 
 The final `render --json` result goes to stdout. Stderr emits JSON lines
 with `event: "progress"`. Recipe events carry `stage: "recipe"` plus the
-asset, step and status. Renderer events carry `stage` values `graphics`,
-`composition`, `audio-analysis`, `audio-mastering`, `encoding`, `muxing`
-and `verification`, alongside `phase`,
-`processedFrames`, `totalFrames`, `percent`, `elapsedSeconds` and
-`remainingSeconds`. Frame counts, percentages and elapsed time apply to
-the current stage. Audio analysis, mastering and verification can each
-start at 0% and finish at 100%. Graphics capture and analysis for a graphic
-include a `clipId`. Graphics events distinguish `browser-capture`,
-`graphic-rasterization`, and `intermediate-writing`. Capture events report
-how many frames have completed and how many came from the graphics cache
-or a reused hold. On cancellation the render emits
-`{"event":"render-status","status":"cancelled"}`. Composition and encoding
-can overlap in direct exports. Treat each elapsed time as its own clock.
-When an export reuses a saved picture version, `muxing` tracks copying the
-encoded picture into the new MP4. Wait for the command to succeed and return
-its final JSON before using the output. Use an external clock to measure
-the full command. Stderr can also contain other diagnostics.
+asset, step and status. The renderer reports `preparation`, `graphics`,
+`composition`, `audio-analysis`, `audio-mastering`, `encoding`, `muxing`,
+`encoding-complete`, `verification`, and `ready`. Direct exports can
+composite and encode in the same FFmpeg pass. When an export reuses encoded
+picture, `muxing` tracks copying that picture into the new MP4.
+
+`exportElapsedSeconds` measures the whole active render, including definition
+preparation in the CLI. `idleSeconds` measures time since a stage change or
+frame advance. Quiet stages emit `heartbeat: true` updates. `processedFrames`,
+`totalFrames`, `percent`, and `elapsedSeconds` describe the current stage.
+An `indeterminate: true` stage has no reliable progress percentage.
+`remainingSeconds` is null when unavailable and has `estimateScope: "stage"`
+when present. Graphics events include a `clipId` and can report
+`browser-capture`, `graphic-rasterization`, `intermediate-writing`, and cache hits.
+Automation can follow the `stage` field in JSON progress lines on stderr.
+Stderr can also contain diagnostics. Cancellation emits
+`{"event":"render-status","status":"cancelled"}` and exits with status 130 for
+SIGINT or 143 for SIGTERM. The `ready` stage follows publication. Wait for
+exit 0 and the final JSON result on stdout before using the output.
 
 ## Frame-targeted contact sheets
 
@@ -155,6 +157,15 @@ checks required FFmpeg encoders and prints JSON. It does not create
 build receipts, cache files or an export. As with other definition commands,
 the TypeScript definition and its imports are trusted executable code.
 
+`composition` and `delivery` each report width, height, frame rate, duration
+in seconds, and frame count. `shots` lists timed video placements and their
+nominal source cadence, composition sampling, and delivery sampling. Methods
+include `native`, `frame-repetition`, `frame-selection`, and `interpolation`.
+The rate is read from source metadata or the declared recipe output. Variable
+frame rates can vary within a shot. For a fresh 4K60 composition with selected
+shot interpolation, use [`create4K60Delivery`](SDK.md#4k60-delivery-variants).
+Output overrides sample and scale the completed composition.
+
 `recipes` lists referenced asset steps by zero-based step index.
 `pictureRanges` uses half-open intervals on the project frame grid.
 Both report `status: 'reuse' | 'rebuild'` and a `reason`. A
@@ -221,35 +232,47 @@ artifacts and other dependencies.
 
 ```sh
 opencut verify export final.mp4 --against approved-preview.mp4 \
-  --render-report final.render.json --frames 59,60 \
-  --audio-master approved-master.mp4 --output final-verification
+  --render-report final.render.json --timestamps 39.6 --expect-fps 60 \
+  --audio-master approved-preview.mp4 --output final-verification
 ```
 
-Supply an approved MP4 preview on the same frame grid as the export.
-OpenCut checks decoded frame counts and presentation timestamps, including
-the first video frame on each MP4's presentation clock. It then
-compares the same zero-based frame indices at a common tile size. Use
-`--frames` to select specific samples. By default, the command selects up
-to eight evenly spaced frames. A fingerprinted render result adds samples
-immediately before and at its internal clip, caption and picture-range
-boundaries. Use `--boundaries 120,300` to add specific delivery boundaries.
-If delivery uses `--fps`, render the approval copy at that same rate.
+The MP4 preview and delivery can use different resolutions and frame rates.
+`--timestamps` accepts seconds, fractions, or clock times. OpenCut uses the
+delivery frame displayed at the requested time and compares the preview
+displayed at that frame's presentation time. `--frames` selects zero-based
+delivery frames. The default samples up to eight positions across the shared
+duration. A fingerprinted render report adds pairs just before and at internal
+clip, caption, and picture-range boundaries. Add cut positions manually with
+`--boundaries 120,300` or `--boundary-timestamps 39.6`.
+
+OpenCut checks every decoded delivery frame's presentation timestamp against
+the expected frame grid from time zero. It checks the preview start and
+rounds its duration up to the next delivery frame when needed, as the renderer
+does. Set `--expect-fps` to specify the intended rate. Otherwise, OpenCut uses
+the render report's rate or checks the stream's reported rates against the
+decoded frame clock. When a file matches a constant-rate grid, picture
+pairing uses its exact frame times to avoid container timestamp rounding.
 
 The new directory contains `report.json` and one side-by-side PNG per sample,
 with the approved preview on the left. The same JSON is printed to stdout.
-`timing` reports both start times in seconds. `firstTimingMismatch` marks
-the first frame whose presentation timestamps differ by more than the
-reported tolerance.
+Each sample reports the two frame indices and the shared time in seconds.
+`timing` reports the absolute difference between start times as `startErrorSeconds`,
+the expected delivery frame count and duration, and any first delivery
+frame-clock mismatch with expected and actual times.
 `--luma-tolerance` controls mean absolute per-frame luma error.
 `--boundary-tolerance` controls the largest difference between the preview
 and export's before-to-after luma change over an 8×8 grid. Both default to
 4 on a 0–255 scale. Use `--size` to set the longest tile dimension (64–640).
 
-For a picture-only revision, `--audio-master` compares the ordered SHA-256
-hashes of each track's encoded audio packet payloads. Container tags and
-packet timestamps do not affect this comparison. The picture timing and
-audio payload results are reported independently. Failed checks still publish
-the report and return status 1.
+Use `--audio-master` when delivery requires exact encoded audio reuse.
+Re-encoding can produce different packets even when playback sounds the same.
+OpenCut checks every encoded audio packet track by track. The report
+gives separate verdicts for packet content and timing, with the first differing
+packet and both presentation times in seconds. Timing compares presentation
+timestamps, decode timestamps, and packet durations as exact fractions.
+Matching packet bytes with shifted timestamps fail the timing check. A passing
+report returns exit 0. Failed checks still publish the JSON and images and
+return exit 1.
 
 ## Reuse picture between exports
 

@@ -11,7 +11,11 @@ export {
   audioSourceSeek,
 } from './probe.js';
 export { orientedSource, resolveSourceWindow } from './source-window.js';
-export { decodeStillFrame, extractFrame } from './frame.js';
+export {
+  decodeStillFrame,
+  extractFrame,
+  readVideoPresentationTicks,
+} from './frame.js';
 export {
   inspectDialogueModel,
   installDialogueModel,
@@ -69,6 +73,7 @@ export type {
 } from './graphics.js';
 export { renderEncoders } from './render-encoder.js';
 export type { RenderEncoder, RenderEncoderReport } from './render-encoder.js';
+export { withExportProgress } from './render-progress.js';
 export type { RenderProgress } from './render-progress.js';
 export { renderContactSheet, renderMp4ContactSheet } from './contact-sheet.js';
 export { readMp4FrameIndex } from './media-frame-index.js';

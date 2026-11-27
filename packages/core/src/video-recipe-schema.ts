@@ -24,6 +24,7 @@ export const videoRecipeSchema = z
         type: z.literal('trim'),
         start: z.number().nonnegative(),
         end: z.number().positive(),
+        clock: z.literal('picture').optional(),
       }),
       z.strictObject({
         type: z.literal('crop'),

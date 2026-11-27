@@ -25,7 +25,9 @@ the composition and audio together. Custom output sizes allow up to
 canvas retains its existing limit. Ordinary output scaling adds no source
 detail. Use a per-source `superResolution` recipe for AI enhancement and an
 `interpolateFrames` recipe for 30-to-60 fps motion synthesis. Set the authored
-timeline to 60 fps to sample those new source frames.
+timeline to 60 fps to sample those new source frames. For an approved 16:9
+or 9:16 edit, the SDK's [4K60 delivery helper](SDK.md#4k60-delivery-variants)
+builds a 60 fps composition and applies interpolation to selected shots.
 
 Choose an output path in an existing directory. The renderer stages output
 beside the destination and publishes it after encoding and verification. An
@@ -49,10 +51,17 @@ sampling and playback limits.
 
 Use [layout assertions](VIDEO_DEFINITIONS.md#layout-assertions) to check
 placement before encoding. Run [`render plan`](CLI.md#read-only-render-plan)
-with the intended export options to check cache reuse, required encoders and
-available scratch space. After export, [`verify export`](CLI.md#post-export-verification)
-can compare an approved MP4 preview on the same frame grid and check that
-encoded audio packets match an approved master.
+with the intended export options to check composition and delivery specs,
+shot cadence, cache reuse, required encoders, and available scratch space.
+
+The export panel shows the current stage, total elapsed time, and time since
+the last reported progress. It displays **Ready · Saved** after verification
+and publication.
+
+After export, [`verify export`](CLI.md#post-export-verification) compares the
+MP4 with an approved preview by timecode, including when their frame rates
+differ. It checks the full delivery frame clock and can check packet content
+and timing against an approved audio master.
 
 ## SDR color across picture ranges
 

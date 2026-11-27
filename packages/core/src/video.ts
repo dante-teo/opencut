@@ -60,6 +60,8 @@ export type {
   VideoPreviewRange,
 } from './video-preview.js';
 export { renderVideo, renderCompiledVideo } from './video-render.js';
+export { create4K60Delivery } from './video-delivery.js';
+export type { Delivery4K60Options } from './video-delivery.js';
 export { planVideoRender } from './video-render-plan.js';
 export type {
   CompiledVideoRenderOptions,

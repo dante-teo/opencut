@@ -118,7 +118,7 @@ test('offers TypeScript definitions and rejects a selected JSON project', async 
   }
 });
 
-test('desktop graphic export sends monotonic encoding progress', async () => {
+test('desktop graphic export reports stages through verified publication', async () => {
   const directory = await mkdtemp(join(fixtureDirectory, 'graphics-progress-'));
   const path = join(directory, 'review.video.ts');
   const output = join(directory, 'review.mp4');
@@ -165,25 +165,46 @@ test('desktop graphic export sends monotonic encoding progress', async () => {
     await expect(
       workspace.getByRole('status', { name: 'Compilation status' }),
     ).toContainText('Preview ready');
-    const updates: number[] = [];
-    await page.exposeFunction('recordExportProgress', (percent: number) => {
-      updates.push(percent);
-    });
+    const updates: Array<{ stage?: string; exportElapsedSeconds?: number }> =
+      [];
+    await page.exposeFunction(
+      'recordExportProgress',
+      (progress: (typeof updates)[number]) => {
+        updates.push(progress);
+      },
+    );
     await page.evaluate(() => {
       const { recordExportProgress } = window as typeof window & {
-        recordExportProgress: (percent: number) => Promise<void>;
+        recordExportProgress: (
+          progress: Parameters<
+            Parameters<typeof window.opencut.onDefinitionExportProgress>[0]
+          >[0],
+        ) => Promise<void>;
       };
-      window.opencut.onDefinitionExportProgress((percent) => {
-        void recordExportProgress(percent);
+      window.opencut.onDefinitionExportProgress((progress) => {
+        void recordExportProgress(progress);
       });
     });
     await workspace.getByRole('button', { name: 'Export MP4' }).click();
     await expect(workspace.getByLabel('Export result')).toContainText(
       'review.mp4',
     );
-    expect(updates[0]).toBe(0);
-    expect(updates.at(-1)).toBe(100);
-    expect(updates).toEqual([...updates].sort((a, b) => a - b));
+    const stages = [...new Set(updates.map(({ stage }) => stage))];
+    expect(stages[0]).toBe('preparation');
+    expect(stages).toContain('composition');
+    expect(stages.indexOf('encoding-complete')).toBeGreaterThan(
+      stages.indexOf('encoding'),
+    );
+    expect(stages.indexOf('verification')).toBeGreaterThan(
+      stages.indexOf('encoding-complete'),
+    );
+    expect(stages.at(-1)).toBe('ready');
+    const elapsed = updates.map(
+      ({ exportElapsedSeconds }) => exportElapsedSeconds ?? -1,
+    );
+    expect(elapsed.every((value) => value >= 0)).toBe(true);
+    expect(elapsed).toEqual([...elapsed].sort((a, b) => a - b));
+    await expect(workspace.getByLabel('Export result')).toContainText('Ready');
   } finally {
     await application.close();
     await rm(directory, { recursive: true, force: true });

@@ -54,7 +54,7 @@ import {
 import { accountRenderBytes, accountRenderFile } from './render-budget.js';
 import { renderQualities } from '@opencut/shared';
 import type { RenderQuality } from '@opencut/shared';
-import { renderProgress } from './render-progress.js';
+import { renderProgress, withExportProgress } from './render-progress.js';
 import type { RenderProgress } from './render-progress.js';
 import { encoderArguments, selectRenderEncoder } from './render-encoder.js';
 import type { RenderEncoder, RenderEncoderReport } from './render-encoder.js';
@@ -565,6 +565,7 @@ export interface TimelinePlan {
   outputWidth: number;
   outputHeight: number;
   outputFrameCount: number;
+  outputFrameRate: VideoTimelineOptions['frameRate'];
   durationSeconds: number;
   warnings: string[];
 }
@@ -574,14 +575,23 @@ interface TimelineInspection {
   pendingSources: ReadonlyMap<string, string>;
 }
 
+interface TimelinePreparation {
+  checkPictureSeek?: ReturnType<typeof pictureSeekCheck>;
+  inspect?: TimelineInspection;
+  composition?:
+    | {
+        start(): void;
+        onRangeComplete(endFrame: number): void;
+      }
+    | undefined;
+}
+
 /** Prepare filters and stage unique held frames when executing a render. */
 async function prepareTimeline(
   options: VideoTimelineOptions,
   mode: 'mp4' | 'png' | 'picture' = 'mp4',
   scratch?: ReturnType<typeof renderScratch>,
-  checkPictureSeek?: ReturnType<typeof pictureSeekCheck>,
-  onPictureRange?: (endFrame: number) => void,
-  inspect?: TimelineInspection,
+  { checkPictureSeek, inspect, composition }: TimelinePreparation = {},
 ) {
   const png = mode === 'png';
   checkRenderSignal(options.signal);
@@ -1029,6 +1039,7 @@ async function prepareTimeline(
       outputWidth,
       outputHeight,
       outputFrameCount,
+      outputFrameRate: outputRate,
       durationSeconds,
       warnings,
     };
@@ -1622,7 +1633,7 @@ async function prepareTimeline(
           endFrame,
           status: 'reused',
         }));
-        onPictureRange?.(endFrame);
+        composition?.onRangeComplete(endFrame);
         args.push('-i', cached);
         videoMap = `${input++}:v:0`;
       }
@@ -1656,9 +1667,10 @@ async function prepareTimeline(
               },
               'picture',
               staging,
-              checkSeek,
+              { checkPictureSeek: checkSeek },
             );
             await staging.stage(segment, options.signal);
+            composition?.start();
             await runMediaTool(
               'ffmpeg',
               [...segment.args, destination],
@@ -1675,7 +1687,7 @@ async function prepareTimeline(
         },
         (range) => {
           if (options.pictureCache) persisted.push(range);
-          onPictureRange?.(range.endFrame);
+          composition?.onRangeComplete(range.endFrame);
         },
       ).catch((error: unknown) => {
         const change = findSourceChange(error);
@@ -1904,14 +1916,9 @@ export async function inspectTimelineRender(
   options: VideoTimelineOptions,
   inspection: TimelineInspection,
 ): Promise<TimelinePlan> {
-  const prepared = await prepareTimeline(
-    options,
-    'mp4',
-    undefined,
-    undefined,
-    undefined,
-    inspection,
-  );
+  const prepared = await prepareTimeline(options, 'mp4', undefined, {
+    inspect: inspection,
+  });
   return prepared.timelinePlan!;
 }
 
@@ -1999,7 +2006,13 @@ function renderScratch(
 }
 
 /** Execute the shared headless pipeline and publish only a verified, complete file. */
-export async function renderVideoTimeline(
+export function renderVideoTimeline(options: VideoTimelineOptions) {
+  return withExportProgress(options.onProgress, (onProgress) =>
+    executeVideoTimeline(onProgress ? { ...options, onProgress } : options),
+  );
+}
+
+async function executeVideoTimeline(
   options: VideoTimelineOptions,
 ): Promise<VideoTimelineResult> {
   const scratch = renderScratch(
@@ -2016,15 +2029,16 @@ export async function renderVideoTimeline(
       ? undefined
       : renderProgress(Math.max(1, pictureFrames), options.onProgress, {
           stage: 'composition',
+          indeterminate: true,
         });
     composition?.start();
-    const prepared = await prepareTimeline(
-      options,
-      'mp4',
-      scratch,
-      undefined,
-      composition && ((endFrame) => composition.update(endFrame - startFrame)),
-    );
+    const prepared = await prepareTimeline(options, 'mp4', scratch, {
+      composition: composition && {
+        start: composition.start,
+        onRangeComplete: (endFrame) =>
+          composition.update(endFrame - startFrame),
+      },
+    });
     await scratch.stage(prepared, options.signal);
     const {
       args,
@@ -2054,6 +2068,7 @@ export async function renderVideoTimeline(
     args.push(rendered);
     const progress = renderProgress(frameCount, options.onProgress, {
       stage: prepared.sourcePicture ? 'muxing' : 'encoding',
+      ...(prepared.sourcePicture && { indeterminate: true }),
     });
     progress.start();
     checkRenderSignal(options.signal);
@@ -2077,9 +2092,12 @@ export async function renderVideoTimeline(
     await accountRenderFile(rendered);
     checkRenderSignal(options.signal);
     progress.update(frameCount);
-    if (!prepared.pictureRanges) composition?.update(pictureFrames);
+    renderProgress(frameCount, options.onProgress, {
+      stage: 'encoding-complete',
+    }).update(frameCount);
     const verification = renderProgress(frameCount, options.onProgress, {
       stage: 'verification',
+      indeterminate: true,
     });
     verification.verifying(false);
     const metadata = await probeMedia(rendered, options.signal, {
@@ -2206,9 +2224,9 @@ export async function renderVideoTimeline(
         status: 'saved',
       };
     }
-    verification.verifying();
     await options.onVerifiedOutput?.(rendered, encodedPicture);
     checkRenderSignal(options.signal);
+    verification.verifying();
     try {
       if (options.overwrite) {
         const destination = await existingOutput(path);
@@ -2230,6 +2248,9 @@ export async function renderVideoTimeline(
         { cause },
       );
     }
+    renderProgress(frameCount, options.onProgress, {
+      stage: 'ready',
+    }).update(frameCount);
     return {
       path,
       quality,

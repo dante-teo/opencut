@@ -14,8 +14,10 @@ const api: DesktopAPI = {
   cancelDefinitionExport: () =>
     ipcRenderer.invoke(DEFINITION_CHANNELS.cancelExport),
   onDefinitionExportProgress(callback) {
-    const listener = (_event: Electron.IpcRendererEvent, percent: number) =>
-      callback(percent);
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      progress: Parameters<typeof callback>[0],
+    ) => callback(progress);
     ipcRenderer.on(DEFINITION_CHANNELS.progress, listener);
     return () =>
       ipcRenderer.removeListener(DEFINITION_CHANNELS.progress, listener);

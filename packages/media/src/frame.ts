@@ -105,6 +105,47 @@ export async function extractFrame(
   };
 }
 
+/** Read integer presentation timestamps around a seek point on the input clock. */
+export async function readVideoPresentationTicks(
+  path: string,
+  streamIndex: number,
+  from: number,
+  to: number,
+  signal?: AbortSignal,
+  inputArguments: string[] = [],
+) {
+  const frames = await runMediaTool(
+    'ffprobe',
+    [
+      '-v',
+      'error',
+      '-threads',
+      '2',
+      '-select_streams',
+      String(streamIndex),
+      '-read_intervals',
+      `${from.toFixed(6)}%${to.toFixed(6)}`,
+      '-show_frames',
+      '-show_entries',
+      'frame=best_effort_timestamp',
+      '-of',
+      'csv=p=0',
+      ...inputArguments,
+      path,
+    ],
+    4 * 1024 * 1024,
+    60_000,
+    { signal },
+  );
+  const ticks: number[] = [];
+  for (const line of frames.toString().split('\n')) {
+    if (!/^-?\d/.test(line)) continue;
+    const pts = Number(line.split(',')[0]);
+    if (Number.isSafeInteger(pts)) ticks.push(pts);
+  }
+  return ticks;
+}
+
 /** Decode the frame covering a media timestamp using the same selection as project freeze. */
 export async function decodeStillFrame(
   source: MediaMetadata,
@@ -162,33 +203,15 @@ export async function decodeStillFrame(
         : targetMicros;
     seekFrom = Number(floor / exact.denominator);
   }
-  const frames = await runMediaTool(
-    'ffprobe',
-    [
-      '-v',
-      'error',
-      '-threads',
-      '2',
-      '-select_streams',
-      String(video.index),
-      '-read_intervals',
-      `${(seekFrom / 1_000_000).toFixed(6)}%${(target + 1).toFixed(6)}`,
-      '-show_frames',
-      '-show_entries',
-      'frame=best_effort_timestamp',
-      '-of',
-      'csv=p=0',
-      source.path,
-    ],
-    4 * 1024 * 1024,
-    60000,
-    { signal },
+  const frames = await readVideoPresentationTicks(
+    source.path,
+    video.index,
+    seekFrom / 1_000_000,
+    target + 1,
+    signal,
   );
   let presentationTicks: number | undefined;
-  for (const line of frames.toString().split('\n')) {
-    if (!/^-?\d/.test(line)) continue;
-    const ticks = Number(line.split(',')[0]);
-    if (!Number.isSafeInteger(ticks)) continue;
+  for (const ticks of frames) {
     if (
       (presentationTicks === undefined || ticks > presentationTicks) &&
       (limit

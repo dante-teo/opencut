@@ -14,6 +14,7 @@
 | Inventory dependencies and artifacts                | `inspect dependencies`                                   |                                                                       |
 | Rebuild on source changes                           | `preview DEFINITION --watch`                             | `watchVideo`                                                          |
 | Compile and render with parameters                  | `validate --params`, `render --params`                   | `compileVideo`, `renderVideo` with `params`                           |
+| Build a 4K60 delivery variant                       |                                                          | `create4K60Delivery`                                                  |
 | Render a batch of variants                          | `batch`                                                  | `batchRenderVideo`                                                    |
 | Inspect build recovery                              | `build inspect`                                          | `inspectVideoBuild`                                                   |
 | Diagnose a source change                            | `SOURCE_CHANGED` in JSON stderr                          | `findSourceChange`                                                    |

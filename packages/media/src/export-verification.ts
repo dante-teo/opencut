@@ -11,6 +11,26 @@ import {
   sourceFileStamp,
 } from './process.js';
 
+const packetTimingFields = ['pts', 'dts', 'duration'] as const;
+
+interface PacketTiming {
+  pts: number;
+  dts: number;
+  duration: number;
+}
+
+function packetTimeBase(value: string | undefined) {
+  const [numerator, denominator] = value?.split('/').map(Number) ?? [];
+  if (
+    numerator !== undefined &&
+    denominator !== undefined &&
+    [numerator, denominator].every(
+      (tick) => Number.isSafeInteger(tick) && tick > 0,
+    )
+  )
+    return { numerator, denominator };
+}
+
 /** Compare encoded payloads per audio track in demux order, independent of container tags. */
 export async function compareAudioPackets(
   approved: string,
@@ -66,8 +86,9 @@ export async function compareAudioPackets(
             stream.index,
             {
               codec: stream.codec_name ?? null,
-              timeBase: stream.time_base,
+              timeBase: packetTimeBase(stream.time_base),
               hashes: [] as string[],
+              timing: [] as PacketTiming[],
             },
           ] as const,
       ),
@@ -80,17 +101,21 @@ export async function compareAudioPackets(
         !/^SHA256:[\da-f]{64}$/i.test(packet.data_hash)
       )
         throw new MediaError(`Unable to hash an audio packet in '${path}'.`);
-      const timing = options.includeTiming
-        ? [track.timeBase, packet.pts, packet.dts, packet.duration]
-        : [];
-      if (
-        options.includeTiming &&
-        (!track.timeBase || !timing.slice(1).every(Number.isSafeInteger))
-      )
-        throw new MediaError(
-          `Audio packet timing is unavailable in '${path}'.`,
-        );
-      track.hashes.push([packet.size, packet.data_hash, ...timing].join(':'));
+      track.hashes.push(`${packet.size}:${packet.data_hash}`);
+      if (options.includeTiming) {
+        const { pts, dts, duration } = packet;
+        if (
+          !track.timeBase ||
+          pts === undefined ||
+          dts === undefined ||
+          duration === undefined ||
+          ![pts, dts, duration].every(Number.isSafeInteger)
+        )
+          throw new MediaError(
+            `Audio packet timing is unavailable in '${path}'.`,
+          );
+        track.timing.push({ pts, dts, duration });
+      }
     }
     return [...tracks.values()];
   }
@@ -105,30 +130,88 @@ export async function compareAudioPackets(
       const candidate = actual[track];
       const expectedPackets = reference?.hashes.length ?? 0;
       const actualPackets = candidate?.hashes.length ?? 0;
-      let firstMismatch: number | null = null;
-      for (let i = 0; i < Math.max(expectedPackets, actualPackets); i++) {
-        if (reference?.hashes[i] !== candidate?.hashes[i]) {
-          firstMismatch = i;
-          break;
-        }
-      }
+      const packetCount = Math.max(expectedPackets, actualPackets);
+      const firstDifferent = (mismatch: (index: number) => boolean) => {
+        for (let i = 0; i < packetCount; i++) if (mismatch(i)) return i;
+      };
+      const contentIndex = firstDifferent(
+        (i) => reference?.hashes[i] !== candidate?.hashes[i],
+      );
+      const referenceBase = reference?.timeBase;
+      const candidateBase = candidate?.timeBase;
+      const scales =
+        referenceBase &&
+        candidateBase &&
+        (referenceBase.numerator !== candidateBase.numerator ||
+          referenceBase.denominator !== candidateBase.denominator)
+          ? {
+              reference:
+                BigInt(referenceBase.numerator) *
+                BigInt(candidateBase.denominator),
+              candidate:
+                BigInt(candidateBase.numerator) *
+                BigInt(referenceBase.denominator),
+            }
+          : undefined;
+      const timingIndex = options.includeTiming
+        ? firstDifferent((i) => {
+            const a = reference?.timing[i];
+            const b = candidate?.timing[i];
+            if (!a || !b) return true;
+            return packetTimingFields.some((key) =>
+              scales
+                ? BigInt(a[key]) * scales.reference !==
+                  BigInt(b[key]) * scales.candidate
+                : a[key] !== b[key],
+            );
+          })
+        : undefined;
+      const firstMismatchAt = (index: number | undefined) => {
+        if (index === undefined) return null;
+        const timecode = (value: typeof reference) => {
+          const pts = value?.timing[index]?.pts;
+          const timeBase = value?.timeBase;
+          return pts === undefined || !timeBase
+            ? null
+            : (pts * timeBase.numerator) / timeBase.denominator;
+        };
+        return {
+          packet: index,
+          expectedTimeSeconds: timecode(reference),
+          actualTimeSeconds: timecode(candidate),
+        };
+      };
+      const content = {
+        passed:
+          expectedPackets > 0 &&
+          contentIndex === undefined &&
+          reference?.codec === candidate?.codec,
+        firstMismatch: firstMismatchAt(contentIndex),
+      };
+      const timing = {
+        passed: expectedPackets > 0 && timingIndex === undefined,
+        firstMismatch: firstMismatchAt(timingIndex),
+      };
       const digest = (hashes: string[] | undefined) =>
         hashes
           ? createHash('sha256').update(hashes.join('\n')).digest('hex')
           : null;
+      const mismatch = Math.min(
+        contentIndex ?? Infinity,
+        timingIndex ?? Infinity,
+      );
       return {
         track,
         expectedPackets,
         actualPackets,
-        firstMismatch,
+        firstMismatch: Number.isFinite(mismatch) ? mismatch : null,
         expectedCodec: reference?.codec ?? null,
         actualCodec: candidate?.codec ?? null,
         expectedSha256: digest(reference?.hashes),
         actualSha256: digest(candidate?.hashes),
-        passed:
-          expectedPackets > 0 &&
-          firstMismatch === null &&
-          reference?.codec === candidate?.codec,
+        content,
+        ...(options.includeTiming && { timing }),
+        passed: content.passed && (!options.includeTiming || timing.passed),
       };
     },
   );
@@ -137,12 +220,24 @@ export async function compareAudioPackets(
     trackCount: actual.length,
     expectedTrackCount: expected.length,
     tracks,
+    content: {
+      passed:
+        tracks.length > 0 && tracks.every(({ content }) => content.passed),
+    },
+    ...(options.includeTiming && {
+      timing: {
+        passed:
+          tracks.length > 0 && tracks.every(({ timing }) => timing?.passed),
+      },
+    }),
     passed: tracks.length > 0 && tracks.every(({ passed }) => passed),
   };
 }
 
 export interface ExportFrameSample {
   frame: number;
+  previewFrame: number;
+  timeSeconds: number;
   image: string;
   meanAbsoluteLumaError: number;
   previewMeanLuma: number;
@@ -152,6 +247,7 @@ export interface ExportFrameSample {
 
 export interface ExportBoundaryCheck {
   frame: number;
+  timeSeconds: number;
   previewMeanLumaChange: number;
   exportMeanLumaChange: number;
   maxRegionLumaChangeError: number;
@@ -170,27 +266,35 @@ export async function compareExportFrames(
     lumaTolerance = 4,
     boundaryTolerance = 4,
     signal,
+    previewFrames = frames,
   }: {
     size?: number;
     lumaTolerance?: number;
     boundaryTolerance?: number;
     signal?: AbortSignal | undefined;
+    previewFrames?: number[];
   },
 ) {
   if (
     !frames.length ||
     frames.length > 2048 ||
+    previewFrames.length !== frames.length ||
+    previewFrames.some(
+      (frame) =>
+        !Number.isSafeInteger(frame) ||
+        frame < 0 ||
+        frame >= preview.ticks.length,
+    ) ||
     frames.some(
       (frame, index) =>
         !Number.isSafeInteger(frame) ||
         frame < 0 ||
-        frame >= preview.ticks.length ||
         frame >= delivered.ticks.length ||
         (index > 0 && frame <= frames[index - 1]!),
     )
   )
     throw new MediaError(
-      'Choose 1–2048 unique increasing frame indices shared by both videos.',
+      'Choose 1–2048 increasing export frame indices paired with approved preview frames.',
     );
   const displayWidth = preview.width * preview.sar;
   const scale = Math.min(1, size / Math.max(displayWidth, preview.height));
@@ -203,9 +307,10 @@ export async function compareExportFrames(
   const samples: ExportFrameSample[] = [];
   const checks: ExportBoundaryCheck[] = [];
   try {
+    const referenceIndices = [...new Set(previewFrames)].sort((a, b) => a - b);
     const expected = await decodeMp4Tiles(
       preview,
-      frames,
+      referenceIndices,
       expectedDirectory,
       width,
       height,
@@ -222,9 +327,16 @@ export async function compareExportFrames(
     const { default: sharp } = await import('sharp');
     const boundaryMetrics = new Map<number, ReturnType<typeof compareLuma>>();
     const needed = new Set(boundaries.flatMap((frame) => [frame - 1, frame]));
+    const references = new Map(
+      referenceIndices.map((frame, i) => [frame, expected.paths[i]!]),
+    );
+    const timeSeconds = (frame: number) =>
+      (delivered.ticks[frame]! * delivered.timeBase.numerator) /
+      delivered.timeBase.denominator;
     for (const [index, frame] of frames.entries()) {
       checkRenderSignal(signal);
-      const files = [expected.paths[index]!, actual.paths[index]!];
+      const previewFrame = previewFrames[index]!;
+      const files = [references.get(previewFrame)!, actual.paths[index]!];
       const [before, after] = await Promise.all(
         files.map((file) =>
           sharp(file).toColourspace('srgb').removeAlpha().raw().toBuffer(),
@@ -252,6 +364,8 @@ export async function compareExportFrames(
         .toFile(join(directory, image));
       samples.push({
         frame,
+        previewFrame,
+        timeSeconds: timeSeconds(frame),
         image,
         meanAbsoluteLumaError: metrics.error,
         previewMeanLuma: metrics.expectedMean,
@@ -279,6 +393,7 @@ export async function compareExportFrames(
       );
       checks.push({
         frame,
+        timeSeconds: timeSeconds(frame),
         previewMeanLumaChange: current.expectedMean - previous.expectedMean,
         exportMeanLumaChange: current.actualMean - previous.actualMean,
         maxRegionLumaChangeError: error,

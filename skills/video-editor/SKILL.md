@@ -106,7 +106,10 @@ For an ordinary footage edit, follow the media workflow below.
    loading takes effect when the preview is ready.
 5. Deliver a new MP4 with `opencut render DEFINITION --output final.mp4`.
    Run `opencut render plan DEFINITION --output final.mp4 --json` with the
-   same options to check cache reuse and estimated scratch space first.
+   same options to check composition and delivery specs, each shot's cadence,
+   cache reuse, and estimated scratch space first. Use the SDK's
+   [`create4K60Delivery`](../../docs/SDK.md#4k60-delivery-variants) for a native
+   4K60 composition with interpolation on selected shots.
    For an MP4 that may get audio revisions, keep the export and its JSON
    report from `render --revision-evidence --json`.
    The CLI defaults to `quality` and runs directly. Use `--quality maximum`
@@ -122,11 +125,13 @@ For an ordinary footage edit, follow the media workflow below.
    stage and content comparison. For transfer, run `opencut package DEFINITION --output bundle`
    and `opencut package verify bundle`. Render `bundle/opencut.bundle.video.ts`
    with the required backends.
-8. Use `opencut verify export` with the approved MP4 preview, the render
-   JSON and, for picture-only revisions, the approved audio master.
-   Review the paired images and boundary checks. Play the output with
-   audio to check timing. For a 60 fps delivery, check
-   `opencut probe final.mp4 --expect-fps 60 --json`.
+8. Use `opencut verify export` with the approved MP4 preview and render
+   JSON. Supply `--audio-master` when delivery requires exact encoded audio
+   content and timing from an approved MP4.
+   Compare different frame rates by presentation time with `--timestamps`.
+   For a 60 fps delivery, use `--expect-fps 60` to check the complete frame
+   clock. Review the paired images and boundary checks. Play the output with
+   audio to check the result.
    Follow the [matched-frame workflow](../../docs/CLI.md#verify-interpolation-and-upscale)
    for interpolation or upscale. Record
    the definition, input hashes, effective profile, worker versions, recipe

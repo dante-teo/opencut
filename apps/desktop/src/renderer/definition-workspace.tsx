@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { frameTime } from '@opencut/core';
+import type { RenderProgress } from '@opencut/media';
 import type { DefinitionReview } from '../bridge.js';
 import type { MotionEdit, MusicSelection } from '@opencut/core/video';
 import { MotionGraphics } from './motion-graphics.js';
@@ -109,6 +110,20 @@ function DefinitionPlayback({
   );
 }
 
+const exportStages = {
+  preparation: 'Preparing export',
+  graphics: 'Rendering graphics',
+  composition: 'Compositing',
+  'audio-analysis': 'Analyzing audio',
+  'audio-mastering': 'Mastering audio',
+  encoding: 'Encoding',
+  muxing: 'Combining picture and audio',
+  'encoding-complete': 'Encoding complete',
+  verification: 'Encoding complete · Verifying',
+  'review-labels': 'Rendering review labels',
+  ready: 'Ready',
+};
+
 export function DefinitionWorkspace({
   state,
   onOpen,
@@ -120,7 +135,9 @@ export function DefinitionWorkspace({
 }) {
   const { current, status } = state;
   const resumeTime = useRef(0);
-  const [progress, setProgress] = useState<number | null>(null);
+  const [progress, setProgress] = useState<RenderProgress | 'preparing' | null>(
+    null,
+  );
   const [feedback, setFeedback] = useState<{
     error?: string;
     message?: string;
@@ -129,12 +146,12 @@ export function DefinitionWorkspace({
 
   async function exportDefinition() {
     if (!current || progress !== null) return;
-    setProgress(0);
+    setProgress('preparing');
     setFeedback({});
     try {
       const result = await window.opencut.exportDefinition(current.generation);
       if (result.status === 'saved')
-        setFeedback({ message: `Saved ${result.path}` });
+        setFeedback({ message: `Ready · Saved ${result.path}` });
     } catch (error) {
       setFeedback({
         error: error instanceof Error ? error.message : String(error),
@@ -217,7 +234,25 @@ export function DefinitionWorkspace({
         </span>
         {state.error && <pre role="alert">{state.error}</pre>}
         {progress !== null && (
-          <progress max={100} value={progress} aria-label="Export progress" />
+          <>
+            <span role="status" aria-label="Export stage">
+              {progress === 'preparing'
+                ? 'Preparing export…'
+                : `${exportStages[progress.stage ?? 'encoding']} · ${Math.floor(progress.exportElapsedSeconds ?? progress.elapsedSeconds)}s elapsed · ${Math.floor(progress.idleSeconds ?? 0)}s since last progress`}
+              {progress !== 'preparing' &&
+                progress.remainingSeconds !== null &&
+                ` · Stage ETA ${Math.ceil(progress.remainingSeconds)}s`}
+            </span>
+            <progress
+              max={100}
+              value={
+                progress === 'preparing' || progress.indeterminate
+                  ? undefined
+                  : progress.percent
+              }
+              aria-label="Export progress"
+            />
+          </>
         )}
         {feedback.message && (
           <output aria-label="Export result">{feedback.message}</output>

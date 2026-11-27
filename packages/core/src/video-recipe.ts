@@ -8,6 +8,7 @@ import {
   interpolationTiming,
   isStillImage,
   MediaError,
+  readVideoPresentationTicks,
   recipeInputArguments,
   renderQualityProfiles,
   videoSourceDuration,
@@ -77,6 +78,7 @@ export function recipeStepError(
 export interface VideoRecipeInspection {
   assetId: string;
   source: string;
+  sourceFrameRate: number | null;
   steps: RecipeStep[];
   beauty?: BeautyRenderReport;
   beautyArtifact?: string;
@@ -90,6 +92,7 @@ export function inspectRecipe(
   quality: RenderQuality,
 ): VideoRecipeInspection {
   let input = recipeMedia(source);
+  const sourceFrameRate = input.frameRate;
   const steps = recipe.map((authored, index) => {
     try {
       if (authored.type === 'beauty' && isActiveBeautyStep(authored)) {
@@ -123,7 +126,7 @@ export function inspectRecipe(
     throw new MediaError(
       `assets.${assetId}.kind: Recipe produces ${input.kind}, expected ${kind}.`,
     );
-  return { assetId, source: source.path, steps };
+  return { assetId, source: source.path, sourceFrameRate, steps };
 }
 
 export function recipeMedia(source: MediaMetadata): RecipeMedia {
@@ -174,12 +177,25 @@ export function resolveRecipeStep(
   switch (parameters.type) {
     case 'beauty':
       break;
-    case 'trim':
+    case 'trim': {
+      const { clock, start, end } = parameters;
+      const origin = clock === 'picture' ? input.videoStartSeconds : 0;
+      if (origin === null)
+        throw new MediaError('A picture-clock trim requires timed video.');
+      if (
+        clock === 'picture' &&
+        (input.durationSeconds === null ||
+          end > input.durationSeconds + 0.000001)
+      )
+        throw new MediaError(
+          'A picture-clock trim must end within the video stream.',
+        );
       return {
         parameters,
         format: output,
-        media: trimRecipeMedia(input, parameters.start, parameters.end),
+        media: trimRecipeMedia(input, start + origin, end + origin),
       };
+    }
     case 'crop':
       if (
         input.width === null ||
@@ -440,16 +456,93 @@ function streamOverlap(
     : null;
 }
 
-export function recipeArguments(
+async function pictureTrim(
+  input: MediaMetadata,
+  start: number,
+  end: number,
+  signal?: AbortSignal,
+) {
+  const video = input.video!;
+  const [n = 0, d = 0] = video.timeBase?.split('/').map(Number) ?? [];
+  if (!Number.isSafeInteger(n) || !Number.isSafeInteger(d) || n <= 0 || d <= 0)
+    throw new MediaError(
+      'A picture-clock trim requires a usable video time base.',
+    );
+  const origin = input.startTimeSeconds ?? 0;
+  const pictureStart = Math.round(((video.startTimeSeconds ?? origin) * d) / n);
+  const toTicks = (seconds: number) => (seconds * d) / n;
+  const toSeconds = (ticks: number) => (ticks * n) / d;
+  // Remove floating-point noise before choosing the enclosing integer PTS.
+  const coveringTick = pictureStart + Math.floor(toTicks(start) + 1e-7);
+  const endTick = pictureStart + Math.ceil(toTicks(end) - 1e-7);
+  const toMicroseconds = (ticks: number) => Math.round(toSeconds(ticks) * 1e6);
+  const startUs = Math.round((toSeconds(pictureStart) + start) * 1e6);
+  const durationUs = Math.round((end - start) * 1e6);
+  if (durationUs < 1)
+    throw new MediaError(
+      'A picture-clock trim requires at least one microsecond.',
+    );
+  const ticks = await readVideoPresentationTicks(
+    input.path,
+    video.index,
+    Math.floor(toSeconds(coveringTick) * 1e6) / 1e6,
+    toSeconds(endTick) + 1,
+    signal,
+    recipeInputArguments(),
+  );
+  let first = -Infinity;
+  let last = -Infinity;
+  for (const pts of ticks) {
+    if (pts <= coveringTick) first = Math.max(first, pts);
+    if (pts < endTick && toMicroseconds(pts) < startUs + durationUs)
+      last = Math.max(last, pts);
+  }
+  if (!Number.isSafeInteger(first) || last < first)
+    throw new MediaError('No video frame covers the picture-clock trim start.');
+  const lastUs = Math.max(0, toMicroseconds(last) - startUs);
+  const seek = Math.max(0, toSeconds(first) - origin - 0.000002);
+  return {
+    input: ['-copyts', ...(seek > 0 ? ['-ss', seek.toFixed(6)] : [])],
+    // Retain the frame covering the cut. Its visible interval starts at zero;
+    // later frames and audio retain their offsets from the requested in-point.
+    video: [
+      '-vf',
+      `trim=start_pts=${first}:end_pts=${endTick},settb=AVTB,setpts=max(PTS-(${startUs})\\,0),trim=end_pts=${durationUs}`,
+      '-bsf:v',
+      `setts=duration='if(eq(PTS,${lastUs}),${durationUs - lastUs},DURATION)'`,
+      '-video_track_timescale',
+      '1000000',
+      '-movie_timescale',
+      '1000000',
+      '-use_editlist',
+      '1',
+      '-avoid_negative_ts',
+      'disabled',
+    ],
+    audio: `atrim=start=${(startUs / 1e6).toFixed(6)}:end=${((startUs + durationUs) / 1e6).toFixed(6)},asetpts=PTS-(${startUs}/1000000)/TB`,
+  };
+}
+
+export async function recipeArguments(
   input: MediaMetadata,
   step: RecipeStep,
   output: string,
+  signal?: AbortSignal,
 ) {
   const { parameters, media, format } = step;
   const video = media.kind !== 'audio' ? input.video : null;
   const audio = media.hasAudio ? input.audio : null;
-  const args = [...recipeInputArguments(), '-i', input.path];
-  if (parameters.type === 'trim')
+  const window =
+    parameters.type === 'trim' && parameters.clock === 'picture'
+      ? await pictureTrim(input, parameters.start, parameters.end, signal)
+      : undefined;
+  const args = [
+    ...recipeInputArguments(),
+    ...(window?.input ?? []),
+    '-i',
+    input.path,
+  ];
+  if (parameters.type === 'trim' && !window)
     args.push(
       '-ss',
       parameters.start.toFixed(6),
@@ -460,6 +553,7 @@ export function recipeArguments(
     args.push('-map', `0:${video.index}`, '-threads:v', '1');
     if (media.kind === 'image') args.push('-frames:v', '1');
     else args.push('-fps_mode', 'passthrough', '-enc_time_base:v', 'filter');
+    if (window) args.push(...window.video);
     switch (parameters.type) {
       case 'crop':
         args.push(
@@ -483,7 +577,7 @@ export function recipeArguments(
   }
   if (audio) {
     args.push('-map', `0:${audio.index}`, '-threads:a', '1');
-    const filters = [];
+    const filters = window ? [window.audio] : [];
     if (parameters.type === 'normalizeAudio')
       filters.push(
         `loudnorm=I=${parameters.targetLufs}:TP=-1.5:LRA=11:linear=false`,
@@ -587,6 +681,16 @@ export function validateRecipeOutput(
     )
       throw new MediaError(
         'AI interpolation output did not preserve the expected picture or audio timing.',
+      );
+    return;
+  }
+  if (step.parameters.type === 'trim' && step.parameters.clock === 'picture') {
+    if (
+      Math.abs(actual.videoStartSeconds ?? Infinity) > 0.000001 ||
+      Math.abs(actual.durationSeconds! - expected.durationSeconds!) > 0.000002
+    )
+      throw new MediaError(
+        'Picture-clock trim did not preserve its requested video timing.',
       );
     return;
   }

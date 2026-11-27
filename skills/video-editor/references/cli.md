@@ -109,9 +109,11 @@ and current free space before rendering. The plan checks overwrite safety
 and required encoders. Scratch usage is estimated.
 After export, use `opencut verify export final.mp4 --against approved.mp4
 --render-report final.render.json --output verification` to save paired
-samples, timing results and luma checks. Use an approved MP4 on the same
-frame grid as the export. Add `--audio-master master.mp4` to require exact
-encoded audio packets for a picture-only revision. See the
+samples, full frame-clock results and luma checks. Use `--timestamps` to
+compare the preview and export at the same presentation times, including
+when their frame rates differ. Set `--expect-fps` for the delivery rate.
+Add `--audio-master master.mp4` when delivery requires exact audio packet
+content and timing. See the
 [CLI verification reference](../../../docs/CLI.md#post-export-verification).
 
 ## Scripted audio revisions

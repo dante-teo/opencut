@@ -297,7 +297,11 @@ async function processRecipe(
           inspection.beauty = entry.beauty;
           inspection.beautyArtifact = entry.metadata.path;
         }
-        if (step.interpolation || declaredCadence !== null)
+        if (
+          step.interpolation ||
+          declaredCadence !== null ||
+          (parameters.type === 'trim' && parameters.clock === 'picture')
+        )
           declaredCadence = step.media.frameRate;
       };
       if (plan) {
@@ -400,7 +404,7 @@ async function processRecipe(
               );
             else
               await runRecipeProcess(
-                recipeArguments(source, step, output),
+                await recipeArguments(source, step, output, signal),
                 stageLimits,
                 signal,
                 progress,

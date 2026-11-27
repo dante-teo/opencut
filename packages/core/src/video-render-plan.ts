@@ -14,6 +14,8 @@ import { missing } from './video-integrity.js';
 import { videoInputIdentity } from './video-input.js';
 import { processingSettings } from './video-processing.js';
 import type { RecipePlanStep } from './video-processing.js';
+import { clipSpeed } from './clip-timing.js';
+import { isInterpolationStep } from './video-recipe-schema.js';
 import type { VideoRenderOptions } from './video-render.js';
 import { bindGraphicAudio } from './graphic-audio.js';
 import { protectRenderInputs } from './video-render.js';
@@ -33,6 +35,11 @@ async function freeSpace(directory: string) {
       path = dirname(path);
     }
   }
+}
+
+function cadenceConversion(input: number, output: number) {
+  if (input < output - 0.000001) return 'frame-repetition';
+  if (input > output + 0.000001) return 'frame-selection';
 }
 
 /** Inspect the current cache snapshot without writing checkpoints or building media. */
@@ -254,6 +261,7 @@ export async function planVideoRender(
     outputHeight,
     durationSeconds,
     outputFrameCount,
+    outputFrameRate,
     encoder,
   } = timeline;
   const rateControl = encoder.settings.rateControl;
@@ -307,6 +315,90 @@ export async function planVideoRender(
     (sum, bytes) => sum + bytes,
     0,
   );
+  const composition = {
+    width: plan.width,
+    height: plan.height,
+    frameRate: plan.frameRate,
+    frameCount: plan.frameCount,
+    durationSeconds:
+      (plan.frameCount * plan.frameRate.denominator) / plan.frameRate.numerator,
+  };
+  const deliveryFormat = {
+    width: outputWidth,
+    height: outputHeight,
+    frameRate: outputFrameRate,
+    frameCount: outputFrameCount,
+    durationSeconds,
+  };
+  const clips = new Map(video.project.clips.map((clip) => [clip.id, clip]));
+  const recipes = new Map(
+    video.recipes.map((recipe) => [recipe.assetId, recipe]),
+  );
+  const compositionFps =
+    composition.frameRate.numerator / composition.frameRate.denominator;
+  const deliveryFps = outputFrameRate.numerator / outputFrameRate.denominator;
+  const deliveryMethod =
+    cadenceConversion(compositionFps, deliveryFps) ?? 'same-grid';
+  const shots = plan.visualClips.flatMap((layer) => {
+    if (!layer.path || layer.graphic || layer.freezeFrame) return [];
+    const clip = clips.get(layer.clipId);
+    if (
+      !clip?.assetId ||
+      video.definition.assets?.[clip.assetId]?.kind !== 'video'
+    )
+      return [];
+    const recipe = recipes.get(clip.assetId);
+    const steps = recipe?.steps;
+    const cadenceIndex =
+      steps?.findLastIndex(
+        ({ parameters }) =>
+          isInterpolationStep(parameters) || parameters.type === 'frameRate',
+      ) ?? -1;
+    const recipeCadence = steps?.[cadenceIndex];
+    const mediaFps =
+      recipeCadence?.media.frameRate ??
+      plan.sourceMetadata.get(layer.path)?.video?.frameRate ??
+      null;
+    const speed = clipSpeed(clip);
+    const playbackFps =
+      mediaFps === null
+        ? null
+        : (mediaFps * speed.numerator) / speed.denominator;
+    const parameters = recipeCadence?.parameters;
+    const interpolation =
+      parameters && isInterpolationStep(parameters)
+        ? parameters.type
+        : undefined;
+    const beforeRecipeFps =
+      steps?.[cadenceIndex - 1]?.media.frameRate ?? recipe?.sourceFrameRate;
+    const recipeMethod = interpolation
+      ? 'interpolation'
+      : parameters?.type === 'frameRate' &&
+          beforeRecipeFps != null &&
+          mediaFps != null
+        ? (cadenceConversion(beforeRecipeFps, mediaFps) ?? 'native')
+        : 'native';
+    const compositionMethod =
+      playbackFps === null
+        ? 'unknown'
+        : (cadenceConversion(playbackFps, compositionFps) ?? recipeMethod);
+    return [
+      {
+        clipId: layer.clipId,
+        assetId: clip.assetId,
+        startFrame: layer.timelineStartFrame,
+        frameCount: layer.frameCount,
+        startSeconds: layer.timelineStartFrame / compositionFps,
+        sourceFps: recipe ? recipe.sourceFrameRate : mediaFps,
+        mediaFps,
+        method:
+          deliveryMethod === 'same-grid' ? compositionMethod : deliveryMethod,
+        compositionMethod,
+        deliveryMethod,
+        ...(interpolation && { interpolation }),
+      },
+    ];
+  });
   return {
     planVersion: 1,
     ok: savedPicture?.status !== 'blocked',
@@ -315,6 +407,9 @@ export async function planVideoRender(
     width: outputWidth,
     height: outputHeight,
     frameCount: outputFrameCount,
+    composition,
+    delivery: deliveryFormat,
+    shots,
     encoder,
     recipes: recipeSteps.sort(
       (a, b) => a.assetId.localeCompare(b.assetId) || a.step - b.step,

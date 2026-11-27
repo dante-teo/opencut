@@ -24,10 +24,19 @@ await preview.frame(30, 'review.png');
 await renderCompiledVideo(video, 'delivery.mp4', {
   quality: 'maximum',
   encoder: 'auto',
-  onProgress: ({ stage, percent }) => {
-    if (stage === 'encoding' || stage === 'muxing') {
-      console.error(percent);
-    }
+  onProgress: ({
+    stage,
+    exportElapsedSeconds,
+    idleSeconds,
+    indeterminate,
+    percent,
+  }) => {
+    console.error({
+      stage,
+      exportElapsedSeconds,
+      idleSeconds,
+      ...(indeterminate ? {} : { percent }),
+    });
   },
 });
 ```
@@ -38,13 +47,13 @@ picture. It copies media on first decode. If a source has changed, compile
 the definition again.
 Pass an `AbortSignal` to cancel a foreground render.
 
-`onProgress` reports counts, percentages, and elapsed time within each
-`stage`. For one progress bar, follow `encoding` or `muxing` as above.
-Verification has its own 0–100% sequence. Treat the export as complete once
-the render promise resolves. Graphic capture can report a separate sequence
-for each `clipId`. `audio-analysis` and `audio-mastering` report start and
-completion when those stages run. Direct exports can compose and encode
-together.
+Use `stage` to display the current work and the stage percentage when
+`indeterminate` is absent. `exportElapsedSeconds` measures the full render
+and `idleSeconds` measures time since the last stage change or frame advance.
+Quiet stages send `heartbeat: true` updates. Graphic capture can report a
+separate sequence for each `clipId`. Direct exports can compose and encode
+together. The `ready` stage follows publication. Await the render promise
+to use the published path and metadata.
 
 Use `findSourceChange(error)` to read the underlying `SourceChangedError`
 if compilation, preview or export encounters a changing input, including a
@@ -263,6 +272,53 @@ Pass a signal to `compileVideo` or `renderVideo` to cancel preprocessing.
 `VideoProcessingOptions` accepts `maxTemporaryBytes`, `maxNativeBytes`,
 `maxBufferedFrames`, `maxPixels`, and `timeoutMs`. See the
 [processing limits](CLI.md#media-recipes) for defaults and scope.
+
+## 4K60 delivery variants
+
+Create a delivery definition from an approved 16:9 or 9:16 edit. Save the
+variant alongside the approved definition so it uses the same relative
+media and graphics paths. Use timeline clip IDs in `interpolateShots` and
+asset IDs in `nativeSources`.
+
+```ts
+import { create4K60Delivery } from '@dantea/opencut/sdk';
+import approved from './approved.video.ts';
+
+export default create4K60Delivery(approved, {
+  interpolateShots: ['intro', 'reveal'],
+  nativeSources: ['camera-60fps'],
+});
+```
+
+The helper builds a 3840 × 2160 or 2160 × 3840 composition at 60 fps from a
+canvas rate that divides 60. It preserves timeline positions, subtitle cues,
+audio fades, and canvas-relative placement. Each selected shot gets a separate
+source trim and interpolation recipe. Trims use the picture clock, including
+when audio starts first, and keep the source frame covering the in-point.
+For a dissolve, the trim includes the source footage needed on either side
+of the cut. Unselected footage uses the existing media and holds lower-rate frames as
+needed. Use the [interpolation prerequisites](VIDEO_DEFINITIONS.md#ai-interpolation)
+for freshly selected shots.
+
+With the variant saved as `delivery.video.ts`, inspect its composition,
+delivery specs, and per-shot cadence before rendering it.
+
+```sh
+opencut render plan delivery.video.ts --output master.mp4 --json
+opencut render delivery.video.ts --output master.mp4 --json > master.render.json
+```
+
+The render report lets [export verification](CLI.md#post-export-verification)
+sample both sides of timeline cuts when comparing the master with the
+approved preview.
+
+Graphics components should lay out against the supplied canvas and use time
+for motion. Three.js and motion-blurred graphics retain their original surface
+dimensions to fit their backend limits. The helper rejects odd cross-dissolves
+when their before/after split cannot be preserved on the delivery grid.
+Asset-specific beauty recipes can include their own authored interpolation.
+For parameterized definitions, apply the helper to the definition returned
+by the parameterized compose function.
 
 ## Layout checks and render planning
 

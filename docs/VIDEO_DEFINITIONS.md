@@ -272,6 +272,11 @@ source whose picture starts at 0.2 s and audio starts at 0 s, a trim from
 0.8 s to 1 s selects the picture at those container timestamps. If the audio
 ends before 0.8 s, the result contains picture only.
 
+A video trim with `clock: 'picture'` measures `start` and `end` from the
+picture stream's start. It keeps the frame covering the in-point, rebases
+that frame to zero, and preserves later picture and audio timing relative
+to the requested cut. The end remains exclusive.
+
 Clip source positions refer to the final processed media. For example, a
 trim from 8 to 10 seconds makes the selected picture available from source
 position zero on the derived asset. Composition uses the probed duration and

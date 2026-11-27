@@ -30,9 +30,9 @@ opencut probe final.mp4 --json
 ```
 
 Review the paired images and `verification/report.json` after export.
-Use `--audio-master` with an approved master when a picture-only revision
-must preserve the encoded audio packets. Keep the comparison preview on the
-delivery frame grid.
+Use `--audio-master` with an approved MP4 when delivery must preserve its
+encoded audio packets and their timing. Use `--timestamps` for shared
+presentation times and `--expect-fps` to verify the delivery grid.
 
 Review `final-qa.png` with its `final-qa.png.json` manifest. The render report
 ties the requested boundary samples to the bytes of `final.mp4`. Add

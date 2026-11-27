@@ -1,3 +1,4 @@
+import type { RenderProgress } from '@opencut/media';
 import type { ApplicationInfo, Project } from '@opencut/core';
 import type {
   AudioMixReport,
@@ -69,7 +70,9 @@ export type DefinitionExportResult =
 export interface DesktopAPI {
   exportDefinition(generation: number): Promise<DefinitionExportResult>;
   cancelDefinitionExport(): Promise<void>;
-  onDefinitionExportProgress(callback: (percent: number) => void): () => void;
+  onDefinitionExportProgress(
+    callback: (progress: RenderProgress) => void,
+  ): () => void;
   openDefinition(): Promise<void>;
   editMotion(generation: number, edit: MotionEdit): Promise<boolean>;
   refreshDefinition(): Promise<void>;

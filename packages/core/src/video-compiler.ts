@@ -710,7 +710,7 @@ async function loadFonts(
   };
 }
 
-function generatedTrackId(
+export function generatedTrackId(
   track: AuthoredTrack,
   occurrences: Map<string, number>,
 ) {
@@ -750,7 +750,7 @@ export function describeAuthoredClips(
   });
 }
 
-function clipIdAt(trackId: string, start: RationalTime) {
+export function clipIdAt(trackId: string, start: RationalTime) {
   return stableId('clip', trackId, reduce(start));
 }
 

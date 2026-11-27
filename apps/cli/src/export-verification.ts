@@ -1,8 +1,12 @@
 import { mkdir, mkdtemp, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
-import { frameAtOrAfter, frameTime } from '@opencut/core';
-import type { RationalTime } from '@opencut/core';
-import { contactTimelineSchema, evenlySpacedFrames } from '@opencut/core/video';
+import { compareTimes, frameAtOrAfter, frameTime } from '@opencut/core';
+import type { FrameRate, RationalTime } from '@opencut/core';
+import {
+  contactTimelineSchema,
+  evenlySpacedFrames,
+  parseSubtitleTime,
+} from '@opencut/core/video';
 import {
   compareAudioPackets,
   compareExportFrames,
@@ -19,6 +23,7 @@ import {
 } from './contact-sheet.js';
 import { withCommandCancellation } from './cancellation.js';
 import { UsageError } from './usage.js';
+import { parseFrameRateOption } from './render-options.js';
 
 const mp4 = (path: string) => extname(path).toLowerCase() === '.mp4';
 
@@ -32,7 +37,8 @@ function lumaTolerance(flag: string, input: string | undefined) {
 
 function exportedBoundaries(
   report: Record<string, unknown>,
-  index: Mp4FrameIndex,
+  length: number,
+  at: (frame: number) => RationalTime,
   add: (frame: number, reason: string) => void,
 ) {
   const timeline =
@@ -65,10 +71,8 @@ function exportedBoundaries(
   function addProjectFrame(frame: number, reason: string) {
     if (frame <= startFrame) return;
     const time = frameTime(frame - startFrame, pictureRate);
-    const boundary = findFrameBoundary(time, index.ticks.length, (frame) =>
-      mp4PresentationTime(index, index.ticks[frame]!),
-    );
-    if (boundary > 0 && boundary < index.ticks.length) add(boundary, reason);
+    const boundary = findFrameBoundary(time, length, at);
+    if (boundary > 0 && boundary < length) add(boundary, reason);
   }
   const addTime = (time: RationalTime, reason: string) =>
     addProjectFrame(frameAtOrAfter(time, pictureRate), reason);
@@ -92,6 +96,176 @@ function exportedBoundaries(
       throw new UsageError('Invalid render-report picture boundary.');
     addProjectFrame(range.startFrame, 'picture-range');
   }
+}
+
+function specifiedFrameRate(
+  report: Record<string, unknown> | undefined,
+  requested: string | undefined,
+) {
+  if (requested !== undefined)
+    return parseFrameRateOption('expect-fps', requested);
+  const authored = report?.frameRate;
+  if (
+    authored &&
+    typeof authored === 'object' &&
+    'numerator' in authored &&
+    'denominator' in authored
+  )
+    return parseFrameRateOption(
+      'expect-fps',
+      `${authored.numerator}/${authored.denominator}`,
+    );
+}
+
+function seconds(time: RationalTime) {
+  return time.numerator / time.denominator;
+}
+
+function tickSeconds(media: Mp4FrameIndex) {
+  return seconds(media.timeBase);
+}
+
+function checkFrameClock(media: Mp4FrameIndex, rate: FrameRate) {
+  const { numerator, denominator } = media.timeBase;
+  const ticksPerFrameNumerator = BigInt(rate.denominator) * BigInt(denominator);
+  const ticksPerFrameDenominator = BigInt(rate.numerator) * BigInt(numerator);
+  const offGrid = (ticks: number, frame: number) => {
+    const error =
+      BigInt(ticks) * ticksPerFrameDenominator -
+      BigInt(frame) * ticksPerFrameNumerator;
+    return (
+      error * 2n < -ticksPerFrameDenominator ||
+      error * 2n > ticksPerFrameDenominator
+    );
+  };
+  const toSeconds = (ticks: number) => (ticks * numerator) / denominator;
+  function findMismatch() {
+    for (const [frame, { pts, duration }] of media.frameClock.entries()) {
+      if (
+        pts === undefined ||
+        !Number.isSafeInteger(pts) ||
+        offGrid(pts - media.firstPts, frame)
+      )
+        return {
+          frame,
+          field: 'pts',
+          expectedTimeSeconds:
+            seconds(frameTime(frame, rate)) + toSeconds(media.firstPts),
+          actualTimeSeconds: pts === undefined ? null : toSeconds(pts),
+        };
+      if (
+        duration !== undefined &&
+        (!Number.isSafeInteger(duration) ||
+          duration <= 0 ||
+          offGrid(pts - media.firstPts + duration, frame + 1))
+      )
+        return {
+          frame,
+          field: 'frame-end',
+          expectedTimeSeconds:
+            seconds(frameTime(frame + 1, rate)) + toSeconds(media.firstPts),
+          actualTimeSeconds: toSeconds(pts + duration),
+        };
+    }
+    return null;
+  }
+  const firstMismatch = findMismatch();
+  const count = media.ticks.length;
+  return {
+    rate,
+    firstMismatch,
+    matches: firstMismatch === null && !offGrid(media.end, count),
+  };
+}
+
+function inferredFrameClock(media: Mp4FrameIndex) {
+  let fallback: ReturnType<typeof checkFrameClock> | undefined;
+  for (const candidate of new Set([
+    media.frameRateRatio,
+    media.nominalFrameRateRatio,
+  ])) {
+    if (!candidate || candidate === '0/0') continue;
+    const clock = checkFrameClock(
+      media,
+      parseFrameRateOption('expect-fps', candidate),
+    );
+    if (clock.matches) return clock;
+    fallback ??= clock;
+  }
+  return fallback;
+}
+
+function pictureClock(
+  media: Mp4FrameIndex,
+  clock: ReturnType<typeof checkFrameClock> | undefined,
+) {
+  // Use the exact grid only after checking the decoded timestamps against it.
+  // This removes muxer rounding when two files have different time bases.
+  const rate = clock?.matches ? clock.rate : undefined;
+  return {
+    end: rate
+      ? frameTime(media.ticks.length, rate)
+      : mp4PresentationTime(media, media.end),
+    at: (frame: number) =>
+      rate
+        ? frameTime(frame, rate)
+        : mp4PresentationTime(media, media.ticks[frame]!),
+  };
+}
+
+function compareFrameClock(
+  preview: Mp4FrameIndex,
+  delivered: Mp4FrameIndex,
+  clock: ReturnType<typeof checkFrameClock>,
+  previewEnd: RationalTime,
+) {
+  const { rate, matches, firstMismatch } = clock;
+  const count = delivered.ticks.length;
+  const previewStartSeconds = preview.firstPts * tickSeconds(preview);
+  const exportStartSeconds = delivered.firstPts * tickSeconds(delivered);
+  const startErrorSeconds = Math.abs(previewStartSeconds - exportStartSeconds);
+  const toleranceSeconds =
+    (tickSeconds(preview) + tickSeconds(delivered)) / 2 + 1e-9;
+  const expectedFrames = frameAtOrAfter(previewEnd, rate);
+  const expectedDurationSeconds = seconds(frameTime(expectedFrames, rate));
+  const exportDurationSeconds = seconds(
+    mp4PresentationTime(delivered, delivered.end),
+  );
+  const durationErrorSeconds = Math.abs(
+    expectedDurationSeconds - exportDurationSeconds,
+  );
+  const firstClockMismatch =
+    delivered.firstPts === 0
+      ? firstMismatch
+      : {
+          frame: 0,
+          field: 'pts',
+          expectedTimeSeconds: 0,
+          actualTimeSeconds: exportStartSeconds,
+        };
+  return {
+    previewFrames: preview.ticks.length,
+    exportFrames: count,
+    expectedFrames,
+    expectedFrameRate: rate,
+    previewStartSeconds,
+    exportStartSeconds,
+    startErrorSeconds,
+    firstTimingMismatch:
+      firstClockMismatch?.frame ??
+      (startErrorSeconds > toleranceSeconds ? 0 : null),
+    firstClockMismatch,
+    expectedDurationSeconds,
+    previewDurationSeconds: seconds(previewEnd),
+    exportDurationSeconds,
+    durationErrorSeconds,
+    toleranceSeconds,
+    passed:
+      firstClockMismatch === null &&
+      startErrorSeconds <= toleranceSeconds &&
+      matches &&
+      count === expectedFrames,
+  };
 }
 
 export async function runExportVerification(
@@ -118,6 +292,18 @@ export async function runExportVerification(
       .map((value) => parseFrameIndex(flag, value.trim()));
   const requested = indices('frames');
   const manual = indices('boundaries') ?? [];
+  const timestamps = (flag: 'timestamps' | 'boundary-timestamps') =>
+    values[flag]?.split(',').map((value) => {
+      try {
+        return parseSubtitleTime(value.trim());
+      } catch {
+        throw new UsageError(
+          `Invalid --${flag} time '${value}'. Use seconds, a fraction or clock time.`,
+        );
+      }
+    });
+  const requestedTimes = timestamps('timestamps');
+  const manualTimes = timestamps('boundary-timestamps') ?? [];
   const audioMaster = values['audio-master'];
   await withCommandCancellation(async (signal) => {
     if (await statIfPresent(output))
@@ -131,9 +317,62 @@ export async function runExportVerification(
       delivered,
       signal,
     );
-    const length = Math.min(preview.ticks.length, delivered.ticks.length);
+    const rate = specifiedFrameRate(renderReport, values['expect-fps']);
+    const deliveryClock = rate
+      ? checkFrameClock(delivered, rate)
+      : inferredFrameClock(delivered);
+    if (!deliveryClock)
+      throw new UsageError(
+        'The delivery frame rate is unavailable. Supply --expect-fps.',
+      );
+    const { end: previewEnd, at: previewAt } = pictureClock(
+      preview,
+      inferredFrameClock(preview),
+    );
+    const { end: deliveredEnd, at: deliveredAt } = pictureClock(
+      delivered,
+      deliveryClock,
+    );
+    const length = findFrameBoundary(
+      previewEnd,
+      delivered.ticks.length,
+      deliveredAt,
+    );
+    const sharedPreviewLength = findFrameBoundary(
+      deliveredEnd,
+      preview.ticks.length,
+      previewAt,
+    );
+    function sample(time: RationalTime, boundary = false) {
+      if (
+        compareTimes(time, previewEnd) >= 0 ||
+        compareTimes(time, deliveredEnd) >= 0
+      )
+        throw new UsageError(
+          'Requested timestamp is outside the shared picture duration.',
+        );
+      const frame = findFrameBoundary(time, length, deliveredAt, !boundary);
+      return boundary ? frame : frame - 1;
+    }
+    const defaults = () =>
+      sharedPreviewLength < length
+        ? evenlySpacedFrames(
+            0,
+            sharedPreviewLength,
+            Math.min(8, sharedPreviewLength),
+          ).map((frame) => sample(previewAt(frame)))
+        : evenlySpacedFrames(0, length, Math.min(8, length));
+    const sampleRequests = new Map<number, number[]>();
+    for (const time of requestedTimes ?? []) {
+      const frame = sample(time);
+      const times = sampleRequests.get(frame) ?? [];
+      times.push(seconds(time));
+      sampleRequests.set(frame, times);
+    }
     const frames = new Set(
-      requested ?? evenlySpacedFrames(0, length, Math.min(8, length)),
+      requested || requestedTimes
+        ? [...(requested ?? []), ...sampleRequests.keys()]
+        : defaults(),
     );
     const boundaryReasons = new Map<number, Set<string>>();
     function addBoundary(frame: number, reason: string) {
@@ -148,43 +387,29 @@ export async function runExportVerification(
       frames.add(frame);
     }
     for (const frame of manual) addBoundary(frame, 'requested');
+    for (const time of manualTimes)
+      addBoundary(sample(time, true), 'requested-timestamp');
     if (renderReport)
-      exportedBoundaries(renderReport, delivered, (frame, reason) => {
-        if (frame < length) addBoundary(frame, reason);
-      });
+      exportedBoundaries(renderReport, length, deliveredAt, addBoundary);
     if ([...frames].some((frame) => frame >= length))
       throw new UsageError(`Choose shared frame indices below ${length}.`);
     const boundaries = [...boundaryReasons.keys()].sort((a, b) => a - b);
-    const timePerTick = (media: Mp4FrameIndex) =>
-      media.timeBase.numerator / media.timeBase.denominator;
-    const a = timePerTick(preview);
-    const b = timePerTick(delivered);
-    const allowed = Math.max(a, b) / 2 + 1e-9;
-    const previewStartSeconds = preview.firstPts * a;
-    const exportStartSeconds = delivered.firstPts * b;
-    let firstTimingMismatch: number | null = null;
-    for (let i = 0; i < length; i++) {
-      const previewTime = (preview.firstPts + preview.ticks[i]!) * a;
-      const exportTime = (delivered.firstPts + delivered.ticks[i]!) * b;
-      if (Math.abs(previewTime - exportTime) > allowed) {
-        firstTimingMismatch = i;
-        break;
-      }
-    }
-    const durationErrorSeconds = Math.abs(preview.end * a - delivered.end * b);
-    const timing = {
-      previewFrames: preview.ticks.length,
-      exportFrames: delivered.ticks.length,
-      previewStartSeconds,
-      exportStartSeconds,
-      firstTimingMismatch,
-      durationErrorSeconds,
-      toleranceSeconds: allowed,
-      passed:
-        preview.ticks.length === delivered.ticks.length &&
-        firstTimingMismatch === null &&
-        durationErrorSeconds <= allowed,
-    };
+    const orderedFrames = [...frames].sort((a, b) => a - b);
+    const previewFrames = orderedFrames.map(
+      (frame) =>
+        findFrameBoundary(
+          deliveredAt(frame),
+          preview.ticks.length,
+          previewAt,
+          true,
+        ) - 1,
+    );
+    const timing = compareFrameClock(
+      preview,
+      delivered,
+      deliveryClock,
+      previewEnd,
+    );
     const aspect = (media: Mp4FrameIndex) =>
       (media.width * media.sar) / media.height;
     const geometry = {
@@ -197,10 +422,16 @@ export async function runExportVerification(
       const picture = await compareExportFrames(
         preview,
         delivered,
-        [...frames].sort((a, b) => a - b),
+        orderedFrames,
         boundaries,
         scratch,
-        { size, lumaTolerance: tolerance, boundaryTolerance, signal },
+        {
+          size,
+          lumaTolerance: tolerance,
+          boundaryTolerance,
+          signal,
+          previewFrames,
+        },
       );
       const audio =
         audioMaster &&
@@ -208,6 +439,7 @@ export async function runExportVerification(
           resolve(audioMaster),
           delivered.path,
           signal,
+          { includeTiming: true },
         ));
       await Promise.all([preview.checkSource(), delivered.checkSource()]);
       const ok =
@@ -217,7 +449,7 @@ export async function runExportVerification(
         picture.samples.every(({ passed }) => passed) &&
         picture.boundaries.every(({ passed }) => passed);
       const report = {
-        verificationVersion: 1,
+        verificationVersion: 2,
         ok,
         path: join(output, 'report.json'),
         preview: preview.path,
@@ -230,6 +462,12 @@ export async function runExportVerification(
         geometry,
         ...picture,
         ...(audio && { audio }),
+        samples: picture.samples.map((sample) => {
+          const requestedTimesSeconds = sampleRequests.get(sample.frame);
+          return requestedTimesSeconds
+            ? { ...sample, requestedTimesSeconds }
+            : sample;
+        }),
         boundaries: picture.boundaries.map((check) => ({
           ...check,
           reasons: [...boundaryReasons.get(check.frame)!].sort(),

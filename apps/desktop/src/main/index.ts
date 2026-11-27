@@ -615,12 +615,11 @@ app
               try {
                 const result = await renderCompiledVideo(video, filePath, {
                   signal: controller.signal,
-                  onProgress: ({ percent, stage }) => {
-                    if (stage !== 'encoding' && stage !== 'muxing') return;
+                  onProgress: (progress) => {
                     if (!window.isDestroyed())
                       window.webContents.send(
                         DEFINITION_CHANNELS.progress,
-                        percent,
+                        progress,
                       );
                   },
                 });

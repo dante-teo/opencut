@@ -19,9 +19,10 @@ foreground call; no job queue, daemon, database or saved job state is introduced
 
 Media consumes structured FFmpeg `-progress` records, independent of stdout chunk
 boundaries, and emits progress through a synchronous callback. Frame counts are
-monotonic and bounded by the planned total. Elapsed time starts with encoding;
-remaining time estimates average encoding throughput and is absent when unknown.
-Encoder completion transitions to verification; it does not establish publication.
+monotonic and bounded within each stage. One clock tracks total export time and
+a second measures time since visible progress. Quiet stages emit periodic updates.
+Available estimates describe the current stage. Encoder completion transitions
+to verification, and readiness follows publication.
 The CLI owns human formatting, JSONL progress and terminal events, diagnostics on
 stderr, process signal handlers and exit codes. Other CLI commands retain their
 existing JSON contracts.
@@ -51,10 +52,11 @@ Publication is the commit point; cancellation after it cannot retract the export
 
 ## Consequences
 
-- Scripts must parse each render JSONL line and require exit 0 plus a `completed`
-  event before consuming the destination. Encoding 100% alone is insufficient.
-- Preflight probing and output verification have no remaining-time estimate;
-  FFmpeg stalls can delay structured progress records.
+- Scripts can read `stage: "ready"` on stderr to observe publication. Use a
+  successful exit and the final JSON result on stdout before consuming the
+  destination.
+- Preflight probing and output verification report liveness while their
+  remaining time is unknown.
 - Cancellation is shared by headless callers through `AbortSignal`; CLI signal
   handling stays outside core and media. Shutdown escalation is bounded, but
   cleanup still waits for the child to close.

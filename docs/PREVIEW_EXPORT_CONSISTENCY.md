@@ -41,8 +41,9 @@ available. Desktop export renders the selected revision using its staged
 inputs and retains those inputs while the render is active.
 When the final profile requires different AI processing, the watcher keeps
 the original recipe inputs available for that export as well.
-The desktop export bar tracks encoding progress. Wait for **Saved** to
-confirm that export verification and publication have finished.
+Desktop export reports progress through compositing, encoding, and
+verification. **Ready · Saved** confirms the verified MP4 was published.
+See [export and delivery checks](EXPORT.md#preflight-and-delivery-checks).
 
 Run `pnpm test:consistency` for frame and audio alignment, preview recovery,
 and decoded comparison of an Electron export with a foreground SDK render.
