@@ -96,8 +96,8 @@ class Evaluation:
         self.env["DEVELOPER_DIR"] = "/var/empty"
         self.metrics = {}
 
-    def run(self, label, *args, expected=0, interrupt_at=None):
-        json_output = interrupt_at is None
+    def run(self, label, *args, expected=0, interrupt_stage=None):
+        stage_marker = f'"stage":"{interrupt_stage}"' if interrupt_stage else None
         stdout_path = self.project / f"{label}.json"
         stderr_path = self.project / f"{label}.log"
         start = time.monotonic()
@@ -107,7 +107,7 @@ class Evaluation:
         peak_rss = peak_project_growth = peak_cache = 0
         children = set()
         with stdout_path.open("w") as stdout, stderr_path.open("w") as stderr, subprocess.Popen(
-            [self.cli, *args, *(["--json"] if json_output else [])], cwd=self.project,
+            [self.cli, *args, "--json"], cwd=self.project,
             env=self.env, stdout=stdout, stderr=stderr, start_new_session=True,
         ) as job:
             try:
@@ -119,7 +119,7 @@ class Evaluation:
                         peak_project_growth, allocated(self.project, excluded) - project_before)
                     peak_cache = max(peak_cache, allocated(self.cache))
                     now = time.monotonic()
-                    if interrupt_at and interrupted is None and interrupt_at in stderr_path.read_text():
+                    if stage_marker and interrupted is None and stage_marker in stderr_path.read_text():
                         job.send_signal(signal.SIGINT)
                         interrupted = now
                     if now - start > 600 or (interrupted is not None and now - interrupted > 10):
@@ -134,7 +134,7 @@ class Evaluation:
             "peakSampledRssBytes": peak_rss, "peakSampledWorkspaceGrowthBytes": peak_project_growth,
             "peakSampledCacheBytes": peak_cache,
         }
-        if interrupt_at:
+        if stage_marker:
             assert interrupted is not None, stderr_path.read_text()
             self.metrics[label]["cancellationSeconds"] = round(time.monotonic() - interrupted, 3)
             pids = subprocess.check_output(["/bin/ps", "-axo", "pid="], text=True)
@@ -142,7 +142,7 @@ class Evaluation:
         exit_codes = (expected,) if isinstance(expected, int) else expected
         assert job.returncode in exit_codes, f"{label}: {stderr_path.read_text()[-3000:]}"
         result = stdout_path.read_text()
-        return json.loads(result) if json_output and result.strip() else None
+        return json.loads(result) if result.strip() else None
 
     def render(self, label, definition, *args):
         return self.run(label, "render", definition, *args, "-o", f"{label}.mp4")
@@ -351,7 +351,7 @@ def verify_recovery(test, files, *, software):
     files["sustained"] = test.probe("sustained.mp4", 640, 360, 24, count)
     previous = files["sustained"]["sha256"]
     args = ("render", definition, *flags, "-o", "sustained.mp4", "--overwrite")
-    test.run("interrupt", *args, expected=130, interrupt_at="rendering:")
+    test.run("interrupt", *args, expected=130, interrupt_stage="encoding")
     assert digest(test.project / "sustained.mp4") == previous
     receipt = test.run("receipt", "build", "inspect", definition, *flags)
     assert any(step["reusable"] for step in receipt["steps"])

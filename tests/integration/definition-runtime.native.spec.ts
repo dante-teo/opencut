@@ -119,7 +119,7 @@ test(
 
       const child = spawn(
         process.execPath,
-        [entry, 'render', source, '--output', output, '--overwrite'],
+        [entry, 'render', source, '--output', output, '--overwrite', '--json'],
         {
           stdio: ['ignore', 'ignore', 'pipe'],
         },
@@ -130,7 +130,7 @@ test(
         let cancelled = false;
         child.stderr.on('data', (chunk: string) => {
           diagnostics += chunk;
-          if (!cancelled && diagnostics.includes('rendering:')) {
+          if (!cancelled && diagnostics.includes('"stage":"encoding"')) {
             cancelled = true;
             child.kill('SIGTERM');
           }
@@ -139,6 +139,10 @@ test(
           signal: AbortSignal.timeout(25_000),
         });
         assert.equal(code, 143, diagnostics);
+        assert.match(
+          diagnostics,
+          /"event":"render-status","status":"cancelled"/,
+        );
       } finally {
         if (child.exitCode === null && child.signalCode === null)
           child.kill('SIGKILL');
