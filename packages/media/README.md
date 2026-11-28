@@ -2,9 +2,11 @@
 
 This headless package provides `probeMedia(file)`,
 `extractFrame(file, timestampSeconds, output)`, `composeMedia(options)` and
-`renderVideoTimeline(options)` / `validateVideoTimeline(options)` using external ffprobe/FFmpeg
-executables. It exports typed metadata/results and `MediaError`, depends only on
-Node built-ins and the shared composition rules, and is independent of Electron, React and the CLI.
+`renderVideoTimeline(options)` / `validateVideoTimeline(options)`. It exports
+typed metadata, results and `MediaError`. It uses FFmpeg and ffprobe for
+codec work and the bundled Rust media engine for decoded-frame indexing,
+export verification and audio-dependent graphics. TypeScript prepares
+the render plan and publishes verified outputs.
 
 See the [CLI/API contract](../../docs/CLI.md) for fields, prerequisites, limits
 and file safety, the [headless API example](../../docs/CLI.md#headless-media-api)
@@ -15,4 +17,6 @@ T11 timeline rendering executes a resolved integer-frame video plan plus positio
 audio clips, with original audio, overlapping music, gain/mute and silent gaps.
 See [project rendering](../../docs/CLI.md#project-rendering) for timing and limits.
 [Exports](../../docs/EXPORT.md) support preflight, HEVC, and output-rate
-controls. The CLI defaults to project-rate H.264. Media binaries are neither installed nor bundled here.
+controls. The CLI defaults to project-rate H.264. Cargo builds the
+OpenCut media engine into `dist/`. The prebuilt distribution supplies that
+worker and discovers FFmpeg and ffprobe on `PATH`.

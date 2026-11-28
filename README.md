@@ -26,8 +26,9 @@ the bundled SDK, and optional AI model setup.
 ## Run from source
 
 On macOS, install Node.js 24.12 or later within the 24.x series, pnpm 11.20.0,
-and Apple’s Command Line Tools for Xcode or Xcode itself. The build compiles
-a native RSS helper against the macOS SDK. Run from the repository root:
+Rust and Cargo 1.85 or later, and Apple’s Command Line Tools for Xcode or Xcode
+itself. The build compiles the Rust media engine and the macOS native helpers.
+Run from the repository root:
 
 ```sh
 pnpm install
