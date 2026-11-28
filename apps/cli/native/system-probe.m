@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <sys/sysctl.h>
 #import "video-toolbox.h"
 #import <Metal/Metal.h>
 
@@ -107,7 +108,11 @@ int main(int argc, const char *argv[]) {
         }
         NSMutableDictionary *effects = [NSMutableDictionary dictionary];
         for (NSString *effect in @[FRC, FRCQuality, LLI, SR, LLSR, TN]) effects[effect] = effectInfo(effect);
+        int guest = 0;
+        size_t guestSize = sizeof(guest);
+        BOOL virtualMachine = sysctlbyname("kern.hv_vmm_present", &guest, &guestSize, NULL, 0) == 0 && guest == 1;
         printJSON(@{@"gpuDevices": gpus, @"codecs": codecs(), @"frameProcessors": effects,
+            @"virtualMachine": @(virtualMachine),
             @"thermalState": @(NSProcessInfo.processInfo.thermalState)});
     }
     return 0;

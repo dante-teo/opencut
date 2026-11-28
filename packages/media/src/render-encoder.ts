@@ -141,7 +141,11 @@ export async function selectRenderEncoder(
         ],
         undefined,
         30_000,
-        { signal, stage: `checking ${report.name} support` },
+        {
+          signal,
+          videoToolboxEncoder: report.selected === 'videotoolbox',
+          stage: `checking ${report.name} support`,
+        },
       );
     } catch (cause) {
       checkRenderSignal(signal);

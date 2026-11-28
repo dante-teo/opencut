@@ -396,6 +396,14 @@ test(
         'export default ' + JSON.stringify(definition) + ';\n',
       );
     try {
+      const { videoToolbox } = opencut(['system', 'inspect']);
+      if (process.platform === 'darwin')
+        assert.equal(videoToolbox.status, 'probed', videoToolbox.reason);
+      const frameRateRecipe =
+        videoToolbox.frameProcessors?.['low-latency-interpolation']?.status ===
+        'reported-supported'
+          ? { type: 'interpolateFrames', numerator: 60, quality: 'fast' }
+          : { type: 'frameRate', numerator: 60 };
       const dimensions = large ? '540x960' : '108x192';
       for (const [name, source] of [
         ['plate', `testsrc2=s=${dimensions}:r=60:d=30`],
@@ -445,9 +453,7 @@ test(
           soft: {
             kind: 'video',
             path: 'soft.mp4',
-            recipe: [
-              { type: 'interpolateFrames', numerator: 60, quality: 'fast' },
-            ],
+            recipe: [frameRateRecipe],
           },
           sharp: { kind: 'video', path: 'sharp-audio.mp4' },
           music: { kind: 'audio', path: 'music.wav' },
@@ -561,7 +567,7 @@ test(
       assert.equal(exact.visualClips[0].source.originalPath, path('soft.mp4'));
       assert.equal(
         exact.visualClips[0].source.steps[0].parameters.type,
-        'interpolateFrames',
+        frameRateRecipe.type,
       );
 
       const renderArgs = [

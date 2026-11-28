@@ -756,7 +756,9 @@ source checkout if a bundled executable is missing or incompatible.
 
 Check optional AI separately under `ai`. `opencut system inspect --json`
 reports VideoToolbox configurations and model status for sample input sizes.
-Run a short preview of the actual input with the intended profile in the
+On macOS virtual machines it also checks whether native workers can process
+sample frames through the guest driver. Run a short preview of the actual input
+with the intended profile in the
 same environment to confirm the processor can initialize.
 
 ## Render quality profiles
@@ -1086,8 +1088,9 @@ final variant `result`. Filter these events by their `event` field when
 reading stderr, which also carries diagnostics and authoring logs.
 
 Batch runs directly on macOS or Linux. `--concurrency` accepts 1–8 and defaults
-to 1. The host caps active slots using the same worker ceiling as recipe work.
-Each slot owns at most one recipe step at a time. An AI step can run one
+to 1. The host caps active slots based on CPU and native memory, up to four.
+Memory pressure at the warning level limits the batch to one slot. Each slot
+owns at most one recipe step at a time. An AI step can run one
 inference worker with a decoder and an encoder. A transformed render layer
 can run a decoder and an encoder together. Shared source probes and the
 recipe cache reuse work across slots. Cache keys depend on the relevant

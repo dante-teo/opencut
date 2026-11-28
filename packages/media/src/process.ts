@@ -25,6 +25,7 @@ export interface MediaToolControl {
   env?: NodeJS.ProcessEnv;
   onStdout?: (chunk: Buffer) => void;
   writesFile?: boolean;
+  videoToolboxEncoder?: boolean;
   onDiagnostics?: (diagnostics: string) => void;
   onNonfatalDiagnostic?: (diagnostic: string) => void;
   stage?: string;
@@ -148,12 +149,26 @@ export async function runMediaTool(
           );
           return;
         }
+        // The guest scaler can log a failed lookup even when its hardware
+        // encoder succeeds. Keep all other diagnostics and nonzero exits fatal.
+        const remainingDiagnostics =
+          tool === 'ffmpeg' && control?.videoToolboxEncoder
+            ? diagnostics
+                .split(/\r?\n/)
+                .filter(
+                  (line) =>
+                    line.trim() !==
+                    'IOServiceMatchingfailed for: AppleM2ScalerParavirtDriver',
+                )
+                .join('\n')
+                .trim()
+            : diagnostics;
         const missingChapters =
           (tool === 'ffprobe' || tool === 'ffmpeg') &&
-          onlyMissingChapterDiagnostic(diagnostics);
+          onlyMissingChapterDiagnostic(remainingDiagnostics);
         if (
           error ||
-          (diagnostics && !missingChapters && !control?.onDiagnostics)
+          (remainingDiagnostics && !missingChapters && !control?.onDiagnostics)
         ) {
           const stage = control?.stage ? ` while ${control.stage}` : '';
           const status = error?.signal

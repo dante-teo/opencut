@@ -68,6 +68,21 @@ describe('media subprocesses', () => {
     },
   );
 
+  it('accepts the guest scaler message only after a successful VideoToolbox encode', async () => {
+    const warning = 'IOServiceMatchingfailed for: AppleM2ScalerParavirtDriver';
+    const tool = () =>
+      runMediaTool('ffmpeg', [], undefined, undefined, {
+        videoToolboxEncoder: true,
+      });
+    respond(null, '', warning);
+    await expect(tool()).resolves.toEqual(Buffer.alloc(0));
+    await expect(runMediaTool('ffmpeg', [])).rejects.toThrow(warning);
+    respond(null, '', `${warning}\n[hevc_videotoolbox] encoding failed`);
+    await expect(tool()).rejects.toThrow('encoding failed');
+    respond(Object.assign(new Error('failed'), { code: 1 }), '', warning);
+    await expect(tool()).rejects.toThrow('exit status 1');
+  });
+
   it('accepts only the known chapter diagnostic on exit zero', async () => {
     const diagnostic = 'Referenced QT chapter track not found';
     const stderr = `[mov,mp4,m4a,3gp,3g2,mj2 @ 0x123] ${diagnostic}`;

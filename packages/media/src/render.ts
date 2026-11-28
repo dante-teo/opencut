@@ -2088,6 +2088,7 @@ async function executeVideoTimeline(
     await runMediaTool('ffmpeg', args, 4 * 1024 * 1024, 600_000, {
       signal: options.signal,
       ...(prepared.sourcePicture ? {} : { onStdout: progress.chunk }),
+      videoToolboxEncoder: prepared.encoder?.selected === 'videotoolbox',
       writesFile: true,
       stage: `encoding ${outputWidth}×${outputHeight} MP4 '${path}' at ${numerator}/${denominator} fps`,
     }).catch((cause: unknown) => {

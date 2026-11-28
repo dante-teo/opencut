@@ -189,7 +189,7 @@ function processorCapability(
   if (processor.status === 'hardware-unsupported')
     return capability(
       'unsupported',
-      'VideoToolbox reports unsupported hardware.',
+      processor.reason ?? 'VideoToolbox reports unsupported hardware.',
       'Use supported hardware or omit this recipe.',
     );
   const accepted =

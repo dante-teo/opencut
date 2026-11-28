@@ -44,8 +44,11 @@ export interface MetalDevice {
 export interface FrameProcessorProbe {
   minimumMacOS: string;
   status: 'os-unavailable' | 'hardware-unsupported' | 'reported-supported';
+  reason?: string;
   testedSizes?: {
-    configurations: { status: string; modelStatus?: string }[];
+    width: number;
+    height: number;
+    configurations: { scale: number; status: string; modelStatus?: string }[];
   }[];
 }
 
@@ -60,6 +63,7 @@ interface NativeProbe {
   };
   frameProcessors: Record<string, FrameProcessorProbe>;
   thermalState: number;
+  virtualMachine: boolean;
 }
 
 async function query<T>(path: string, args: string[] = []): Promise<T> {
@@ -84,11 +88,13 @@ async function probeVideoToolbox() {
         status: 'unavailable' as const,
         reason: 'Native system probe version does not match OpenCut.',
       };
-    return {
-      status: 'probed' as const,
-      version,
-      ...(await query<NativeProbe>(path)),
-    };
+    const probe = await query<NativeProbe>(path);
+    if (probe.virtualMachine) {
+      const { verifyGuestFrameProcessors } =
+        await import('./frame-processor-probe.js');
+      await verifyGuestFrameProcessors(probe.frameProcessors);
+    }
+    return { status: 'probed' as const, version, ...probe };
   } catch (failure) {
     const error = failure as NodeJS.ErrnoException;
     return {
@@ -96,7 +102,7 @@ async function probeVideoToolbox() {
       reason:
         error.code === 'ENOENT'
           ? 'Native probe is missing. Reinstall OpenCut or rebuild from source with a macOS 26+ SDK.'
-          : `Native probe failed (${error.code ?? error.name}).`,
+          : `Native probe failed: ${error.message}`,
     };
   }
 }

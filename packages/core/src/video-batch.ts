@@ -167,7 +167,7 @@ export async function batchRenderVideo(
   const concurrency = Math.min(
     plan.length,
     boundedInteger('concurrency', options.concurrency ?? 1, 1, 8),
-    pressure === 'warning' ? 1 : host.recipeWorkers,
+    pressure === 'warning' ? 1 : host.batchWorkers,
   );
   const limits = {
     maxTemporaryBytes: Math.floor(

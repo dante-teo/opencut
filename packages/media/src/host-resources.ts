@@ -24,7 +24,23 @@ export function hostRenderResources() {
       4,
     ),
   );
-  return { installedBytes, parallelism, nativeBudgetBytes, recipeWorkers };
+  // Batch slots run one recipe step each and enforce their share of the
+  // total budget. A small batch can use a second slot on a three-core host.
+  const batchWorkers = Math.max(
+    1,
+    Math.min(
+      Math.ceil(parallelism / 2),
+      Math.floor(nativeBudgetBytes / (GiB / 2)),
+      4,
+    ),
+  );
+  return {
+    installedBytes,
+    parallelism,
+    nativeBudgetBytes,
+    recipeWorkers,
+    batchWorkers,
+  };
 }
 
 export async function sampleMemoryPressure(signal?: AbortSignal) {
