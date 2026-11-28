@@ -14,6 +14,10 @@ export interface RecipeProcessLimits {
 }
 
 const progress = ['-progress', 'pipe:1', '-stats_period', '0.25'];
+const nativeMemoryLimitMessage =
+  'Recipe step exceeded its native memory limit.';
+const failedPacketAllocation =
+  /^(?:\[[^\]\r\n]+\][ \t]+)*Failed to allocate packet of size (\d+)\r?$/gm;
 
 type NativeRecipePipeline = {
   label: string;
@@ -23,7 +27,7 @@ type NativeRecipePipeline = {
   encoder: string[];
 };
 
-function ffmpegLimits(limits: RecipeProcessLimits) {
+function ffmpegLimits(limits: RecipeProcessLimits, maxAllocationBytes: number) {
   return [
     '-nostdin',
     '-hide_banner',
@@ -31,7 +35,7 @@ function ffmpegLimits(limits: RecipeProcessLimits) {
     'error',
     '-xerror',
     '-max_alloc',
-    String(Math.min(limits.maxNativeBytes, 2_147_483_647)),
+    String(maxAllocationBytes),
     '-filter_threads',
     '1',
     '-filter_complex_threads',
@@ -59,7 +63,8 @@ export async function runRecipeProcess(
     process.platform !== 'linux'
   )
     throw new MediaError('Bounded recipe processing requires macOS or Linux.');
-  const ffmpeg = ffmpegLimits(limits);
+  const maxAllocationBytes = Math.min(limits.maxNativeBytes, 2_147_483_647);
+  const ffmpeg = ffmpegLimits(limits, maxAllocationBytes);
   let command = 'exec ffmpeg "$@" </dev/null 3<&-';
   let args: string[];
   if (pipeline) {
@@ -158,9 +163,7 @@ export async function runRecipeProcess(
           if (closed) return;
           if (error) stop(error);
           else if (bytes > limits.maxNativeBytes)
-            stop(
-              new MediaError('Recipe step exceeded its native memory limit.'),
-            );
+            stop(new MediaError(nativeMemoryLimitMessage));
         },
       );
     }, 50);
@@ -202,13 +205,24 @@ export async function runRecipeProcess(
         reject(
           new MediaError('Recipe step exceeded its temporary file limit.'),
         );
-      else if (code !== 0 || (!pipeline && diagnostic))
-        reject(
-          new MediaError(
-            `${pipeline ? invocation.label : 'FFmpeg recipe step'} failed: ${diagnostic.trim() || sig || code}`,
-          ),
+      else if (code !== 0 || (!pipeline && diagnostic)) {
+        const error = new MediaError(
+          `${pipeline ? invocation.label : 'FFmpeg recipe step'} failed: ${diagnostic.trim() || sig || code}`,
         );
-      else resolve();
+        // FFmpeg's per-allocation cap can reject a packet before the RSS
+        // sampler sees an overage. Only classify requests above the actual cap.
+        const refusedAllocation =
+          code !== null &&
+          code !== 0 &&
+          [...diagnostic.matchAll(failedPacketAllocation)].some(
+            ([, size]) => Number(size) > maxAllocationBytes,
+          );
+        reject(
+          refusedAllocation
+            ? new MediaError(nativeMemoryLimitMessage, { cause: error })
+            : error,
+        );
+      } else resolve();
     });
     signal.addEventListener('abort', cancel, { once: true });
     if (signal.aborted) cancel();
