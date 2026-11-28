@@ -3,7 +3,8 @@
 ## Homebrew
 
 OpenCut runs on Apple Silicon with macOS 15 or later. The Homebrew formula
-installs Node.js 24 and FFmpeg as dependencies.
+installs Node.js 24 and FFmpeg as dependencies. The release bundles the
+Rust media engine. Cargo is a build-time dependency.
 
 ```sh
 brew install dante-teo/tap/opencut
@@ -95,8 +96,8 @@ environment and Qwen model directories. Check `ai.transcription` in
 ## Release builds
 
 Build on Apple Silicon with the Node and pnpm versions pinned in the
-repository and Xcode with the macOS 26 SDK. Only the build machine needs
-Xcode. The release workflow selects Xcode 26.6, uses the frozen pnpm lockfile
+repository, Rust and Cargo 1.85 or later, and Xcode with the macOS 26 SDK.
+Only the build machine needs Rust, Cargo and Xcode. The release workflow selects Xcode 26.6, uses the frozen pnpm lockfile
 and checks that the tag matches the workspace version.
 
 ```sh
@@ -111,10 +112,12 @@ Use a fresh output directory for a local rebuild, for example
 archive, Homebrew formula, and `SHA256SUMS`.
 
 The staging tool bundles the SDK, core, media runtime, native addons, Noto
-fonts, VideoToolbox workers and the macOS RSS helper. It checks the Mach-O architecture,
+fonts, the Rust media engine, VideoToolbox workers and the macOS RSS helper.
+It checks the Rust protocol and the Mach-O architecture,
 deployment target, library paths and executable versions. The CLI archive
 uses sorted paths and fixed timestamps and retains its dependencies' license
-notices and package manifests. See the [libvips build source](https://github.com/lovell/sharp-libvips/tree/v1.3.4)
+notices and package manifests. Rust dependency licenses are under
+`libexec/licenses/rust/` in the installed package. See the [libvips build source](https://github.com/lovell/sharp-libvips/tree/v1.3.4)
 and [component versions](https://github.com/lovell/sharp-libvips/releases/tag/v1.3.4)
 for the shared library bundled with sharp.
 

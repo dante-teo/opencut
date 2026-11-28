@@ -3,7 +3,10 @@
 A `.video.ts` definition can import `@opencut/sdk` directly when run by
 OpenCut. For editor type checking or to run the examples below directly with
 Node, [link the Homebrew SDK into your project](INSTALL.md#use-the-bundled-sdk-from-a-node-project).
-Use Node 24.12 or later within the 24.x series.
+Use Node 24.12 or later within the 24.x series. Media execution uses the
+bundled media engine and FFmpeg and ffprobe on `PATH`. Use the CLI's
+[installation check](CLI.md#check-the-installation) to verify that
+environment.
 
 ```ts
 import { compileVideo, previewVideo, renderCompiledVideo } from '@opencut/sdk';

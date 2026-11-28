@@ -1,4 +1,5 @@
-import { MediaError, runMediaTool } from './process.js';
+import { MediaError } from './process.js';
+import { indexDecodedVideo } from './media-engine.js';
 import { probeMedia } from './probe.js';
 import { orientedSource } from './source-window.js';
 import {
@@ -40,44 +41,13 @@ export async function readMp4FrameIndex(file: string, signal?: AbortSignal) {
   )
     throw new MediaError('MP4 has no usable video time base.');
 
-  const response = await runMediaTool(
-    'ffprobe',
-    [
-      '-v',
-      'error',
-      '-select_streams',
-      String(video.index),
-      '-show_frames',
-      '-show_entries',
-      'frame=pts,best_effort_timestamp,duration',
-      '-of',
-      'json',
-      path,
-    ],
-    32 * 1024 * 1024,
-    600_000,
-    { signal, stage: 'indexing decoded MP4 frames' },
+  const { ticks, firstPts, frameClock } = await indexDecodedVideo(
+    path,
+    video.index,
+    signal,
   ).finally(() => checkSource(stage));
-  const { frames = [] } = JSON.parse(response.toString()) as {
-    frames?: {
-      pts?: number;
-      best_effort_timestamp?: number;
-      duration?: number;
-    }[];
-  };
-  const first = frames[0]?.best_effort_timestamp;
-  const ticks: number[] = [];
-  for (const { best_effort_timestamp: pts } of frames) {
-    const delta = (pts ?? NaN) - (first ?? NaN);
-    if (!Number.isSafeInteger(delta) || delta < (ticks.at(-1) ?? 0))
-      throw new MediaError(
-        'MP4 frames do not have ordered presentation timestamps.',
-      );
-    ticks.push(delta);
-  }
-  if (!ticks.length) throw new MediaError('MP4 has no decoded video frames.');
   const last = ticks.at(-1)!;
-  const duration = frames.at(-1)?.duration ?? 0;
+  const duration = frameClock.at(-1)?.duration ?? 0;
   const end =
     Number.isSafeInteger(duration) && duration > 0
       ? last + duration
@@ -92,10 +62,10 @@ export async function readMp4FrameIndex(file: string, signal?: AbortSignal) {
     stream: video.index,
     frameRateRatio: video.frameRateRatio,
     nominalFrameRateRatio: video.nominalFrameRateRatio,
-    frameClock: frames.map(({ pts, duration }) => ({ pts, duration })),
+    frameClock,
     ...orientedSource(video),
     timeBase: { numerator, denominator },
-    firstPts: first!,
+    firstPts,
     ticks,
     end,
     checkSource,

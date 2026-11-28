@@ -1,13 +1,11 @@
-import { createReadStream } from 'node:fs';
 import { openAudioAnalysisRecord } from './audio-analysis-cache.js';
 import type { AudioSeries } from './audio-analysis-cache.js';
 import { join } from 'node:path';
-import FFT from 'fft.js';
 import { LRUCache } from 'lru-cache';
 import { lerp } from '@opencut/shared';
 import type { GraphicAudioAnalysis, GraphicAudioSample } from '@opencut/shared';
 import { audioSampleAtFrame } from './audio-graph.js';
-import { renderAudioFile } from './audio-mastering.js';
+import { analyzeGraphicAudio } from './media-engine.js';
 import { prepareMusicComparison } from './music-comparison.js';
 import {
   prepareProfessionalMix,
@@ -88,108 +86,16 @@ export async function decodeGraphicAudio(
       1,
     );
   }
-  const mono = join(directory, 'mono.f32');
-  await renderAudioFile(
-    [
-      '-threads',
-      '1',
-      '-i',
-      sourcePath,
-      '-map',
-      '0:a:0',
-      '-ar',
-      String(sampleRate),
-      '-ac',
-      '1',
-      '-f',
-      'f32le',
-    ],
-    mono,
+  const series = await analyzeGraphicAudio(
+    sourcePath,
+    samples,
+    settings,
     plan.signal,
   );
-  const series = await analyzePcm(mono, samples, settings, plan.signal);
   await record?.publish(series, stride);
   analysis.update(plan.frameCount);
   saved.set(key, series);
   return series;
-}
-
-export async function analyzePcm(
-  path: string,
-  samples: number,
-  { window, hop, waveform, bins }: GraphicAudioAnalysis,
-  signal?: AbortSignal,
-): Promise<AudioSeries> {
-  const count = Math.ceil(samples / hop) + 1;
-  const stride = 1 + waveform + bins;
-  if (count * stride * 4 > 64 * 1024 * 1024)
-    throw new MediaError(
-      'Audio analysis exceeds 64 MiB. Increase hop or reduce output features.',
-    );
-  const features = new Float32Array(count * stride);
-  const ring = new Float32Array(window);
-  const fft = new FFT(window);
-  const inWindow = new Float64Array(window);
-  const out = fft.createComplexArray() as number[];
-  const hann = Float32Array.from(
-    { length: window },
-    (_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / window),
-  );
-  let write = 0;
-  let center = 0;
-  let row = 0;
-
-  function readWindow() {
-    const offset = row * stride;
-    let square = 0;
-    // The center tick is emitted after reading the right half-window.
-    for (let i = 0; i < window; i++) {
-      const input = ring[(write + i) % window]!;
-      inWindow[i] = input * hann[i]!;
-      square += input * input;
-      const bucket = offset + 1 + Math.floor((i * waveform) / window);
-      if (Math.abs(input) > Math.abs(features[bucket]!))
-        features[bucket] = input;
-    }
-    features[offset] = Math.sqrt(square / window);
-    fft.realTransform(out, inWindow);
-    for (let i = 0; i < bins; i++)
-      features[offset + 1 + waveform + i] =
-        (4 * Math.hypot(out[2 * i]!, out[2 * i + 1]!)) / window;
-    row++;
-    center += hop;
-  }
-
-  let read = 0;
-  function push(value: number) {
-    ring[write] = value;
-    write = (write + 1) % window;
-    read++;
-    if (row < count && read >= center + window / 2) readWindow();
-  }
-
-  let tail: Buffer = Buffer.alloc(0);
-  for await (const chunk of createReadStream(path, {
-    signal,
-    highWaterMark: 64 * 1024,
-  })) {
-    const input = tail.length
-      ? Buffer.concat([tail, chunk as Buffer])
-      : (chunk as Buffer);
-    const end = input.length - (input.length % 4);
-    for (let i = 0; i < end; i += 4) {
-      if (read >= samples) break;
-      push(input.readFloatLE(i));
-    }
-    tail = input.subarray(end);
-  }
-  if (tail.length)
-    throw new MediaError('Incomplete PCM sample during audio analysis.');
-  while (row < count) {
-    signal?.throwIfAborted();
-    push(0);
-  }
-  return { features, count };
 }
 
 export function sampleGraphicAudio(

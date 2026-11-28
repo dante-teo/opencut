@@ -1,3 +1,4 @@
+import { countDecodedVideo } from './media-engine.js';
 import { createHash } from 'node:crypto';
 import { open, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -451,29 +452,8 @@ export async function renderReviewClip(options: ReviewClipOptions) {
     { signal, writesFile: true, stage: 'encoding labeled review clip' },
   );
   const { video } = await probeMedia(output, signal);
-  const count = await runMediaTool(
-    'ffprobe',
-    [
-      '-v',
-      'error',
-      '-count_frames',
-      '-select_streams',
-      'v:0',
-      '-show_entries',
-      'stream=nb_read_frames',
-      '-of',
-      'csv=p=0',
-      output,
-    ],
-    undefined,
-    600_000,
-    { signal, stage: 'counting review frames' },
-  );
-  if (
-    video?.width !== width ||
-    video.height !== height ||
-    Number(count.toString().trim()) !== frameCount
-  )
+  const count = await countDecodedVideo(output, signal);
+  if (video?.width !== width || video.height !== height || count !== frameCount)
     throw new MediaError(
       'Review clip failed its dimensions or decoded frame-count check.',
     );

@@ -29,6 +29,11 @@ it('reports the render memory helper independently of FFmpeg availability', () =
   expect(status).toBe(0);
   const report = JSON.parse(stdout);
   expect(report.graphicsSchemas).toBeTypeOf('object');
+  expect(report.media.engine).toEqual({
+    status: 'available',
+    version: report.application.version,
+    protocol: 1,
+  });
   expect(report.media.rssHelper).toEqual(
     process.platform === 'darwin'
       ? { status: 'available', version: report.application.version }

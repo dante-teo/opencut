@@ -1,3 +1,4 @@
+import './build-engine.mjs';
 import { spawnSync } from 'node:child_process';
 import { warn } from 'node:console';
 import { cpSync, existsSync, readFileSync, renameSync, rmSync } from 'node:fs';

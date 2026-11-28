@@ -55,11 +55,14 @@ Fixture directories must stay under `tests/fixtures/generated/` and may not
 traverse symlinks. The native cases also run under `pnpm test:media`, which
 uses the fixtures prepared by `pnpm fixtures:generate`.
 
-Use a clean checkout for source validation when `tests/fixtures/generated/`
-contains archived TypeScript projects or unpacked packages. The root
-type check and Vitest can pick up files from those copies. To check whether
-a native pixel assertion is a regression, run the same test on the base
-revision with the same synthetic inputs and FFmpeg build.
+The root type check and Vitest exclude `tests/fixtures/generated/`.
+Prepare the offline Lottie and GLB fixtures for `pnpm test:media` with
+`python3 tests/reference-motion/fixtures.py --adapters-only`.
+To check whether a native pixel assertion is a regression, run the same
+test on the base revision with the same synthetic inputs and FFmpeg build.
+The native integration tests also check protocol rejection and make sure
+that cancelling or killing a render during decoded-frame verification
+stops its FFprobe process and preserves an existing export.
 
 After the build, the runner writes `conformance-results/run-*/report.json`.
 Use `cases` for test results and skip reasons, and `measurements` for

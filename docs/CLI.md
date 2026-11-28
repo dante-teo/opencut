@@ -747,11 +747,12 @@ Dialogue and speech workflows require FFmpeg and ffprobe in addition to
 their local backends and models.
 
 Run `opencut doctor --json` for full diagnostics and graphics schemas.
-`media.ready` reports whether FFmpeg, ffprobe, and the default H.264 and AAC
-encoders are available. On macOS it also requires the bundled RSS helper
-to match the installed version and successfully sample memory. If
-`media.ready` is false, read `media.hint`. A missing or mismatched RSS helper
-calls for reinstalling the package or rebuilding a source checkout.
+`media.ready` checks FFmpeg, ffprobe, the default H.264 and AAC encoders,
+and the bundled Rust media engine. On macOS it also checks that the RSS
+helper matches the installed version and can sample memory. The
+`media.engine` field reports the executable version and protocol. If
+`media.ready` is false, read `media.hint`. Reinstall OpenCut or rebuild a
+source checkout if a bundled executable is missing or incompatible.
 
 Check optional AI separately under `ai`. `opencut system inspect --json`
 reports VideoToolbox configurations and model status for sample input sizes.
@@ -1122,6 +1123,22 @@ ffprobe -v error -show_entries format_tags=opencut_build -of json ./outputs/wide
 ```
 
 ## Performance benchmarks
+
+From a built checkout with FFmpeg, Python 3 and the generated tests
+directory available, run the media engine benchmark. Pass the CLI from
+a different checkout or an unpacked release with `--cli`.
+
+```sh
+python3 scripts/media-engine-benchmark.py --runs 3
+python3 scripts/media-engine-benchmark.py --runs 3 --cli /path/to/other/dist/index.js
+```
+
+The benchmark checks cold and warm previews with eight minutes of
+audio analysis, three sampled frames from a 9,000-frame source, and
+1080p and 4K software exports from a short sequence of trimmed footage.
+The JSON includes elapsed time, sampled process-tree RSS, scratch size,
+and hashes of decoded video or PNG output. Use the same Node, FFmpeg,
+power settings and machine for both runs.
 
 Build with the macOS 26+ SDK, then run the benchmark from the repository root
 with Python 3.11+ and FFmpeg/ffprobe on PATH.

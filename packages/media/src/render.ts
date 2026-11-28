@@ -1,3 +1,4 @@
+import { countDecodedVideo } from './media-engine.js';
 import { prepareProfessionalMix } from './professional-mix.js';
 import type { AudioMixCache } from './professional-mix.js';
 import type { AudioMixReport } from './audio-mastering.js';
@@ -2135,30 +2136,7 @@ async function executeVideoTimeline(
         );
     }
     // Decode/count output frames, rather than trusting container duration alone.
-    const frameProbe = await runMediaTool(
-      'ffprobe',
-      [
-        '-v',
-        'error',
-        '-count_frames',
-        '-select_streams',
-        'v:0',
-        '-show_entries',
-        'stream=nb_read_frames',
-        '-of',
-        'json',
-        rendered,
-      ],
-      4 * 1024 * 1024,
-      600_000,
-      {
-        signal: options.signal,
-        stage: `counting decoded frames in '${rendered}'`,
-      },
-    );
-    const counted = JSON.parse(frameProbe.toString('utf8')) as {
-      streams?: { nb_read_frames?: string }[];
-    };
+    const counted = await countDecodedVideo(rendered, options.signal);
     if (
       video?.codec !== codec ||
       video.colorRange !== pictureColor.colorRange ||
@@ -2179,11 +2157,11 @@ async function executeVideoTimeline(
       Math.abs(video.durationSeconds - durationSeconds) > 0.000002 ||
       !containerDurationMatches ||
       video.startTimeSeconds !== 0 ||
-      Number(counted.streams?.[0]?.nb_read_frames) !== frameCount
+      counted !== frameCount
     )
       throw new MediaError(
         `Render verification failed. Expected ${codec} ${outputWidth}×${outputHeight} BT.709 limited range, ${numerator}/${denominator} fps, ${frameCount} frames and ${durationSeconds}s with AAC ${options.audioSampleRate ?? 48000} Hz /${options.audioChannels ?? 2} channels. ` +
-          `Decoded ${video?.codec} ${video?.width}×${video?.height}, ${video?.colorSpace}/${video?.colorPrimaries}/${video?.colorTransfer}/${video?.colorRange}, ${video?.frameRateRatio} fps, ${counted.streams?.[0]?.nb_read_frames} frames, video ${video?.durationSeconds}s, audio ${metadata.audio?.durationSeconds}s ${metadata.audio?.codec} ${metadata.audio?.sampleRate} Hz /${metadata.audio?.channels} channels, container ${metadata.durationSeconds}s. ` +
+          `Decoded ${video?.codec} ${video?.width}×${video?.height}, ${video?.colorSpace}/${video?.colorPrimaries}/${video?.colorTransfer}/${video?.colorRange}, ${video?.frameRateRatio} fps, ${counted} frames, video ${video?.durationSeconds}s, audio ${metadata.audio?.durationSeconds}s ${metadata.audio?.codec} ${metadata.audio?.sampleRate} Hz /${metadata.audio?.channels} channels, container ${metadata.durationSeconds}s. ` +
           'Check source decodability and trim ranges.',
       );
     checkRenderSignal(options.signal);

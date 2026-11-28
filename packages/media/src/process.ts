@@ -34,6 +34,15 @@ const missingChapterTrack = 'Referenced QT chapter track not found';
 const chapterDiagnostic =
   /^(?:\[[^\]\r\n]+\]\s*)?Referenced QT chapter track not found$/;
 
+export function onlyMissingChapterDiagnostic(diagnostics: string) {
+  return (
+    !!diagnostics &&
+    diagnostics
+      .split(/\r?\n/)
+      .every((line) => chapterDiagnostic.test(line.trim()))
+  );
+}
+
 export async function localFile(file: string): Promise<string> {
   const path = resolve(file);
   try {
@@ -140,11 +149,8 @@ export async function runMediaTool(
           return;
         }
         const missingChapters =
-          !!diagnostics &&
           (tool === 'ffprobe' || tool === 'ffmpeg') &&
-          diagnostics
-            .split(/\r?\n/)
-            .every((line) => chapterDiagnostic.test(line.trim()));
+          onlyMissingChapterDiagnostic(diagnostics);
         if (
           error ||
           (diagnostics && !missingChapters && !control?.onDiagnostics)

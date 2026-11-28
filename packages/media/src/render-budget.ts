@@ -117,6 +117,12 @@ export function trackRenderProcess(
   return () => children.delete(pid);
 }
 
+export function renderAllocationLimit() {
+  const budget = storage.getStore();
+  if (budget?.samplerFailure) throw budget.samplerFailure;
+  return budget && Math.min(budget.maxNativeBytes, 2_147_483_647);
+}
+
 /** Bound individual writes at the OS level before charging the finished file. */
 export function renderToolCommand(
   tool: string,
@@ -125,14 +131,10 @@ export function renderToolCommand(
 ) {
   const budget = storage.getStore();
   if (!budget) return { tool, args };
-  if (budget.samplerFailure) throw budget.samplerFailure;
+  const allocation = renderAllocationLimit();
   const bounded =
-    tool === 'ffmpeg' || tool === 'ffprobe'
-      ? [
-          '-max_alloc',
-          String(Math.min(budget.maxNativeBytes, 2_147_483_647)),
-          ...args,
-        ]
+    (tool === 'ffmpeg' || tool === 'ffprobe') && allocation !== undefined
+      ? ['-max_alloc', String(allocation), ...args]
       : args;
   if (!writesFile || budget.remainingBytes === undefined)
     return { tool, args: bounded };

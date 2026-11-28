@@ -5,6 +5,7 @@
     "allowImportingTsExtensions": true,
     "lib": ["ES2023", "DOM"]
   },
+  "exclude": ["tests/fixtures/generated"],
   "include": [
     "scripts/**/*.ts",
     "examples/**/*.ts",

@@ -476,8 +476,9 @@ after its ordinary clip trims, gain, timing and effects. The mixed source
 uses the resolved music selection. With Professional Dialogue Mix enabled,
 it also uses the export channel count, sample rate, and AAC bitrate.
 Analysis uses timeline seconds and measures the resolved signal at 48 kHz.
-The renderer samples signed peak waveform buckets, RMS, and linear FFT
-magnitudes from centered Hann windows. FFT bin `i` represents
+The bundled media engine analyzes signed peak waveform buckets, RMS,
+and linear FFT magnitudes from centered Hann windows. It streams PCM
+from FFmpeg and caches the resulting features. FFT bin `i` represents
 `i × 48000 / window` Hz. Nearby hop results interpolate on the timeline.
 Explicit `beats` are increasing rational timeline seconds. A beat is
 active for the project frame covering its time.

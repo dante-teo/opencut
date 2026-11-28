@@ -41,6 +41,8 @@ jobs:
           corepack enable pnpm
           pnpm install --frozen-lockfile
           brew install ffmpeg
+          rustup toolchain install stable --profile minimal --component clippy --component rustfmt
+          rustup override set stable
       - name: Install pinned graphics browser
         run: |
           export PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/opencut-playwright"
@@ -48,13 +50,22 @@ jobs:
           pnpm --filter @opencut/graphics exec playwright-core install chromium
       - name: Validate
         run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo test --workspace --locked
+          cargo build --workspace --release --locked
+          pnpm build
           pnpm typecheck
           pnpm lint
           pnpm format:check
           pnpm fixtures:generate
+          python3 tests/reference-motion/fixtures.py --adapters-only
+          pnpm fixtures:validate
+          pnpm test:fixtures
           pnpm test
           pnpm test:media
           pnpm test:conformance
+          pnpm test:consistency
       - name: Build and test the release artifacts
         run: |
           pnpm release:pack

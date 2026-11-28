@@ -13,10 +13,54 @@ identity and stage a private copy for the duration of the operation.
   render planner are shared by all these operations.
 - `@opencut/media` runs FFmpeg and ffprobe, prepares generated layers, mixes
   audio, and publishes completed output. It also provides standalone media
-  processing and the optional dialogue-separation backend.
+  processing and the optional dialogue-separation backend. Its bundled Rust
+  media engine runs decoded-frame verification, presentation indexing and
+  the analysis used by audio-dependent graphics.
 - `@opencut/sdk` exposes the definition workflow. The CLI uses the same core
   functions; foreground rendering runs in the CLI process and starts only the
   subprocesses needed for that invocation.
+
+## Native execution
+
+TypeScript owns composition and timeline evaluation, including rational
+source sampling, clip and transition ranges, stream selection, effect
+ordering, mix routing, output profiles and render plans. The graphics
+runtime evaluates React, SVG and authored animations on that timeline.
+The media package passes the result of those decisions to FFmpeg and,
+for supported native jobs, an OpenCut Rust executable.
+
+The executable accepts one typed request with the OpenCut release, the
+protocol version, an optional FFmpeg allocation limit, and a job. A
+graphics audio job receives the prepared mix path, exact sample count
+and analysis window settings. The worker decodes that mix to mono
+48 kHz float PCM and analyzes it as samples arrive. It reuses a ring,
+Hann weights, an FFT plan and a scratch buffer. A video index job
+receives the pinned asset path and stream index. It reads decoded frame
+timestamps in the demuxer time base and checks that the presentation
+clock stays ordered. An export verification job counts decoded frames
+before TypeScript verifies the final stream metadata and publishes
+the output.
+
+The codec and DSP processes exchange bytes through pipes. Audio feature
+rows use little-endian float32 values, with a 64 MiB response limit. The
+frame index carries integer PTS, duration and relative presentation ticks,
+with a 32 MiB limit. The Rust-to-Node pipe carries feature values and
+timestamps. Node owns each completed response and retains it only as long as needed
+by the caller or existing analysis cache. The Rust job and codec share a
+private process group. The parent enforces cancellation and timeout, can
+sample that group's memory under the render budget, and keeps an owner
+pipe open. If the parent exits, EOF stops the group. Tool diagnostics
+remain on stderr.
+
+A short-lived executable fits these jobs because each consumes one
+prepared source and produces a bounded result. It links against the
+system runtime and uses the same FFmpeg and ffprobe on PATH as OpenCut.
+Homebrew ships the worker with OpenCut. Source builds use Cargo and lock
+dependency versions in `Cargo.lock`. Changing FFT implementations changes
+the audio analysis key, so graphics rebuild with the matching features.
+See [performance benchmarks](CLI.md#performance-benchmarks).
+
+## Snapshots, caching and publication
 
 A watch scopes its temporary media copies and rendered preview to a single
 definition. It observes source, imported modules and referenced media. Failed

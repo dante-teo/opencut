@@ -2,7 +2,8 @@
 
 OpenCut compiles a TypeScript definition into a video. See [Install OpenCut](INSTALL.md)
 for packaged installations. To run from source, install
-Node.js 24.12+ within the 24.x series, pnpm 11.20, FFmpeg, and ffprobe.
+Node.js 24.12+ within the 24.x series, pnpm 11.20, Rust and Cargo 1.85+,
+FFmpeg, and ffprobe.
 On macOS, install Apple’s Command Line Tools for Xcode or Xcode itself to
 build the native RSS helper. The VideoToolbox AI workers require the
 macOS 26 SDK. From a checkout, run:

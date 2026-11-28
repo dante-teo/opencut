@@ -16,6 +16,7 @@ import type { VideoTimelineOptions } from './render.js';
 import { probeMedia } from './probe.js';
 import type { MediaMetadata, MediaStream } from './probe.js';
 import { MediaError, runMediaTool } from './process.js';
+import { countDecodedVideo } from './media-engine.js';
 
 vi.mock('./probe.js', async (original) => ({
   ...(await original<typeof import('./probe.js')>()),
@@ -25,6 +26,8 @@ vi.mock('./process.js', async (original) => ({
   ...(await original<typeof import('./process.js')>()),
   runMediaTool: vi.fn(),
 }));
+vi.mock('./media-engine.js', () => ({ countDecodedVideo: vi.fn() }));
+
 const stream: MediaStream = {
   index: 2,
   type: 'video',
@@ -107,11 +110,8 @@ beforeEach(async () => {
   vi.mocked(probeMedia).mockImplementation(async (path) =>
     path.endsWith('render.mp4') ? { ...verified, path } : { ...source, path },
   );
-  vi.mocked(runMediaTool).mockImplementation(async (tool, args) => {
-    if (tool === 'ffprobe')
-      return Buffer.from(
-        JSON.stringify({ streams: [{ nb_read_frames: String(count) }] }),
-      );
+  vi.mocked(countDecodedVideo).mockImplementation(async () => count);
+  vi.mocked(runMediaTool).mockImplementation(async (_, args) => {
     await writeFile(args.at(-1)!, 'verified output');
     return Buffer.alloc(0);
   });
@@ -384,6 +384,10 @@ describe('video timeline executor safety', () => {
       metadata: { path: options.output },
     });
     expect(await readdir(directory)).toEqual(['out.mp4']);
+    expect(countDecodedVideo).toHaveBeenCalledWith(
+      expect.stringMatching(/render\.mp4$/),
+      options.signal,
+    );
     const args = vi.mocked(runMediaTool).mock.calls[0]![1];
     expect(args).toContain(source.path);
     expect(args).toContain('[audio]');
@@ -409,9 +413,7 @@ describe('video timeline executor safety', () => {
   );
 
   it('preserves a destination created during encoding and removes its temporary render', async () => {
-    vi.mocked(runMediaTool).mockImplementation(async (tool, args) => {
-      if (tool === 'ffprobe')
-        return Buffer.from('{"streams":[{"nb_read_frames":"12"}]}');
+    vi.mocked(runMediaTool).mockImplementation(async (_, args) => {
       await writeFile(args.at(-1)!, 'render');
       await writeFile(options.output, 'racing writer');
       return Buffer.alloc(0);
@@ -714,12 +716,8 @@ describe('indexed decoding for cached picture', () => {
                 : `0, ${pts}, ${pts}, 1001, 6, 0x00000000\n`),
           );
         }
-        if (tool === 'ffprobe')
-          return Buffer.from(
-            args.includes('-count_packets')
-              ? '12'
-              : '{"streams":[{"nb_read_frames":"12"}]}',
-          );
+        if (tool === 'ffprobe' && args.includes('-count_packets'))
+          return Buffer.from('12');
         await writeFile(args.at(-1)!, 'rendered output');
         return Buffer.alloc(0);
       });

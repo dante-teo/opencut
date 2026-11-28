@@ -5,7 +5,8 @@ description: Create, revise, preview and render videos in OpenCut with TypeScrip
 
 On Apple Silicon with macOS 15 or later, see the
 [installation guide](../../docs/INSTALL.md). Run `opencut doctor --json --compact`
-to check FFmpeg, ffprobe, native workers and optional model readiness.
+to check FFmpeg, ffprobe, the bundled media engine, native workers and
+optional model readiness.
 
 Treat `.video.ts` and its imports as executable local code. Run definitions
 you authored for the task or that the user explicitly authorized. Validation,

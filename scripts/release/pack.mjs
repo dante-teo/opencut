@@ -81,6 +81,7 @@ async function createCliArchive() {
   mkdirSync(path);
   stageRuntime(root, path, app, manifest);
   auditNative(path);
+  stageRustLicenses(path);
   writeFileSync(
     join(path, 'README.md'),
     '# OpenCut\n\n[Installation and requirements](docs/INSTALL.md)\n\n' +
@@ -90,6 +91,9 @@ async function createCliArchive() {
   mkdirSync(join(path, 'docs'));
   for (const name of [
     'INSTALL',
+    'ARCHITECTURE',
+    'EXPORT',
+    'PREVIEW_EXPORT_CONSISTENCY',
     'CLI',
     'SDK',
     'AUDIO_MIX',
@@ -138,17 +142,57 @@ async function createCliArchive() {
   return candidate;
 }
 
+function stageRustLicenses(path) {
+  const { packages } = JSON.parse(
+    run('cargo', [
+      'metadata',
+      '--format-version',
+      '1',
+      '--manifest-path',
+      join(root, 'Cargo.toml'),
+      '--locked',
+      '--offline',
+    ]),
+  );
+  const output = join(path, 'licenses', 'rust');
+  mkdirSync(output, { recursive: true });
+  for (const dependency of packages.filter(({ source }) => source !== null)) {
+    const source = dirname(dependency.manifest_path);
+    const target = join(output, `${dependency.name}-${dependency.version}`);
+    mkdirSync(target);
+    const licenses = new Set(
+      readdirSync(source, { withFileTypes: true })
+        .filter(
+          (entry) =>
+            entry.isFile() &&
+            /^(?:LICENSE|COPYING|NOTICE)(?:[.-]|$)/i.test(entry.name),
+        )
+        .map((entry) => entry.name),
+    );
+    if (dependency.license_file) licenses.add(dependency.license_file);
+    if (!licenses.size)
+      throw new Error('Missing Rust license files for ' + dependency.name);
+    for (const file of licenses)
+      copyFileSync(resolve(source, file), join(target, basename(file)));
+  }
+}
+
 function auditNative(path) {
   const binaries = [
-    ...['process-memory', 'video-enhance', 'video-interpolate'].map((name) =>
-      join(path, 'node_modules/@opencut/media/dist', name),
-    ),
+    ...[
+      'opencut-media-engine',
+      'process-memory',
+      'video-enhance',
+      'video-interpolate',
+    ].map((name) => join(path, 'node_modules/@opencut/media/dist', name)),
     join(path, 'dist/system-probe'),
   ];
   for (const file of binaries) {
     if (run(file, ['--version']).trim() !== version)
       throw new Error('Native binary version does not match OpenCut: ' + file);
   }
+  if (run(binaries[0], ['--protocol']).trim() !== `${version} 1`)
+    throw new Error('Native media engine protocol does not match OpenCut.');
   const modules = join(path, 'node_modules');
   const addons = readdirSync(modules, { recursive: true })
     .filter((name) => /\.(node|dylib)$/.test(name))

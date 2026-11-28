@@ -118,6 +118,10 @@ fn run() -> Result<()> {
             println!("{version}");
             return Ok(());
         }
+        (Some("--protocol"), None, None) => {
+            println!("{version} {PROTOCOL}");
+            return Ok(());
+        }
         (Some("--job"), Some(request), None) => {
             let request: Request = serde_json::from_str(&request)?;
             if request.protocol != PROTOCOL || request.release != version {
@@ -189,7 +193,7 @@ fn run() -> Result<()> {
             }
             output.flush()?;
         }
-        _ => return Err("Expected --version or --job with a media request.".into()),
+        _ => return Err("Expected --version, --protocol, or --job with a media request.".into()),
     }
     Ok(())
 }

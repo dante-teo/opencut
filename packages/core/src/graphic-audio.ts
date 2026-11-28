@@ -103,7 +103,7 @@ export function bindGraphicAudio(
       bins: settings.bins,
     };
     const key = hashJson([
-      'opencut-audio-fft4.0.4-v1/48000',
+      'opencut-audio-realfft-v2/48000',
       analysisSettings,
       plan.frameRate,
       plan.frameCount,

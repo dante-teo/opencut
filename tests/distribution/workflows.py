@@ -408,6 +408,8 @@ def main():
     def doctor_system():
         result = test.run("doctor", "doctor")
         assert result["media"]["ready"], result["media"]
+        engine = result["media"]["engine"]
+        assert engine["status"] == "available" and engine["protocol"] == 1, engine
         return result["system"]
 
     def optional(name, verify, reason):

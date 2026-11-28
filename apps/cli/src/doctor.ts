@@ -10,6 +10,7 @@ import {
 import {
   inspectDialogueModel,
   inspectGraphicsRuntime,
+  inspectMediaEngine,
   inspectRenderMemory,
   inspectVideoToolboxWorkers,
   localEnhancer,
@@ -74,6 +75,7 @@ async function probeDoctor() {
     ffmpeg,
     ffprobe,
     rssHelper,
+    mediaEngine,
     system,
     workers,
     dialogue,
@@ -83,6 +85,7 @@ async function probeDoctor() {
     inspectExecutable('ffmpeg'),
     inspectExecutable('ffprobe'),
     inspectRenderMemory(),
+    inspectMediaEngine(),
     inspectSystem(),
     inspectVideoToolboxWorkers(),
     inspectDialogueModel(),
@@ -108,6 +111,7 @@ async function probeDoctor() {
   const hint = [
     ...(!toolsReady ? [installHint] : []),
     ...('hint' in rssHelper ? [rssHelper.hint] : []),
+    ...('hint' in mediaEngine ? [mediaEngine.hint] : []),
   ].join(' ');
   const result = {
     doctorVersion: 1,
@@ -122,6 +126,7 @@ async function probeDoctor() {
       ffmpeg,
       ffprobe,
       rssHelper,
+      engine: mediaEngine,
       missingEncoders,
       hevc: encoders.has('libx265'),
       ...(hint && { hint }),
@@ -279,10 +284,21 @@ async function compactDoctor() {
     capabilities: {
       ffmpeg: readTool(media.ffmpeg),
       ffprobe: readTool(media.ffprobe),
+      mediaEngine:
+        'hint' in media.engine
+          ? capability(
+              'unavailable',
+              `Native media engine: ${media.engine.status}.`,
+              media.engine.hint,
+            )
+          : capability(
+              'ready',
+              `OpenCut ${media.engine.version}, protocol ${media.engine.protocol}.`,
+            ),
       defaultMp4: media.ready
         ? capability(
             'ready',
-            'FFmpeg, ffprobe, the default encoders and required memory sampling are available.',
+            'FFmpeg, ffprobe, the OpenCut media engine, the default encoders and required memory sampling are available.',
           )
         : capability(
             'unavailable',
@@ -352,6 +368,7 @@ function formatDoctor(result: DoctorResult) {
       ')',
     'FFmpeg: ' + result.media.ffmpeg.status,
     'ffprobe: ' + result.media.ffprobe.status,
+    'Media engine: ' + result.media.engine.status,
     ...(result.media.rssHelper.status === 'not-applicable'
       ? []
       : ['RSS helper: ' + result.media.rssHelper.status]),
