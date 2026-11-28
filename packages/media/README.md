@@ -14,7 +14,5 @@ music, with normalized video/audio, source-preserving export and metadata checks
 T11 timeline rendering executes a resolved integer-frame video plan plus positioned
 audio clips, with original audio, overlapping music, gain/mute and silent gaps.
 See [project rendering](../../docs/CLI.md#project-rendering) for timing and limits.
-T28 adds shared preflight and optional HEVC/output-rate controls for
-[desktop export](../../docs/EXPORT.md), reusing the same plan, original media,
-progress/cancellation and verified atomic publication as CLI rendering. CLI defaults
-remain project-rate H.264. Media binaries are neither installed nor bundled here.
+[Exports](../../docs/EXPORT.md) support preflight, HEVC, and output-rate
+controls. The CLI defaults to project-rate H.264. Media binaries are neither installed nor bundled here.

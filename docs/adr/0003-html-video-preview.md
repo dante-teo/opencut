@@ -1,6 +1,6 @@
 # ADR 0003: HTML video for the initial source preview
 
-Status: accepted for the T04 prototype; recommendation for the initial editor.
+Status: historical. The Electron application has been retired.
 Date: 2026-10-24.
 
 T16 retains this approach for the reusable desktop source player and imported
@@ -8,7 +8,7 @@ asset preview. Project FPS supplies nominal clock/frame/timecode labels; source
 PTS is displayed separately. Revocable asset-ID capabilities extend the original
 picker boundary, and abortable actions unload cleanly on asset/project changes.
 The precision and codec limits below still apply; T16 does not add a frame index
-or timeline compositor. See [desktop usage](../README.md) for controls and timing.
+or timeline compositor.
 
 ## Decision
 

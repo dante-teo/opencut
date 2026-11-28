@@ -1,22 +1,12 @@
 # TypeScript SDK
 
-The installed CLI and review app include the authoring SDK. A `.video.ts`
-definition can import `@opencut/sdk` without setting up a Node project.
-For TypeScript editor support or SDK usage from a separate Node program,
-install `@dantea/opencut` locally and use the `@dantea/opencut/sdk` export in the
-examples below. See the [installation guide](INSTALL.md#pnpm).
-
-Use Node 24.12+ (within 24.x). The CLI resolves bundled SDK imports from
-trusted `.video.ts` definitions, which should default-export
-`defineVideo({...})`. The following examples are for separate Node programs
-with the CLI package installed locally.
+A `.video.ts` definition can import `@opencut/sdk` directly when run by
+OpenCut. For editor type checking or to run the examples below directly with
+Node, [link the Homebrew SDK into your project](INSTALL.md#use-the-bundled-sdk-from-a-node-project).
+Use Node 24.12 or later within the 24.x series.
 
 ```ts
-import {
-  compileVideo,
-  previewVideo,
-  renderCompiledVideo,
-} from '@dantea/opencut/sdk';
+import { compileVideo, previewVideo, renderCompiledVideo } from '@opencut/sdk';
 
 const video = await compileVideo('edit.video.ts');
 const preview = previewVideo(video);
@@ -237,7 +227,7 @@ pinned graphic sources. See the [graphics runtime and authoring API](GRAPHICS.md
 ## Media recipes
 
 ```ts
-import { inspectVideoRecipes, renderVideo } from '@dantea/opencut/sdk';
+import { inspectVideoRecipes, renderVideo } from '@opencut/sdk';
 
 const { recipes } = await inspectVideoRecipes('edit.video.ts');
 console.log(recipes);
@@ -281,7 +271,7 @@ media and graphics paths. Use timeline clip IDs in `interpolateShots` and
 asset IDs in `nativeSources`.
 
 ```ts
-import { create4K60Delivery } from '@dantea/opencut/sdk';
+import { create4K60Delivery } from '@opencut/sdk';
 import approved from './approved.video.ts';
 
 export default create4K60Delivery(approved, {
@@ -350,7 +340,7 @@ import {
   packageVideo,
   renderVideo,
   verifyVideoPackage,
-} from '@dantea/opencut/sdk';
+} from '@opencut/sdk';
 
 const processing = { cacheDirectory: './recipe-cache' };
 const status = await inspectVideoBuild('src/edit.video.ts', { processing });
@@ -389,8 +379,8 @@ compiled project and its build record are deeply frozen. See the
 [authoring example](VIDEO_DEFINITIONS.md#reusable-functions-and-parameters).
 
 ```ts
-import { batchRenderVideo, renderVideo } from '@dantea/opencut/sdk';
-import type { VideoVariant } from '@dantea/opencut/sdk';
+import { batchRenderVideo, renderVideo } from '@opencut/sdk';
+import type { VideoVariant } from '@opencut/sdk';
 
 const file = 'examples/video/short-batch.video.ts';
 const variants = [

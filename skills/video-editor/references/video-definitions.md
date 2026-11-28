@@ -105,7 +105,7 @@ opencut render opening.video.ts --output opening.mp4
 opencut probe opening.mp4 --json
 ```
 
-Run watch in a separate terminal or use **Open definition** in Electron.
+Run watch in a separate terminal and open the printed MP4 path in a video player.
 Read `current.generation` and `current.path` from `ready` events.
 On an `error` event, `current` holds the last playable revision if one exists.
 Watch tracks local ESM imports, including dynamic imports used to resolve the

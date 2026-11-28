@@ -38,7 +38,7 @@ symlink. Output files must be new and their parent directories must exist.
 ## Author a definition
 
 Import `defineVideo` from `@opencut/sdk` and default-export the
-result. The installed CLI and review app resolve this import to their included
+result. The installed CLI resolves this import to its bundled
 SDK when the project has no local SDK. Node 24.12+ within 24.x runs the file
 with native type stripping. Use ESM and
 erasable TypeScript syntax. OpenCut evaluates the entry module once per
@@ -548,17 +548,14 @@ directly. Range ends are exclusive and clips have a 30-second limit.
 Use [frame-targeted contact sheets](CLI.md#frame-targeted-contact-sheets)
 to review the rendered frames around a cut or caption boundary.
 
-In Electron, choose **Open definition** and select the source file. OpenCut
-compiles and renders a playable revision with mixed audio. Use the timeline
-ruler or frame buttons to seek the composition. A build error appears beside
-the last valid revision, which stays playable while you fix the file.
-
-Desktop review uses the `fast` profile. If a recipe requires the offline
-processor to preview successfully, set `quality: 'quality'` on that recipe
-step. That setting applies to exports as well.
+Watch mode defaults to the `fast` profile. Use `--quality quality`
+to preview recipes that require offline AI processing.
 
 CLI watch prints the build stages and the path of each playable MP4. Use
-`--size` to change the default 640-pixel cap on the longest side.
+`--size` to change the default 640-pixel cap on the longest side. Open the
+printed path in a video player. Open the new path when a rebuild produces
+a new MP4. A build error leaves the last valid preview available.
+
 With `--json`, stdout carries one event per line. Each event has a `status`
 (`compiling`, `rendering`, `ready`, or `error`), an attempted `generation`, and
 a `current` field. `current` is `null` until the first playable preview and

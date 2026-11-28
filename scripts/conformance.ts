@@ -1,6 +1,5 @@
 import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import { arch, platform, release } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { run } from 'node:test';
@@ -9,7 +8,6 @@ import {
   resolveFixtureDirectory,
 } from '../tests/fixture-paths.js';
 
-const require = createRequire(import.meta.url);
 const results = resolve('conformance-results');
 await mkdir(results, { recursive: true });
 const output = await mkdtemp(join(results, 'run-'));
@@ -24,14 +22,9 @@ const measurements: unknown[] = [];
 const issues: string[] = [];
 let hardware: unknown;
 let ffmpeg: string | undefined;
-let desktop: unknown;
 let scratch: string | undefined;
 
-function execute(
-  executable: string,
-  args: string[],
-  { allowFailure = false }: { allowFailure?: boolean } = {},
-) {
+function execute(executable: string, args: string[]) {
   const result = spawnSync(executable, args, {
     encoding: 'utf8',
     maxBuffer: 16 * 1024 ** 2,
@@ -39,34 +32,35 @@ function execute(
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   if (result.error) throw result.error;
-  if (!allowFailure && result.status !== 0)
+  if (result.status !== 0)
     throw new Error(`${executable}: ${result.stderr || result.stdout}`);
-  return result;
+  return result.stdout;
 }
 
 try {
-  ffmpeg = execute('ffmpeg', ['-version']).stdout.split('\n')[0];
+  ffmpeg = execute('ffmpeg', ['-version']).split('\n')[0];
   hardware = JSON.parse(
     execute(process.execPath, [
       'apps/cli/dist/index.js',
       'system',
       'inspect',
       '--json',
-    ]).stdout,
+    ]),
   ).videoToolbox;
   const generated = resolveFixtureDirectory(generatedFixtures);
   await mkdir(generated, { recursive: true });
   scratch = await mkdtemp(join(generated, 'conformance-'));
   const fixtures = join(scratch, 'media');
   const examples = join(scratch, 'definitions');
+  const scratchTemp = join(scratch, 'tmp');
   Object.assign(process.env, {
     OPENCUT_TEST_FIXTURES: fixtures,
     OPENCUT_TEST_EXAMPLES: examples,
     OPENCUT_CONFORMANCE_ARTIFACTS: output,
     XDG_CACHE_HOME: join(scratch, 'cache'),
-    TMPDIR: join(scratch, 'tmp'),
+    TMPDIR: scratchTemp,
   });
-  await mkdir(process.env.TMPDIR!);
+  await mkdir(scratchTemp);
   execute(process.execPath, [
     '--import',
     'tsx',
@@ -74,6 +68,7 @@ try {
     'generate',
   ]);
   await mkdir(examples);
+  const fixtureReference = relative(examples, fixtures);
   for (const name of [
     'showcase.video.ts',
     'review.video.ts',
@@ -83,10 +78,7 @@ try {
     const original = await readFile(join('examples/video', name), 'utf8');
     await writeFile(
       join(examples, name),
-      original.replaceAll(
-        '../../tests/fixtures/generated',
-        relative(examples, fixtures),
-      ),
+      original.replaceAll('../../tests/fixtures/generated', fixtureReference),
     );
   }
 
@@ -137,31 +129,6 @@ try {
     });
     process.stdout.write(`${status} ${name}${detail ? `: ${detail}` : ''}\n`);
   }
-
-  const result = execute(
-    process.execPath,
-    [
-      require.resolve('@playwright/test/cli'),
-      'test',
-      'video-definition-review.spec.ts',
-      '--reporter=json',
-      '--output',
-      join(output, 'desktop-artifacts'),
-    ],
-    { allowFailure: true },
-  );
-  await writeFile(join(output, 'desktop.json'), result.stdout);
-  desktop = {
-    report: 'desktop.json',
-    exitCode: result.status,
-    ...(result.stderr.trim() && { stderr: result.stderr.trim() }),
-  };
-  if (result.status !== 0)
-    issues.push('Electron definition review failed. See desktop.json.');
-  else {
-    const { stats } = JSON.parse(result.stdout);
-    desktop = { report: 'desktop.json', exitCode: 0, stats };
-  }
 } catch (error) {
   issues.push(
     error instanceof Error ? (error.stack ?? error.message) : String(error),
@@ -199,7 +166,6 @@ try {
         },
         cases,
         measurements,
-        desktop,
         issues,
       },
       null,

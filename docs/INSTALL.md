@@ -1,77 +1,75 @@
 # Install OpenCut
 
-The first distribution target is Apple Silicon with macOS 15 or later. The CLI needs native Node.js 24.12 or later within the 24.x series. Rendering also needs FFmpeg and ffprobe on PATH. Use a build with libx264 and AAC for default MP4 exports and libx265 for HEVC exports.
-
-## pnpm
-
-Install the CLI from the npm registry or run it on demand. If pnpm's global
-bin directory is missing from `PATH`, run `pnpm setup` and open a new shell
-before using `pnpm add -g`.
-
-```sh
-pnpm add -g @dantea/opencut
-opencut doctor --json
-pnpm dlx @dantea/opencut --help
-```
-
-Use `opencut doctor --json --compact` for a summary of readiness and next
-steps. The full JSON includes hardware details, model probes, and graphics
-schemas. [Doctor report fields](CLI.md#check-the-installation)
-
-You can also install the packed archive directly.
-
-```sh
-pnpm add -g ./opencut-cli-0.16.0-macos-arm64.tgz
-```
-
-Run the CLI from any directory. A definition can import `@opencut/sdk` and
-use relative imports such as `./scenes.ts`. OpenCut uses its bundled SDK when
-the project has no local `@opencut/sdk`. If a local SDK fails to load, OpenCut
-reports the import error. Repair or reinstall the project's SDK. Third-party
-imports resolve from the definition's project as usual.
-
-For editor type checking or SDK use from a separate Node program, install
-locally with `pnpm add @dantea/opencut` and import from `@dantea/opencut/sdk`.
-Use ESM and TypeScript syntax supported by Node's type stripping.
-
-The package includes the official [Agent Skill](../skills/video-editor/SKILL.md),
-its references, the CLI and SDK guides, and the authoring examples. In a
-local Node project, find the Skill at
-`node_modules/@dantea/opencut/skills/video-editor/SKILL.md`.
-Copy the bundled [opening card](../examples/video/opening-card.video.ts)
-into your project before running it. Node's TypeScript loader excludes
-definitions under `node_modules`.
-
-```sh
-opencut preview frame my-video.video.ts --frame 0 -o preview.png
-opencut render my-video.video.ts -o final.mp4
-```
-
-Use `pnpm remove -g @dantea/opencut` to uninstall and rerun the install command to upgrade. The CLI executes trusted local TypeScript.
-
 ## Homebrew
 
-Once the release and dedicated tap are available, Homebrew supplies Node and FFmpeg.
+OpenCut runs on Apple Silicon with macOS 15 or later. The Homebrew formula
+installs Node.js 24 and FFmpeg as dependencies.
 
 ```sh
 brew install dante-teo/tap/opencut
-brew upgrade dante-teo/tap/opencut
-brew uninstall dante-teo/tap/opencut
+opencut doctor --json --compact
 ```
 
-Find the Skill at
-`$(brew --prefix opencut)/libexec/skills/video-editor/SKILL.md`.
-Definitions use the SDK bundled with the formula. For SDK calls from a
-separate Node program, use the local Node package installation above.
+Use `brew upgrade dante-teo/tap/opencut` to upgrade and
+`brew uninstall dante-teo/tap/opencut` to uninstall. The
+[doctor report](CLI.md#check-the-installation) describes hardware, media
+tools, graphics, and optional AI models.
 
-## OpenCut Review for macOS
+If you have an older OpenCut installation, run `type -a opencut` to see which
+copy your shell runs first. You can call the Homebrew copy directly with
+`"$(brew --prefix opencut)/bin/opencut"`.
 
-Download the signed `OpenCut-Review-<version>-macos-arm64.zip` from the [GitHub release](https://github.com/dante-teo/opencut/releases). Compare its SHA-256 with the entry in `SHA256SUMS`, unzip it and move **OpenCut Review.app** to Applications. The app includes Electron and the SDK. Install FFmpeg separately for rendered previews and export. The packaged app can also find FFmpeg and ffprobe in the standard Apple Silicon Homebrew bin directory when opened from Finder.
+Run the CLI from any directory. A trusted `.video.ts` definition can import
+`@opencut/sdk` and use relative imports such as `./scenes.ts`. OpenCut
+resolves `@opencut/sdk` to its bundled copy when the project has no local SDK.
+Third-party imports resolve from the definition's project.
+
+The installed guides, examples, and [Agent Skill](../skills/video-editor/SKILL.md)
+are under `$(brew --prefix opencut)/libexec`. To try the bundled example, run
+these commands in your project directory.
+
+```sh
+cp -n "$(brew --prefix opencut)/libexec/examples/video/opening-card.video.ts" .
+opencut preview frame opening-card.video.ts --frame 0 -o preview.png
+opencut render opening-card.video.ts -o final.mp4
+```
+
+## Move from OpenCut Review
+
+OpenCut Review, the Electron preview app, has been retired. To watch an
+existing `.video.ts` project as you edit, run:
+
+```sh
+opencut preview edit.video.ts --watch
+```
+
+Open the MP4 path printed by OpenCut in your video player. For a preview
+file you can keep or share, use [a clip preview](VIDEO_DEFINITIONS.md#inspect-preview-and-render).
+
+## Use the bundled SDK from a Node project
+
+For editor type checking or scripts run directly with Node, link the SDK
+from the Homebrew install into your project. Import `@opencut/sdk` and use
+Node.js 24.12 or later within the 24.x series. For standalone scripts that
+render media, keep Homebrew's `ffmpeg` and `ffprobe` on `PATH`.
+
+```sh
+mkdir -p node_modules/@opencut
+ln -s "$(brew --prefix opencut)/libexec/node_modules/@opencut/sdk" node_modules/@opencut/sdk
+```
+
+For type checking `@opencut/graphics` imports, link the bundled graphics
+package from the same install.
+
+```sh
+ln -s "$(brew --prefix opencut)/libexec/node_modules/@opencut/graphics" node_modules/@opencut/graphics
+```
+
+See the [TypeScript SDK guide](SDK.md) for examples.
 
 ## Optional React graphics
 
-The CLI and Review app use the pinned Chromium Headless Shell to render
-React graphics. Follow the [graphics browser setup](GRAPHICS.md#install-the-optional-react-browser)
+OpenCut uses the pinned Chromium Headless Shell to render React graphics. Follow the [graphics browser setup](GRAPHICS.md#install-the-optional-react-browser)
 on each machine that renders a React composition. Static SVG renders
 without a browser.
 
@@ -87,7 +85,7 @@ opencut models inspect --json
 opencut models remove bandit-v2
 ```
 
-The Python runtime, model and user caches are managed separately from npm or Homebrew upgrades and uninstallations.
+The Python runtime, model and user caches are managed separately from Homebrew upgrades and uninstallations.
 
 For local transcription and corrected-text alignment, configure a Python
 environment and Qwen model directories. Check `ai.transcription` in
@@ -104,40 +102,30 @@ and checks that the tag matches the workspace version.
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
-pnpm release:pack all
+pnpm release:pack
 (cd dist/release && shasum -a 256 -c SHA256SUMS)
 ```
 
 Use a fresh output directory for a local rebuild, for example
-`pnpm release:pack all dist/release-check`. The `cli` target builds the CLI
-archive and Formula, and `desktop` builds the local review ZIP. Each target
-writes its own `SHA256SUMS`.
+`pnpm release:pack cli dist/release-check`. The packer writes the CLI
+archive, Homebrew formula, and `SHA256SUMS`.
 
 The staging tool bundles the SDK, core, media runtime, native addons, Noto
 fonts, VideoToolbox workers and the macOS RSS helper. It checks the Mach-O architecture,
-deployment target, library paths and executable versions. It omits Electron
-from the npm archive. The CLI archive uses sorted paths and fixed timestamps.
-Both distributions retain their dependencies' license notices and package
-manifests. See the [libvips build source](https://github.com/lovell/sharp-libvips/tree/v1.3.4)
+deployment target, library paths and executable versions. The CLI archive
+uses sorted paths and fixed timestamps and retains its dependencies' license
+notices and package manifests. See the [libvips build source](https://github.com/lovell/sharp-libvips/tree/v1.3.4)
 and [component versions](https://github.com/lovell/sharp-libvips/releases/tag/v1.3.4)
 for the shared library bundled with sharp.
-The local app ZIP is for smoke testing. Developer ID signing and notarization
-add Apple-issued timestamps and a stapled ticket to the distribution app.
 
 Before cutting a release, synchronize the version in the root and workspace
 package manifests. Run the manually dispatched [release workflow](https://github.com/dante-teo/opencut/actions/workflows/release.yml)
 on the matching `vMAJOR.MINOR.PATCH` tag with `publish` off to generate
-test artifacts. The workflow tests the CLI with pnpm, a temporary Homebrew
-tap and an unpacked review app. The pnpm smoke test installs the tarball
-offline, then serves the same archive from a local test registry to exercise
-global install, `pnpm dlx`, local SDK import and uninstall. A Homebrew
-upgrade test uses the same archive under a simulated older keg version for
-the first release.
-The two CLI installation checks render the bundled opening card and run the
-installed-runtime workflow suite with Python 3.11+, FFmpeg and ffprobe.
+test artifacts. The workflow checks installation, upgrade, and uninstall
+in a temporary Homebrew tap, then renders the bundled opening card and runs
+the installed-runtime suite with Python 3.11+, FFmpeg and ffprobe.
 For local release checks, set `PLAYWRIGHT_BROWSERS_PATH` to the cache
-containing the pinned Headless Shell to include graphics package relocation
-and the packaged review app's graphics smoke test.
+containing the pinned Headless Shell to include graphics package relocation.
 Software rendering, Lanczos upscaling, and failure handling run on every host.
 The recovery check uses a software recipe when offline interpolation is
 unavailable. A passing run can include skipped AI cases. Check the
@@ -150,7 +138,7 @@ work="$(mktemp -d)"
 bash scripts/release/test-workflows.sh "$(command -v opencut)" "$work/project"
 ```
 
-To keep results from a local pnpm or Homebrew installation check, set
+To keep results from a local Homebrew installation check, set
 `OPENCUT_RELEASE_EVALUATION_DIR` to the absolute path of a new directory
 outside the checkout before running the check.
 
@@ -162,36 +150,16 @@ the CLI and observed descendants. Check system memory pressure separately
 for allocations outside those processes. When both UHD outputs are present,
 compare the decoded AI and Lanczos results.
 
-For authorized publication, configure protected `release-signing` and
-`release-publish` environments with required reviewers and tag restrictions.
-Store `MACOS_DEVELOPER_ID_P12_BASE64`, `MACOS_DEVELOPER_ID_P12_PASSWORD`,
-`MACOS_NOTARY_KEY_BASE64`, `MACOS_NOTARY_KEY_ID` and `MACOS_NOTARY_ISSUER`
-in `release-signing`. Enable immutable GitHub Releases. The publish option
-signs and notarizes the app, tests the signed app and uploads the validated
-artifacts to a new release. It fails when a release for the tag already exists.
+For authorized publication, configure the protected `release-publish`
+environment with required reviewers and tag restrictions. Enable immutable
+GitHub Releases. The publish option uploads the verified CLI archive,
+formula, and checksums to a new release. Homebrew downloads the archive
+from that release. The workflow fails when a release for the tag already
+exists.
 
-## Publish the CLI to npm and Homebrew
+## Update the Homebrew tap
 
 Once the GitHub release URL resolves, add the generated `opencut.rb` to
-`Formula/opencut.rb` in `dante-teo/homebrew-tap` and verify with
-`brew install dante-teo/tap/opencut`. Use a new version to replace published
-artifacts.
-
-For npm, set up [Trusted Publishing](https://docs.npmjs.com/trusted-publishers/)
-once for `@dantea/opencut`. After `publish-npm.yml` is on `main`, create
-the GitHub environment `npm-publish` with a deployment rule allowing only
-`main`. In the npm package settings, authorize owner `dante-teo`, repository
-`opencut`, workflow `publish-npm.yml`, and environment `npm-publish`. Enable
-direct publishing. The workflow authenticates with OIDC. Run the first
-successful OIDC publish within two days of creating the trust configuration.
-
-Dispatch the workflow with the latest stable GitHub release tag.
-
-```sh
-gh workflow run publish-npm.yml --repo dante-teo/opencut --ref main -f tag=v0.16.0
-```
-
-The workflow checks the CLI archive against the GitHub release checksums
-and Homebrew formula, then submits it to npm. The job summary records the
-submission after npm accepts the upload. npm completes its automated review
-and updates the registry separately.
+`Formula/opencut.rb` in `dante-teo/homebrew-tap`. Verify with
+`brew install dante-teo/tap/opencut` or `brew upgrade dante-teo/tap/opencut`.
+Use a new version to replace published artifacts.

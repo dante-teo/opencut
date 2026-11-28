@@ -52,8 +52,8 @@ audio and subtitle timing, preview recovery, and cancellation. Tests that
 create derived media use and clean up their own subdirectories under
 `generated/`.
 
-Run `pnpm test:consistency` for the focused preview and export checks,
-including Electron. See [preview and export consistency](../../docs/PREVIEW_EXPORT_CONSISTENCY.md).
+Run `pnpm test:consistency` for the focused preview and export checks.
+See [preview and export consistency](../../docs/PREVIEW_EXPORT_CONSISTENCY.md).
 
 The generator exclusively creates `generated/` and uses FFmpeg's no-overwrite
 mode. It refuses an existing directory or symlink. On failure, it removes only

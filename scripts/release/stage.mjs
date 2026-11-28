@@ -29,12 +29,11 @@ function resolvePackage(parent, name) {
   return path && realpathSync(join(path, name));
 }
 
-function copyBuild(from, to, matchSources = true) {
+function copyBuild(from, to) {
   cpSync(join(from, 'dist'), join(to, 'dist'), {
     recursive: true,
     filter(path) {
       if (path.endsWith('.map')) return false;
-      if (!matchSources) return true;
       // Match emitted modules to current sources so stale output cannot ship.
       const match = /\/dist\/(.+?)(?:\.d\.ts|\.js)$/.exec(path);
       return (
@@ -104,10 +103,8 @@ export function stageRuntime(root, destination, app, appManifest) {
   ]) {
     if (!packages.has(name)) throw new Error('Missing prebuilt addon ' + name);
   }
-  const dependencies = {};
   for (const name of [...packages.keys()].sort()) {
     const { path, manifest, internal } = packages.get(name);
-    dependencies[name] = manifest.version;
     const target = join(destination, 'node_modules', name);
     if (internal) {
       mkdirSync(target, { recursive: true });
@@ -150,11 +147,10 @@ export function stageRuntime(root, destination, app, appManifest) {
     }
   }
 
-  copyBuild(app, destination, app.endsWith('/cli'));
+  copyBuild(app, destination);
   cpSync(join(root, 'LICENSE'), join(destination, 'LICENSE'));
   cpSync(
     join(root, 'THIRD_PARTY_NOTICES'),
     join(destination, 'THIRD_PARTY_NOTICES'),
   );
-  return dependencies;
 }

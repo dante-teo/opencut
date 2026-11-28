@@ -1,20 +1,16 @@
 # Repository instructions
 
 - Use pnpm (never npm/npx); keep `pnpm-lock.yaml` synchronized with manifests.
-- Use TypeScript, strict checking and ESM, except the sandbox-compatible CJS preload.
+- Use TypeScript, strict checking and ESM.
 - Follow existing conventions, work on one task at a time and avoid unrelated changes.
 - For UI/UX, avoid unnecessary secondary labels and descriptions. Let layout,
   grouping and visual hierarchy explain the interface; add supporting text only
   when it resolves real ambiguity.
 - Check reliable maintained libraries before implementing a common capability;
   prefer an appropriate library unless its cost outweighs its benefit.
-- Keep the core headless. GUI and CLI must share future editing operations.
-  Core must not depend on Electron, React or the CLI. CLI must not depend on Electron.
-- Keep renderer privileges behind narrow typed preload methods. Preserve sandbox,
-  isolation, CSP, sender checks and navigation restrictions.
+- Keep the core headless and independent of React and the CLI.
 - Add meaningful tests for new behavior. Run `pnpm typecheck`, `pnpm lint`,
-  `pnpm format:check`, `pnpm test` and `pnpm build` as appropriate. Run
-  `pnpm test:desktop` for changes to Electron/preload/renderer integration.
+  `pnpm format:check`, `pnpm test` and `pnpm build` as appropriate.
 - Media tools are optional development prerequisites; never silently install them.
 - Never silently modify or overwrite user media. Generated fixtures belong only
   in `tests/fixtures/generated/`, are ignored by Git and must never contain user files.

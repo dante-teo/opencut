@@ -5,7 +5,6 @@ import {
   copyFileSync,
   cpSync,
   existsSync,
-  lutimesSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -22,12 +21,10 @@ import { fileURLToPath, URL } from 'node:url';
 import { readManifest, stageRuntime, writeManifest } from './stage.mjs';
 
 const root = realpathSync(fileURLToPath(new URL('../..', import.meta.url)));
-const [target = 'all', output = join(root, 'dist/release')] =
+const [target = 'cli', output = join(root, 'dist/release')] =
   process.argv.slice(2);
-if (!['cli', 'desktop', 'all'].includes(target) || process.argv.length > 4)
-  throw new Error(
-    'Usage: pnpm release:pack [cli|desktop|all] [output-directory]',
-  );
+if (!['cli', 'all'].includes(target) || process.argv.length > 4)
+  throw new Error('Usage: pnpm release:pack [cli|all] [output-directory]');
 if (process.platform !== 'darwin' || process.arch !== 'arm64')
   throw new Error('Release builds require native Apple Silicon macOS.');
 
@@ -38,65 +35,52 @@ if (!/^\d+\.\d+\.\d+$/.test(version))
 const out = resolve(output);
 mkdirSync(out, { recursive: true });
 const cliArchive = 'opencut-cli-' + version + '-macos-arm64.tgz';
-const localApp = 'OpenCut-Review-' + version + '-macos-arm64-local.zip';
-const buildCli = target !== 'desktop';
-const buildDesktop = target !== 'cli';
-const artifacts = [
-  ...(buildCli ? [cliArchive, 'opencut.rb'] : []),
-  ...(buildDesktop ? [localApp] : []),
-];
-for (const name of ['SHA256SUMS', ...artifacts])
+const formulaName = 'opencut.rb';
+const checksumsName = 'SHA256SUMS';
+for (const name of [checksumsName, cliArchive, formulaName])
   if (existsSync(join(out, name)))
     throw new Error('Release output already exists: ' + join(out, name));
 
 const work = mkdtempSync(join(tmpdir(), 'opencut-pack-'));
 const digest = (file) =>
   createHash('sha256').update(readFileSync(file)).digest('hex');
-const run = (command, args, options) =>
-  execFileSync(command, args, { encoding: 'utf8', ...options });
+const run = (command, args) =>
+  execFileSync(command, args, { encoding: 'utf8' });
 try {
-  if (buildCli) await packCli();
-  if (buildDesktop) await packDesktop();
+  const candidate = await createCliArchive();
+  const archive = join(out, cliArchive);
+  copyFileSync(candidate, archive, constants.COPYFILE_EXCL);
+  const archiveDigest = digest(archive);
+
+  const formula = readFileSync(
+    join(import.meta.dirname, 'opencut.rb.in'),
+    'utf8',
+  )
+    .replaceAll('@VERSION@', version)
+    .replace('@ARCHIVE@', cliArchive)
+    .replace('@ARCHIVE_SHA256@', archiveDigest);
+  const formulaFile = join(out, formulaName);
+  writeFileSync(formulaFile, formula, { flag: 'wx' });
   writeFileSync(
-    join(out, 'SHA256SUMS'),
-    artifacts.map((name) => digest(join(out, name)) + '  ' + name).join('\n') +
-      '\n',
+    join(out, checksumsName),
+    `${archiveDigest}  ${cliArchive}\n${digest(formulaFile)}  ${formulaName}\n`,
     { flag: 'wx' },
   );
 } finally {
   rmSync(work, { recursive: true, force: true });
 }
 
-function stage(name) {
-  const app = join(root, 'apps', name);
+async function createCliArchive() {
+  const app = join(root, 'apps/cli');
   const manifest = readManifest(app);
   if (manifest.version !== version)
     throw new Error(
       manifest.name + ' version does not match OpenCut ' + version,
     );
-  const path = join(work, name);
+  const path = join(work, 'cli');
   mkdirSync(path);
-  const dependencies = stageRuntime(root, path, app, manifest);
-  auditNative(path, name === 'cli');
-  return { manifest, path, dependencies };
-}
-
-async function packCli() {
-  const { manifest, path, dependencies } = stage('cli');
-  const adapters = ['sdk'];
-  if (dependencies['@opencut/graphics'])
-    adapters.push('graphics/react', 'graphics/anime', 'graphics/templates');
-  const exports = Object.fromEntries(
-    adapters.map((name) => {
-      const base = './dist/' + name.replace('/', '-');
-      const source = "export * from '@opencut/" + name + "';\n";
-      const types = base + '.d.ts';
-      const entry = base + '.js';
-      writeFileSync(join(path, types), source);
-      writeFileSync(join(path, entry), source);
-      return ['./' + name, { types, import: entry }];
-    }),
-  );
+  stageRuntime(root, path, app, manifest);
+  auditNative(path);
   writeFileSync(
     join(path, 'README.md'),
     '# OpenCut\n\n[Installation and requirements](docs/INSTALL.md)\n\n' +
@@ -127,34 +111,18 @@ async function packCli() {
       filter: (source) => basename(source) !== '.DS_Store',
     });
   writeManifest(path, {
-    name: '@dantea/opencut',
+    name: manifest.name,
     version,
-    description:
-      'OpenCut video-as-code CLI and TypeScript SDK for Apple Silicon',
-    license: 'MIT',
-    type: 'module',
-    repository: {
-      type: 'git',
-      url: 'git+https://github.com/dante-teo/opencut.git',
-      directory: 'apps/cli',
-    },
+    private: true,
+    type: manifest.type,
     engines: { node: engines.node },
-    os: ['darwin'],
-    cpu: ['arm64'],
-    bin: manifest.bin,
-    exports,
-    files: ['dist', 'docs', 'skills', 'examples', 'THIRD_PARTY_NOTICES'],
-    dependencies,
-    bundledDependencies: Object.keys(dependencies),
-    publishConfig: { access: 'public' },
   });
   const candidate = join(work, cliArchive);
   const files = readdirSync(path, { recursive: true, withFileTypes: true })
     .filter((entry) => !entry.isDirectory())
     .map((entry) => join(entry.parentPath, entry.name).slice(path.length + 1))
     .sort();
-  const archive = join(out, cliArchive);
-  // Preserve modes for native workers that aren't npm bins.
+  // Preserve executable modes for the bundled native workers.
   await createTar(
     {
       cwd: path,
@@ -167,80 +135,16 @@ async function packCli() {
     },
     files,
   );
-  copyFileSync(candidate, archive, constants.COPYFILE_EXCL);
-  const formula = readFileSync(
-    join(import.meta.dirname, 'opencut.rb.in'),
-    'utf8',
-  )
-    .replaceAll('@VERSION@', version)
-    .replace('@NPM_ARCHIVE@', cliArchive)
-    .replace('@NPM_SHA256@', digest(archive));
-  writeFileSync(join(out, 'opencut.rb'), formula, { flag: 'wx' });
+  return candidate;
 }
 
-async function packDesktop() {
-  const { manifest, path } = stage('desktop');
-  writeManifest(path, {
-    name: 'opencut-review',
-    version,
-    type: manifest.type,
-    main: manifest.main,
-    author: 'OpenCut',
-    license: 'MIT',
-  });
-  const icon = join(root, 'apps/desktop/resources/opencut-icon.png');
-  mkdirSync(join(path, 'resources'));
-  copyFileSync(icon, join(path, 'resources/opencut-icon.png'));
-  const icons = join(work, 'OpenCut.iconset');
-  mkdirSync(icons);
-  for (const size of [16, 32, 128, 256, 512]) {
-    for (const scale of [1, 2]) {
-      const pixels = String(size * scale);
-      const file =
-        'icon_' + size + 'x' + size + (scale === 2 ? '@2x' : '') + '.png';
-      run('/usr/bin/sips', [
-        '-z',
-        pixels,
-        pixels,
-        icon,
-        '--out',
-        join(icons, file),
-      ]);
-    }
-  }
-  const appIcon = join(work, 'OpenCut.icns');
-  run('/usr/bin/iconutil', ['-c', 'icns', icons, '-o', appIcon]);
-  const { packager } = await import('@electron/packager');
-  const [app] = await packager({
-    dir: path,
-    out: work,
-    platform: 'darwin',
-    arch: 'arm64',
-    electronVersion: manifest.devDependencies.electron,
-    name: 'OpenCut Review',
-    appBundleId: 'com.danteteo.opencut.review',
-    appVersion: version,
-    icon: appIcon,
-    extendInfo: { LSMinimumSystemVersion: '15.0' },
-    prune: false,
-    asar: false,
-  });
-  const bundle = join(app, 'OpenCut Review.app');
-  for (const entry of ['', ...readdirSync(bundle, { recursive: true })]) {
-    lutimesSync(join(bundle, entry), archiveTime, archiveTime);
-  }
-  run(
-    '/usr/bin/ditto',
-    ['-c', '-k', '--norsrc', '--keepParent', bundle, join(out, localApp)],
-    { env: { ...process.env, TZ: 'UTC' } },
-  );
-}
-
-function auditNative(path, cli) {
-  const binaries = ['process-memory', 'video-enhance', 'video-interpolate'].map(
-    (name) => join(path, 'node_modules/@opencut/media/dist', name),
-  );
-  if (cli) binaries.push(join(path, 'dist/system-probe'));
+function auditNative(path) {
+  const binaries = [
+    ...['process-memory', 'video-enhance', 'video-interpolate'].map((name) =>
+      join(path, 'node_modules/@opencut/media/dist', name),
+    ),
+    join(path, 'dist/system-probe'),
+  ];
   for (const file of binaries) {
     if (run(file, ['--version']).trim() !== version)
       throw new Error('Native binary version does not match OpenCut: ' + file);

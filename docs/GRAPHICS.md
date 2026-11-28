@@ -8,10 +8,12 @@ fit, crop, position, scale, rotation, opacity, and outer keyframes.
 ## Install the optional React browser
 
 React graphics require the pinned Chromium Headless Shell. Install it under
-the account that runs the OpenCut CLI or Review app.
+the account that runs OpenCut.
 
 ```sh
-pnpm dlx playwright-core@1.64.1 install --only-shell chromium
+"$(brew --prefix node@24)/bin/node" \
+  "$(brew --prefix opencut)/libexec/node_modules/playwright-core/cli.js" \
+  install --only-shell chromium
 opencut doctor --json
 ```
 
@@ -109,9 +111,8 @@ entrances and exits.
 
 ## Runtime API and assets
 
-For editor type checking with the published CLI package installed locally,
-use `@dantea/opencut/graphics/react` and `@dantea/opencut/graphics/templates`.
-Both paths use the same renderer and bundled React instance.
+Use `@opencut/graphics/react` and `@opencut/graphics/templates` in components.
+For editor type checking, [link the bundled graphics package](INSTALL.md#use-the-bundled-sdk-from-a-node-project).
 
 - `useGraphicFrame()` returns the source frame as an integer.
 - `useGraphicTiming()` returns the frame, full source frame count, rational
@@ -134,7 +135,7 @@ Both paths use the same renderer and bundled React instance.
 
 React captures the committed tree and waits for fonts and image decoding.
 Components run in an ephemeral offline Chromium context with a restricted
-resource origin and no Node or Electron bridge. Compile and render graphics
+resource origin and no Node bridge. Compile and render graphics
 from sources you trust. Errors from a component or its imported modules
 include the original TSX or TS filename, line and column when a frame
 location is available. Source maps travel with offline bundles.
@@ -200,8 +201,8 @@ export default function Headline({ title }: { title: string }) {
 }
 ```
 
-The published authoring path is `@dantea/opencut/graphics/anime`. The compiler
-supplies its pinned `animejs`, React, and OpenCut SDK modules. Composition
+Import animation hooks from `@opencut/graphics/anime`. The compiler supplies
+its pinned `animejs`, React, and OpenCut graphics modules. Composition
 source and local imports stay within the definition directory. OpenCut bundles
 them without running project build configuration or package scripts. The
 graphics package contains the Anime.js license, with the full notice also
@@ -226,21 +227,8 @@ playback loops, timers, WAAPI, autonomous CSS transitions and animations,
 wall-clock values, user input and network data are outside the deterministic
 contract. Use ordinary OpenCut tracks for audio and video.
 
-The desktop editor opens the definition and automatically refreshes changed
-sources. Use **Refresh source** to request a rebuild immediately. Expand
-**Motion graphics** to import a TSX component or place a registered composition
-on a new video track. Select a motion clip in the timeline to edit its frame
-range and parameters, duplicate it at a new position, or split at the playhead.
-If the playhead would divide a transition, **Split at frame** is disabled.
-Move to the transition's edge or beyond it.
-
-Edits save and open a new resolved `.video.ts` beside the original. The copy
-captures the selected variant and continues to use the same component sources
-and local assets. Closing the definition cancels a pending motion edit. If
-the source refreshes during **Save As**, retry the edit from the rebuilt preview.
-
-In the import dialog, use `options.parameters` and `props` in the settings JSON
-to expose fields, and `resources` for local file aliases.
+Use `opencut timeline edit-graphic --help` for the CLI commands to import,
+place, and edit motion clips in a new definition.
 
 The [Tideline example](../examples/motion/tideline/tideline.video.ts) is a
 13-second 1080p30 project with transparent Anime.js layers, an ordinary SVG
@@ -327,12 +315,12 @@ within each render and bounds the source-frame memory cache. The existing
 picture cache also stores verified graphic PNG samples, up to 256 MiB of
 new samples per render. Source reuse depends on code, resources, props,
 duration, rate, size, and the renderer. The cache directory can be shared
-between exports. Preview and desktop review use the same frame renderer as
+between exports. Previews use the same frame renderer as
 export. Compare equivalent quality and size settings to separate animation
 timing from normal MP4 compression differences.
 
 A version 2 package includes editable local sources and a captured executable
-React bundle. It renders without the original npm dependency graph once the
+React bundle. It renders without the original project's dependencies once the
 matching Chromium Headless Shell and OpenCut runtime are installed. Use the
 package manifest's `graphics` map to look up a bundle by asset ID. Add any
 required project attribution and font notices with `--resource`. OpenCut carries

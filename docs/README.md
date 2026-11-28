@@ -31,12 +31,10 @@ node apps/cli/dist/index.js batch examples/video/short-batch.video.ts \
   --variants examples/video/short-batch.variants.json --output-dir ./outputs --json
 ```
 
-Run `pnpm dev` for the optional Electron app. **Open definition** watches
-the chosen file and its inputs, shows the last playable revision, and lets
-you export it. Select a clip, subtitle, or transition in the timeline to
-inspect its start. Edit the definition in your usual text editor and the
-preview rebuilds at your current timeline position. **Open video** plays a
-local source file.
+Run `node apps/cli/dist/index.js preview examples/video/showcase.video.ts --watch`
+to rebuild a playable MP4 as you edit. Open the printed path in your video
+player. Use [frame, clip and contact-sheet previews](VIDEO_DEFINITIONS.md#inspect-preview-and-render)
+to review specific points in the edit.
 
 - [Definition format and examples](VIDEO_DEFINITIONS.md)
 - [React and SVG graphics](GRAPHICS.md)

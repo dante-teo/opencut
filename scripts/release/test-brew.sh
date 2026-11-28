@@ -54,6 +54,19 @@ prefix="$(brew --prefix "$formula_name")"
 bin="$prefix/bin/opencut"
 "$bin" render smoke.video.ts -o final.mp4
 test "$(ffprobe -v error -select_streams v:0 -show_entries stream=nb_frames -of csv=p=0 final.mp4)" = 12
+
+# Exercise the documented SDK link in a project outside the installed keg.
+node_bin="$(brew --prefix node@24)/bin/node"
+mkdir -p "$work/sdk/node_modules/@opencut"
+ln -s "$prefix/libexec/node_modules/@opencut/sdk" "$work/sdk/node_modules/@opencut/sdk"
+cp smoke.video.ts title.ts package.json "$work/sdk/"
+(
+  cd "$work/sdk"
+  "$node_bin" "$prefix/libexec/node_modules/typescript/lib/tsc.js" --noEmit \
+    --module NodeNext --skipLibCheck --allowImportingTsExtensions --strict smoke.video.ts
+  "$node_bin" --input-type=module -e 'import { defineVideo } from "@opencut/sdk"; if (typeof defineVideo !== "function") process.exit(1)'
+)
+
 bash "$root/scripts/release/test-workflows.sh" "$bin" \
   "${OPENCUT_RELEASE_EVALUATION_DIR:-$work/evaluation}" --package-dir "$prefix/libexec"
 brew uninstall "$formula_name"

@@ -1,9 +1,7 @@
 # Export
 
 Render a definition to MP4 with the CLI or SDK. The default uses the
-definition's canvas and rate, H.264 video and stereo AAC. The export
-dialog in Electron renders the displayed revision at its authored size and
-rate. Use the CLI or SDK for the full set of output controls.
+definition's canvas and rate, H.264 video and stereo AAC.
 
 ```sh
 opencut render edit.video.ts --output final.mp4
@@ -54,9 +52,9 @@ placement before encoding. Run [`render plan`](CLI.md#read-only-render-plan)
 with the intended export options to check composition and delivery specs,
 shot cadence, cache reuse, required encoders, and available scratch space.
 
-The export panel shows the current stage, total elapsed time, and time since
-the last reported progress. It displays **Ready · Saved** after verification
-and publication.
+During rendering, the CLI reports the current stage, elapsed
+time, and time since the last reported progress. It reports **Ready** after
+verification and publication.
 
 After export, [`verify export`](CLI.md#post-export-verification) compares the
 MP4 with an approved preview by timecode, including when their frame rates

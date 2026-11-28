@@ -9,8 +9,6 @@
     "pnpm": ">=11.20.0 <12"
   },
   "scripts": {
-    "dev": "pnpm build:packages && pnpm --filter @opencut/desktop dev",
-    "dev:desktop": "pnpm dev",
     "dev:cli": "pnpm build:packages && pnpm --filter @opencut/cli dev",
     "cli": "pnpm --filter @opencut/cli start",
     "build:packages": "pnpm -r --filter './packages/*' build",
@@ -20,10 +18,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "pnpm build:packages && pnpm --filter @opencut/cli build && vitest run",
-    "test:desktop": "pnpm build && playwright test",
     "test:conformance": "pnpm build && node --import tsx scripts/conformance.ts",
-    "test:consistency": "pnpm build && playwright test video-definition-review.spec.ts && node --import tsx --test tests/integration/video-definition.native.spec.ts tests/integration/video-watch.native.spec.ts",
-    "test:preview": "pnpm build && playwright test --config playwright.preview.config.ts",
+    "test:consistency": "pnpm build && node --import tsx --test tests/integration/video-definition.native.spec.ts tests/integration/video-watch.native.spec.ts",
     "fixtures:generate": "tsx scripts/fixtures.ts generate",
     "fixtures:validate": "tsx scripts/fixtures.ts validate",
     "test:fixtures": "node --import tsx --test tests/fixtures/validation.native.spec.ts",
@@ -31,13 +27,9 @@
     "release:pack": "node scripts/release/pack.mjs"
   },
   "devDependencies": {
-    "@electron/notarize": "3.1.2",
-    "@electron/osx-sign": "2.6.0",
-    "@electron/packager": "20.0.0",
     "@eslint/js": "9.39.5",
     "@opencut/core": "workspace:*",
     "@opencut/sdk": "workspace:*",
-    "@playwright/test": "1.64.1",
     "@types/node": "24.19.2",
     "eslint": "9.39.5",
     "eslint-config-prettier": "10.1.8",

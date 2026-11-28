@@ -1,8 +1,8 @@
 class Opencut < Formula
   desc "Local video-as-code renderer"
   homepage "https://github.com/dante-teo/opencut"
-  url "https://github.com/dante-teo/opencut/releases/download/v@VERSION@/@NPM_ARCHIVE@"
-  sha256 "@NPM_SHA256@"
+  url "https://github.com/dante-teo/opencut/releases/download/v@VERSION@/@ARCHIVE@"
+  sha256 "@ARCHIVE_SHA256@"
   version "@VERSION@"
   license "MIT"
 

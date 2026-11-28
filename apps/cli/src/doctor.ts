@@ -50,7 +50,7 @@ async function inspectExecutable(tool: 'ffmpeg' | 'ffprobe') {
 
 export async function inspectReactGraphics() {
   const hint =
-    'Install the matching headless Chromium with pnpm dlx playwright-core@1.64.1 install --only-shell chromium.';
+    'Install the matching Chromium Headless Shell using https://github.com/dante-teo/opencut/blob/main/docs/GRAPHICS.md#install-the-optional-react-browser.';
   try {
     const { installed, backend, path, adapters } =
       await inspectGraphicsRuntime();

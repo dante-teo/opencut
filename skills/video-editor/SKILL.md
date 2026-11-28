@@ -42,8 +42,7 @@ For an ordinary footage edit, follow the media workflow below.
    Set asset `props` as defaults and clip `props` for each placement. Declare
    local images and fonts in `resources`. Put soundtrack material on audio tracks.
 2. Register animation with `useGraphicTimeline(ref, build)` from
-   `@opencut/graphics/anime` (installed CLI:
-   `@dantea/opencut/graphics/anime`). Use Anime.js `stagger`, `createSpring`
+   `@opencut/graphics/anime`. Use Anime.js `stagger`, `createSpring`
    and `svg` helpers with explicit initial and target values. OpenCut builds
    and seeks the paused timeline for each source frame. Drive visual state
    from that clock. Use stable-ID randomness and scoped SVG IDs.
@@ -92,18 +91,14 @@ For an ordinary footage edit, follow the media workflow below.
    inspection to get processed-media evidence. Declare
    [layout assertions](references/video-definitions.md#layout-assertions) for
    essential caption, panel, watermark and coverage geometry.
-4. Review the composition with `opencut preview DEFINITION --watch`, the
-   desktop **Open definition** action, or a deterministic frame, clip, or
-   contact sheet from `opencut preview --help`. Use exact samples on the
+4. Review the composition with `opencut preview DEFINITION --watch` or a
+   deterministic frame, clip, or contact sheet from `opencut preview --help`.
+   Use exact samples on the
    definition or exported MP4 to check clip cuts and caption boundaries.
    Definition previews default to `fast`.
    Use `--quality quality` to review offline AI processing, such as 4×
    super-resolution. A failed watch rebuild leaves the last valid preview
-   available. Desktop review keeps the playhead at the same timeline time
-   across rebuilds, including frame-rate changes, and clamps it to the last
-   frame if the revision ends earlier. Select a clip, subtitle, or transition
-   to pause on the first frame at or after its start. A selection made during
-   loading takes effect when the preview is ready.
+   available.
 5. Deliver a new MP4 with `opencut render DEFINITION --output final.mp4`.
    Run `opencut render plan DEFINITION --output final.mp4 --json` with the
    same options to check composition and delivery specs, each shot's cadence,

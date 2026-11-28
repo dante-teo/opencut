@@ -2,10 +2,8 @@
 
 Import `defineVideo`, `compileVideo`, `previewVideo`, `watchVideo`,
 `renderVideo` and `renderCompiledVideo` from `@opencut/sdk` in definitions
-run by OpenCut. Use `@dantea/opencut/sdk` in a Node project with the published
-CLI installed locally for SDK access and type checking. The CLI and review app
-use their bundled `@opencut/sdk` for projects without a local SDK. If a local
-SDK fails to load, repair the project's installation or exported entry point.
+run by OpenCut. For editor type checking or standalone Node programs,
+[link the SDK bundled with Homebrew](../../../docs/INSTALL.md#use-the-bundled-sdk-from-a-node-project).
 Use `renderVideo` to compile and render in one call. If `renderCompiledVideo`
 reports that source media changed, recompile before retrying.
 See the repository's [SDK guide](../../../docs/SDK.md) for the public API.

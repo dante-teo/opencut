@@ -94,7 +94,7 @@ export async function readDefinitionScript(
       try {
         resolved = nextResolve(specifier, context);
       } catch (error) {
-        // A global CLI or review app has its SDK beside the core, outside
+        // The global CLI has its SDK beside the core, outside
         // the authored project's normal Node module search path.
         if (
           specifier === sdk &&

@@ -17,10 +17,6 @@ identity and stage a private copy for the duration of the operation.
 - `@opencut/sdk` exposes the definition workflow. The CLI uses the same core
   functions; foreground rendering runs in the CLI process and starts only the
   subprocesses needed for that invocation.
-- Electron opens local video or watches a definition. It previews the last
-  valid revision and can export that revision to a destination chosen in the
-  native save dialog. Its renderer remains isolated and sandboxed; it never
-  receives a filesystem API.
 
 A watch scopes its temporary media copies and rendered preview to a single
 definition. It observes source, imported modules and referenced media. Failed

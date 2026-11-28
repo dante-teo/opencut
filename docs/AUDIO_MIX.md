@@ -4,25 +4,10 @@ Enable the mixer by adding `professionalMix` to a `.video.ts` definition. Assign
 
 **Natural Cinematic Dialogue** uses lighter cleanup and dynamics processing suitable for interviews and narrative work. **Clear Professional Voiceover** uses stronger cleanup, presence, consistency and music ducking.
 
-In OpenCut Review, select **Create dialogue mix** to choose dialogue recordings,
-optional music and an optional picture. The import writes a new definition
-that references your original files. Open **Professional Dialogue Mix** to
-adjust routing and settings, then select **Apply to preview**.
-
-**Compare before** targets the last applied mix’s measured loudness when
-playing the original mix and honors the delivery true-peak ceiling.
-**Compare after** returns to the applied mix. Both preserve your draft edits. **Export MP4** renders the
-applied mix even while **Compare before** is playing.
-
-Switch off **Enable mix** and apply to bypass processing. **Reset to definition**
-restores the settings from the authored file. **Save mix settings** writes the
-current draft to JSON. Use **Load mix settings** followed by **Apply to preview**
-to use it in OpenCut Review, or pass the JSON to the CLI or SDK.
-
 ## Definition
 
 ```ts
-import { defineVideo } from '@dantea/opencut/sdk';
+import { defineVideo } from '@opencut/sdk';
 
 export default defineVideo({
   canvas: { width: 1920, height: 1080, frameRate: 30, durationFrames: 300 },
@@ -87,8 +72,7 @@ gain keys.
 
 To reuse the generated curves, copy the report’s `automation` object into
 `professionalMix.automation` in the definition or `mix.automation` in a mix
-settings file. In OpenCut Review, select **Use analyzed curves** under
-**Advanced settings and automation** to copy the curves into the draft.
+settings file.
 
 ## Delivery and inspection
 
@@ -115,7 +99,7 @@ import {
   analyzeVideoMix,
   compileVideo,
   renderCompiledVideo,
-} from '@dantea/opencut/sdk';
+} from '@opencut/sdk';
 
 const video = await compileVideo('lesson.video.ts');
 const report = await analyzeVideoMix(video);
@@ -129,7 +113,7 @@ Pass `audioMixEdit` to `compileVideo` or `renderVideo` for the same JSON overrid
 
 The two presets require only OpenCut’s existing FFmpeg installation. To enable [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet), install its native `deep-filter` executable separately. OpenCut uses it on local 48 kHz audio with compensation for its model delay. The executable can be on PATH or set via the absolute `OPENCUT_DEEPFILTER` path. Set `OPENCUT_DEEPFILTER_MODEL` to use a compatible local model archive when the executable lacks a built-in model or when choosing a different one. The mixer runs without network access. An explicitly selected backend that cannot run produces an error so the same settings do not silently render with a different backend.
 
-OpenCut reuses analyzed clip profiles within a process. For persistent AI-enhanced stems, pass `--mix-cache <directory>` to CLI commands or `audioMixCacheDirectory` to SDK analysis, render and video preview. Desktop previews reuse enhanced stems during an open review session. Cached stems contain processed audio. Keep the cache private when working with private recordings and remove it when it is no longer needed.
+OpenCut reuses analyzed clip profiles within a process. For persistent AI-enhanced stems, pass `--mix-cache <directory>` to CLI commands or `audioMixCacheDirectory` to SDK analysis, render and video preview. Cached stems contain processed audio. Keep the cache private when working with private recordings and remove it when it is no longer needed.
 
 ## Centered mono dialogue
 
@@ -168,16 +152,10 @@ musicComparison: {
 },
 ```
 
-In OpenCut Review, use **Music candidate** to switch at the current playhead.
-**Match loudness** applies a common measured level to the candidate tracks
-before ducking. Both controls preserve unapplied Dialogue Mix edits. If a
-definition edit removes the auditioned candidate, Review uses the authored
-selection. When Professional Dialogue Mix is active, any `ducking` fields
-specified for the candidate override the corresponding base settings during
-rendering. The editor shows the base mix settings. Explicit authored music
-automation still takes precedence.
-Final mastering remains based on the selected mix and may adjust the overall
-output level.
+When Professional Dialogue Mix is active, any `ducking` fields specified for
+the candidate override the corresponding base settings during rendering.
+Explicit authored music automation takes precedence. Final mastering uses the
+selected mix and may adjust the overall output level.
 
 On the CLI, use `--music-candidate soft-bed --music-loudness matched` with
 `preview clip`, `preview --watch` or `render`. Select `authored` to compare
@@ -185,5 +163,4 @@ the original gains. The JSON render report records the selection, sources
 and available provenance in `musicComparison`. With matching enabled,
 `musicLoudness` reports the target, applied gain and candidate measurements.
 Repeated sources are flagged inside the current edit. The optional
-`previouslyUsedIn` field surfaces known earlier deliveries in Review and the
-report. Export from Review to render the currently selected candidate.
+`previouslyUsedIn` field records known earlier deliveries in the report.

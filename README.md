@@ -10,15 +10,18 @@ opencut preview frame my-video.video.ts --frame 48 --output review.png
 opencut render my-video.video.ts --output final.mp4
 ```
 
-The CLI, TypeScript SDK and Electron review app share the same timeline
-evaluator and rendering pipeline. Use Electron to watch a definition and
-export a reviewed revision.
+The CLI and TypeScript SDK share the same timeline evaluator and renderer.
+Use `opencut preview my-video.video.ts --watch` to rebuild a playable
+preview as you edit.
 
 ## Install
 
-Use pnpm or the Homebrew tap for the Apple Silicon CLI. The macOS review app
-is a separate download. See the [installation guide](docs/INSTALL.md) for
-release availability, system requirements and optional AI model setup.
+```sh
+brew install dante-teo/tap/opencut
+```
+
+See the [installation guide](docs/INSTALL.md) for system requirements,
+the bundled SDK, and optional AI model setup.
 
 ## Run from source
 
@@ -28,7 +31,8 @@ a native RSS helper against the macOS SDK. Run from the repository root:
 
 ```sh
 pnpm install
-pnpm dev
+pnpm build
+pnpm cli --help
 ```
 
 Install FFmpeg and ffprobe for rendered previews and video export. See the [full quick start](docs/README.md) for

@@ -1,7 +1,7 @@
 # Preview and export consistency
 
 OpenCut runs the same timeline planner and media engine for frame, clip,
-watch, desktop, and final export. Frame numbers use the authored canvas
+watch, and final export. Frame numbers use the authored canvas
 rate. A preview clip keeps the selected time range with an exclusive end.
 A single-frame PNG and MP4 decoded at the same position can differ slightly
 from lossy encoding and chroma subsampling. Watched playback also uses a
@@ -34,30 +34,23 @@ the CLI harness.
 
 ## Watched revisions
 
-CLI and Electron watchers stage referenced media for each revision so a
-file changing in place cannot mix old and new input within one published
-preview. A failed or superseded rebuild leaves the last complete playback
-available. Desktop export renders the selected revision using its staged
-inputs and retains those inputs while the render is active.
-When the final profile requires different AI processing, the watcher keeps
-the original recipe inputs available for that export as well.
-Desktop export reports progress through compositing, encoding, and
-verification. **Ready · Saved** confirms the verified MP4 was published.
-See [export and delivery checks](EXPORT.md#preflight-and-delivery-checks).
+Watch mode stages referenced media for each revision so a file changing in
+place cannot mix old and new input within one published preview. A failed or
+superseded rebuild leaves the last complete playback available. The SDK can
+export a selected revision with its staged inputs and retains those inputs
+while the render is active. When the final profile requires different AI
+processing, the watcher keeps the original recipe inputs available for that
+export as well. See [export and delivery checks](EXPORT.md#preflight-and-delivery-checks).
 
-Run `pnpm test:consistency` for frame and audio alignment, preview recovery,
-and decoded comparison of an Electron export with a foreground SDK render.
-The suite compares graded exports and frame previews across a long
-variable-frame-rate gap against sequential decoding. Desktop tests cover
-playhead restoration across frame-rate changes and selections made before
-preview metadata loads.
+Run `pnpm test:consistency` for frame and audio alignment and preview
+recovery. The suite compares graded exports and frame previews across a long
+variable-frame-rate gap against sequential decoding.
 
 ## Video-as-Code conformance
 
-Run `pnpm test:conformance` with FFmpeg and ffprobe on PATH and a desktop
-session that can launch Electron. The command builds OpenCut, generates
-synthetic inputs in a fresh workspace, runs the Video-as-Code native tests
-and Electron review tests, and removes the temporary media and recipe cache.
+Run `pnpm test:conformance` with FFmpeg and ffprobe on PATH. The command
+builds OpenCut, generates synthetic inputs in a fresh workspace, runs the
+Video-as-Code native tests, and removes the temporary media and recipe cache.
 Fixture directories must stay under `tests/fixtures/generated/` and may not
 traverse symlinks. The native cases also run under `pnpm test:media`, which
 uses the fixtures prepared by `pnpm fixtures:generate`.
@@ -69,8 +62,8 @@ a native pixel assertion is a regression, run the same test on the base
 revision with the same synthetic inputs and FFmpeg build.
 
 After the build, the runner writes `conformance-results/run-*/report.json`.
-Use `cases` for native results and skip reasons, `desktop.report` for the
-Electron results, and `measurements` for decoded values and artifact paths.
+Use `cases` for test results and skip reasons, and `measurements` for
+decoded values and artifact paths.
 Paths are relative to the run directory and point to items such as PNG
 comparisons, representative MP4s, and decoded WAVs. Runs are ignored by Git.
 
