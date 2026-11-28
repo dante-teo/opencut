@@ -28,6 +28,7 @@ import type {
   VideoProcessingProgress,
   VideoRecipe,
   VideoWatchRevision,
+  VideoWatchStatus,
 } from '@opencut/sdk';
 import { fixtureDirectory } from '../fixture-paths.js';
 
@@ -463,20 +464,28 @@ test(
       ['tv', 'bt709', 'bt709', 'bt709'],
     );
 
-    const watcher = await new Promise<VideoWatchRevision>((resolve, reject) => {
-      void watchVideo(file, {
-        processing: { cacheDirectory: cache },
-        maxDimension: 960,
-        onStatus(event) {
-          if (event.status === 'error') reject(new Error(event.error));
-          if (event.status === 'ready' && event.current) resolve(event.current);
-        },
-      }).then((watch) => t.after(() => watch.close()), reject);
+    let onStatus!: (event: VideoWatchStatus) => void;
+    const ready = new Promise<VideoWatchRevision>((resolve, reject) => {
+      onStatus = (event) => {
+        if (event.status === 'error') reject(new Error(event.error));
+        if (event.status === 'ready' && event.current) resolve(event.current);
+      };
     });
-    const [snapshot] = (
-      await watcher.video.resolveRender()
-    ).sourceMetadata.keys();
-    assert.deepEqual(await readFile(snapshot!), await readFile(derived));
+    const watch = await watchVideo(file, {
+      processing: { cacheDirectory: cache },
+      maxDimension: 960,
+      signal: t.signal,
+      onStatus,
+    });
+    try {
+      const revision = await ready;
+      const [snapshot] = (
+        await revision.video.resolveRender()
+      ).sourceMetadata.keys();
+      assert.deepEqual(await readFile(snapshot!), await readFile(derived));
+    } finally {
+      await watch.close();
+    }
 
     const qualityChange: VideoProcessingProgress[] = [];
     const high = (await capabilities)['video-super-resolution'];
