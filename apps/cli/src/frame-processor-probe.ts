@@ -12,16 +12,16 @@ const driverUnavailable =
 const media = import.meta.resolve('@opencut/media');
 
 const samples = [
-  { effect: 'low-latency-interpolation', scale: 1, offline: false },
-  { effect: 'frame-rate-conversion-quality', scale: 1, offline: true },
-  { effect: 'low-latency-super-resolution', scale: 1.5, mode: 'fast' },
-  { effect: 'video-super-resolution', scale: 4, mode: 'video' },
-  { effect: 'temporal-noise-filter', scale: 1, mode: 'noise' },
+  { effect: 'low-latency-interpolation', scales: [1], offline: false },
+  { effect: 'frame-rate-conversion-quality', scales: [1], offline: true },
+  { effect: 'low-latency-super-resolution', scales: [1.5, 2], mode: 'fast' },
+  { effect: 'video-super-resolution', scales: [4], mode: 'video' },
+  { effect: 'temporal-noise-filter', scales: [1], mode: 'noise' },
 ] as const;
 
 type Probe = (typeof samples)[number];
 
-async function processSample(sample: Probe) {
+async function processSample(sample: Probe, scale: number) {
   const dimensions = [String(width), String(height)];
   const interpolation = 'offline' in sample;
   const rgba = interpolation ? sample.offline : sample.mode === 'video';
@@ -50,7 +50,7 @@ async function processSample(sample: Probe) {
     : [
         sample.mode,
         ...dimensions,
-        String(sample.scale),
+        String(scale),
         '2',
         '24',
         '1',
@@ -58,8 +58,7 @@ async function processSample(sample: Probe) {
         '0.5',
         '32',
       ];
-  const expectedBytes =
-    frameBytes * (interpolation ? 4 : 2 * sample.scale ** 2);
+  const expectedBytes = frameBytes * (interpolation ? 4 : 2 * scale ** 2);
 
   return new Promise<boolean>((resolve, reject) => {
     const child = spawn(worker, args, {
@@ -115,23 +114,27 @@ export async function verifyGuestFrameProcessors(
   // Keep the advertised capability when the worker processes real frames.
   for (const sample of samples) {
     const processor = processors[sample.effect];
-    const config = processor?.testedSizes
-      ?.find((size) => size.width === width && size.height === height)
-      ?.configurations.find(
+    if (!processor?.testedSizes) continue;
+    const configs = processor.testedSizes
+      .find((size) => size.width === width && size.height === height)
+      ?.configurations.filter(
         (item) =>
-          item.scale === sample.scale &&
-          item.status === 'configuration-accepted',
+          sample.scales.some((scale) => scale === item.scale) &&
+          item.status === 'configuration-accepted' &&
+          item.modelStatus !== 'downloading' &&
+          item.modelStatus !== 'download-required',
       );
-    if (
-      !config ||
-      config.modelStatus === 'downloading' ||
-      config.modelStatus === 'download-required'
-    )
-      continue;
-    if (await processSample(sample)) continue;
-    processor!.status = 'hardware-unsupported';
-    processor!.reason =
+    if (!configs?.length) continue;
+
+    let supported = false;
+    for (const config of configs) {
+      if (await processSample(sample, config.scale)) supported = true;
+      else config.status = 'processing-unavailable';
+    }
+    if (supported) continue;
+    processor.status = 'hardware-unsupported';
+    processor.reason =
       'VideoToolbox could not process sample frames through the virtual machine driver.';
-    delete processor!.testedSizes;
+    delete processor.testedSizes;
   }
 }
