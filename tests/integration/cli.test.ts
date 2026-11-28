@@ -86,6 +86,29 @@ describe('standalone built CLI', () => {
     expect(run('render', '--help').stdout).toContain('--no-subtitles');
   });
 
+  it('prints scoped help without loading the media runtime', () => {
+    const preload = `data:text/javascript,${encodeURIComponent(`
+      import { registerHooks } from 'node:module';
+      registerHooks({
+        resolve(specifier, context, nextResolve) {
+          if (specifier === '@opencut/media')
+            throw new Error('Help loaded the media runtime');
+          return nextResolve(specifier, context);
+        },
+      });
+    `)}`;
+    const result = spawnSync(
+      process.execPath,
+      ['--import', preload, entry, 'help', 'render', '--json'],
+      { encoding: 'utf8', cwd: tmpdir() },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(JSON.parse(result.stdout).help).toContain(
+      '--encoder <auto|software|videotoolbox>',
+    );
+  });
+
   it('resolves subcommand help with option values before and between command words', () => {
     const result = run(
       '--size',

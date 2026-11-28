@@ -2,7 +2,6 @@
 import { parseCommandLine, printHelp, resolveCommand } from './commands.js';
 import type { CommandOptions } from './commands.js';
 import { UsageError } from './usage.js';
-import { findSourceChange, sourceIdentity } from '@opencut/media';
 
 async function run(args: string[]) {
   const { values, positionals } = parseCommandLine(args);
@@ -24,9 +23,10 @@ async function run(args: string[]) {
   try {
     return await executeCommand(command, file, values);
   } catch (error) {
+    if (!values['retry-source-change']) throw error;
+    const { findSourceChange, sourceIdentity } = await import('@opencut/media');
     const source = findSourceChange(error);
     if (
-      !values['retry-source-change'] ||
       source?.change.content !== 'unchanged' ||
       sourceIdentity(source.change.path) !== source.change.after
     )
@@ -182,6 +182,7 @@ const args = process.argv.slice(2);
 try {
   await run(args);
 } catch (error) {
+  const { findSourceChange } = await import('@opencut/media');
   const source = findSourceChange(error);
   const { findBeautyCoverageError } = await import('@opencut/core/video');
   const beauty = findBeautyCoverageError(error);

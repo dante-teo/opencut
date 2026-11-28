@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./render-options": {
+      "types": "./dist/render-options.d.ts",
+      "import": "./dist/render-options.js"
     }
   },
   "files": [

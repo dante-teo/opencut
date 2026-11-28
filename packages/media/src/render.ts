@@ -53,12 +53,21 @@ import {
   SourceChangedError,
 } from './source-integrity.js';
 import { accountRenderBytes, accountRenderFile } from './render-budget.js';
-import { renderQualities } from '@opencut/shared';
-import type { RenderQuality } from '@opencut/shared';
+import {
+  renderCodecs,
+  renderQualities,
+  renderResolutions,
+} from './render-options.js';
+import type {
+  RenderCodec,
+  RenderEncoder,
+  RenderQuality,
+  RenderResolution,
+} from './render-options.js';
 import { renderProgress, withExportProgress } from './render-progress.js';
 import type { RenderProgress } from './render-progress.js';
 import { encoderArguments, selectRenderEncoder } from './render-encoder.js';
-import type { RenderEncoder, RenderEncoderReport } from './render-encoder.js';
+import type { RenderEncoderReport } from './render-encoder.js';
 import {
   orientedSource,
   resolveSourceWindow,
@@ -145,10 +154,6 @@ interface VisualTransition {
   layers: TransitionLayer[];
 }
 
-export const renderResolutions = ['project', '720p', '1080p'] as const;
-export const renderCodecs = ['h264', 'hevc'] as const;
-export type RenderCodec = (typeof renderCodecs)[number];
-export type RenderResolution = (typeof renderResolutions)[number];
 const maxDeliveryPixels = 2880 * 3840;
 const pictureColor = {
   colorRange: 'tv',

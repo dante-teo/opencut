@@ -1,12 +1,14 @@
 import { checkRenderSignal, MediaError, runMediaTool } from './process.js';
 import { renderQualityProfiles } from '@opencut/shared';
-import type { RenderQuality } from '@opencut/shared';
-
-export const renderEncoders = ['auto', 'software', 'videotoolbox'] as const;
-export type RenderEncoder = (typeof renderEncoders)[number];
+import { renderEncoders } from './render-options.js';
+import type {
+  RenderCodec,
+  RenderEncoder,
+  RenderQuality,
+} from './render-options.js';
 
 interface EncoderTarget {
-  codec: 'h264' | 'hevc';
+  codec: RenderCodec;
   quality: RenderQuality;
   width: number;
   height: number;

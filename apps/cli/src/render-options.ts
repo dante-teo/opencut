@@ -4,8 +4,8 @@ import {
   renderEncoders,
   renderQualities,
   renderResolutions,
-} from '@opencut/media';
-import type { RenderQuality } from '@opencut/media';
+} from '@opencut/media/render-options';
+import type { RenderQuality } from '@opencut/media/render-options';
 import { positiveIntegerOption, UsageError } from './usage.js';
 
 export const renderOptionTypes = {

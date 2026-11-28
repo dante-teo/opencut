@@ -47,19 +47,26 @@ export {
   validateVideoTimeline,
   checkRenderEncoders,
   validateSubtitleBurnIn,
-  renderCodecs,
-  renderResolutions,
 } from './render.js';
 export type {
   VisualTimelineClip,
   VideoTimelineOptions,
   VideoTimelineResult,
   RenderControls,
-  RenderCodec,
-  RenderResolution,
 } from './render.js';
-export { renderQualities, renderQualityProfiles } from '@opencut/shared';
-export type { RenderQuality } from '@opencut/shared';
+export {
+  renderCodecs,
+  renderEncoders,
+  renderQualities,
+  renderResolutions,
+} from './render-options.js';
+export type {
+  RenderCodec,
+  RenderEncoder,
+  RenderQuality,
+  RenderResolution,
+} from './render-options.js';
+export { renderQualityProfiles } from '@opencut/shared';
 export type { PictureCache, PictureRange } from './picture-cache.js';
 export {
   compileReactGraphic,
@@ -73,8 +80,7 @@ export type {
   GraphicLayer,
   GraphicBundle,
 } from './graphics.js';
-export { renderEncoders } from './render-encoder.js';
-export type { RenderEncoder, RenderEncoderReport } from './render-encoder.js';
+export type { RenderEncoderReport } from './render-encoder.js';
 export { withExportProgress } from './render-progress.js';
 export type { RenderProgress } from './render-progress.js';
 export { renderContactSheet, renderMp4ContactSheet } from './contact-sheet.js';
