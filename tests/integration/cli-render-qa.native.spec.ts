@@ -2398,21 +2398,26 @@ test('cleanup plan identifies project-only, shared and unowned recipe directorie
     `
 import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
-const { open, readFile } = fs;
-let reads = 0;
-let receiptReads = 0;
-fs.open = (path, ...args) => {
-  if (path === ${JSON.stringify(payload)}) reads++;
-  return open(path, ...args);
-};
-fs.readFile = async (path, ...args) => {
-  const data = await readFile(path, ...args);
-  if (process.env.OPENCUT_TEST_CHANGE_RECEIPT !== '1' ||
-      path !== ${JSON.stringify(receipt)} || ++receiptReads !== 2) return data;
-  return JSON.stringify({ ...JSON.parse(data), sha256: '0'.repeat(64) });
-};
-syncBuiltinESMExports();
-process.on('exit', () => console.error(JSON.stringify({ payloadReads: reads })));
+import { isMainThread } from 'node:worker_threads';
+// Node preloads this module in the authoring worker too. Only the main
+// thread inspects the cache and owns the single measurement on stderr.
+if (isMainThread) {
+  const { open, readFile } = fs;
+  let reads = 0;
+  let receiptReads = 0;
+  fs.open = (path, ...args) => {
+    if (path === ${JSON.stringify(payload)}) reads++;
+    return open(path, ...args);
+  };
+  fs.readFile = async (path, ...args) => {
+    const data = await readFile(path, ...args);
+    if (process.env.OPENCUT_TEST_CHANGE_RECEIPT !== '1' ||
+        path !== ${JSON.stringify(receipt)} || ++receiptReads !== 2) return data;
+    return JSON.stringify({ ...JSON.parse(data), sha256: '0'.repeat(64) });
+  };
+  syncBuiltinESMExports();
+  process.on('exit', () => console.error(JSON.stringify({ payloadReads: reads })));
+}
 `,
   );
   const measured = runCli(inspectArgs, {
