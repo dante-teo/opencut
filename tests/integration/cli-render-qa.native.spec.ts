@@ -103,7 +103,7 @@ function colorInfo(path: string) {
       '-select_streams',
       'v:0',
       '-show_entries',
-      'stream=color_range,color_space,color_primaries,color_transfer,pix_fmt',
+      'stream=color_range,color_space,color_primaries,color_transfer,chroma_location,pix_fmt',
       '-of',
       'json',
       path,
@@ -116,6 +116,7 @@ const expected = {
   color_space: 'bt709',
   color_transfer: 'bt709',
   color_primaries: 'bt709',
+  chroma_location: 'center',
 };
 const raw = (path: string) =>
   ffmpeg([

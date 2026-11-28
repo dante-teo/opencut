@@ -155,10 +155,12 @@ const pictureColor = {
   colorSpace: 'bt709',
   colorPrimaries: 'bt709',
   colorTransfer: 'bt709',
+  chromaLocation: 'center',
 } as const;
 /** Composition surfaces are full-range RGB. Convert once before caching or delivery. */
 const deliveryColorFilter =
-  'format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709';
+  `format=yuv420p,setparams=range=${pictureColor.colorRange}:colorspace=${pictureColor.colorSpace}:` +
+  `color_primaries=${pictureColor.colorPrimaries}:color_trc=${pictureColor.colorTransfer}:chroma_location=${pictureColor.chromaLocation}`;
 const deliveryColorArgs = [
   '-color_range',
   pictureColor.colorRange,
@@ -168,6 +170,8 @@ const deliveryColorArgs = [
   pictureColor.colorPrimaries,
   '-color_trc',
   pictureColor.colorTransfer,
+  '-chroma_sample_location',
+  pictureColor.chromaLocation,
 ];
 export interface RenderControls {
   /** Trim the finished composition on the project grid; end is exclusive. */
@@ -1568,11 +1572,14 @@ async function prepareTimeline(
   }
   completeGroup();
   const scale = `scale=${outputWidth}:${outputHeight}`;
+  // RGB has no chroma grid. Choose the 4:2:0 sample placement explicitly so
+  // FFmpeg cannot inherit different placements as the visible layers change.
+  const toDeliveryColor =
+    `${scale}:in_range=pc:out_range=${pictureColor.colorRange}:out_color_matrix=${pictureColor.colorSpace}` +
+    `:out_chroma_loc=${pictureColor.chromaLocation},setsar=1,${deliveryColorFilter}`;
   let picture =
     `[${canvas}]settb=1/${numerator},setpts=N*${denominator},` +
-    (png
-      ? `${scale},setsar=1,format=rgb24`
-      : `${scale}:in_range=pc:out_range=tv:out_color_matrix=bt709,setsar=1,${deliveryColorFilter}`);
+    (png ? `${scale},setsar=1,format=rgb24` : toDeliveryColor);
   let videoMap = '[video]';
   if (external && scratch) {
     await protectSourceFiles(options, existing, external.path);
@@ -1889,6 +1896,11 @@ async function prepareTimeline(
           '-enc_time_base:v',
           `1/${outputRate.numerator}`,
           ...deliveryColorArgs,
+          // VideoToolbox copies the supplied chroma planes but leaves their
+          // location at the codec default. Signal the centered grid (type 1).
+          ...(encoder!.selected === 'videotoolbox'
+            ? ['-bsf:v', `${codec}_metadata=chroma_sample_loc_type=1`]
+            : []),
         ]),
     '-video_track_timescale',
     String(outputRate.numerator),
@@ -2143,6 +2155,8 @@ async function executeVideoTimeline(
       video.colorSpace !== pictureColor.colorSpace ||
       video.colorPrimaries !== pictureColor.colorPrimaries ||
       video.colorTransfer !== pictureColor.colorTransfer ||
+      (!prepared.sourcePicture &&
+        video.chromaLocation !== pictureColor.chromaLocation) ||
       metadata.streams.length !== 2 ||
       metadata.audio?.codec !== 'aac' ||
       metadata.audio.sampleRate !== (options.audioSampleRate ?? 48000) ||
@@ -2160,8 +2174,8 @@ async function executeVideoTimeline(
       counted !== frameCount
     )
       throw new MediaError(
-        `Render verification failed. Expected ${codec} ${outputWidth}×${outputHeight} BT.709 limited range, ${numerator}/${denominator} fps, ${frameCount} frames and ${durationSeconds}s with AAC ${options.audioSampleRate ?? 48000} Hz /${options.audioChannels ?? 2} channels. ` +
-          `Decoded ${video?.codec} ${video?.width}×${video?.height}, ${video?.colorSpace}/${video?.colorPrimaries}/${video?.colorTransfer}/${video?.colorRange}, ${video?.frameRateRatio} fps, ${counted} frames, video ${video?.durationSeconds}s, audio ${metadata.audio?.durationSeconds}s ${metadata.audio?.codec} ${metadata.audio?.sampleRate} Hz /${metadata.audio?.channels} channels, container ${metadata.durationSeconds}s. ` +
+        `Render verification failed. Expected ${codec} ${outputWidth}×${outputHeight} BT.709 limited range${prepared.sourcePicture ? '' : ' with centered chroma'}, ${numerator}/${denominator} fps, ${frameCount} frames and ${durationSeconds}s with AAC ${options.audioSampleRate ?? 48000} Hz /${options.audioChannels ?? 2} channels. ` +
+          `Decoded ${video?.codec} ${video?.width}×${video?.height}, ${video?.colorSpace}/${video?.colorPrimaries}/${video?.colorTransfer}/${video?.colorRange}, chroma ${video?.chromaLocation}, ${video?.frameRateRatio} fps, ${counted} frames, video ${video?.durationSeconds}s, audio ${metadata.audio?.durationSeconds}s ${metadata.audio?.codec} ${metadata.audio?.sampleRate} Hz /${metadata.audio?.channels} channels, container ${metadata.durationSeconds}s. ` +
           'Check source decodability and trim ranges.',
       );
     checkRenderSignal(options.signal);

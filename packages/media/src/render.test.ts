@@ -89,6 +89,7 @@ beforeEach(async () => {
     colorSpace: 'bt709',
     colorPrimaries: 'bt709',
     colorTransfer: 'bt709',
+    chromaLocation: 'center',
   };
   const audio = {
     ...stream,
@@ -395,7 +396,7 @@ describe('video timeline executor safety', () => {
       'trim=start_frame=3:end_frame=13',
     );
     expect(args[args.indexOf('-filter_complex') + 1]).toContain(
-      'setpts=N*1001,scale=320:180:in_range=pc:out_range=tv:out_color_matrix=bt709,setsar=1,format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709[video]',
+      'setpts=N*1001,scale=320:180:in_range=pc:out_range=tv:out_color_matrix=bt709:out_chroma_loc=center,setsar=1,format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709:chroma_location=center[video]',
     );
   });
 
@@ -440,6 +441,7 @@ describe('video timeline executor safety', () => {
     'frames',
     'audio',
     'unknown duration',
+    'chroma location',
     'fps',
   ] as const)(
     'does not publish when verification detects wrong %s',
@@ -450,6 +452,7 @@ describe('video timeline executor safety', () => {
       if (bad === 'frames') count = 11;
       if (bad === 'audio') verified.audio = null;
       if (bad === 'unknown duration') verified.durationSeconds = null;
+      if (bad === 'chroma location') verified.video!.chromaLocation = 'left';
       await expect(renderVideoTimeline(options)).rejects.toThrow(
         /verification failed/,
       );
@@ -632,7 +635,7 @@ describe('video timeline executor safety', () => {
     expect(result).toMatchObject({ width: 720, height: 1280 });
     const args = vi.mocked(runMediaTool).mock.calls[0]![1];
     expect(args[args.indexOf('-filter_complex') + 1]).toContain(
-      'scale=720:1280:in_range=pc:out_range=tv:out_color_matrix=bt709,setsar=1,format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709[video]',
+      'scale=720:1280:in_range=pc:out_range=tv:out_color_matrix=bt709:out_chroma_loc=center,setsar=1,format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709:chroma_location=center[video]',
     );
   });
 

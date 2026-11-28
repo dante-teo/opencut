@@ -70,9 +70,12 @@ can be cleared after delivery. [Dependency inventory and cleanup](CLI.md#read-on
 ## SDR color across picture ranges
 
 The compositor converts its full-range RGB surface to limited-range
-BT.709 YUV once at the delivery size. Lossless picture ranges are FFV1
-in Matroska and carry the same range, matrix, transfer and primaries as
-the MP4. Concatenation restores timestamps and frame durations on the
+BT.709 YUV once at the delivery size and uses centered 4:2:0 chroma.
+Explicit placement keeps each color sample in the same position in
+continuous renders and cached ranges. Lossless picture ranges are
+FFV1 in Matroska and carry the same range, matrix, transfer, primaries
+and chroma placement as the MP4. Ranges cached with the previous
+chroma behavior rebuild under a new key. Concatenation restores timestamps and frame durations on the
 exact project grid, including fractional rates such as 30000/1001. It
 then passes the normalized samples to the encoder. Existing NUT ranges
 rebuild as needed. To replace a saved encoded picture version from the old

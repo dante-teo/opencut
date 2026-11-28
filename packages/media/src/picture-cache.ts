@@ -197,7 +197,7 @@ export async function planPictureRanges({
     pending?: string[];
   }[] = [];
   const settings = [
-    'ffv1-matroska-limited-bt709-v1',
+    'ffv1-matroska-limited-bt709-center-v2',
     cache.backend,
     width,
     height,
