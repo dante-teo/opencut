@@ -1,0 +1,8 @@
+[workspace]
+members = ["native/media-engine"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"

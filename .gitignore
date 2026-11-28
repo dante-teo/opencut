@@ -8,3 +8,5 @@ test-results/
 playwright-report/
 tests/fixtures/generated/
 conformance-results/
+
+/target/
