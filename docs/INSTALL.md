@@ -128,6 +128,10 @@ on the matching `vMAJOR.MINOR.PATCH` tag with `publish` off to generate
 test artifacts. The workflow checks installation, upgrade, and uninstall
 in a temporary Homebrew tap, then renders the bundled opening card and runs
 the installed-runtime suite with Python 3.11+, FFmpeg and ffprobe.
+For an isolated local check, put the test Homebrew first on `PATH` and set
+`OPENCUT_TEST_BREW_PREFIX` to its absolute prefix. The script checks that
+prefix and its Cellar before installing. Supply a previous archive and
+formula as arguments three and four to test an upgrade from that release.
 For local release checks, set `PLAYWRIGHT_BROWSERS_PATH` to the cache
 containing the pinned Headless Shell to include graphics package relocation.
 Software rendering, Lanczos upscaling, and failure handling run on every host.

@@ -3,11 +3,16 @@ import { createServer } from 'node:http';
 import { basename } from 'node:path';
 import process from 'node:process';
 
-const [archive, portFile] = process.argv.slice(2);
-const bytes = readFileSync(archive);
-const filename = '/' + basename(archive);
+const [archive, portFile, ...previous] = process.argv.slice(2);
+const archives = new Map(
+  [archive, ...previous].map((file) => [
+    '/' + basename(file),
+    readFileSync(file),
+  ]),
+);
 const server = createServer((request, response) => {
-  if (request.url !== filename) {
+  const bytes = archives.get(request.url);
+  if (!bytes) {
     response.writeHead(404).end();
     return;
   }
