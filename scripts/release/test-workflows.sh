@@ -13,7 +13,8 @@ python3 "$root/tests/distribution/fixtures.py" "$media"
 python3 "$root/tests/distribution/workflows.py" "$cli" "$project" "$media" "$@"
 
 if [[ -n "${PLAYWRIGHT_BROWSERS_PATH:-}" ]]; then
-  graphics="$project/graphics"
+  # mktemp may return macOS's /var alias. Package inputs require physical paths.
+  graphics="$(realpath "$project")/graphics"
   mkdir "$graphics"
   cp "$root"/tests/distribution/{graphics.video.ts,Graphic.tsx,Badge.svg} "$graphics/"
   "$cli" validate "$graphics/graphics.video.ts"
