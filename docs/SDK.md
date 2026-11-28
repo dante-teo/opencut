@@ -314,7 +314,14 @@ approved preview.
 
 Graphics components should lay out against the supplied canvas and use time
 for motion. Three.js and motion-blurred graphics retain their original surface
-dimensions to fit their backend limits. The helper rejects odd cross-dissolves
+dimensions to fit their backend limits. Visual group `blur` and `backdropBlur`
+scale with the canvas, so 40 px on a 1080 × 1920 canvas becomes 80 px on a
+2160 × 3840 canvas. If a scaled blur exceeds the renderer's 1024 px limit,
+the error gives the group, the requested value and the maximum source value.
+Use a smaller blur in the definition passed to the helper or pre-render the
+effect into the picture.
+
+The helper rejects odd cross-dissolves
 when their before/after split cannot be preserved on the delivery grid.
 Asset-specific beauty recipes can include their own authored interpolation.
 For parameterized definitions, apply the helper to the definition returned

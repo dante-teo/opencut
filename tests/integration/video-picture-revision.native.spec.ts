@@ -761,6 +761,23 @@ test(
         [551, 552, 635, 636],
       );
       assert.equal(result.verification.completeDecode, true);
+      const revisionReport = path('revised.render.json');
+      await writeFile(revisionReport, JSON.stringify(result));
+      const inventory = opencut([
+        'inspect',
+        'dependencies',
+        revised,
+        '--recipe-cache',
+        cache,
+        '--render-report',
+        revisionReport,
+      ]);
+      assert.ok(
+        inventory.files.some(
+          (file: { resolvedPath: string; roles: string[] }) =>
+            file.resolvedPath === result.path && file.roles.includes('export'),
+        ),
+      );
       const crop = opencut([
         'preview',
         'contact-sheet',

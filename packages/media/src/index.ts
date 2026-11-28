@@ -23,6 +23,7 @@ export {
 } from './dialogue-model.js';
 export { inspectVideoToolboxWorkers } from './video-toolbox-workers.js';
 export { inspectRenderMemory } from './process-memory.js';
+export { localEnhancer } from './deepfilter.js';
 export { separateDialogue } from './dialogue.js';
 export {
   fileIdentity,

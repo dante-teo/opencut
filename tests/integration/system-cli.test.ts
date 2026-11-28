@@ -28,11 +28,67 @@ it('reports the render memory helper independently of FFmpeg availability', () =
   const { status, stdout } = run('doctor', '--json');
   expect(status).toBe(0);
   const report = JSON.parse(stdout);
+  expect(report.graphicsSchemas).toBeTypeOf('object');
   expect(report.media.rssHelper).toEqual(
     process.platform === 'darwin'
       ? { status: 'available', version: report.application.version }
       : { status: 'not-applicable', version: null },
   );
+});
+
+it('reports compact capabilities with actionable states when FFmpeg is missing', () => {
+  const { status, stdout } = spawnSync(
+    process.execPath,
+    [entry, 'doctor', '--json', '--compact'],
+    {
+      cwd: tmpdir(),
+      env: {
+        ...process.env,
+        PATH: tmpdir(),
+        // Node responds to the backend's --version probe without needing PATH.
+        OPENCUT_DEEPFILTER: process.execPath,
+        OPENCUT_DEEPFILTER_MODEL: '',
+      },
+      encoding: 'utf8',
+      timeout: 20000,
+    },
+  );
+  expect(status).toBe(0);
+  expect(Buffer.byteLength(stdout)).toBeLessThan(10000);
+  const report = JSON.parse(stdout);
+  expect(report).toMatchObject({
+    doctorVersion: 1,
+    format: 'compact',
+    capabilities: {
+      ffmpeg: {
+        status: 'unavailable',
+        reason: expect.stringContaining('missing'),
+        nextStep: expect.stringContaining('FFmpeg'),
+      },
+      aacEncoding: { status: 'unavailable' },
+      defaultMp4: { status: 'unavailable' },
+      offlineInterpolation: { status: expect.any(String) },
+    },
+  });
+  for (const name of [
+    'dialogueSeparation',
+    'dialogueEnhancement',
+    'transcription',
+    'transcriptAlignment',
+  ]) {
+    expect(report.capabilities[name]).toEqual({
+      status: 'unavailable',
+      reason: expect.stringContaining('ffmpeg, ffprobe'),
+      nextStep: expect.stringContaining('ffmpeg and ffprobe'),
+    });
+  }
+  for (const check of Object.values(report.capabilities)) {
+    expect(check).toHaveProperty('status');
+    expect(check).toHaveProperty('reason', expect.any(String));
+    expect(check).toHaveProperty('nextStep');
+  }
+  expect(report).not.toHaveProperty('graphicsSchemas');
+  expect(run('doctor', '--compact').status).toBe(2);
 });
 
 describe('system inspect', () => {

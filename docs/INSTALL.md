@@ -14,6 +14,10 @@ opencut doctor --json
 pnpm dlx @dantea/opencut --help
 ```
 
+Use `opencut doctor --json --compact` for a summary of readiness and next
+steps. The full JSON includes hardware details, model probes, and graphics
+schemas. [Doctor report fields](CLI.md#check-the-installation)
+
 You can also install the packed archive directly.
 
 ```sh

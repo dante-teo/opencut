@@ -1,4 +1,4 @@
-import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, relative, resolve, join, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { compileGraphic } from './video-graphics.js';
@@ -6,37 +6,33 @@ import { readVideoInput } from './video-files.js';
 import { parseVideoDefinition } from './video-definition.js';
 import type { ScriptImport } from './video-script.js';
 import { scanPackageImports } from './video-package-imports.js';
+import { ifPresent } from './video-integrity.js';
+import { videoRecipeCacheDirectory } from './video-processing.js';
 import {
-  fileFingerprintSchema,
-  matchesFingerprint,
-  missing,
-} from './video-integrity.js';
-import { processingSettings } from './video-processing.js';
-import {
+  buildReceiptsDirectory,
   listDefinitionBuildArtifacts,
-  readOutputFingerprint,
+  readCompileReceipts,
 } from './video-build.js';
-import { readMediaEntry } from './video-media-cache.js';
+import { mediaStageDirectory, readMediaEntry } from './video-media-cache.js';
+import type { MediaFingerprint } from './video-media-cache.js';
 import { videoInputIdentity } from './video-input.js';
+import { readDeliveryReport } from './video-render-report.js';
 
 interface Reference {
   role: string;
   owner: string;
   direct: boolean;
 }
+const isDeliveryRole = (role: string) =>
+  role === 'export' || role === 'unverified-export';
 type Options = {
   params?: unknown;
   signal?: AbortSignal;
   artifactRoots?: string[] | undefined;
   recipeCache?: string | undefined;
   renderReport?: string | undefined;
+  cleanupPlan?: boolean | undefined;
 };
-
-async function optional<T>(result: Promise<T>) {
-  return result.catch((error: unknown) => {
-    if (!missing(error)) throw error;
-  });
-}
 
 async function* artifacts(root: string, signal?: AbortSignal) {
   const todo = [root];
@@ -48,7 +44,7 @@ async function* artifacts(root: string, signal?: AbortSignal) {
         `Artifact root '${root}' exceeds 20000 entries. Choose a narrower root.`,
       );
     const path = todo.pop()!;
-    const info = await optional(lstat(path));
+    const info = await ifPresent(lstat(path));
     if (!info) continue;
     if (info.isDirectory())
       for (const name of (await readdir(path)).sort().reverse())
@@ -64,8 +60,13 @@ export async function inspectVideoDependencies(
 ) {
   const { signal } = options;
   const entries = new Map<string, Reference[]>();
-  const cacheIdentities = new Map<string, string>();
-  const diagnostics: { owner: string; message: string }[] = [];
+  const cacheFingerprints = new Map<string, MediaFingerprint>();
+  const diagnostics: {
+    owner: string;
+    message: string;
+    code?: string;
+    reason?: string;
+  }[] = [];
   function add(path: string, role: string, owner: string, direct: boolean) {
     const refs = entries.get(path) ?? [];
     refs.push({ role, owner, direct });
@@ -114,7 +115,7 @@ export async function inspectVideoDependencies(
   } else {
     // Runtime hooks miss erased type imports and inactive literal branches.
     for (const module of imports) {
-      if (!(await optional(stat(module)))) continue;
+      if (!(await ifPresent(stat(module)))) continue;
       for (const { specifier } of await scanPackageImports(module, signal)) {
         if (
           !/^(?:\.{1,2}\/|\/)/.test(specifier) ||
@@ -124,7 +125,7 @@ export async function inspectVideoDependencies(
         )
           continue;
         const target = resolve(dirname(module), specifier);
-        if (await optional(stat(target)))
+        if (await ifPresent(stat(target)))
           add(target, 'definition-module', ownerPath(module), module === path);
       }
     }
@@ -226,9 +227,8 @@ export async function inspectVideoDependencies(
       }
   }
 
-  const cache = processingSettings({
-    cacheDirectory: options.recipeCache,
-  }).directory;
+  const dependenciesComplete = value !== undefined && diagnostics.length === 0;
+  const cache = videoRecipeCacheDirectory(options.recipeCache);
   for (const artifact of await listDefinitionBuildArtifacts(
     cache,
     path,
@@ -236,46 +236,31 @@ export async function inspectVideoDependencies(
   )) {
     if (!entries.has(artifact.path)) entries.set(artifact.path, []);
     if (artifact.role) add(artifact.path, artifact.role, artifact.owner, false);
-    if (artifact.cacheIdentity)
-      cacheIdentities.set(artifact.path, artifact.cacheIdentity);
+    if (artifact.cacheFingerprint)
+      cacheFingerprints.set(artifact.path, artifact.cacheFingerprint);
   }
   if (options.renderReport) {
-    const reportPath = resolve(options.renderReport);
-    const report = JSON.parse(
-      await readFile(reportPath, { encoding: 'utf8', signal }),
-    ) as {
-      path?: unknown;
-      definitionPath?: unknown;
-      frameCount?: unknown;
-      metadata?: { path?: unknown };
-      outputFingerprint?: unknown;
-    };
-    if (
-      !report ||
-      typeof report.path !== 'string' ||
-      typeof report.frameCount !== 'number' ||
-      report.path !== report.metadata?.path ||
-      (typeof report.definitionPath === 'string' &&
-        resolve(report.definitionPath) !== path)
-    )
-      throw new Error('Expected a render JSON result for this definition.');
+    const { reportPath, output, reason } = await readDeliveryReport(
+      options.renderReport,
+      path,
+      signal,
+    );
     add(reportPath, 'render-report', 'render report', true);
-    const output = resolve(dirname(reportPath), report.path);
-    const expected = fileFingerprintSchema.safeParse(report.outputFingerprint);
-    const verified =
-      expected.success &&
-      matchesFingerprint(
-        await readOutputFingerprint(output, signal),
-        expected.data,
-      );
-    add(output, verified ? 'export' : 'unverified-export', reportPath, false);
+    add(output, reason ? 'unverified-export' : 'export', reportPath, false);
+    if (reason)
+      diagnostics.push({
+        owner: reportPath,
+        code: 'RENDER_REPORT_OUTPUT_UNVERIFIABLE',
+        reason,
+        message: `Cannot verify '${output}'. Check that the original export and its matching report are available.`,
+      });
   }
 
   const roots = [
     ...new Set((options.artifactRoots ?? []).map((path) => resolve(path))),
   ].sort();
   for (const root of roots) {
-    if (!(await optional(lstat(root)))?.isDirectory())
+    if (!(await ifPresent(lstat(root)))?.isDirectory())
       throw new Error(`Artifact root '${root}' must be a directory.`);
     for await (const { path, info } of artifacts(root, signal)) {
       if (!entries.has(path)) entries.set(path, []);
@@ -290,19 +275,20 @@ export async function inspectVideoDependencies(
         )?.[1];
         if (!format) continue;
         const media = join(directory, name);
-        const identity = cacheIdentities.get(media);
-        if (identity && videoInputIdentity(media) === identity) {
-          matches.push({ media, identity });
-          continue;
-        }
-        const entry = await readMediaEntry(directory, key, format, signal);
-        if (entry) matches.push({ media, identity: entry.identity });
+        const entry = await readMediaEntry(directory, key, format, signal, {
+          fingerprint: cacheFingerprints.get(media),
+        });
+        if (entry)
+          matches.push({
+            media,
+            fingerprint: { identity: entry.identity, sha256: entry.sha256 },
+          });
       }
       // A generic receipt does not name its format. An ambiguous payload is
       // only classified if it was independently identified by build history.
       if (matches.length === 1) {
-        const { media, identity } = matches[0]!;
-        cacheIdentities.set(media, identity);
+        const { media, fingerprint } = matches[0]!;
+        cacheFingerprints.set(media, fingerprint);
         add(path, 'cache-manifest', ownerPath(root), false);
         add(media, 'cache-media', ownerPath(path), false);
       }
@@ -315,34 +301,48 @@ export async function inspectVideoDependencies(
     {
       resolvedPath: string;
       paths: string[];
-      status: 'present' | 'missing' | 'not-file';
+      status: 'present' | 'missing' | 'not-file' | 'unreadable';
       bytes?: number;
       references: Reference[];
     }
   >();
   for (const path of [...entries.keys()].sort()) {
     signal?.throwIfAborted();
-    const [resolved, info] = await Promise.all([
-      optional(realpath(path)),
-      optional(stat(path)),
-    ]);
+    const references = entries.get(path)!;
+    const [resolved, info, lookupStatus] = await Promise.all([
+      ifPresent(realpath(path)),
+      ifPresent(stat(path)),
+    ]).catch((error: unknown) => {
+      if (error instanceof Error && 'code' in error) {
+        if (error.code === 'ENOTDIR')
+          return [undefined, undefined, 'missing'] as const;
+        if (
+          (error.code === 'EACCES' ||
+            error.code === 'EPERM' ||
+            error.code === 'ELOOP') &&
+          references.some(({ role }) => isDeliveryRole(role))
+        )
+          return [undefined, undefined, 'unreadable'] as const;
+      }
+      throw error;
+    });
     const resolvedPath = resolved ?? path;
     const record = files.get(resolvedPath) ?? {
       resolvedPath,
       paths: [],
-      status: !info ? 'missing' : info.isFile() ? 'present' : 'not-file',
+      status:
+        lookupStatus ??
+        (!info ? 'missing' : info.isFile() ? 'present' : 'not-file'),
       ...(info?.isFile() && { bytes: info.size }),
       references: [],
     };
     record.paths.push(ownerPath(path));
     record.references.push(
-      ...entries
-        .get(path)!
-        .filter(
-          ({ role }) =>
-            role !== 'cache-media' ||
-            cacheIdentities.get(path) === videoInputIdentity(path),
-        ),
+      ...references.filter(
+        ({ role }) =>
+          role !== 'cache-media' ||
+          cacheFingerprints.get(path)?.identity === videoInputIdentity(path),
+      ),
     );
     files.set(resolvedPath, record);
   }
@@ -350,16 +350,15 @@ export async function inspectVideoDependencies(
     const roles = item.references.length
       ? [...new Set(item.references.map(({ role }) => role))].sort()
       : ['unclassified'];
-    const classification =
-      roles.includes('export') || roles.includes('unverified-export')
-        ? 'delivery'
-        : roles.every(
-              (role) => role === 'cache-manifest' || role === 'cache-media',
-            )
-          ? 'regenerable-cache'
-          : roles.includes('unclassified')
-            ? 'unclassified'
-            : 'dependency';
+    const classification = roles.some(isDeliveryRole)
+      ? 'delivery'
+      : roles.every(
+            (role) => role === 'cache-manifest' || role === 'cache-media',
+          )
+        ? 'regenerable-cache'
+        : roles.includes('unclassified')
+          ? 'unclassified'
+          : 'dependency';
     return {
       ...item,
       relativePath: item.paths[0]!,
@@ -396,5 +395,164 @@ export async function inspectVideoDependencies(
     files: inventory,
     byteTotals,
     diagnostics,
+    ...(options.cleanupPlan && {
+      cleanupPlan: await planRecipeCleanup(
+        cache,
+        path,
+        inventory,
+        dependenciesComplete,
+        cacheFingerprints,
+        signal,
+      ),
+    }),
+  };
+}
+
+const recipeKey = /^[a-f0-9]{64}$/;
+
+async function planRecipeCleanup(
+  cache: string,
+  definition: string,
+  inventory: readonly {
+    resolvedPath: string;
+    classification: string;
+    bytes?: number;
+  }[],
+  dependenciesComplete: boolean,
+  cacheFingerprints: ReadonlyMap<string, MediaFingerprint>,
+  signal?: AbortSignal,
+) {
+  const root = (await ifPresent(realpath(cache))) ?? cache;
+  const keyFor = (path: string) => {
+    const [key] = relative(root, path).split(sep);
+    return key && recipeKey.test(key) ? key : undefined;
+  };
+  const recorded = new Map<
+    string,
+    { owners: Set<string>; formats: Set<string> }
+  >();
+  const incompleteReceipts: string[] = [];
+  const protectedKeys = new Set<string>();
+  const recordedInputs = new Set<string>();
+  for await (const { path, receipt } of readCompileReceipts(root, signal)) {
+    if (!receipt || receipt.state === 'compiling')
+      incompleteReceipts.push(path);
+    if (!receipt) continue;
+    for (const { key, format } of receipt.steps) {
+      const recipe = recorded.get(key) ?? {
+        owners: new Set<string>(),
+        formats: new Set<string>(),
+      };
+      recipe.owners.add(receipt.definition);
+      recipe.formats.add(format);
+      recorded.set(key, recipe);
+    }
+    for (const { path } of receipt.inputs) recordedInputs.add(path);
+  }
+  // A timeline can use cache media as an ordinary input, including via an alias.
+  const unreadableBuildInputs: string[] = [];
+  for (const path of recordedInputs) {
+    signal?.throwIfAborted();
+    const direct = keyFor(path);
+    const physical = direct
+      ? undefined
+      : await realpath(path).catch((error: unknown) => {
+          if (
+            error instanceof Error &&
+            'code' in error &&
+            (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+          )
+            return;
+          unreadableBuildInputs.push(path);
+        });
+    const key = direct ?? (physical && keyFor(physical));
+    if (key) protectedKeys.add(key);
+  }
+  const protectedFile = ({ classification }: (typeof inventory)[number]) =>
+    classification === 'delivery' || classification === 'dependency';
+  for (const file of inventory) {
+    const key = keyFor(file.resolvedPath);
+    if (key && protectedFile(file)) protectedKeys.add(key);
+  }
+
+  type Item = {
+    path: string;
+    bytes: number | null;
+    reason: string;
+    referencedBy?: string[];
+  };
+  const keep: Item[] = [];
+  const eligible: Item[] = [];
+  const uncertain: Item[] = [];
+  const names = (await ifPresent(readdir(root)))?.sort() ?? [];
+  const ownershipComplete =
+    dependenciesComplete &&
+    !incompleteReceipts.length &&
+    !unreadableBuildInputs.length;
+  const scanned = new Set<string>();
+  for (const key of names.filter((name) => recipeKey.test(name))) {
+    const path = join(root, key);
+    const info = await ifPresent(lstat(path));
+    if (!info) continue;
+    scanned.add(key);
+    let bytes = 0;
+    const contents: string[] = [];
+    for await (const file of artifacts(path, signal)) {
+      if (file.info.isFile()) bytes += file.info.size;
+      contents.push(file.path);
+    }
+    const recipe = recorded.get(key);
+    const referencedBy = [...(recipe?.owners ?? [])].sort();
+    const item = { path, bytes, referencedBy };
+    const keepReason = protectedKeys.has(key)
+      ? 'contains-project-input-or-delivery'
+      : referencedBy.some((owner) => owner !== definition)
+        ? 'referenced-by-another-timeline'
+        : undefined;
+    if (keepReason) {
+      keep.push({ ...item, reason: keepReason });
+      continue;
+    }
+
+    const [format, extra] = recipe?.formats ?? [];
+    let uncertainReason: string | undefined;
+    if (!referencedBy.length) uncertainReason = 'no-build-ownership-record';
+    else if (!ownershipComplete)
+      uncertainReason = 'incomplete-dependency-or-build-records';
+    else if (await ifPresent(lstat(mediaStageDirectory(root, key))))
+      uncertainReason = 'cache-staging-directory-present';
+    else if (
+      !info.isDirectory() ||
+      !format ||
+      extra ||
+      contents.length !== 2 ||
+      !contents.includes(join(path, 'result.json')) ||
+      !contents.includes(join(path, `media.${format}`)) ||
+      (await readdir(path)).length !== 2 ||
+      !(await readMediaEntry(path, key, format, signal, {
+        fingerprint: cacheFingerprints.get(join(cache, key, `media.${format}`)),
+      }))
+    )
+      uncertainReason = 'unverified-cache-directory';
+    (uncertainReason ? uncertain : eligible).push({
+      ...item,
+      reason: uncertainReason ?? 'verified-cache-owned-by-this-timeline',
+    });
+  }
+  const buildReceipts = buildReceiptsDirectory(root) + sep;
+  for (const file of inventory) {
+    if (scanned.has(keyFor(file.resolvedPath) ?? '')) continue;
+    const item = { path: file.resolvedPath, bytes: file.bytes ?? null };
+    if (protectedFile(file) || file.resolvedPath.startsWith(buildReceipts))
+      keep.push({ ...item, reason: 'project-file-delivery-or-build-record' });
+    else uncertain.push({ ...item, reason: 'outside-recipe-ownership-scope' });
+  }
+  return {
+    recipeCache: root,
+    incompleteReceipts,
+    unreadableBuildInputs,
+    keep,
+    eligible,
+    uncertain,
   };
 }

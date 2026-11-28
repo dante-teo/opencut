@@ -696,6 +696,7 @@ canvas. `backdropBlur` blurs the actual lower-track picture within the
 transformed group alpha. Blend a group with that backdrop using
 `normal`, `multiply`, `screen` or `overlay`. The compositor uses
 straight-alpha SDR surfaces and premultiplies for spatial blur.
+Both `blur` and `backdropBlur` accept 0–1024 logical pixels.
 Audio routing follows the original tracks.
 
 An existing `cross-dissolve` can specify a `style` using

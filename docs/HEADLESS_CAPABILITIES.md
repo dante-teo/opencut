@@ -12,6 +12,8 @@
 | Verify export timing, picture and audio packets     | `verify export`                                          |                                                                       |
 | Check the reported video frame rate                 | `probe --expect-fps`                                     | `probeMedia` for stream metadata                                      |
 | Inventory dependencies and artifacts                | `inspect dependencies`                                   |                                                                       |
+| Plan recipe cache cleanup                           | `inspect dependencies --cleanup-plan`                    |                                                                       |
+| Check local tool and model readiness                | `doctor --json --compact`                                |                                                                       |
 | Rebuild on source changes                           | `preview DEFINITION --watch`                             | `watchVideo`                                                          |
 | Compile and render with parameters                  | `validate --params`, `render --params`                   | `compileVideo`, `renderVideo` with `params`                           |
 | Build a 4K60 delivery variant                       |                                                          | `create4K60Delivery`                                                  |

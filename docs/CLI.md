@@ -205,7 +205,8 @@ declared dependencies. Use `--params` to inspect a specific variant.
 
 `files` reports `relativePath` and any alias `paths` relative to the
 definition directory, the physical `resolvedPath`, `bytes` for regular
-files, and a `status` of `present`, `missing` or `not-file`.
+files, and a `status` of `present`, `missing`, `not-file` or `unreadable`.
+`unreadable` identifies an export path that inspection cannot access.
 `roles` includes every known role and `references` reports each role,
 its owner and whether it is directly declared or discovered transitively.
 `diagnostics` reports dependency discovery failures with their reference
@@ -214,19 +215,69 @@ inventory with `definitionEvaluated: false`.
 
 Build receipts under the default recipe cache or `--recipe-cache` identify
 historical cache payloads and published exports for the definition.
-`--render-report` adds an export reference from a saved render result.
-An `export` role means the current file matched a recorded fingerprint.
-Missing, replaced, or otherwise unverifiable files are marked
-`unverified-export` for that reference.
+`--render-report` accepts the JSON from a completed full render, `remix`, or
+local picture revision. OpenCut checks the output at the recorded path.
+Relative paths in the report are resolved from the report's directory.
+OpenCut checks the definition path when the report includes it. Older remix
+reports may omit that field.
+
+With `--json`, inspection failures include `error.code` on stderr.
+
+- `UNSUPPORTED_RENDER_REPORT` means the JSON is invalid or has an unsupported
+  shape. Use the saved stdout from a completed render or revision.
+- `RENDER_REPORT_TIMELINE_MISMATCH` means the report names a different
+  definition file. Inspect the named definition or supply the report for
+  the definition you selected.
+
+An `export` role means the current file matched the recorded byte count
+and SHA-256. Inspection still returns an inventory when the output cannot
+be verified. The reference has the `unverified-export` role and the supplied
+report has a `RENDER_REPORT_OUTPUT_UNVERIFIABLE` diagnostic in `diagnostics`.
+Use the diagnostic's `reason` to decide what to check.
+
+| Reason                           | What to check                                             |
+| -------------------------------- | --------------------------------------------------------- |
+| `missing-or-invalid-fingerprint` | Find the original report with a valid output fingerprint. |
+| `missing-or-unreadable-output`   | Check the recorded path and access to the export.         |
+| `fingerprint-mismatch`           | Locate the exact export recorded in the report.           |
+
 Repeat `--artifact-root` to inventory other directories and recognize
 OpenCut cache receipts and their payloads. Payloads must match their
 recorded byte count and SHA-256 before they qualify as regenerable.
 Files without known provenance are `unclassified`. The scan leaves cache
 and project files untouched.
+
 Each file has a `classification` and a `regenerable` flag. `byteTotals`
 reports logical sizes by classification across resolved paths. Deliveries
 and unclassified files have their own totals alongside regenerable cache
 artifacts and other dependencies.
+
+### Plan recipe cache cleanup
+
+```sh
+opencut inspect dependencies edit.video.ts --recipe-cache ./recipes --artifact-root ./exports --render-report final.render.json --cleanup-plan --json
+```
+
+`cleanupPlan` lists absolute paths under `keep`, `eligible`, and `uncertain`,
+with a `reason` and regular-file `bytes` for each item. A missing or
+non-file inventory entry can have `bytes: null`. Paths to recipe entries
+refer to whole directories. The plan performs no moves or deletions.
+
+- `keep` includes known project inputs, deliveries, build receipts, and
+  recipe entries referenced by another timeline in the same cache.
+- `eligible` includes verified recipe directories attributed only to the
+  selected timeline. Future builds of that timeline can regenerate them.
+- `uncertain` includes entries without ownership evidence, directories
+  with unexpected contents, and unclassified artifacts. Incomplete build
+  receipts or dependency discovery prevent eligibility.
+
+Ownership comes from the selected recipe cache's recorded builds. Run
+the plan with renders and previews stopped, and account for projects that
+have no build receipts in that cache before moving any directories.
+For recipe directories, `referencedBy` lists definition paths from build
+receipts. Check `incompleteReceipts` and `unreadableBuildInputs` when the
+plan reports incomplete records. `--artifact-root` broadens the inventory.
+Only verified entries in the selected recipe cache can appear in `eligible`.
 
 ## Post-export verification
 
@@ -687,7 +738,15 @@ provenance for a backend that provides no sample map.
 
 ## Check the installation
 
-Run `opencut doctor --json` from the environment that will run the export.
+Run `opencut doctor --json --compact` from the environment that will run the
+export. Each entry in `capabilities` gives a `status`, `reason`, and
+`nextStep` (`null` if no action is needed). Status is `ready`, `unavailable`,
+`unsupported`, or `unverified`. The summary covers encoding, native video
+processing, dialogue tools, speech models and the graphics runtime.
+Dialogue and speech workflows require FFmpeg and ffprobe in addition to
+their local backends and models.
+
+Run `opencut doctor --json` for full diagnostics and graphics schemas.
 `media.ready` reports whether FFmpeg, ffprobe, and the default H.264 and AAC
 encoders are available. On macOS it also requires the bundled RSS helper
 to match the installed version and successfully sample memory. If

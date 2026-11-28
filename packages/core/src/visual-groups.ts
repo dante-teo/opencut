@@ -2,6 +2,8 @@ import { z } from 'zod';
 import type { Project } from './project.js';
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/);
+// Both visual group effects use FFmpeg's gblur sigma parameter.
+export const maxVisualGroupBlur = 1024;
 export const visualGroupsSchema = z
   .array(
     z.strictObject({
@@ -22,8 +24,8 @@ export const visualGroupsSchema = z
           height: z.int().min(1).max(3840),
         })
         .optional(),
-      blur: z.number().min(0).max(48).optional(),
-      backdropBlur: z.number().min(0).max(48).optional(),
+      blur: z.number().min(0).max(maxVisualGroupBlur).optional(),
+      backdropBlur: z.number().min(0).max(maxVisualGroupBlur).optional(),
     }),
   )
   .max(8)

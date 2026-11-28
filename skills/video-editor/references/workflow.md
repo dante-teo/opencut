@@ -39,6 +39,13 @@ ties the requested boundary samples to the bytes of `final.mp4`. Add
 `cuts` to `--around` for edits between clips, and use `--from` and `--to`
 to narrow a range with more than 16 unique samples.
 
+Before clearing recipe caches, run
+`opencut inspect dependencies edit.video.ts --render-report final.render.json --cleanup-plan --json`.
+Use the most recent successful report for the delivered MP4, including
+one from `remix` or a picture revision. Review the `keep`, `eligible`, and
+`uncertain` lists with their reasons before moving files.
+[Cleanup planning](../../../docs/CLI.md#plan-recipe-cache-cleanup)
+
 For footage with cuts, declare each source under `assets` and lay clips
 back to back on a video track. Use `sourceIn` and exclusive `sourceOut` to
 select the source range, and `at` to position it. Add overlays on higher

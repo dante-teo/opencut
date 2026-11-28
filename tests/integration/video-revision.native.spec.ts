@@ -184,6 +184,29 @@ test('review and remix use bounded ranges and verified export picture without a 
     const revised = command(
       remix('before.video.ts', 'baseline.mp4', 'mix.mp4'),
     );
+    for (const [name, result] of [
+      ['baseline', report],
+      ['mix', revised],
+    ] as const) {
+      const reportPath = path(`${name}.render.json`);
+      await writeFile(reportPath, JSON.stringify(result));
+      const inspection = command([
+        'inspect',
+        'dependencies',
+        path('before.video.ts'),
+        '--recipe-cache',
+        path('recipes'),
+        '--render-report',
+        reportPath,
+      ]);
+      assert.ok(
+        inspection.files.some(
+          (file: { resolvedPath: string; roles: string[] }) =>
+            file.resolvedPath === path(`${name}.mp4`) &&
+            file.roles.includes('export'),
+        ),
+      );
+    }
     assert.equal(revised.pictureReuse.pictureFramesRendered, 0);
     assert.equal(
       revised.revisionEvidence.packetHash,

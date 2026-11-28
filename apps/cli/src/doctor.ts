@@ -12,9 +12,12 @@ import {
   inspectGraphicsRuntime,
   inspectRenderMemory,
   inspectVideoToolboxWorkers,
+  localEnhancer,
 } from '@opencut/media';
 import { inspectSpeechRuntime } from './transcript.js';
 import { inspectSystem } from './system.js';
+import type { CommandOptions } from './commands.js';
+import { UsageError } from './usage.js';
 
 const exec = promisify(execFile);
 const options = { timeout: 5000, maxBuffer: 1024 * 1024 };
@@ -66,7 +69,7 @@ export async function inspectReactGraphics() {
   }
 }
 
-export async function doctor() {
+async function probeDoctor() {
   const [
     ffmpeg,
     ffprobe,
@@ -106,7 +109,7 @@ export async function doctor() {
     ...(!toolsReady ? [installHint] : []),
     ...('hint' in rssHelper ? [rssHelper.hint] : []),
   ].join(' ');
-  return {
+  const result = {
     doctorVersion: 1,
     application: getApplicationInfo(),
     node: process.version,
@@ -114,7 +117,6 @@ export async function doctor() {
     graphics,
     videoDefinitions: videoDefinitionFormats,
     graphicsCapabilities: videoGraphicsCapabilities,
-    graphicsSchemas: videoGraphicsSchemas(),
     media: {
       ready: !hint,
       ffmpeg,
@@ -137,9 +139,209 @@ export async function doctor() {
       transcription,
     },
   };
+  return { result, encoders };
 }
 
-export function formatDoctor(result: Awaited<ReturnType<typeof doctor>>) {
+type DoctorResult = Awaited<ReturnType<typeof probeDoctor>>['result'];
+
+function capability(
+  status: 'ready' | 'unavailable' | 'unsupported' | 'unverified',
+  reason: string,
+  nextStep: string | null = null,
+) {
+  return { status, reason, nextStep };
+}
+
+function processorCapability(
+  system: DoctorResult['system']['videoToolbox'],
+  worker: { status: string },
+  name: string,
+) {
+  if (worker.status === 'unsupported' || system.status === 'not-applicable')
+    return capability(
+      'unsupported',
+      'Requires Apple Silicon with macOS.',
+      'Use an Apple Silicon Mac or omit this recipe.',
+    );
+  if (worker.status !== 'available')
+    return capability(
+      'unavailable',
+      `Native worker: ${worker.status}.`,
+      'Reinstall OpenCut or rebuild its native media workers.',
+    );
+  const inspect = 'Run opencut system inspect --json for processor details.';
+  if (system.status !== 'probed')
+    return capability('unverified', system.reason, inspect);
+  const processor = system.frameProcessors[name];
+  if (!processor)
+    return capability('unverified', 'No configuration was reported.', inspect);
+  if (processor.status === 'os-unavailable')
+    return capability(
+      'unavailable',
+      `Requires macOS ${processor.minimumMacOS} or later.`,
+      'Update macOS or choose another recipe.',
+    );
+  if (processor.status === 'hardware-unsupported')
+    return capability(
+      'unsupported',
+      'VideoToolbox reports unsupported hardware.',
+      'Use supported hardware or omit this recipe.',
+    );
+  const accepted =
+    processor.testedSizes
+      ?.flatMap(({ configurations }) => configurations)
+      .filter(({ status }) => status === 'configuration-accepted') ?? [];
+  if (!accepted.length)
+    return capability(
+      'unverified',
+      'No sample configuration was accepted.',
+      inspect,
+    );
+  if (
+    accepted.every(
+      ({ modelStatus }) =>
+        modelStatus === 'downloading' || modelStatus === 'download-required',
+    )
+  )
+    return capability(
+      'unavailable',
+      'Accepted configurations require a macOS-managed model download.',
+      inspect,
+    );
+  return capability(
+    'ready',
+    'Native worker and sample configurations are available.',
+    'Check the intended input and profile with opencut recipes validate.',
+  );
+}
+
+async function compactDoctor() {
+  const [{ result, encoders }, deepFilter] = await Promise.all([
+    probeDoctor(),
+    localEnhancer().then(
+      () =>
+        capability(
+          'ready',
+          'The local DeepFilterNet executable responds to its version check.',
+        ),
+      (error: unknown) =>
+        capability(
+          'unavailable',
+          error instanceof Error ? error.message : String(error),
+          'Check the deep-filter executable and any configured model path.',
+        ),
+    ),
+  ]);
+  const { media, ai, graphics, system } = result;
+  const missingAudioTools = (['ffmpeg', 'ffprobe'] as const).filter(
+    (tool) => media[tool].status !== 'available',
+  );
+  const audioUnavailable = missingAudioTools.length
+    ? capability(
+        'unavailable',
+        `Required audio tools unavailable: ${missingAudioTools.join(', ')}.`,
+        `Install or repair ${missingAudioTools.join(' and ')} on PATH.`,
+      )
+    : undefined;
+  const encoder = (name: string) =>
+    encoders.has(name)
+      ? capability('ready', `FFmpeg lists the ${name} encoder.`)
+      : capability(
+          'unavailable',
+          `FFmpeg did not report the ${name} encoder.`,
+          `Use an FFmpeg build with ${name} on PATH.`,
+        );
+  const { workers } = ai.videoToolbox;
+  const processor = (worker: keyof typeof workers, name: string) =>
+    processorCapability(system.videoToolbox, workers[worker], name);
+  const speech = ai.transcription;
+  const speechModel = (ready: boolean, name: string) =>
+    speech.runtime && ready
+      ? capability('ready', `The local ${name} model and backend were found.`)
+      : capability(
+          'unavailable',
+          `${name} model or runtime is missing.`,
+          speech.hint ?? null,
+        );
+  const { dialogue } = ai;
+  const readTool = (tool: typeof media.ffmpeg) =>
+    tool.status === 'available'
+      ? capability('ready', tool.version)
+      : capability(
+          'unavailable',
+          `Executable status: ${tool.status}.`,
+          tool.hint,
+        );
+  return {
+    doctorVersion: result.doctorVersion,
+    format: 'compact' as const,
+    application: result.application,
+    capabilities: {
+      ffmpeg: readTool(media.ffmpeg),
+      ffprobe: readTool(media.ffprobe),
+      defaultMp4: media.ready
+        ? capability(
+            'ready',
+            'FFmpeg, ffprobe, the default encoders and required memory sampling are available.',
+          )
+        : capability(
+            'unavailable',
+            media.missingEncoders.length
+              ? `Missing encoders: ${media.missingEncoders.join(', ')}.`
+              : 'A required export tool is unavailable.',
+            media.hint,
+          ),
+      h264Encoding: encoder('libx264'),
+      hevcEncoding: encoder('libx265'),
+      aacEncoding: encoder('aac'),
+      losslessPictureEncoding: encoder('ffv1'),
+      offlineInterpolation: processor(
+        'interpolation',
+        'frame-rate-conversion-quality',
+      ),
+      lowLatencyInterpolation: processor(
+        'interpolation',
+        'low-latency-interpolation',
+      ),
+      superResolution: processor('enhancement', 'video-super-resolution'),
+      lowLatencySuperResolution: processor(
+        'enhancement',
+        'low-latency-super-resolution',
+      ),
+      temporalDenoise: processor('enhancement', 'temporal-noise-filter'),
+      dialogueSeparation:
+        audioUnavailable ??
+        (dialogue.ready
+          ? capability(
+              'ready',
+              'ELUATE and the verified Bandit v2 checkpoint are available.',
+            )
+          : capability(
+              'unavailable',
+              `ELUATE: ${dialogue.backend.status}. Bandit v2 checkpoint: ${dialogue.model.status}.`,
+              'Run opencut models inspect --json for setup details.',
+            )),
+      dialogueEnhancement: audioUnavailable ?? deepFilter,
+      transcription:
+        audioUnavailable ?? speechModel(speech.asrModel, 'transcription'),
+      transcriptAlignment:
+        audioUnavailable ?? speechModel(speech.alignerModel, 'alignment'),
+      reactGraphics:
+        graphics.status === 'available'
+          ? capability(
+              'ready',
+              'The React graphics runtime and browser are installed.',
+            )
+          : capability(
+              'unavailable',
+              `React graphics: ${graphics.status}.`,
+              graphics.hint,
+            ),
+    },
+  };
+}
+
+function formatDoctor(result: DoctorResult) {
   return [
     'OpenCut ' +
       result.application.version +
@@ -164,4 +366,17 @@ export function formatDoctor(result: Awaited<ReturnType<typeof doctor>>) {
         : ''),
     'Run opencut doctor --json for hardware, AI configurations and runtime details.',
   ].join('\n');
+}
+
+export async function runDoctor({ json, compact }: CommandOptions) {
+  if (compact) {
+    if (!json) throw new UsageError('--compact requires --json.');
+    return console.log(JSON.stringify(await compactDoctor()));
+  }
+  const { result } = await probeDoctor();
+  console.log(
+    json
+      ? JSON.stringify({ ...result, graphicsSchemas: videoGraphicsSchemas() })
+      : formatDoctor(result),
+  );
 }

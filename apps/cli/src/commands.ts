@@ -70,6 +70,8 @@ const optionTypes = {
   'boundary-tolerance': { type: 'string' },
   'audio-master': { type: 'string' },
   'artifact-root': { type: 'string', multiple: true },
+  'cleanup-plan': { type: 'boolean' },
+  compact: { type: 'boolean' },
   frame: { type: 'string' },
   from: { type: 'string' },
   to: { type: 'string' },
@@ -190,8 +192,14 @@ const commands = {
     options: ['params', ...Object.keys(processingOptionTypes)],
   },
   'inspect dependencies': {
-    args: `${definition} [--artifact-root <directory> ...] [--render-report <report.json>] [--recipe-cache <directory>] ${params}`,
-    options: ['artifact-root', 'render-report', 'recipe-cache', 'params'],
+    args: `${definition} [--artifact-root <directory> ...] [--render-report <report.json>] [--recipe-cache <directory>] [--cleanup-plan] ${params}`,
+    options: [
+      'artifact-root',
+      'render-report',
+      'recipe-cache',
+      'cleanup-plan',
+      'params',
+    ],
   },
   'recipes inspect': {
     args: `${definition} ${qualityOption} ${params}`,
@@ -378,7 +386,7 @@ const commands = {
     args: '<transcript.json> --output <new.srt|new.vtt>',
     options: ['output'],
   },
-  doctor: { args: '', options: [] },
+  doctor: { args: '', options: ['compact'] },
   'models inspect': { args: '', options: [] },
   'models install': { args: '<bandit-v2>', options: [] },
   'models remove': { args: '<bandit-v2>', options: [] },
@@ -403,6 +411,7 @@ function isSubcommand(name: Command, group: string) {
 }
 
 export function commandUsage(command: Command) {
+  if (command === 'doctor') return 'opencut doctor [--json [--compact]]';
   const { args } = commands[command];
   return `opencut ${command}${args ? ' ' + args : ''} [--json]`;
 }

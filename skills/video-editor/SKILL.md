@@ -4,8 +4,8 @@ description: Create, revise, preview and render videos in OpenCut with TypeScrip
 ---
 
 On Apple Silicon with macOS 15 or later, see the
-[installation guide](../../docs/INSTALL.md). Run `opencut doctor --json` to
-check FFmpeg, ffprobe, native workers and optional model readiness.
+[installation guide](../../docs/INSTALL.md). Run `opencut doctor --json --compact`
+to check FFmpeg, ffprobe, native workers and optional model readiness.
 
 Treat `.video.ts` and its imports as executable local code. Run definitions
 you authored for the task or that the user explicitly authorized. Validation,
@@ -200,5 +200,5 @@ file path relative to the authored definition. See the
 - For local caption timing, use `transcribe` with times relative to the
   first picture frame or first audio sample for audio-only files. Correct
   the UTF-8 sidecar, then use `transcript align` and review flagged spans
-  before export. Check `doctor --json` for optional model availability.
+  before export. Check `doctor --json --compact` for tool and model readiness.
   [Local transcription](../../docs/CLI.md#local-transcription-and-corrected-timing)

@@ -23,7 +23,10 @@ import {
   fingerprintFile,
   matchesFingerprint,
   hashJson,
+  ifPresent,
+  inspectOutputFingerprint,
   missing,
+  readOutputFingerprint,
   syncPath,
   writeCheckpoint,
 } from './video-integrity.js';
@@ -38,6 +41,7 @@ import { processingSettings } from './video-processing.js';
 import type { FileFingerprint } from './video-integrity.js';
 import type { RecipeRecovery } from './video-processing.js';
 import { findMediaEntry, readMediaEntry } from './video-media-cache.js';
+import type { MediaFingerprint } from './video-media-cache.js';
 import {
   inheritsRenderQuality,
   recipeFormatSchema,
@@ -92,6 +96,10 @@ type BuildInputs = Pick<
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 const scratchPrefix = '.opencut-build-render-';
+
+export function buildReceiptsDirectory(cache: string) {
+  return join(cache, '.builds-v1');
+}
 
 export async function prepareVideoBuild(
   {
@@ -211,7 +219,11 @@ function locateBuild(
       ? [quality === 'fast' ? 'fast' : 'quality']
       : []),
   ]);
-  return { ...build, id, directory: join(build.cache, '.builds-v1', id) };
+  return {
+    ...build,
+    id,
+    directory: join(buildReceiptsDirectory(build.cache), id),
+  };
 }
 
 type BuildIdentity = Awaited<ReturnType<typeof prepareVideoBuild>>;
@@ -417,18 +429,6 @@ export async function checkpointRender<T extends object>(
   }
 }
 
-export async function readOutputFingerprint(
-  path: string,
-  signal?: AbortSignal,
-) {
-  try {
-    if ((await lstat(path)).isFile())
-      return await fingerprintFile(path, signal);
-  } catch (error) {
-    if (!missing(error)) throw error;
-  }
-}
-
 // A crash can happen after the rename but before the publication receipt is saved.
 function reconcilePublication(
   { published, settings, verified }: RenderReceipt,
@@ -551,7 +551,7 @@ export async function inspectBuildCheckpoint(
       status = 'interrupted';
     const actual =
       published || (verified && status !== 'rendering')
-        ? await readOutputFingerprint(output, signal)
+        ? await inspectOutputFingerprint(output, signal)
         : undefined;
     const publication = reconcilePublication(
       parsed.data,
@@ -590,57 +590,61 @@ export async function inspectBuildCheckpoint(
   };
 }
 
+export async function* readCompileReceipts(
+  cache: string,
+  signal?: AbortSignal,
+) {
+  const builds = buildReceiptsDirectory(cache);
+  const info = await ifPresent(lstat(builds));
+  if (!info) return;
+  if (!info.isDirectory()) {
+    yield { path: builds };
+    return;
+  }
+  const names = (await ifPresent(readdir(builds)))?.sort() ?? [];
+  for (const name of names) {
+    signal?.throwIfAborted();
+    if (!sha256.safeParse(name).success) continue;
+    const directory = join(builds, name);
+    const path = join(directory, 'compile.json');
+    const info = await ifPresent(lstat(directory));
+    const parsed = compileSchema.safeParse(
+      info?.isDirectory() ? await readCheckpoint(path) : null,
+    );
+    yield {
+      path,
+      receipt:
+        parsed.success &&
+        parsed.data.id === name &&
+        resolve(parsed.data.definition) === parsed.data.definition
+          ? parsed.data
+          : undefined,
+    };
+  }
+}
+
 /** Read historical build and publish receipts for one definition. */
 export async function listDefinitionBuildArtifacts(
   cache: string,
   definition: string,
   signal?: AbortSignal,
 ) {
-  const builds = join(cache, '.builds-v1');
-  const names = (
-    await readdir(builds).catch((error: unknown) => {
-      if (!missing(error)) throw error;
-      return [];
-    })
-  ).sort();
   const files: {
     path: string;
     role?: string;
     owner: string;
-    cacheIdentity?: string;
+    cacheFingerprint?: MediaFingerprint;
   }[] = [];
   const cacheEntries = new Map<string, ReturnType<typeof readMediaEntry>>();
   const fingerprints = new Map<
     string,
-    ReturnType<typeof readOutputFingerprint>
+    ReturnType<typeof inspectOutputFingerprint>
   >();
-  for (const name of names) {
-    signal?.throwIfAborted();
-    if (!sha256.safeParse(name).success) continue;
-    const directory = join(builds, name);
-    const path = join(directory, 'compile.json');
-    if (
-      !(
-        await lstat(directory).catch((error: unknown) => {
-          if (!missing(error)) throw error;
-        })
-      )?.isDirectory() ||
-      !(
-        await lstat(path).catch((error: unknown) => {
-          if (!missing(error)) throw error;
-        })
-      )?.isFile()
-    )
-      continue;
-    const compile = compileSchema.safeParse(await readCheckpoint(path));
-    if (
-      !compile.success ||
-      compile.data.id !== name ||
-      compile.data.definition !== definition
-    )
-      continue;
+  for await (const { path, receipt } of readCompileReceipts(cache, signal)) {
+    if (receipt?.definition !== definition) continue;
+    const directory = dirname(path);
     files.push({ path, role: 'cache-manifest', owner: definition });
-    for (const { key, format, assetId } of compile.data.steps) {
+    for (const { key, format, assetId } of receipt.steps) {
       const media = join(cache, key, 'media.' + format);
       let verified = cacheEntries.get(media);
       if (!verified) {
@@ -650,7 +654,10 @@ export async function listDefinitionBuildArtifacts(
       const entry = await verified;
       files.push({
         path: media,
-        ...(entry && { role: 'cache-media', cacheIdentity: entry.identity }),
+        ...(entry && {
+          role: 'cache-media',
+          cacheFingerprint: { identity: entry.identity, sha256: entry.sha256 },
+        }),
         owner: 'assets.' + assetId,
       });
       files.push({
@@ -674,7 +681,7 @@ export async function listDefinitionBuildArtifacts(
       if (!published && !verified && state !== 'rendered') continue;
       let pending = fingerprints.get(output);
       if (!pending) {
-        pending = readOutputFingerprint(output, signal);
+        pending = inspectOutputFingerprint(output, signal);
         fingerprints.set(output, pending);
       }
       const actual = await pending;

@@ -5,6 +5,7 @@ import type { TimelineClip } from './project.js';
 import { frameTime, subtractTimes, compareTimes } from './time.js';
 import type { RationalTime } from './time.js';
 import { resolveTransition } from './transitions.js';
+import { maxVisualGroupBlur } from './visual-groups.js';
 import { clipIdAt, generatedTrackId } from './video-compiler.js';
 import {
   parseVideoDefinition,
@@ -288,11 +289,18 @@ export function create4K60Delivery(
   }
   for (const marker of definition.markers ?? [])
     marker.frame = frameNumber(marker.frame);
+  const unsupportedBlur: string[] = [];
   for (const group of definition.visualGroups ?? []) {
     if (group.x !== undefined) group.x = offset(group.x);
     if (group.y !== undefined) group.y = offset(group.y);
-    group.blur = pixels(group.blur);
-    group.backdropBlur = pixels(group.backdropBlur);
+    for (const effect of ['blur', 'backdropBlur'] as const) {
+      const requested = pixels(group[effect]);
+      if (requested !== undefined && requested > maxVisualGroupBlur)
+        unsupportedBlur.push(
+          `Visual group '${group.id}' ${effect} scales to ${requested} px (limit ${maxVisualGroupBlur} px). Use an authored value at or below ${maxVisualGroupBlur / scale} px for a weaker delivery effect, or pre-render the blur into the picture.`,
+        );
+      group[effect] = requested;
+    }
     const clip = group.clip;
     if (clip) {
       clip.width = offset(clip.x + clip.width) - offset(clip.x);
@@ -301,6 +309,8 @@ export function create4K60Delivery(
       clip.y = offset(clip.y);
     }
   }
+  if (unsupportedBlur.length)
+    throw new VideoDefinitionError(unsupportedBlur.join('\n'));
   for (const assertion of definition.layoutAssertions ?? []) {
     assertion.tolerance *= scale;
     if (assertion.kind === 'bottom-center') assertion.bottom *= scale;

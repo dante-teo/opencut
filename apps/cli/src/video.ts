@@ -13,7 +13,10 @@ import {
   planVideoRender,
   renderCompiledVideo,
 } from '@opencut/core/video';
-import type { VideoProcessingProgress } from '@opencut/core/video';
+import type {
+  CompiledVideo,
+  VideoProcessingProgress,
+} from '@opencut/core/video';
 import { writeRenderProgress } from './render-progress.js';
 import { withCommandCancellation } from './cancellation.js';
 import { commandUsage, type CommandOptions } from './commands.js';
@@ -49,6 +52,23 @@ export async function withDefinitionConsole<T>(run: () => Promise<T>) {
   } finally {
     globalThis.console = console;
   }
+}
+
+export function writeRenderReport(
+  video: Pick<CompiledVideo, 'path' | 'project'>,
+  result: object,
+) {
+  console.log(
+    JSON.stringify(
+      {
+        definitionPath: video.path,
+        contactTimeline: describeProjectContactTimeline(video.project),
+        ...result,
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 export function runVideoCommand(
@@ -244,18 +264,10 @@ async function executeVideoCommand(
         ...(onProgress && { onProgress }),
       });
       if (values.json)
-        console.log(
-          JSON.stringify(
-            {
-              definitionPath: video.path,
-              contactTimeline: describeProjectContactTimeline(video.project),
-              ...result,
-              ...(recipeProcessing.length > 0 && { recipeProcessing }),
-            },
-            null,
-            2,
-          ),
-        );
+        writeRenderReport(video, {
+          ...result,
+          ...(recipeProcessing.length > 0 && { recipeProcessing }),
+        });
       else {
         for (const effect of beauty)
           if (effect.status === 'completed-with-limitations')

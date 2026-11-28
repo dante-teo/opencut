@@ -9,7 +9,7 @@ import {
 } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { MediaError } from '@opencut/media';
+import { fileIdentity, MediaError } from '@opencut/media';
 import { beautyReportSchema } from './beauty-report.js';
 import type { BeautyRenderReport } from './beauty-report.js';
 import type { MediaMetadata } from '@opencut/media';
@@ -17,6 +17,7 @@ import {
   fileLease,
   fingerprintFile,
   hashJson,
+  ifPresent,
   missing,
   syncPath,
   writeCheckpoint,
@@ -27,7 +28,8 @@ export type MediaEntry = IdentifiedMedia & {
   sha256: string;
   beauty?: BeautyRenderReport;
 };
-const stageDirectory = (directory: string, key: string) =>
+export type MediaFingerprint = Pick<MediaEntry, 'identity' | 'sha256'>;
+export const mediaStageDirectory = (directory: string, key: string) =>
   join(directory, `.${key}.stage`);
 
 const mediaCacheReceipt = z.strictObject({
@@ -62,7 +64,7 @@ export async function materializeMediaEntry(
     join(directory, `.lock-${key.slice(0, 2)}.sqlite`),
     signal,
   );
-  const staging = stageDirectory(directory, key);
+  const staging = mediaStageDirectory(directory, key);
   try {
     signal.throwIfAborted();
     const target = join(directory, key);
@@ -149,20 +151,16 @@ export async function findMediaEntry(
 ): Promise<{ directory: string; entry: MediaEntry } | undefined> {
   const target = join(directory, key);
   const published = async () => {
-    const entry = await readMediaEntry(
-      target,
-      key,
-      format,
-      signal,
+    const entry = await readMediaEntry(target, key, format, signal, {
       requiresBeauty,
-    );
+    });
     return entry && { directory: target, entry };
   };
   const cached = await published();
   if (cached) return cached;
 
-  const staging = stageDirectory(directory, key);
-  if (!(await statIfPresent(staging))?.isDirectory()) return published();
+  const staging = mediaStageDirectory(directory, key);
+  if (!(await ifPresent(lstat(staging)))?.isDirectory()) return published();
   // A process may have stopped after writing a valid receipt but before publishing.
   const attempts = await readdir(staging).catch((error: unknown) => {
     if (!missing(error)) throw error;
@@ -171,15 +169,11 @@ export async function findMediaEntry(
   for (const name of attempts) {
     if (!/^attempt-[a-zA-Z0-9]{6}$/.test(name)) continue;
     const attempt = join(staging, name);
-    const entry = await readMediaEntry(
-      attempt,
-      key,
-      format,
-      signal,
+    const entry = await readMediaEntry(attempt, key, format, signal, {
       requiresBeauty,
-    ).catch(async (error: unknown) => {
+    }).catch(async (error: unknown) => {
       // An inspector can race a writer moving the attempt to its final location.
-      if (signal?.aborted || (await statIfPresent(attempt))) throw error;
+      if (signal?.aborted || (await ifPresent(lstat(attempt)))) throw error;
     });
     if (entry) return { directory: attempt, entry };
   }
@@ -187,15 +181,9 @@ export async function findMediaEntry(
 }
 
 export async function mediaCacheMissReason(directory: string, key: string) {
-  return (await statIfPresent(join(directory, key)))
+  return (await ifPresent(lstat(join(directory, key))))
     ? ('entry-invalid' as const)
     : ('entry-missing' as const);
-}
-
-async function statIfPresent(path: string) {
-  return lstat(path).catch((error: unknown) => {
-    if (!missing(error)) throw error;
-  });
 }
 
 export async function readMediaEntry(
@@ -203,7 +191,13 @@ export async function readMediaEntry(
   key: string,
   format: string,
   signal?: AbortSignal,
-  requiresBeauty = false,
+  {
+    requiresBeauty = false,
+    fingerprint,
+  }: {
+    requiresBeauty?: boolean;
+    fingerprint?: MediaFingerprint | undefined;
+  } = {},
 ): Promise<MediaEntry | undefined> {
   const path = join(target, `media.${format}`);
   const manifest = join(target, 'result.json');
@@ -229,7 +223,13 @@ export async function readMediaEntry(
       (beauty && hashJson(beauty) !== receipt.beautySha256)
     )
       return;
-    const { bytes, sha256, identity } = await fingerprintFile(path, signal);
+    signal?.throwIfAborted();
+    // The receipt was read again. Reuse the hash only for the same payload identity.
+    const { bytes, sha256, identity } =
+      fingerprint?.sha256 === receipt.sha256 &&
+      fingerprint.identity === fileIdentity(await lstat(path, { bigint: true }))
+        ? { ...fingerprint, bytes: info.size }
+        : await fingerprintFile(path, signal);
     if (receipt.bytes === bytes && receipt.sha256 === sha256)
       return {
         metadata: { ...metadata, path },

@@ -41,6 +41,14 @@ export interface MetalDevice {
   maxBufferBytes: number;
 }
 
+export interface FrameProcessorProbe {
+  minimumMacOS: string;
+  status: 'os-unavailable' | 'hardware-unsupported' | 'reported-supported';
+  testedSizes?: {
+    configurations: { status: string; modelStatus?: string }[];
+  }[];
+}
+
 interface NativeProbe {
   gpuDevices: MetalDevice[];
   codecs: {
@@ -50,7 +58,7 @@ interface NativeProbe {
     >;
     decoders: Record<string, boolean>;
   };
-  frameProcessors: Record<string, unknown>;
+  frameProcessors: Record<string, FrameProcessorProbe>;
   thermalState: number;
 }
 

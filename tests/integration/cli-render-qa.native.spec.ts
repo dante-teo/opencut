@@ -8,13 +8,14 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  rename,
   rm,
   symlink,
   writeFile,
 } from 'node:fs/promises';
 import { delimiter, dirname, join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { probeMedia } from '@opencut/sdk';
 import { fixtureDirectory } from '../fixture-paths.js';
 import {
@@ -1054,6 +1055,65 @@ test('picture-clock trim keeps the covering frame and picture duration when audi
   const cutFrames = decodeFrames(trim, [0, 1], 96, 128);
   assert.deepEqual(cutFrames.get(0), sourceFrames.get(24));
   assert.deepEqual(cutFrames.get(1), sourceFrames.get(25));
+});
+
+test('4K60 delivery renders a scaled backdrop blur above 48 pixels', async (t) => {
+  const directory = await mkdtemp(join(fixtureDirectory, '4k60-blur-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  patches(directory, 30, 2);
+  await writeFile(
+    join(directory, 'glass.svg'),
+    '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="400"><rect width="200" height="400" fill="white" fill-opacity="0.35"/></svg>',
+  );
+  const variant = join(directory, 'delivery.video.ts');
+  await writeFile(
+    variant,
+    `import { create4K60Delivery } from '@opencut/sdk';
+export default create4K60Delivery(${JSON.stringify({
+      canvas: { width: 1080, height: 1920, frameRate: 30, durationFrames: 2 },
+      assets: {
+        picture: { path: 'patches.mov', kind: 'video' },
+        glass: {
+          path: 'glass.svg',
+          kind: 'graphic',
+          renderer: 'svg',
+          width: 200,
+          height: 400,
+        },
+      },
+      tracks: [
+        {
+          id: 'picture-track',
+          type: 'video',
+          clips: [{ asset: 'picture', at: 0, sourceOut: 2 }],
+        },
+        {
+          id: 'glass-track',
+          type: 'video',
+          clips: [{ asset: 'glass', at: 0, duration: 2 }],
+        },
+      ],
+      visualGroups: [
+        { id: 'blur-group', tracks: ['glass-track'], backdropBlur: 40 },
+      ],
+    })});\n`,
+  );
+  const output = join(directory, 'master.mp4');
+  const { data } = json(
+    'render',
+    variant,
+    '--output',
+    output,
+    '--encoder',
+    'software',
+    '--quality',
+    'fast',
+  );
+  assert.equal(data.width, 2160);
+  assert.equal(data.height, 3840);
+  assert.equal(data.frameCount, 4);
+  assert.deepEqual(data.frameRate, { numerator: 60, denominator: 1 });
+  ffmpeg(['-i', output, '-f', 'null', '-']);
 });
 
 test('4K60 delivery plan distinguishes shot interpolation, native frames, and repetition', async (t) => {
@@ -2099,7 +2159,8 @@ test('report fingerprints follow unchanged copies and reject an overwritten expo
   const first = join(directory, 'first.video.ts');
   const second = join(directory, 'second.video.ts');
   const cache = join(directory, 'recipes');
-  const exportPath = join(directory, 'delivery.mp4');
+  const exportDirectory = join(directory, 'exports');
+  const exportPath = join(exportDirectory, 'delivery.mp4');
   const moved = join(directory, 'moved.mp4');
   const reportPath = join(directory, 'render.json');
   const write = (file: string, backgroundColor: string) =>
@@ -2118,6 +2179,7 @@ test('report fingerprints follow unchanged copies and reject an overwritten expo
         }),
     );
   await Promise.all([write(first, '#ff0000'), write(second, '#0000ff')]);
+  await mkdir(exportDirectory);
   const initial = json(
     'render',
     first,
@@ -2194,6 +2256,213 @@ test('report fingerprints follow unchanged copies and reject an overwritten expo
     ),
   );
   assert.deepEqual(inventory(second).roles, ['export']);
+  const staleReport = json(
+    'inspect',
+    'dependencies',
+    first,
+    '--recipe-cache',
+    cache,
+    '--render-report',
+    reportPath,
+  ).data;
+  assert.ok(
+    staleReport.diagnostics.some(
+      (item: { code: string; reason: string }) =>
+        item.code === 'RENDER_REPORT_OUTPUT_UNVERIFIABLE' &&
+        item.reason === 'fingerprint-mismatch',
+    ),
+  );
+  const inspectReport = (file: string) =>
+    run(
+      'inspect',
+      'dependencies',
+      file,
+      '--recipe-cache',
+      cache,
+      '--render-report',
+      reportPath,
+    );
+  const mismatch = inspectReport(second);
+  assert.equal(mismatch.status, 1);
+  assert.equal(
+    JSON.parse(mismatch.stderr).error.code,
+    'RENDER_REPORT_TIMELINE_MISMATCH',
+  );
+  const assertUnreachableExport = (status: string) => {
+    const rejectedPath = inspectReport(first);
+    assert.equal(rejectedPath.status, 0, rejectedPath.stderr);
+    const result = JSON.parse(rejectedPath.stdout);
+    const exportEntry = result.files.find(
+      ({ resolvedPath }: { resolvedPath: string }) =>
+        resolvedPath === exportPath,
+    );
+    assert.equal(exportEntry.status, status);
+    assert.deepEqual(exportEntry.roles, ['unverified-export']);
+    // Both the historical build and the supplied report should still contribute.
+    assert.equal(exportEntry.references.length, 2);
+    assert.ok(
+      result.diagnostics.some(
+        ({ code, reason }: { code: string; reason: string }) =>
+          code === 'RENDER_REPORT_OUTPUT_UNVERIFIABLE' &&
+          reason === 'missing-or-unreadable-output',
+      ),
+    );
+  };
+  await rename(exportDirectory, join(directory, 'archived-exports'));
+  await writeFile(exportDirectory, 'A file now occupies the former directory.');
+  assertUnreachableExport('missing');
+  await rm(exportDirectory);
+  await symlink(exportDirectory, exportDirectory);
+  assertUnreachableExport('unreadable');
+
+  await writeFile(reportPath, '{invalid JSON');
+  const unsupported = inspectReport(first);
+  assert.equal(unsupported.status, 1);
+  assert.equal(
+    JSON.parse(unsupported.stderr).error.code,
+    'UNSUPPORTED_RENDER_REPORT',
+  );
+});
+
+test('cleanup plan identifies project-only, shared and unowned recipe directories without writing', async (t) => {
+  const directory = await mkdtemp(join(fixtureDirectory, 'cleanup-plan-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const cache = join(directory, 'recipes');
+  patches(directory, 60, 4);
+  const first = join(directory, 'first.video.ts');
+  const second = join(directory, 'second.video.ts');
+  const output = join(directory, 'delivery.mp4');
+  const resize = (width: number) => ({
+    kind: 'video',
+    path: 'patches.mov',
+    recipe: [{ type: 'resize', width, height: 64 }],
+  });
+  const write = (
+    file: string,
+    assets: Record<string, ReturnType<typeof resize>>,
+  ) =>
+    writeFile(
+      file,
+      'export default ' +
+        JSON.stringify({
+          canvas: { width: 64, height: 64, frameRate: 60, durationFrames: 4 },
+          assets,
+          tracks: Object.keys(assets).map((asset) => ({
+            type: 'video',
+            clips: [{ asset, at: 0, sourceOut: 4 }],
+          })),
+        }),
+    );
+  await write(first, { exclusive: resize(48), shared: resize(64) });
+  await write(second, { shared: resize(64) });
+  const built = json(
+    'render',
+    first,
+    '--recipe-cache',
+    cache,
+    '--output',
+    output,
+  ).data;
+  const other = json(
+    'render',
+    second,
+    '--recipe-cache',
+    cache,
+    '--output',
+    join(directory, 'other.mp4'),
+  ).data;
+  const shared = other.recipeProcessing[0].key;
+  const exclusive = built.recipeProcessing.find(
+    ({ key }: { key: string }) => key !== shared,
+  );
+  const unknown = join(cache, '0'.repeat(64));
+  await mkdir(unknown);
+  await writeFile(join(unknown, 'unexplained'), 'test');
+  const recipeDir = join(cache, exclusive.key);
+  const receipt = join(recipeDir, 'result.json');
+  const before = await readFile(receipt);
+  const inspectArgs = [
+    'inspect',
+    'dependencies',
+    first,
+    '--recipe-cache',
+    cache,
+    '--cleanup-plan',
+  ];
+  const inspect = () => json(...inspectArgs).data.cleanupPlan;
+  const preload = join(directory, 'count-cache-reads.mjs');
+  const payload = join(recipeDir, `media.${exclusive.format}`);
+  await writeFile(
+    preload,
+    `
+import fs from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
+const { open, readFile } = fs;
+let reads = 0;
+let receiptReads = 0;
+fs.open = (path, ...args) => {
+  if (path === ${JSON.stringify(payload)}) reads++;
+  return open(path, ...args);
+};
+fs.readFile = async (path, ...args) => {
+  const data = await readFile(path, ...args);
+  if (process.env.OPENCUT_TEST_CHANGE_RECEIPT !== '1' ||
+      path !== ${JSON.stringify(receipt)} || ++receiptReads !== 2) return data;
+  return JSON.stringify({ ...JSON.parse(data), sha256: '0'.repeat(64) });
+};
+syncBuiltinESMExports();
+process.on('exit', () => console.error(JSON.stringify({ payloadReads: reads })));
+`,
+  );
+  const measured = runCli(inspectArgs, {
+    NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`,
+  });
+  assert.equal(measured.status, 0, measured.stderr);
+  assert.deepEqual(JSON.parse(measured.stderr), { payloadReads: 1 });
+  const plan = JSON.parse(measured.stdout).cleanupPlan;
+  assert.equal(plan.eligible.length, 1);
+  assert.equal(plan.eligible[0].path, recipeDir);
+  assert.ok(plan.eligible[0].bytes > before.length);
+  assert.ok(
+    plan.keep.some(
+      ({ path, reason }: { path: string; reason: string }) =>
+        path === join(cache, shared) &&
+        reason === 'referenced-by-another-timeline',
+    ),
+  );
+  assert.ok(plan.keep.some(({ path }: { path: string }) => path === output));
+  assert.deepEqual(plan.uncertain, [
+    {
+      path: unknown,
+      bytes: 4,
+      reason: 'no-build-ownership-record',
+      referencedBy: [],
+    },
+  ]);
+  assert.deepEqual(await readFile(receipt), before);
+  const changedReceipt = runCli(inspectArgs, {
+    NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`,
+    OPENCUT_TEST_CHANGE_RECEIPT: '1',
+  });
+  assert.equal(changedReceipt.status, 0, changedReceipt.stderr);
+  assert.deepEqual(JSON.parse(changedReceipt.stderr), { payloadReads: 2 });
+  assert.equal(
+    JSON.parse(changedReceipt.stdout).cleanupPlan.eligible.length,
+    0,
+  );
+  await writeFile(join(recipeDir, 'unexplained'), 'extra');
+  assert.equal(inspect().eligible.length, 0);
+  assert.ok(
+    inspect().uncertain.some(
+      ({ path, reason }: { path: string; reason: string }) =>
+        path === recipeDir && reason === 'unverified-cache-directory',
+    ),
+  );
+  await rm(join(recipeDir, 'unexplained'));
+  const corrupt = await readFile(payload);
+  corrupt[0] = corrupt[0]! ^ 1;
+  await writeFile(payload, corrupt);
+  assert.equal(inspect().eligible.length, 0);
 });
 
 test('dependency inspection traces nested project modules resolved through package imports', async (t) => {

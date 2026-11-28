@@ -63,6 +63,12 @@ MP4 with an approved preview by timecode, including when their frame rates
 differ. It checks the full delivery frame clock and can check packet content
 and timing against an approved audio master.
 
+Keep the JSON from the completed render, remix, or picture revision with
+the delivered MP4. Pass that report to `inspect dependencies --render-report`
+to check the export's fingerprint and inventory the files used by the
+definition. Add `--cleanup-plan` to review which recipe cache directories
+can be cleared after delivery. [Dependency inventory and cleanup](CLI.md#read-only-dependency-inventory)
+
 ## SDR color across picture ranges
 
 The compositor converts its full-range RGB surface to limited-range

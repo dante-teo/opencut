@@ -1,7 +1,9 @@
 # OpenCut CLI
 
-Run `opencut doctor --json` in the environment that will render. Read
-`media.hint` if `media.ready` is false. For optional Bandit v2
+Run `opencut doctor --json --compact` for capability status and next steps
+in the environment that will render. Use `opencut doctor --json` for the
+full report. Read `media.hint` if `media.ready` is false. Dialogue and
+speech workflows need both FFmpeg and ffprobe. For optional Bandit v2
 dialogue separation, follow the [model setup](../../../docs/INSTALL.md#optional-ai),
 then use `opencut models inspect --json` to check readiness. If
 `separate-dialogue --json` reports `MISSING_DEPENDENCY`, inspect the ELUATE
@@ -96,12 +98,14 @@ rate with `inspect`, and the sampled time with `timeline inspect` or the
 contact-sheet manifest. Use `probe EXPORT --expect-fps 60 --json` for a
 60 fps delivery. See [interpolation and upscale verification](../../../docs/CLI.md#verify-interpolation-and-upscale).
 
-For cleanup planning run `opencut inspect dependencies DEFINITION --json`.
-Supply `--artifact-root` for additional directories and
-`--render-report` for a published export. Use `classification`, `byteTotals`
-and the recorded owners to distinguish regenerable artifacts, deliveries and
-unclassified files. An `unverified-export` reference could point to a
-missing or replaced output.
+For cleanup planning run `opencut inspect dependencies DEFINITION --cleanup-plan --json`.
+Supply `--recipe-cache` for the cache used by the project, `--artifact-root`
+for additional directories, and `--render-report` with the completed full
+render, remix, or picture revision JSON. Review paths, sizes and reasons in
+`cleanupPlan.keep`, `cleanupPlan.eligible` and `cleanupPlan.uncertain`. The
+plan checks other timelines' receipts in that recipe cache and does not move
+files. An `unverified-export` reference could point to a missing, replaced,
+or unreadable output. Read its diagnostic for the reason.
 
 Run `opencut render plan DEFINITION --output final.mp4 --json` with the
 intended cache and render options to check recipe and picture range reuse

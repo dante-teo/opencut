@@ -1,15 +1,39 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { open, rename, rm } from 'node:fs/promises';
+import { lstat, open, rename, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { z } from 'zod';
 import { setTimeout as delay } from 'node:timers/promises';
-export { fingerprintSourceFile as fingerprintFile } from '@opencut/media';
+import { fingerprintSourceFile as fingerprintFile } from '@opencut/media';
+export { fingerprintFile };
 
 export const hashJson = (value: unknown) =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 export function missing(error: unknown) {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
+export function ifPresent<T>(result: Promise<T>) {
+  return result.catch((error: unknown) => {
+    if (!missing(error)) throw error;
+    return undefined;
+  });
+}
+
+export async function readOutputFingerprint(
+  path: string,
+  signal?: AbortSignal,
+) {
+  if ((await ifPresent(lstat(path)))?.isFile())
+    return ifPresent(fingerprintFile(path, signal));
+}
+
+/** Keep inspection useful when a published path can no longer be verified. */
+export function inspectOutputFingerprint(path: string, signal?: AbortSignal) {
+  return readOutputFingerprint(path, signal).catch(() => {
+    signal?.throwIfAborted();
+    return undefined;
+  });
 }
 
 export const fileFingerprintSchema = z.object({

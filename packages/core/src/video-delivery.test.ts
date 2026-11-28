@@ -222,4 +222,36 @@ describe('4K60 delivery', () => {
       }),
     ).toThrow(/uses native source/);
   });
+
+  it('preserves the canvas-relative blur of foreground and backdrop groups', () => {
+    const group = {
+      id: 'background',
+      tracks: ['picture'],
+      blur: 40,
+      backdropBlur: 25,
+    };
+    const definition = {
+      ...approved,
+      tracks: approved.tracks.map((track, index) =>
+        index === 0 ? { ...track, id: 'picture' } : track,
+      ),
+      visualGroups: [group],
+    };
+    expect(create4K60Delivery(definition).visualGroups).toEqual([
+      { ...group, blur: 80, backdropBlur: 50 },
+    ]);
+    expect(group.blur).toBe(40);
+  });
+
+  it('names the group, effect, requested blur and available adjustment at the backend limit', () => {
+    const delivery = (backdropBlur: number) =>
+      create4K60Delivery({
+        ...approved,
+        visualGroups: [{ id: 'background', tracks: ['picture'], backdropBlur }],
+      });
+    expect(delivery(512).visualGroups?.[0]?.backdropBlur).toBe(1024);
+    expect(() => delivery(513)).toThrow(
+      /group 'background' backdropBlur scales to 1026 px \(limit 1024 px\).*512 px.*pre-render/,
+    );
+  });
 });

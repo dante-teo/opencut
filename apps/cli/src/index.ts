@@ -131,9 +131,8 @@ async function executeCommand(
       return runTranscript(command, file, values);
     }
     case 'doctor': {
-      const { doctor, formatDoctor } = await import('./doctor.js');
-      const result = await doctor();
-      return console.log(json ? JSON.stringify(result) : formatDoctor(result));
+      const { runDoctor } = await import('./doctor.js');
+      return runDoctor(values);
     }
     case 'models inspect':
     case 'models install':

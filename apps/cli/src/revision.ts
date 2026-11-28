@@ -3,7 +3,6 @@ import { lstatSync } from 'node:fs';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import {
   compileCachedVideo,
-  describeProjectContactTimeline,
   fileFingerprintSchema,
   fingerprintFile,
   inspectVideoRevision,
@@ -44,7 +43,11 @@ import {
   renderOptionTypes,
 } from './render-options.js';
 import { positiveIntegerOption, UsageError } from './usage.js';
-import { loadVideo, withDefinitionConsole } from './video.js';
+import {
+  loadVideo,
+  withDefinitionConsole,
+  writeRenderReport,
+} from './video.js';
 
 function parseRevisionReport(report: unknown) {
   const fields =
@@ -535,11 +538,11 @@ export async function runRemix(file: string, values: CommandOptions) {
       revisionEvidence: true,
       onProgress: progress(values),
     });
-    console.log(
-      values.json
-        ? JSON.stringify({ ...result, preflight }, null, 2)
-        : 'Reused verified picture and saved the revised mix to ' + result.path,
-    );
+    if (values.json) writeRenderReport(video, { ...result, preflight });
+    else
+      console.log(
+        'Reused verified picture and saved the revised mix to ' + result.path,
+      );
   });
 }
 
@@ -705,19 +708,8 @@ export async function runPictureRevision(file: string, values: CommandOptions) {
           audioMixCacheDirectory,
         },
       );
-      console.log(
-        values.json
-          ? JSON.stringify(
-              {
-                definitionPath: video.path,
-                contactTimeline: describeProjectContactTimeline(video.project),
-                ...result,
-              },
-              null,
-              2,
-            )
-          : 'Verified picture revision saved to ' + result.path,
-      );
+      if (values.json) writeRenderReport(video, result);
+      else console.log('Verified picture revision saved to ' + result.path);
     } catch (error) {
       signal.throwIfAborted();
       const failedDuringRender = plan?.status === 'eligible';
