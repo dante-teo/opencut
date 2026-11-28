@@ -61,8 +61,9 @@ Prepare the offline Lottie and GLB fixtures for `pnpm test:media` with
 To check whether a native pixel assertion is a regression, run the same
 test on the base revision with the same synthetic inputs and FFmpeg build.
 The native integration tests also check protocol rejection and make sure
-that cancelling or killing a render during decoded-frame verification
-stops its FFprobe process and preserves an existing export.
+that cancelling a render or killing its CLI or native worker during
+decoded-frame verification stops the FFprobe process and preserves an
+existing export.
 
 After the build, the runner writes `conformance-results/run-*/report.json`.
 Use `cases` for test results and skip reasons, and `measurements` for

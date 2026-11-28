@@ -45,12 +45,12 @@ The codec and DSP processes exchange bytes through pipes. Audio feature
 rows use little-endian float32 values, with a 64 MiB response limit. The
 frame index carries integer PTS, duration and relative presentation ticks,
 with a 32 MiB limit. The Rust-to-Node pipe carries feature values and
-timestamps. Node owns each completed response and retains it only as long as needed
-by the caller or existing analysis cache. The Rust job and codec share a
+timestamps. Node owns each completed response and retains it for the caller
+or existing analysis cache. The Rust job and codec share a
 private process group. The parent enforces cancellation and timeout, can
 sample that group's memory under the render budget, and keeps an owner
-pipe open. If the parent exits, EOF stops the group. Tool diagnostics
-remain on stderr.
+pipe open. If the parent exits, EOF stops the group. If the Rust worker
+fails, Node stops its codec subprocess. Tool diagnostics remain on stderr.
 
 A short-lived executable fits these jobs because each consumes one
 prepared source and produces a bounded result. It links against the

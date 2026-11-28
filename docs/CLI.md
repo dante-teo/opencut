@@ -1140,6 +1140,14 @@ The JSON includes elapsed time, sampled process-tree RSS, scratch size,
 and hashes of decoded video or PNG output. Use the same Node, FFmpeg,
 power settings and machine for both runs.
 
+On an M1 Max with macOS 27.0.1, Node 24.12.0 and FFmpeg 9.1, the median of
+three cold audio-dependent previews dropped from 5.07 to 3.09 seconds
+against revision `4e777f4`. Peak sampled scratch use dropped from 220 to
+132 MiB and process-tree RSS from 747 to 681 MiB. The warm preview took
+1.31 seconds in both builds. The MP4 contact sheet and software exports
+were within 2% of the original times. All sampled PNGs and decoded export
+video hashes matched.
+
 Build with the macOS 26+ SDK, then run the benchmark from the repository root
 with Python 3.11+ and FFmpeg/ffprobe on PATH.
 

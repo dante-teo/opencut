@@ -64,7 +64,7 @@ async function awaitCondition<T>(check: () => T | Promise<T>) {
 }
 
 test(
-  'the public render kills native verification on interrupt and owner exit',
+  'the public render stops verification after interruption, owner exit and worker failure',
   { timeout: 45_000 },
   async (t) => {
     const lookup = spawnSync('which', ['ffprobe'], { encoding: 'utf8' });
@@ -80,7 +80,7 @@ import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 const args = process.argv.slice(2);
 if (args.includes('-count_frames')) {
-  writeFileSync(process.env.OPENCUT_TEST_COUNT_PID, String(process.pid));
+  writeFileSync(process.env.OPENCUT_TEST_COUNT_PID, \`\${process.pid} \${process.ppid}\`);
   setInterval(() => {}, 1000);
 } else {
   process.stdout.write(execFileSync(process.env.OPENCUT_TEST_REAL_FFPROBE, args, { stdio: ['ignore', 'pipe', 'inherit'] }));
@@ -96,7 +96,11 @@ if (args.includes('-count_frames')) {
     );
     assert.equal(previous.status, 0, previous.stderr);
     const original = await readFile(output);
-    for (const termination of ['SIGINT', 'SIGKILL'] as const) {
+    for (const termination of [
+      'interrupt',
+      'kill-owner',
+      'kill-worker',
+    ] as const) {
       const marker = join(directory, `probe-${termination}`);
       const cliProcess = spawn(
         process.execPath,
@@ -119,19 +123,32 @@ if (args.includes('-count_frames')) {
       const closed = once(cliProcess, 'close');
       let probePid: number | undefined;
       try {
-        probePid = await awaitCondition(async () => {
-          const pid = await readFile(marker, 'utf8').catch(() => '');
+        const pids = await awaitCondition(async () => {
+          const ids = await readFile(marker, 'utf8').catch(() => '');
           if (cliProcess.exitCode !== null)
             assert.fail(`OpenCut exited before verification: ${diagnostic}`);
-          return Number(pid);
+          const [codec, worker] = ids.split(' ').map(Number);
+          if (codec && worker) return { codec, worker };
         });
-        assert.ok(Number.isSafeInteger(probePid) && probePid > 1);
-        assert.equal(cliProcess.kill(termination), true);
+        probePid = pids.codec;
+        if (termination === 'kill-worker') {
+          assert.ok(process.kill(pids.worker, 'SIGKILL'));
+        } else {
+          assert.equal(
+            cliProcess.kill(termination === 'interrupt' ? 'SIGINT' : 'SIGKILL'),
+            true,
+          );
+        }
         const [code, signal] = await closed;
-        if (termination === 'SIGINT') {
+        if (termination === 'interrupt') {
           assert.equal(code, 130, diagnostic);
           assert.match(diagnostic, /cancelled/i);
-        } else assert.equal(signal, 'SIGKILL');
+        } else if (termination === 'kill-owner') {
+          assert.equal(signal, 'SIGKILL');
+        } else {
+          assert.equal(code, 1, diagnostic);
+          assert.match(diagnostic, /media engine failed.*SIGKILL/i);
+        }
         await awaitCondition(() => hasExited(probePid!));
         assert.equal((await stat(output)).size, original.length);
         assert.deepEqual(await readFile(output), original);

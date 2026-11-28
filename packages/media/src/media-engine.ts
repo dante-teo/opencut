@@ -91,6 +91,11 @@ async function runMediaJob(
         { cause },
       );
     });
+    child.once('exit', (code) => {
+      // A crashed worker can leave its codec holding stderr open. Stop the
+      // group on exit so close still runs and releases the render budget.
+      if (code !== 0) stop();
+    });
     child.stderr.setEncoding('utf8').on('data', (part: string) => {
       diagnostics = (diagnostics + part).slice(-8192);
     });

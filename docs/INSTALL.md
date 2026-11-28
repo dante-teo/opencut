@@ -97,8 +97,9 @@ environment and Qwen model directories. Check `ai.transcription` in
 
 Build on Apple Silicon with the Node and pnpm versions pinned in the
 repository, Rust and Cargo 1.85 or later, and Xcode with the macOS 26 SDK.
-Only the build machine needs Rust, Cargo and Xcode. The release workflow selects Xcode 26.6, uses the frozen pnpm lockfile
-and checks that the tag matches the workspace version.
+Only the build machine needs Rust, Cargo and Xcode. The release workflow
+selects Xcode 26.6, uses the frozen pnpm lockfile and checks that the tag
+matches the workspace version.
 
 ```sh
 pnpm install --frozen-lockfile
